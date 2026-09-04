@@ -139,6 +139,7 @@ cp .env.example .env    変数名だけが入っている。値を書き込む
 | 操作 | コマンド |
 |---|---|
 | 起動する | `docker compose up -d --wait` |
+| **イメージを作り直す** | `docker compose up -d --build --wait` |
 | 状態を見る | `docker compose ps` |
 | ログを見る | `docker compose logs -f db` |
 | 止める（**データは残る**） | `docker compose down` |
@@ -147,15 +148,22 @@ cp .env.example .env    変数名だけが入っている。値を書き込む
 `--wait` を付けるとヘルスチェックが通るまで戻らない。付けないと、
 **まだ初期化中の DB に接続しようとして落ちる。**
 
+**`--build` が要るのは、`up` が既にあるイメージを作り直さないためである。**
+[Dockerfile](docker/postgres/Dockerfile) は pg_bigm の版を `ARG` で固定しており、
+更新は手で上げる。**その変更を pull しても `up` だけでは古い pg_bigm のまま動く。**
+
 接続先は `.env` に書いた値から組み立てる。
 
 ```
-postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@localhost:<POSTGRES_PORT>/<POSTGRES_DB>
-redis://localhost:<REDIS_PORT>
+postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@127.0.0.1:<POSTGRES_PORT>/<POSTGRES_DB>
+redis://127.0.0.1:<REDIS_PORT>
 ```
 
 **どちらも `127.0.0.1` にだけ結び付けている。** 省略すると全インターフェースで待ち受け、
 同じネットワーク上の端末から開発用の DB に届く。
+
+**`localhost` と書かない。** 多くの環境で `localhost` は `::1` を先に返すが、
+束縛しているのは IPv4 の `127.0.0.1` だけである。IPv4 に落ちないクライアントは繋がらない。
 
 #### pg_bigm
 
@@ -172,8 +180,13 @@ redis://localhost:<REDIS_PORT>
 > 手で確かめるには次を実行する。
 
 ```
-docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'CREATE EXTENSION pg_bigm;'
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION pg_bigm;"'
 ```
+
+**`sh -c` で包むのは、変数をコンテナの中で展開させるためである。**
+`.env` を読むのは compose であって手元のシェルではない。
+`docker compose exec db psql -U "$POSTGRES_USER"` と書くと、
+**手元のシェルが空文字に展開してから** `docker` に渡す。
 
 ### 動かす
 
