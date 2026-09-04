@@ -50,10 +50,11 @@ jobs:
         run: npm test
 
       # テストが失敗したときこそ残す。CI を実行した事実と結果を成果物として残すのが目的。
-      # ただしテストが走った場合に限る。それより前の段階で落ちたときは reports/ が
-      # 存在せず、if-no-files-found: error が本来の失敗と無関係な2件目の失敗を出す。
+      # ただしレポートが実際に出ている場合に限る。前段で落ちたときや、テストの
+      # ステップ自体が junit を書く前に落ちたときは reports/ が存在せず、
+      # if-no-files-found: error が本来の失敗と無関係な2件目の失敗を出す。
       - name: テストレポートの保存
-        if: always() && steps.test.conclusion != 'skipped'
+        if: always() && hashFiles('reports/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: test-reports

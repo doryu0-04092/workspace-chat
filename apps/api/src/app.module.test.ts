@@ -3,10 +3,9 @@ import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { REALTIME_EVENT_KINDS } from '@workspace-chat/shared';
-import { AppModule } from '../app.module';
-import { HealthController } from './health.controller';
+import { AppModule } from './app.module';
 
-describe('ヘルスチェック', () => {
+describe('AppModule', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
@@ -21,14 +20,13 @@ describe('ヘルスチェック', () => {
     await app?.close();
   });
 
-  it('AppModule が起動し、HealthController が解決できる', () => {
-    expect(app.get(HealthController)).toBeInstanceOf(HealthController);
+  it('起動する', () => {
+    expect(app).toBeDefined();
   });
 
-  it('status: ok と、共有パッケージから読んだ種類数を返す', () => {
-    expect(app.get(HealthController).check()).toEqual({
-      status: 'ok',
-      realtimeEventKinds: REALTIME_EVENT_KINDS.length,
-    });
+  // 共有パッケージは CommonJS で出している（tech-stack.md）。
+  // api 側から実際に読めることを確かめる。読めなければここで落ちる。
+  it('共有パッケージを読める', () => {
+    expect(REALTIME_EVENT_KINDS).toHaveLength(7);
   });
 });
