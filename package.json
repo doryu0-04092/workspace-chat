@@ -13,7 +13,7 @@
   "scripts": {
     "lint": "eslint .",
     "format:check": "prettier --check .",
-    "typecheck": "npm run build -w @workspace-chat/shared && npm run typecheck -w @workspace-chat/api && npm run typecheck -w @workspace-chat/web",
+    "typecheck": "npm run build -w @workspace-chat/shared && npm run typecheck -w @workspace-chat/shared && npm run typecheck -w @workspace-chat/api && npm run typecheck -w @workspace-chat/web",
     "build": "npm run build -w @workspace-chat/shared && npm run build -w @workspace-chat/api && npm run build -w @workspace-chat/web",
     "test": "npm run build -w @workspace-chat/shared && vitest run"
   },

@@ -46,11 +46,14 @@ jobs:
         run: npm run build
 
       - name: テスト（Vitest）
+        id: test
         run: npm test
 
-      # 失敗時こそ残す。CI を実行した事実と結果を成果物として残すのが目的。
+      # テストが失敗したときこそ残す。CI を実行した事実と結果を成果物として残すのが目的。
+      # ただしテストが走った場合に限る。それより前の段階で落ちたときは reports/ が
+      # 存在せず、if-no-files-found: error が本来の失敗と無関係な2件目の失敗を出す。
       - name: テストレポートの保存
-        if: always()
+        if: always() && steps.test.conclusion != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: test-reports
