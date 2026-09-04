@@ -144,5 +144,5 @@ WebSocket のイベント定義（7種類）をフロントとバックで二重
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml) と [dependabot.yml](.github/dependabot.yml)） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
-| 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
-| 実装 | 未着手 |
+| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。**Docker に入れるのはミドルウェアだけ**。api / web はホストの Node で動かす） |
+| 実装 | 未着手（次の作業） |

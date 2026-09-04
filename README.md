@@ -18,8 +18,8 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml) と [dependabot.yml](.github/dependabot.yml)） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
-| 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
-| 実装 | 未着手 |
+| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Redis） |
+| 実装 | 未着手（次の作業） |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する
 （[要件定義書](docs/requirements.md) 4.8）。
@@ -118,6 +118,62 @@ bash scripts/check-docs.test.sh
 それ以外のメジャーは受け取る。**すべて止めると、メジャー版でしか修正されない
 脆弱性が出たときに、Dependabot が PR を出さない一方で監査は落ち続け、
 自動で直す経路が無いままマージが塞がる。**
+
+### 開発環境のミドルウェア（DB・Redis）
+
+**Docker で動かすのはミドルウェアだけである。** api と web はホストの Node で動かす
+（[compose.yaml](compose.yaml)）。ホットリロードとデバッグのしやすさを優先した。
+
+> **代償。** ローカルとデプロイ先（ECS Fargate）で Node の動作環境が揃わない。
+> 「手元では動くが ECS で動かない」がありうる。**CI（ubuntu / Node 24）がその差を先に踏む。**
+
+**先に `.env` を用意する。** compose は値を持たず、すべて `.env` から読む。
+
+```
+cp .env.example .env    変数名だけが入っている。値を書き込む
+```
+
+**変数を1つでも空のままにすると起動が止まる。** 既定値には落とさない。
+落とすと設定の書き忘れが「動いてしまう」形で隠れる（`PORT` と同じ考え方）。
+
+| 操作 | コマンド |
+|---|---|
+| 起動する | `docker compose up -d --wait` |
+| 状態を見る | `docker compose ps` |
+| ログを見る | `docker compose logs -f db` |
+| 止める（**データは残る**） | `docker compose down` |
+| **止めてデータも消す** | `docker compose down -v` |
+
+`--wait` を付けるとヘルスチェックが通るまで戻らない。付けないと、
+**まだ初期化中の DB に接続しようとして落ちる。**
+
+接続先は `.env` に書いた値から組み立てる。
+
+```
+postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@localhost:<POSTGRES_PORT>/<POSTGRES_DB>
+redis://localhost:<REDIS_PORT>
+```
+
+**どちらも `127.0.0.1` にだけ結び付けている。** 省略すると全インターフェースで待ち受け、
+同じネットワーク上の端末から開発用の DB に届く。
+
+#### pg_bigm
+
+公式の `postgres:17` に pg_bigm は入っておらず、**PGDG の apt リポジトリにも無い**。
+そのため [docker/postgres/Dockerfile](docker/postgres/Dockerfile) で
+ソースからビルドしている。初回の `up` はそのぶん遅い。
+
+**`CREATE EXTENSION pg_bigm` はこの compose では自動実行しない。**
+拡張を作るのは Prisma のマイグレーションの役目とする。
+初期化スクリプトで作ると、**ローカルだけ拡張があり、RDS には無い**状態が生まれ、
+「手元では検索できるのに本番で落ちる」という形で後から露見する。
+
+> **代償。** マイグレーションを書くまで、起動しただけの DB に pg_bigm は入っていない。
+> 手で確かめるには次を実行する。
+
+```
+docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'CREATE EXTENSION pg_bigm;'
+```
 
 ### 動かす
 

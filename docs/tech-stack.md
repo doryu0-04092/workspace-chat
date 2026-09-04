@@ -290,6 +290,34 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
   バージョンごとにビルドが必要なため、最初のマイグレーションで実際に確認する。
   通らない場合は RDS PostgreSQL 18.4、または MySQL 8.4 の ngram 索引に切り替える
 
+#### ローカルでの確認結果（2026-09-04）
+
+**ローカルの Docker では通った。RDS では未確認である。**
+
+| 項目 | 結果 |
+|---|---|
+| 環境 | `postgres:17-bookworm`（server_version 17.11）＋ pg_bigm `v1.2-20250903` をソースからビルド |
+| `CREATE EXTENSION pg_bigm` | **通った**（extversion 1.2） |
+| `gin_bigm_ops` の索引が `LIKE '%…%'` で使われること | **確認した**（`Bitmap Index Scan` になる） |
+| RDS PostgreSQL 17 | **未確認**。Terraform で環境を作る段で確かめる |
+
+**pg_bigm は PGDG の apt リポジトリに存在しない**（bookworm / trixie の `Packages` を
+取得して検索し 0 件）。ローカルは [Dockerfile](../docker/postgres/Dockerfile) でビルドしている。
+
+> **RDS では話が変わる。** RDS は利用者が拡張をビルドして持ち込めない。
+> 使えるのは AWS が同梱した拡張だけであり、**pg_bigm が同梱されていることが前提**になる。
+> ローカルで通ったことは、その前提を裏付けない。**上の「未確認」を消してよいのは、
+> RDS の実インスタンスで実行したときだけである。**
+
+#### Redis の版（ローカル）
+
+ローカルは `redis:7.2-alpine` とする。**ElastiCache の Redis OSS は 7.1 が上限であり、
+7.2 以降は Valkey としてのみ提供される**（2026-09-04 に確認）。本番と同系統に寄せた暫定である。
+
+> **代償。** Redis OSS 7.x は AWS 側で新機能の開発対象から外れている。
+> Valkey へ移すかどうかは決めていない。**決めるまで、本書の「ElastiCache for Redis」は
+> 上限 7.1 の意味で読む必要がある。**
+
 ---
 
 ## 検討したが採らなかった案
