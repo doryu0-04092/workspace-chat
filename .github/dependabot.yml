@@ -9,6 +9,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # メジャー更新は自動で上げない。
+    # tech-stack.md は NestJS 11（最新は12）/ Vite 7（最新は8）/ TypeScript 5（最新は7）を
+    # **理由を書いたうえで意図的に選んでいる。** 自動 PR で上げると、その決定が
+    # 記録の無いまま崩れる。メジャーの移行は文書を直す作業と一体で行う。
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     # 開発用の依存はまとめて1つの PR にする。個別に来るとレビューの回数が増え、
     # 1件あたりに向ける注意が薄くなる。
     groups:
@@ -26,5 +33,8 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    # こちらはメジャーも受け取る。アクションのメジャーは
+    # ランタイム（Node 20 → 24）の移行を含み、放置すると非推奨のまま残る。
+    # この PR で実際にそうなっていた。
     commit-message:
       prefix: 'chore'

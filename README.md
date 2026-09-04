@@ -16,6 +16,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | AI コードレビューの設定 | **完了**（[claude_code_review.yml](.github/workflows/claude_code_review.yml)） |
 | ドキュメント検査の CI | **完了**（[docs.yml](.github/workflows/docs.yml)） |
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
+| 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml) と [dependabot.yml](.github/dependabot.yml)） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
 | 実装 | 未着手 |
@@ -89,8 +90,18 @@ npm test
 npm audit --audit-level=high
 ```
 
-このほかに CI は [docs.yml](.github/workflows/docs.yml) でドキュメントの検査
-（`scripts/check-docs.sh` と、その検査自身の検査 `scripts/check-docs.test.sh`）を回す。
+このほかに CI は次を回す。
+
+| ワークフロー | 内容 |
+|---|---|
+| [docs.yml](.github/workflows/docs.yml) | ドキュメントの検査（`scripts/check-docs.sh`）と、**その検査自身が壊れたら落ちることの確認**（`scripts/check-docs.test.sh`、28通り） |
+| [audit.yml](.github/workflows/audit.yml) | 依存の脆弱性検査。PR・push に加えて**毎週月曜に定期実行する**（要件定義書 4.3 の「継続的に」） |
+| [claude_code_review.yml](.github/workflows/claude_code_review.yml) | AI コードレビュー（下記） |
+
+依存の更新は [dependabot.yml](.github/dependabot.yml) が毎週提案する。
+**npm のメジャー更新は自動で上げない。** [技術スタック](docs/tech-stack.md) が
+NestJS 11 / Vite 7 / TypeScript 5 を理由付きで選んでいるため、
+メジャーの移行は文書を直す作業と一体で行う。
 
 ### 動かす
 

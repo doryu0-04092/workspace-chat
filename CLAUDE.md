@@ -142,6 +142,7 @@ WebSocket のイベント定義（7種類）をフロントとバックで二重
 | **AI コードレビューの設定** | **完了**（[claude_code_review.yml](.github/workflows/claude_code_review.yml)。導入手順と制約は [README](README.md)） |
 | **ドキュメント検査の CI** | **完了**（[docs.yml](.github/workflows/docs.yml)。検査そのものの検査を28通り含む） |
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
+| 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml) と [dependabot.yml](.github/dependabot.yml)） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
 | 実装 | 未着手 |
