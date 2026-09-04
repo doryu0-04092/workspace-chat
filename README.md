@@ -178,7 +178,7 @@ docker volume rm workspace-chat_db-data
 **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` を後から変えるときは
 `down -v` が要る。** これらを読むのは公式イメージの初期化処理で、
 **走るのはデータ領域が空のときだけ**である。ボリュームができたあとに `.env` を直しても、
-**DB の中の利用者名・データベース名は初回の値のまま変わらない。**
+**DB の中の利用者名・パスワード・データベース名は初回の値のまま変わらない。3つともである。**
 
 このとき `up -d --wait` は**ヘルスチェックが通らずに失敗する**。
 **3つとも検知する**（パスワードだけずらした場合も含めて実行して確かめた）。
@@ -200,10 +200,10 @@ docker volume rm workspace-chat_db-data
 | ずれた値 | 消さずに直せるか |
 |---|---|
 | `POSTGRES_PASSWORD` | **直せる。**下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
-| `POSTGRES_DB` | **直せる。**`ALTER DATABASE <古い名前> RENAME TO <新しい名前>;`。**その DB に接続したままでは実行できない**ので `-d postgres` で繋ぐ |
+| `POSTGRES_DB` | **直せる。**下記の `ALTER DATABASE ... RENAME TO`（**その DB に接続したままでは実行できない**ので `-d postgres` で繋ぐ） |
 | `POSTGRES_USER` | **直せない。**`down -v` するか、`.env` を元の名前に戻す |
 
-パスワードは `psql` に入って `\password` で変える。
+**パスワード**は `psql` に入って `\password` で変える。
 
 ```
 docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
@@ -213,9 +213,28 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 workspace_chat=# \password
 ```
 
+**入力するのは `.env` に書いた `POSTGRES_PASSWORD` と同じ値である。**
+別の値を入れると、DB は変わったのに**ヘルスチェックは赤のまま**になり、
+「`\password` が効かなかった」と読み違える。
+
+**正しく入力すれば、コンテナを作り直さずに次のヘルスチェックで緑に戻る**
+（実行して確認した。10 秒後に `healthy`）。ずれているのは DB の中身だけで、
+コンテナの環境変数は `up` の時点ですでに新しいためである。
+**`restart` では直らない**（前述）のと逆の向きの話になる。
+
 **`ALTER ROLE ... PASSWORD '<平文>'` を1行で叩かない。** 平文が手元のシェル履歴と
 コンテナ内のプロセス引数に残る。`\password` は**入力を受け取ってから
 クライアント側でハッシュに変換して送る**ため、どちらにも平文が残らない。
+
+**データベース名**は `-d postgres` に繋いで改名する。
+
+```
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DATABASE \"<古い名前>\" RENAME TO \"$POSTGRES_DB\";"'
+```
+
+**`-d "$POSTGRES_DB"` で繋いではいけない。** その値は**これから作ろうとしている新しい名前**であり、
+まだ存在しない。`-d postgres` を使うのは、**`POSTGRES_DB` の値によらず initdb が必ず作るデータベース**
+だからである。改名したあとも、コンテナを作り直さずに緑に戻る（実行して確認した。表も残っていた）。
 
 **利用者名だけが直せないのは、改名しようとしている本人しかログインできる利用者がいないためである。**
 `ALTER ROLE ... RENAME TO` は `session user cannot be renamed` で拒否される。
@@ -253,6 +272,16 @@ redis://127.0.0.1:<REDIS_PORT>
 
 **`localhost` と書かない。** 多くの環境で `localhost` は `::1` を先に返すが、
 束縛しているのは IPv4 の `127.0.0.1` だけである。IPv4 に落ちないクライアントは繋がらない。
+
+**この経路は実際に叩いて確かめた。** ヘルスチェックはコンテナの中から見ているだけで、
+**公開ポートを通らない。** api が使うのはこちらだけなので、別に確認した。
+
+| 確かめたこと | 結果 |
+|---|---|
+| ホストの `127.0.0.1:<POSTGRES_PORT>` / `<REDIS_PORT>` に TCP が通る | 両方とも通った |
+| 上の接続 URL の形で `SELECT version()` | `PostgreSQL 17.11` が返った |
+| Redis に `ping` | `PONG` |
+| **パスワードを誤った接続 URL** | `password authentication failed` で**拒否された** |
 
 #### pg_bigm
 
