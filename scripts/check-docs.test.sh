@@ -10,7 +10,7 @@
 # 方針: 文書一式を一時ディレクトリに複製し、1箇所ずつ壊して exit 1 になることを見る。
 # 元のリポジトリは書き換えない。
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 # 対象範囲の定義は check-docs.sh と共有する
 # shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh

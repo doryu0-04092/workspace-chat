@@ -2,7 +2,7 @@
 # ドキュメントの機械的な検査。
 # 目的は「実行した事実を成果物に残すこと」であり、内容の正しさは人間とレビューが見る。
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 # 対象範囲の定義は check-docs.test.sh と共有する（scripts/doc-scope.sh）
 # shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh
