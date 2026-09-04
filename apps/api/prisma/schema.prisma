@@ -201,6 +201,10 @@ model Membership {
 /// これにより `(workspaceId, name)` の一意制約を維持したまま、名前の衝突が
 /// 構造的に起きなくなる。
 ///
+/// **復元した行は「採番済みだが archivedAt が null」という形になる。**
+/// これは異常ではなく、復元されたチャンネルの正しい姿である。
+/// 採番の有無を「アーカイブ中かどうか」の判定に使ってはならない。**判定は archivedAt で行う。**
+///
 /// **代償を記録する**（CLAUDE.md 4）。
 ///
 /// 1. **アーカイブを解除しても名前が戻らないため、利用者からは「別のチャンネルに
@@ -226,7 +230,7 @@ model Channel {
   ///
   /// 代償: 列が1つ増え、**作成時に name と baseName へ同じ値を書く必要がある。**
   /// ずれると採番の基底が狂う。ずれないことは `Channel_archive_naming_check` が見る
-  /// （アーカイブしていない行は `name = baseName` でなければ通らない）。
+  /// （採番されていない行は `name = baseName` でなければ通らない）。
   baseName String
 
   visibility ChannelVisibility
@@ -234,7 +238,8 @@ model Channel {
   /// アーカイブした時刻（F-35）。null なら現役。
   archivedAt DateTime? @db.Timestamptz(3)
 
-  /// 同じ基底名の中での通し番号。**アーカイブした行だけが持つ。**
+  /// 同じ基底名の中での通し番号。**一度アーカイブされた行が持つ。**
+  /// 復元しても外れないため、**現役の行が持っていることもある**（上の説明を参照）。
   /// 次の番号は `MAX(archiveSequence) + 1`（同一ワークスペース・同一 baseName）で求める。
   archiveSequence Int?
 
@@ -248,13 +253,15 @@ model Channel {
   /// 一意制約の範囲が広すぎないことは、テストが別ワークスペースへの作成で確かめている。
   ///
   /// **採番（workspaceId, baseName, archiveSequence）に別の一意制約は置かない。**
-  /// 検査制約 `Channel_archive_naming_check` により、アーカイブ済みの name は
+  /// 検査制約 `Channel_archive_naming_check` により、name は
   /// `baseName-<archiveSequence>` に一意に決まる。**採番が重複すれば名前も必ず重複する**ため、
   /// この一意制約だけで採番の重複も止まる。置いても届く場面が無く、
   /// テストで到達できない制約が1つ増えるだけになる。
+  ///
+  /// **`@@index([workspaceId])` も置かない。** この一意索引は先頭列が workspaceId の
+  /// B-tree であり、「チャンネル一覧をワークスペース単位で引く」問い合わせにそのまま使える。
+  /// 単独の索引は問い合わせ能力を1つも足さず、書き込みのたびの索引更新と容量だけを増やす。
   @@unique([workspaceId, name])
-  /// チャンネル一覧はワークスペース単位で引く。
-  @@index([workspaceId])
 }
 
 /// チャンネルへの参加（第2層）。

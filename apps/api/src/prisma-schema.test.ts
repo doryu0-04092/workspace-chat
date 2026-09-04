@@ -108,6 +108,35 @@ describe('Prisma のスキーマとマイグレーション', () => {
     // 空の DB にマイグレーションを適用する。ここが落ちるなら、
     // マイグレーションが実際の PostgreSQL に適用できていない。
     runPrisma(['migrate', 'deploy', '--schema', schemaPath], container.getConnectionUri());
+
+    // 前提データはここで揃える。**どれか1つの describe の中に置かない。**
+    // 置くと、describe の並べ替え・`.only`・`-t` での絞り込みのいずれでも
+    // 「投入されていない行を参照する」形で落ち、
+    // **落ちた原因がスキーマなのか実行順なのかを、失敗した人が区別できない。**
+    await expectSqlToSucceed(`
+      INSERT INTO "User" ("id", "userId", "displayName", "passwordHash") VALUES
+        ('00000000-0000-7000-8000-000000000001', 'owner',    'オーナー',   'argon2id-placeholder'),
+        ('00000000-0000-7000-8000-000000000002', 'insider',  '参加者',     'argon2id-placeholder'),
+        ('00000000-0000-7000-8000-000000000003', 'outsider', '非参加者',   'argon2id-placeholder'),
+        ('00000000-0000-7000-8000-000000000004', 'stranger', 'よその人',   'argon2id-placeholder');
+
+      INSERT INTO "Workspace" ("id", "name") VALUES
+        ('00000000-0000-7000-8000-0000000000a1', '第1ワークスペース'),
+        ('00000000-0000-7000-8000-0000000000a2', '第2ワークスペース');
+
+      INSERT INTO "Membership" ("id", "workspaceId", "userId", "role") VALUES
+        ('00000000-0000-7000-8000-0000000000b1', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000001', 'OWNER'),
+        ('00000000-0000-7000-8000-0000000000b2', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002', 'MEMBER'),
+        ('00000000-0000-7000-8000-0000000000b3', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000003', 'MEMBER');
+
+      INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility") VALUES
+        ('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000a1', 'general', 'general', 'PUBLIC'),
+        ('00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', 'secret',  'secret',  'PRIVATE');
+
+      INSERT INTO "ChannelMember" ("id", "channelId", "userId") VALUES
+        ('00000000-0000-7000-8000-0000000000d1', '00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-000000000002'),
+        ('00000000-0000-7000-8000-0000000000d2', '00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-000000000002');
+    `);
     // 20 分。初回はイメージの取得が入る。
   }, 1_200_000);
 
@@ -153,7 +182,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
           container.getConnectionUri(),
         ),
       ).not.toThrow();
-    });
+      // 既定の 5 秒を使わない。**このテストだけが子プロセスを起こす。**
+      // Node の起動・CLI の読み込み・DB の内省を含むため、CI の負荷次第で
+      // 「スキーマとは無関係な理由で赤くなる」。
+    }, 60_000);
 
     it('主キーが連番ではなく UUID である', async () => {
       // 連番を用いない（要件定義書 3.5.2）。**型が integer なら連番である。**
@@ -176,33 +208,6 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('一意制約', () => {
-    beforeAll(async () => {
-      await expectSqlToSucceed(`
-        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash") VALUES
-          ('00000000-0000-7000-8000-000000000001', 'owner',    'オーナー',   'argon2id-placeholder'),
-          ('00000000-0000-7000-8000-000000000002', 'insider',  '参加者',     'argon2id-placeholder'),
-          ('00000000-0000-7000-8000-000000000003', 'outsider', '非参加者',   'argon2id-placeholder'),
-          ('00000000-0000-7000-8000-000000000004', 'stranger', 'よその人',   'argon2id-placeholder');
-
-        INSERT INTO "Workspace" ("id", "name") VALUES
-          ('00000000-0000-7000-8000-0000000000a1', '第1ワークスペース'),
-          ('00000000-0000-7000-8000-0000000000a2', '第2ワークスペース');
-
-        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role") VALUES
-          ('00000000-0000-7000-8000-0000000000b1', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000001', 'OWNER'),
-          ('00000000-0000-7000-8000-0000000000b2', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002', 'MEMBER'),
-          ('00000000-0000-7000-8000-0000000000b3', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000003', 'MEMBER');
-
-        INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility") VALUES
-          ('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000a1', 'general', 'general', 'PUBLIC'),
-          ('00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', 'secret',  'secret',  'PRIVATE');
-
-        INSERT INTO "ChannelMember" ("id", "channelId", "userId") VALUES
-          ('00000000-0000-7000-8000-0000000000d1', '00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-000000000002'),
-          ('00000000-0000-7000-8000-0000000000d2', '00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-000000000002');
-      `);
-    }, 60_000);
-
     it('ユーザーID は重複できない', async () => {
       const output = await expectSqlToFail(
         `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
@@ -310,7 +315,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toContain('Channel_archive_naming_check');
     });
 
-    it('アーカイブしていないのに採番できない', async () => {
+    it('採番だけ変えて改名しないことはできない', async () => {
+      // 「アーカイブしていないのに採番できない」ではない。
+      // **復元した行は、現役のまま採番を持ち続ける。** 禁じているのは
+      // 採番と名前が食い違うことであって、現役の行が採番を持つことではない。
       const output = await expectSqlToFail(
         `UPDATE "Channel" SET "archiveSequence" = 1
          WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
@@ -329,6 +337,24 @@ describe('Prisma のスキーマとマイグレーション', () => {
         `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
          VALUES ('00000000-0000-7000-8000-0000000000c3', '00000000-0000-7000-8000-0000000000a1', 'general', 'general', 'PUBLIC');`,
       );
+    });
+
+    it('復元しても名前と採番が保たれる', async () => {
+      // **承認済みの決定は「復元しても番号は外れない」**（機能一覧 3.2）。
+      //
+      // 検査制約を archivedAt で場合分けすると、復元が
+      // 「採番を外して名前を baseName に戻すこと」まで要求してしまい、
+      // **上で作り直した general と衝突して復元そのものができなくなる。**
+      // このテストが無いと、その矛盾が誰にも見えないまま土台に残る。
+      await expectSqlToSucceed(
+        `UPDATE "Channel" SET "archivedAt" = NULL
+         WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
+      );
+      const output = await expectSqlToSucceed(
+        `SELECT "name" || ':' || "baseName" || ':' || "archiveSequence"
+         FROM "Channel" WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
+      );
+      expect(output).toBe('general-1:general:1');
     });
 
     it('同じ基底名に同じ採番を二度使えない', async () => {

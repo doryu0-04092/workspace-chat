@@ -89,9 +89,6 @@ CREATE INDEX "Membership_userId_idx" ON "Membership"("userId");
 CREATE UNIQUE INDEX "Membership_workspaceId_userId_key" ON "Membership"("workspaceId", "userId");
 
 -- CreateIndex
-CREATE INDEX "Channel_workspaceId_idx" ON "Channel"("workspaceId");
-
--- CreateIndex
 CREATE UNIQUE INDEX "Channel_workspaceId_name_key" ON "Channel"("workspaceId", "name");
 
 -- CreateIndex
@@ -160,20 +157,31 @@ CREATE UNIQUE INDEX "RecoveryCode_single_unused_per_user"
 -- アーカイブすると name を `baseName-<archiveSequence>` に変える。**この3つは
 -- 必ず同時に起きなければならない。** どれか1つだけが行われた状態を DB が受け入れると、
 --
---   - 採番だけ  → 現役のチャンネルに番号が付き、次の採番の計算が狂う
---   - 改名だけ  → 現役のチャンネルの名前が baseName とずれ、採番の基底が狂う
+--   - 採番だけ  → 名前と番号が食い違い、名前から採番を辿れなくなる
+--   - 改名だけ  → 名前が baseName とも採番とも合わなくなる
 --   - アーカイブだけ → 名前が空かず、同じ名前で作り直せない（この機能の目的が失われる）
 --
 -- **アプリ側の実装に委ねると、片方だけ実行された状態が作れてしまう。**
--- 検査制約は行ごとに評価されるため、同一の UPDATE 文で3つを揃えない限り通らない。
+-- 検査制約は行ごとに評価されるため、同一の UPDATE 文で揃えない限り通らない。
+--
+-- **条件を archivedAt で場合分けしない。** 採番と名前の対応は
+-- **アーカイブ中かどうかに関わらず常に成り立つ**必要がある。
+-- 場合分けすると、復元（archivedAt を null に戻す操作）が
+-- 「採番を外して名前を baseName に戻すこと」まで要求してしまい、
+-- **承認済みの「復元しても番号は外れない」（機能一覧 3.2）が成立しない。**
+-- さらに、その名前で作り直された新しいチャンネルがあれば、
+-- 復元そのものが Channel_workspaceId_name_key と衝突して失敗する。
 --
 -- 代償: **アーカイブ済みチャンネルの名前を、後から自由に変えられない。**
 -- 名前は baseName と採番から機械的に決まる。
 ALTER TABLE "Channel"
     ADD CONSTRAINT "Channel_archive_naming_check" CHECK (
+        -- 採番と名前は常に対応する（採番だけ・改名だけを禁じる）。
         CASE
-            WHEN "archivedAt" IS NULL
-                THEN "archiveSequence" IS NULL AND "name" = "baseName"
-            ELSE "archiveSequence" IS NOT NULL AND "name" = "baseName" || '-' || "archiveSequence"
+            WHEN "archiveSequence" IS NULL THEN "name" = "baseName"
+            ELSE "name" = "baseName" || '-' || "archiveSequence"
         END
+        -- アーカイブするなら採番済みでなければならない（アーカイブだけを禁じる）。
+        -- 逆向きは要求しない。**採番済みだが現役の行は、復元されたチャンネルである。**
+        AND ("archivedAt" IS NULL OR "archiveSequence" IS NOT NULL)
     );
