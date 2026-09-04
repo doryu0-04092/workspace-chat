@@ -144,7 +144,8 @@ cp .env.example .env    変数名だけが入っている。値を書き込む
 |---|---|
 | 起動する | `docker compose up -d --wait` |
 | **イメージを作り直す** | `docker compose up -d --build --wait` |
-| **土台ごと新しくする** | `docker compose build --pull db` のあと `docker compose up -d --wait` |
+| **土台ごと新しくする（db）** | `docker compose build --pull db` のあと `docker compose up -d --wait` |
+| **イメージを取り直す（redis）** | `docker compose pull redis` のあと `docker compose up -d --wait` |
 | 状態を見る | `docker compose ps` |
 | ログを見る | `docker compose logs -f db` |
 | 止める（**データは残る**） | `docker compose down` |
@@ -198,9 +199,23 @@ docker volume rm workspace-chat_db-data
 
 | ずれた値 | 消さずに直せるか |
 |---|---|
-| `POSTGRES_PASSWORD` | **直せる。**`ALTER ROLE <利用者> PASSWORD '<新しい値>';` |
+| `POSTGRES_PASSWORD` | **直せる。**下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
 | `POSTGRES_DB` | **直せる。**`ALTER DATABASE <古い名前> RENAME TO <新しい名前>;`。**その DB に接続したままでは実行できない**ので `-d postgres` で繋ぐ |
 | `POSTGRES_USER` | **直せない。**`down -v` するか、`.env` を元の名前に戻す |
+
+パスワードは `psql` に入って `\password` で変える。
+
+```
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+```
+workspace_chat=# \password
+```
+
+**`ALTER ROLE ... PASSWORD '<平文>'` を1行で叩かない。** 平文が手元のシェル履歴と
+コンテナ内のプロセス引数に残る。`\password` は**入力を受け取ってから
+クライアント側でハッシュに変換して送る**ため、どちらにも平文が残らない。
 
 **利用者名だけが直せないのは、改名しようとしている本人しかログインできる利用者がいないためである。**
 `ALTER ROLE ... RENAME TO` は `session user cannot be renamed` で拒否される。
@@ -221,6 +236,10 @@ Docker は同じ名前のイメージが手元にあればレジストリを見�
 
 **PostgreSQL のマイナー修正を受け取るのは `--pull` を付けたときだけである。**
 土台をダイジェストで固定していない理由は [Dockerfile](docker/postgres/Dockerfile) に記した。
+
+**redis は `build --pull` の対象にならない。** `build` が触るのは `build:` を持つサービスだけで、
+redis は既製のイメージをそのまま使う。**`docker compose pull redis` が要る。**
+これを叩かない限り、**最初に `up` した日の 7.2.x のまま動き続ける。**
 
 接続先は `.env` に書いた値から組み立てる。
 
