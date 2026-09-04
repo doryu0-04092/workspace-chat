@@ -41,21 +41,27 @@ services:
       # $$ は compose の変数展開ではなくコンテナ内のシェルに渡すための書き方。
       #
       # pg_isready ではなく psql で実際に問い合わせる。**pg_isready は利用者も
-      # データベースも検証しない。** 存在しない利用者を渡しても
+      # データベースもパスワードも検証しない。** 存在しない利用者を渡しても
       # 「accepting connections」を返して終了コード 0 になる（実行して確認した）。
-      # .env を初期化後に書き換えた場合、pg_isready だと healthy のまま
-      # アプリだけが繋がらない、という最も追いにくい形になる。
       #
-      # -h 127.0.0.1 を省いてはいけない。省くと Unix ドメインソケットを見る。
-      # 公式イメージは初回の初期化中に listen_addresses='' の一時サーバーを
-      # ソケット上で立てるため、**初期化の途中で healthy を返しうる**。
-      # 一時サーバーは TCP を開かないので、TCP を見れば初期化中は必ず失敗する。
+      # 接続先は 127.0.0.1 ではなく自分のサービス名（db）にする。
+      # イメージが作る pg_hba.conf は `host all all 127.0.0.1/32 trust` を持ち、
+      # **ループバック宛だとパスワードを検証しない**（これも実行して確認した）。
+      # サービス名で引くとブリッジ側の IP になり、`host all all all scram-sha-256`
+      # に落ちてパスワードまで検証される。
       #
-      # パスワードは要らない。イメージが作る pg_hba.conf が
-      # `host all all 127.0.0.1/32 trust` を持つため、**秘密をここに書かずに済む**。
+      # ここまでする理由。.env の値は**初回の初期化のときにしか効かない**。
+      # 検証しないと、ボリュームが残ったまま値を書き換えた場合に
+      # **ヘルスチェックは緑のままアプリだけが繋がらない**、という最も追いにくい形になる。
+      #
+      # ホスト名を使っても、初期化中の一時サーバーは listen_addresses='' で
+      # TCP を開かないため、**初期化の途中で healthy を返す**問題は起きない。
+      #
+      # 渡しているのは変数の名前であり、値ではない。`docker inspect` に出るのも
+      # `$POSTGRES_PASSWORD` という文字列のままである。
       test:
         - CMD-SHELL
-        - psql -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "SELECT 1" >/dev/null
+        - PGPASSWORD="$$POSTGRES_PASSWORD" psql -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "SELECT 1" >/dev/null
       interval: 5s
       timeout: 5s
       # 初回はイメージのビルドではなく initdb に時間がかかる。余裕を取る。
