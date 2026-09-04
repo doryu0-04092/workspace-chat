@@ -62,6 +62,41 @@ Slack 風のチャットアプリケーション。スクール課題として�
 [機能一覧](docs/features.md) を参照。
 **実装しない機能**は [要件定義書](docs/requirements.md) の 3.4 に理由とともに記載する。
 
+## 開発の始め方
+
+Node.js 24 が要る（`package.json` の `engines` で強制している）。
+
+```
+npm ci          依存を入れる（package-lock.json のとおりに入る）
+npm run build   3つのワークスペースを順に組む
+npm test        テストを実行する
+```
+
+CI が回すのと同じ検査を手元で通すには次を順に実行する。
+
+```
+npm run lint
+npm run format:check
+npm run typecheck
+npm run build
+npm test
+```
+
+### 動かす
+
+| 対象 | 手順 |
+|---|---|
+| フロントエンド | `npm run dev -w @workspace-chat/web` |
+| バックエンド | **端末を2つ使う。** 片方で `npm run build:watch -w @workspace-chat/api`、もう片方で `npm run dev -w @workspace-chat/api` |
+
+バックエンドが2端末なのは、**ビルドと実行を分けているため**である。
+NestJS 11 は CommonJS で、TypeScript をそのまま実行しない。
+1コマンドにまとめるには監視ツールを足すことになるので、**依存を増やさない側に倒している。**
+
+待ち受けポートは `PORT` で変えられる。**不正な値を渡すと起動時に落ちる**
+（`Number()` は不正な文字列に `NaN` を返し、`listen(NaN)` は任意の空きポートで
+待ち受けてしまうため）。
+
 ## AI コードレビュー
 
 PR の作成時と、その PR のブランチへの push 時に、Claude Code が

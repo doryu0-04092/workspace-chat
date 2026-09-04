@@ -5,7 +5,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/main.js"
+    "build:watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "start": "node dist/main.js",
+    "dev": "node --watch dist/main.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.2.3",
