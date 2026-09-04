@@ -1,12 +1,22 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { REALTIME_EVENT_KINDS } from '@workspace-chat/shared';
+import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 
+// 共有パッケージを差し替える。実数（7）を期待値にすると、App が数値を直書きしても
+// テストが通ってしまい、「共有パッケージから読んでいる」ことを検証できない。
+// 差し替えた値が画面に出れば、参照が生きていることの証明になる。
+vi.mock('@workspace-chat/shared', () => ({
+  REALTIME_EVENT_KINDS: ['a', 'b', 'c'],
+}));
+
 describe('App', () => {
-  it('描画され、共有パッケージから読んだ種類数を表示する', () => {
+  it('描画される', () => {
     render(<App />);
     expect(screen.getByRole('heading', { name: 'workspace-chat' })).toBeDefined();
-    expect(screen.getByText(new RegExp(`${REALTIME_EVENT_KINDS.length} 種類`))).toBeDefined();
+  });
+
+  it('種類数を共有パッケージから読んでいる', () => {
+    render(<App />);
+    expect(screen.getByText(/3 種類/)).toBeDefined();
   });
 });
