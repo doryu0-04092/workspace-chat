@@ -57,8 +57,16 @@ cla=$(list_len CLAUDE.md '^#+ 必ずテストを書く箇所')
 [ "$req" = "$rev" ] || note "件数がずれている（requirements.md $req 件 / REVIEW.md $rev 件）"
 [ "$req" = "$cla" ] || note "件数がずれている（requirements.md $req 件 / CLAUDE.md $cla 件）"
 # 本文が「N項目である」と数を宣言している箇所も、一覧の実数と突き合わせる。
-items=$(grep -o "「必ずテストを書く箇所」の *[0-9]* *項目" docs/requirements.md | head -1 | grep -o "[0-9]*")
-[ -z "$items" ] || [ "$items" = "$req" ] || note "requirements.md の「$items 項目」が一覧の $req 件と一致しない"
+# 宣言は複数の文書にある。1つだけ検査すると、検査していない側を直し忘れて同じ見落としが再発する。
+# 読み取れなかった場合は NG とする。黙って通すと、言い回しを変えた時点で検査が消える。
+check_decl() { # $1=ファイル $2=宣言の正規表現 $3=一覧の実数
+  local n
+  n=$(grep -o "$2" "$1" | head -1 | grep -o "[0-9]*")
+  [ -n "$n" ] || { note "$1 から「N項目」の宣言を読み取れない（言い回しが変わった可能性）"; return; }
+  [ "$n" = "$3" ] || note "$1 の「$n 項目」が一覧の $3 件と一致しない"
+}
+check_decl docs/requirements.md "「必ずテストを書く箇所」の *[0-9]* *項目" "$req"
+check_decl REVIEW.md "下記の *[0-9]* *項目" "$rev"
 echo "  完了（$req 項目）"
 
 if [ "$fail" -ne 0 ]; then echo "検査に失敗しました"; exit 1; fi
