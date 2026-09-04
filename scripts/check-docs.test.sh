@@ -90,7 +90,7 @@ else
 fi
 
 # --- 前提: 検査対象が1件も無いときに落ちること -------------------------------
-# この分岐だけがケース1〜26 のどれからも踏まれない。踏まないまま置くと、
+# この分岐だけがケース1〜27 のどれからも踏まれない。踏まないまま置くと、
 # 検査が何も見ていない状態を「合格」と表示するようになっても気づけない。
 echo "0b. Markdown が1件も無いときに落ちること"
 bare=$(mktemp -d)
@@ -280,56 +280,44 @@ expect_ng "requirements.md の一覧の見出しを変えて読み取れなく�
   's/^#### 必ずテストを書く箇所$/#### 必ずテストを書く項目/' \
   'requirements.md から一覧を読み取れない'
 
-# --- 除外されたディレクトリの中の Markdown は検査対象にならないこと。
-#     ここが効かないと、依存パッケージの README のリンク切れで CI が落ちる。
-expect_ok() { # $1=説明 $2=作るファイル $3=中身
+# --- 落ちてはならないこと。$4 で、置いたファイルが検査の対象に入るはず（in）か
+#     除外されるはず（out）かを切り替える。関数を2つに分けると、失敗時の出力や
+#     後片付けに手を入れたとき片方が黙って取り残される（doc-scope.sh 冒頭と同じ理由）。
+#     判定は doc_find -name '*.md' に統一する。検査1が見るのは Markdown だけである。
+expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対象に入る）| out（除外される）
+  local desc="$1" file="$2" body="$3" want="$4" got
   n=$((n + 1))
-  mkdir -p "$work/$(dirname "$2")"
-  printf '%s\n' "$3" > "$work/$2"
-  # 置いたファイルが実際に除外されていることを先に確かめる。除外の外に置いてしまうと
+  mkdir -p "$work/$(dirname "$file")"
+  printf '%s\n' "$body" > "$work/$file"
+  # 置いたファイルが想定した側にあることを先に確かめる。逆側に落ちると
   # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
-  if (cd "$work" && doc_find -type f -print | sed 's|^\./||' | grep -qxF "$2"); then
-    echo "  NG: $n. $1 — 置いたファイルが除外されていない。ケースが成立していない"
-    fail=1; rm -f "$work/$2"; return
+  if (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF "$file"); then
+    got=in
+  else
+    got=out
+  fi
+  if [ "$got" != "$want" ]; then
+    echo "  NG: $n. $desc — 置いたファイルが $want ではなく $got の側にある。ケースが成立していない"
+    fail=1; rm -f "$work/$file"; return
   fi
   if run_check; then
-    echo "  OK: $n. $1"
+    echo "  OK: $n. $desc"
   else
-    echo "  NG: $n. $1 — 除外されるはずのファイルで検査が落ちた"
+    echo "  NG: $n. $desc — 落ちてはならないのに検査が落ちた"
     (cd "$work" && bash scripts/check-docs.sh 2>&1 | grep '^  NG' | sed 's/^/        実際: /')
     fail=1
   fi
-  rm -f "$work/$2"
+  rm -f "$work/$file"
 }
+# 除外されたディレクトリの中の Markdown は検査対象にならないこと。
+# ここが効かないと、依存パッケージの README のリンク切れで CI が落ちる。
 expect_ok "node_modules の中のリンク切れは無視される" node_modules/pkg/README.md \
-  '[壊れたリンク](./does-not-exist.md)'
+  '[壊れたリンク](./does-not-exist.md)' out
 expect_ok "入れ子の node_modules の中のリンク切れも無視される" apps/api/node_modules/pkg/README.md \
-  '[壊れたリンク](./does-not-exist.md)'
-
-# --- 検査の対象に入っている Markdown でも、落ちてはならないもの。
-#     expect_ok は「置いたファイルが除外されていること」を前提にするため流用できない。
-expect_ok_doc() { # $1=説明 $2=作るファイル $3=中身
-  n=$((n + 1))
-  mkdir -p "$work/$(dirname "$2")"
-  printf '%s\n' "$3" > "$work/$2"
-  # 置いたファイルが検査の対象に入っていることを先に確かめる。除外の側に落ちると
-  # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
-  if ! (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF "$2"); then
-    echo "  NG: $n. $1 — 置いたファイルが検査の対象に入っていない。ケースが成立していない"
-    fail=1; rm -f "$work/$2"; return
-  fi
-  if run_check; then
-    echo "  OK: $n. $1"
-  else
-    echo "  NG: $n. $1 — 落ちてはならないのに検査が落ちた"
-    (cd "$work" && bash scripts/check-docs.sh 2>&1 | grep '^  NG' | sed 's/^/        実際: /')
-    fail=1
-  fi
-  rm -f "$work/$2"
-}
+  '[壊れたリンク](./does-not-exist.md)' out
 # 外部リンクを飛ばす判断はスキームで行う。現物の文書にも https のリンクはあるが、
 # それが消えた瞬間にこの経路の確認も消える。専用のケースとして残す。
-expect_ok_doc "外部リンク（https / mailto）は存在を確かめない" docs/probe-external-link.md \
-  '[外部の文書](https://example.invalid/does-not-exist) と [連絡先](mailto:nobody@example.invalid)'
+expect_ok "外部リンク（https / mailto）は存在を確かめない" docs/probe-external-link.md \
+  '[外部の文書](https://example.invalid/does-not-exist) と [連絡先](mailto:nobody@example.invalid)' in
 if [ "$fail" -ne 0 ]; then echo "検査の検査に失敗しました"; exit 1; fi
 echo "$n 通りの確認をすべて通過しました"
