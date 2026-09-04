@@ -144,6 +144,7 @@ cp .env.example .env    変数名だけが入っている。値を書き込む
 |---|---|
 | 起動する | `docker compose up -d --wait` |
 | **イメージを作り直す** | `docker compose up -d --build --wait` |
+| **土台ごと新しくする** | `docker compose build --pull db` のあと `docker compose up -d --wait` |
 | 状態を見る | `docker compose ps` |
 | ログを見る | `docker compose logs -f db` |
 | 止める（**データは残る**） | `docker compose down` |
@@ -212,6 +213,14 @@ docker volume rm workspace-chat_db-data
 **`--build` が要るのは、`up` が既にあるイメージを作り直さないためである。**
 [Dockerfile](docker/postgres/Dockerfile) は pg_bigm の版を `ARG` で固定しており、
 更新は手で上げる。**その変更を pull しても `up` だけでは古い pg_bigm のまま動く。**
+
+**さらに `--build` だけでは、土台の `postgres:17-bookworm` は取り直されない。**
+Docker は同じ名前のイメージが手元にあればレジストリを見ない。
+`--pull` を付けたときだけ取り直す。**実際に確かめた**（手元のタグを 17.2 に付け替えると、
+`--build` だけのビルドは 17.2 で出来上がり、`build --pull` では 17.11 に戻った）。
+
+**PostgreSQL のマイナー修正を受け取るのは `--pull` を付けたときだけである。**
+土台をダイジェストで固定していない理由は [Dockerfile](docker/postgres/Dockerfile) に記した。
 
 接続先は `.env` に書いた値から組み立てる。
 

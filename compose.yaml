@@ -36,6 +36,12 @@ services:
       - '127.0.0.1:${POSTGRES_PORT:?.env に POSTGRES_PORT を設定してください}:5432'
     volumes:
       - db-data:/var/lib/postgresql/data
+    # stop_signal は指定しない。**公式イメージが STOPSIGNAL SIGINT を宣言している**ため、
+    # `down` / `stop` は fast shutdown になる（`docker image inspect` で確認した）。
+    # ここで SIGINT を書き足しても意味は変わらない。
+    # 既定は SIGTERM（PostgreSQL では smart shutdown ＝ 接続が切れるまで待つ）だが、
+    # このイメージではそうならない。接続を張ったまま止めても即座に終わり、
+    # 次の起動でクラッシュリカバリにならないことを実際に確かめた。
     healthcheck:
       # `docker compose up -d --wait` と depends_on が起動完了を待てるようにする。
       # $$ は compose の変数展開ではなくコンテナ内のシェルに渡すための書き方。
