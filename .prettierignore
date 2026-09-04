@@ -5,6 +5,13 @@ coverage/
 reports/
 package-lock.json
 
+# エージェントが作る git のワークツリー。apps/ の複製がまるごと入る。
+# Prettier は .gitignore を既定では読まないため、ここに書かないと
+# 作業中（整形前）のファイルまで対象に入り、**手元でだけ format:check が落ちる。**
+# CI には .claude/ が無いので緑のままになり、気づけない。
+# 外れていることは scripts/lint-scope.test.sh が機械で確かめる。
+.claude/
+
 # Markdown は Prettier の対象にしない。
 # Prettier は表のセルを桁揃えするため、`| F-01 | 新規登録 |` のような行に
 # 空白が入る。scripts/check-docs.sh と scripts/check-docs.test.sh は
