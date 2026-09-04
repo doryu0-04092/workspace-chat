@@ -5,6 +5,15 @@ coverage/
 reports/
 package-lock.json
 
+# Prisma が出力するクライアント（apps/api/src/generated/）。
+# eslint.config.js の ignores と同じ理由による。**人が書いたものではなく、
+# 指摘されても直せない**（REVIEW.md 7）。
+#
+# 今の生成物は Prettier の規則に一致する（確認済み）。**それでも外す。**
+# 一致しているのは偶然であり、Prisma の版が上がった時点で、
+# **誰も直せないコードで format:check が落ちる。**
+**/generated/
+
 # Markdown は Prettier の対象にしない。
 # Prettier は表のセルを桁揃えするため、`| F-01 | 新規登録 |` のような行に
 # 空白が入る。scripts/check-docs.sh と scripts/check-docs.test.sh は

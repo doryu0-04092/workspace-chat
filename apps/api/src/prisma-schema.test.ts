@@ -277,14 +277,30 @@ describe('Prisma のスキーマとマイグレーション', () => {
       );
     });
 
+    /**
+     * リカバリーコードの検査は、いずれも**自分の利用者を作ってから**行う。
+     *
+     * 固定データの利用者を使い回すと、**前の `it` が入れた行を次の `it` が更新する**形になり、
+     * 単独で走らせたときに `UPDATE` が0行に一致して**素通りで緑になる**
+     * （psql は0行の更新を成功として返す）。制約を一度も踏まないまま通る。
+     */
+    async function createUserWithUnusedCode(): Promise<{ userId: string; codeId: string }> {
+      const userId = randomUUID();
+      const codeId = randomUUID();
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${userId}', 'u-${userId.slice(0, 8)}', '検査用', 'argon2id-placeholder');
+        INSERT INTO "RecoveryCode" ("id", "userId", "codeHash")
+          VALUES ('${codeId}', '${userId}', 'argon2id-placeholder');
+      `);
+      return { userId, codeId };
+    }
+
     it('未使用のリカバリーコードは1人につき1つしか持てない', async () => {
-      await expectSqlToSucceed(
-        `INSERT INTO "RecoveryCode" ("id", "userId", "codeHash")
-         VALUES ('00000000-0000-7000-8000-0000000000e1', '00000000-0000-7000-8000-000000000001', 'argon2id-placeholder');`,
-      );
+      const { userId } = await createUserWithUnusedCode();
       const output = await expectSqlToFail(
         `INSERT INTO "RecoveryCode" ("id", "userId", "codeHash")
-         VALUES ('00000000-0000-7000-8000-0000000000e2', '00000000-0000-7000-8000-000000000001', 'argon2id-placeholder-2');`,
+         VALUES ('${randomUUID()}', '${userId}', 'argon2id-placeholder-2');`,
       );
       expect(output).toContain('RecoveryCode_single_unused_per_user');
     });
@@ -294,28 +310,20 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 同じ利用者で重複を試すだけでは、索引の定義から "userId" が落ちても気づけない。
       // チャンネル名の一意制約に「別のワークスペースなら作れる」を置いたのと同じ理由で、
       // **範囲が広すぎても落ちる形にする。**
-      const first = randomUUID();
-      const second = randomUUID();
-      await expectSqlToSucceed(`
-        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash") VALUES
-          ('${first}',  'u-${first.slice(0, 8)}',  '利用者1', 'argon2id-placeholder'),
-          ('${second}', 'u-${second.slice(0, 8)}', '利用者2', 'argon2id-placeholder');
-        INSERT INTO "RecoveryCode" ("id", "userId", "codeHash") VALUES
-          ('${randomUUID()}', '${first}',  'argon2id-placeholder'),
-          ('${randomUUID()}', '${second}', 'argon2id-placeholder');
-      `);
+      await createUserWithUnusedCode();
+      await createUserWithUnusedCode();
     });
 
     it('使用済みにすれば新しいリカバリーコードを発行できる', async () => {
       // 「再設定の完了時に新しいコードを発行する」（機能一覧 1.1）が
       // 上の制約と両立することを見る。**古いコードを無効にしない限り新しく出せない。**
+      const { userId, codeId } = await createUserWithUnusedCode();
       await expectSqlToSucceed(
-        `UPDATE "RecoveryCode" SET "usedAt" = now()
-         WHERE "id" = '00000000-0000-7000-8000-0000000000e1';`,
+        `UPDATE "RecoveryCode" SET "usedAt" = now() WHERE "id" = '${codeId}';`,
       );
       await expectSqlToSucceed(
         `INSERT INTO "RecoveryCode" ("id", "userId", "codeHash")
-         VALUES ('00000000-0000-7000-8000-0000000000e3', '00000000-0000-7000-8000-000000000001', 'argon2id-placeholder-3');`,
+         VALUES ('${randomUUID()}', '${userId}', 'argon2id-placeholder-2');`,
       );
     });
   });
