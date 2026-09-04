@@ -32,12 +32,17 @@ blob-report/
 **/generated/
 
 # Terraform
+# .terraform.lock.hcl は意図的に無視しない。プロバイダのバージョンとチェックサムを
+# 固定するファイルであり、追跡しないと手元・CI・本番で違うプロバイダが入りうる。
+# 代償: 記録した platform のハッシュしか検証に通らない。手元と CI の OS が違うと
+# terraform init が落ちる。ロックは複数 platform を指定して作る
+# (terraform providers lock -platform=darwin_arm64 -platform=linux_amd64)。
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+# *.tfvars は末尾一致のため prod.tfvars.example には一致しない。
+# .env と違い、例示ファイルを打ち消す行（!*.tfvars.example）は要らない。
 *.tfvars
-!*.tfvars.example
 crash.log
 override.tf
 override.tf.json
