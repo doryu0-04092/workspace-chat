@@ -20,7 +20,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@swc/core": "^1.16.1",
-    "@types/node": "^24.13.3",
+    "@types/node": "^26.4.0",
     "eslint": "^10.9.1",
     "prettier": "^3.9.6",
     "typescript": "^5.9.3",
