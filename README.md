@@ -130,10 +130,13 @@ bash scripts/check-docs.test.sh
 | フロントエンド | `npm run dev -w @workspace-chat/web` |
 | バックエンド | **端末を2つ使う。** 片方で `npm run build:watch -w @workspace-chat/api`、もう片方で `npm run dev -w @workspace-chat/api` |
 
-**`packages/shared` を編集したら `npm run build -w @workspace-chat/shared` を実行する。**
+**`packages/shared` を編集するなら、もう1つ端末を開いて
+`npm run build:watch -w @workspace-chat/shared` を回す。**
 api の `build:watch` が見ているのは api の `src` だけで、
 **共有パッケージを直しても api も web も古い `dist` を読み続ける。**
 「直したはずの型が反映されない」の原因はたいていこれである。
+
+1回だけ組み直すなら `npm run build -w @workspace-chat/shared`。
 
 バックエンドが2端末なのは、**ビルドと実行を分けているため**である。
 NestJS 11 は CommonJS で、TypeScript をそのまま実行しない。

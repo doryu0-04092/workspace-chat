@@ -52,6 +52,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    # npm 側と同じ理由でまとめる。個別に来るとレビューの回数が増える。
+    groups:
+      actions:
+        patterns: ['*']
     # こちらはメジャーも受け取る。アクションのメジャーは
     # ランタイム（Node 20 → 24）の移行を含み、放置すると非推奨のまま残る。
     # この PR で実際にそうなっていた。
