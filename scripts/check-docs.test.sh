@@ -40,19 +40,39 @@ restore()   { cp "$repo/$1" "$work/$1"; }
 # 確かめられない（何も無いので何も漏れない）。専用の木を作って doc_find だけを見る。
 echo "0a. 除外の定義（doc_find）が効くこと"
 probe=$(mktemp -d)
-mkdir -p "$probe/node_modules/pkg" "$probe/apps/api/node_modules" "$probe/dist" "$probe/.git"
+# 期待値は DOC_PRUNE_DIRS から導出しない。一覧を回して木を作ると、
+# 一覧から項目が消えたときに木からも消え、検証が素通りする。ここに直接書く。
+for d in .git node_modules .pnp dist build .vite coverage .nyc_output \
+         playwright-report test-results blob-report generated uploads tmp \
+         .terraform .vscode .idea; do
+  mkdir -p "$probe/$d" && : > "$probe/$d/x.md"
+done
+mkdir -p "$probe/apps/api/node_modules" && : > "$probe/apps/api/node_modules/x.md"
 : > "$probe/.env"
 : > "$probe/.env.local"
-: > "$probe/node_modules/pkg/README.md"
-: > "$probe/apps/api/node_modules/x.md"
-: > "$probe/dist/x.md"
-: > "$probe/.git/config"
 : > "$probe/keep.md"
+: > "$probe/.env.example"   # .gitignore が追跡対象に戻しているため、除外してはいけない
 got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
-if [ "$got" = "keep.md " ]; then
-  echo "  OK（keep.md だけが残る）"
+if [ "$got" = ".env.example keep.md " ]; then
+  echo "  OK（keep.md と .env.example だけが残る）"
 else
-  echo "  NG: 除外が効いていない → $got"
+  echo "  NG: 除外の範囲が想定と違う → $got"
+  fail=1
+fi
+
+# --- 前提: 検査対象が1件も無いときに落ちること -------------------------------
+# この分岐だけがケース1〜26 のどれからも踏まれない。踏まないまま置くと、
+# 検査が何も見ていない状態を「合格」と表示するようになっても気づけない。
+echo "0b. Markdown が1件も無いときに落ちること"
+bare=$(mktemp -d)
+mkdir -p "$bare/scripts"
+cp "$repo"/scripts/*.sh "$bare/scripts/"
+bare_out=$( (cd "$bare" && bash scripts/check-docs.sh 2>&1) ) && bare_rc=0 || bare_rc=$?
+if [ "$bare_rc" -ne 0 ] && printf '%s\n' "$bare_out" | grep -q "検査対象の Markdown が1件も見つからない"; then
+  echo "  OK"
+else
+  echo "  NG: Markdown が無くても落ちない、または期待した指摘が出ない"
+  printf '%s\n' "$bare_out" | sed 's/^/        実際: /'
   fail=1
 fi
 
