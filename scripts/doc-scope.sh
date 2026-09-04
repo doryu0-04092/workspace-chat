@@ -36,28 +36,59 @@ DOC_PRUNE_DIRS=(
   .vscode .idea
 )
 
+# 除外するファイル名。値を持つため、複製すると一時ディレクトリに残り続ける
+# （テストは後片付けをしない）。CLAUDE.md の禁止事項は .env の値の扱いを
+# 「存在と変数名までに留める」と定めている。terraform.tfstate は RDS のパスワードなどを
+# 平文で保持する。DOC_PRUNE_DIRS に .terraform を入れている以上、ディレクトリだけ
+# 除外して同じ .gitignore の秘密ファイルを残すのは非対称である。
+DOC_PRUNE_FILES=(
+  '.env' '.env.*'
+  '*.tfstate' '*.tfstate.*' '*.tfvars'
+)
+
+# 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、
+# 値ではなく変数名しか持たない。除外すると、文書がそこへリンクした時点で
+# 「本物の検査は通るのにテストだけが落ちる」というずれが生まれる。
+DOC_KEEP_FILES=(
+  '.env.example' '*.tfvars.example'
+)
+
 # ディレクトリは -path ではなく -name で指定する。実装が始まれば
 # apps/api/node_modules のように入れ子になり、-path ./node_modules では当たらない。
 doc_find() { # $1... = find に渡す残りの条件（例: -name '*.md' -print）
-  local expr=() d
+  local dexpr=() fexpr=() keep=() d g
   for d in "${DOC_PRUNE_DIRS[@]}"; do
-    expr+=(-name "$d" -o)
+    [ ${#dexpr[@]} -eq 0 ] || dexpr+=(-o)
+    dexpr+=(-name "$d")
   done
-  # .env は値を持つため複製しない。テストは後片付けをしないため、複製すると
-  # 一時ディレクトリに残り続ける。CLAUDE.md の禁止事項は .env の値の扱いを
-  # 「存在と変数名までに留める」と定めている。
-  # .env.example は変数名しか持たないので対象に残す（.gitignore も !.env.example で
-  # 追跡対象に戻している）。ここで除外すると、README がそこへリンクした時点で
-  # 「本物の検査は通るのにテストだけが落ちる」というずれが生まれる。
-  # Terraform の state と tfvars も値を持つ。terraform.tfstate は RDS のパスワードなどを
-  # 平文で保持する。DOC_PRUNE_DIRS に .terraform を入れている以上、ディレクトリだけ
-  # 除外して同じ .gitignore の秘密ファイルを残すのは非対称である。
-  # *.tfvars.example は .gitignore が追跡対象に戻しているため対象に残す。
-  find . \
-    \( "${expr[@]}" \
-       -name '.env' \
-       -o \( -name '.env.*' ! -name '.env.example' \) \
-       -o -name '*.tfstate' -o -name '*.tfstate.*' \
-       -o \( -name '*.tfvars' ! -name '*.tfvars.example' \) \) -prune -o \
-    "$@"
+  for g in "${DOC_PRUNE_FILES[@]}"; do
+    [ ${#fexpr[@]} -eq 0 ] || fexpr+=(-o)
+    fexpr+=(-name "$g")
+  done
+  for g in "${DOC_KEEP_FILES[@]}"; do
+    keep+=(! -name "$g")
+  done
+  find . "(" \
+      "(" "${dexpr[@]}" ")" \
+      -o "(" "(" "${fexpr[@]}" ")" "${keep[@]}" ")" \
+    ")" -prune -o "$@"
+}
+
+# リンク先にできないパスかどうかを判定する。check-docs.sh の検査1が使う。
+# ディレクトリ側だけを見ると、.env や terraform.tfstate へのリンクを見逃す。
+doc_excluded() { # $1=リンク先のパス。除外なら理由を出力して 0 を返す
+  local p="$1" base d g
+  base=$(basename "$p")
+  for d in "${DOC_PRUNE_DIRS[@]}"; do
+    case "/$p/" in */"$d"/*) echo "対象外ディレクトリ $d の配下"; return 0 ;; esac
+  done
+  for g in "${DOC_KEEP_FILES[@]}"; do
+    # shellcheck disable=SC2254
+    case "$base" in $g) return 1 ;; esac
+  done
+  for g in "${DOC_PRUNE_FILES[@]}"; do
+    # shellcheck disable=SC2254
+    case "$base" in $g) echo "対象外のファイル名 $g に一致"; return 0 ;; esac
+  done
+  return 1
 }

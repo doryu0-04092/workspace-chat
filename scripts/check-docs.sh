@@ -19,14 +19,10 @@ for f in "${docs[@]}"; do
   while IFS= read -r l; do
     [ -z "$l" ] && continue
     [ -e "$d/$l" ] || note "$f -> $l が存在しない"
-    # 除外ディレクトリの配下はリンク先にできない（doc-scope.sh の制約）。
+    # 検査の対象外はリンク先にできない（doc-scope.sh の制約）。
     # ここで見ないと、本物のリポジトリでは通るのにテストの前提チェックだけが落ち、
     # 原因の切り分けに時間がかかる。制約を書くだけでは守られない。
-    for pd in "${DOC_PRUNE_DIRS[@]}"; do
-      case "/$d/$l/" in
-        */"$pd"/*) note "$f -> $l は検査の対象外ディレクトリ $pd の配下（リンク先にできない）" ;;
-      esac
-    done
+    why=$(doc_excluded "$d/$l") && note "$f -> $l は検査の$why（リンク先にできない）"
   done < <(grep -o "](\([^)h][^)]*\))" "$f" | sed 's/](\(.*\))/\1/' | sed 's/#.*//' | sort -u)
 done
 echo "  完了"

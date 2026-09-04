@@ -47,11 +47,17 @@ probe=$(mktemp -d)
 probe_dirs=(.git node_modules .pnp dist build .vite coverage .nyc_output
             playwright-report test-results blob-report generated uploads tmp
             .terraform .vscode .idea)
-if [ "$(printf '%s\n' "${probe_dirs[@]}" | sort)" \
-  != "$(printf '%s\n' "${DOC_PRUNE_DIRS[@]}" | sort)" ]; then
-  echo "  NG: 0a の一覧と DOC_PRUNE_DIRS がずれている（除外を足したら、この一覧にも足す）"
-  fail=1
-fi
+probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars')
+probe_keep_files=('.env.example' '*.tfvars.example')
+same() { # $1=期待の一覧名 $2...=比較する2組（改行区切り）
+  [ "$2" = "$3" ] || { echo "  NG: 0a の一覧と $1 がずれている（除外を足したら、この一覧にも足す）"; fail=1; }
+}
+same DOC_PRUNE_DIRS \
+  "$(printf '%s\n' "${probe_dirs[@]}"        | sort)" "$(printf '%s\n' "${DOC_PRUNE_DIRS[@]}"  | sort)"
+same DOC_PRUNE_FILES \
+  "$(printf '%s\n' "${probe_prune_files[@]}" | sort)" "$(printf '%s\n' "${DOC_PRUNE_FILES[@]}" | sort)"
+same DOC_KEEP_FILES \
+  "$(printf '%s\n' "${probe_keep_files[@]}"  | sort)" "$(printf '%s\n' "${DOC_KEEP_FILES[@]}"  | sort)"
 for d in "${probe_dirs[@]}"; do
   mkdir -p "$probe/$d" && : > "$probe/$d/x.md"
 done
@@ -150,6 +156,9 @@ expect_ng "README のリンク先を存在しないファイルに" README.md \
 expect_ng "README のリンク先を除外ディレクトリの配下にする" README.md \
   's|(docs/requirements.md)|(node_modules/pkg/README.md)|' \
   'は検査の対象外ディレクトリ node_modules の配下'
+expect_ng "README のリンク先を除外ファイル名（.env）にする" README.md \
+  's|(docs/requirements.md)|(.env)|' \
+  'は検査の対象外のファイル名 .env に一致'
 
 # --- 検査2: 機能IDの連番と重複
 expect_ng "features.md から F-20 の行を削除して欠番を作る" docs/features.md \
@@ -227,6 +236,12 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身
   n=$((n + 1))
   mkdir -p "$work/$(dirname "$2")"
   printf '%s\n' "$3" > "$work/$2"
+  # 置いたファイルが実際に除外されていることを先に確かめる。除外の外に置いてしまうと
+  # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
+  if (cd "$work" && doc_find -type f -print | sed 's|^\./||' | grep -qxF "$2"); then
+    echo "  NG: $n. $1 — 置いたファイルが除外されていない。ケースが成立していない"
+    fail=1; rm -f "$work/$2"; return
+  fi
   if run_check; then
     echo "  OK: $n. $1"
   else
