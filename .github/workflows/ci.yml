@@ -13,15 +13,17 @@ on:
     branches: [main]
 
 jobs:
-  check:
+  # ジョブ名は docs.yml と重ねない。ブランチ保護の必須チェックは
+  # ジョブ名で指定するため、同名だとどちらを指しているか区別できない。
+  code:
     runs-on: ubuntu-latest
     # チェックアウトと検査の実行だけで、書き込み権限は要らない。
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -55,7 +57,7 @@ jobs:
       # if-no-files-found: error が本来の失敗と無関係な2件目の失敗を出す。
       - name: テストレポートの保存
         if: always() && hashFiles('reports/**') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports
           path: reports/

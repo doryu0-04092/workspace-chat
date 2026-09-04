@@ -9,8 +9,12 @@ describe('AppModule', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
-    // 型が通っても DI の結線が誤っていれば、ここで落ちる。
-    // 「ビルドは通るが起動しない」を検出するのがこのテストの目的である。
+    // モジュールの組み立てと初期化が通ることを見る。
+    //
+    // **注意: この環境では、コンストラクタインジェクションの誤りは検出できない。**
+    // Vitest は esbuild で変換しており、esbuild は emitDecoratorMetadata を
+    // 出力しない。依存を持つクラスを足すと、Nest は解決に失敗せず
+    // undefined を注入し、使う瞬間に別の場所で落ちる。#14 で扱う。
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
