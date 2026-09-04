@@ -157,14 +157,21 @@ cp .env.example .env    変数名だけが入っている。値を書き込む
 **`up` だけでなく `down` / `ps` / `logs` / `exec` もすべて止まる**（実行して確認した）。
 値を消してから片付けようとすると、**コンテナもボリュームも compose では消せなくなる。**
 
-その状態に陥ったら、`.env` を書き戻すか、名前を直接指定して消す。
+その状態に陥ったら、**`.env` に値を書き戻してから `down -v` を叩くのが最も短い。**
+中身が正しい必要はない。compose が読めればよい。
+
+`.env` を戻せない場合は、**コンテナを先に消してからボリュームを消す。**
 
 ```
+docker rm -f workspace-chat-db-1 workspace-chat-redis-1
 docker volume rm workspace-chat_db-data
 ```
 
+**順序を逆にすると `volume is in use` で失敗する**（実行して確認した）。
+コンテナが停止していても、参照している限り消せない。
+
 （`compose.yaml` が `name: workspace-chat` を固定しているため、
-ボリューム名は作業ツリーの置き場所によらずこの名前になる）
+コンテナ名もボリューム名も作業ツリーの置き場所によらずこの名前になる）
 
 **`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` を後から変えるときは
 `down -v` が要る。** これらを読むのは公式イメージの初期化処理で、
@@ -175,6 +182,15 @@ docker volume rm workspace-chat_db-data
 **3つとも検知する**（パスワードだけずらした場合も含めて実行して確かめた）。
 `.env` を直したのに直らない、という形にはなるが、**黙って動くよりは良い**という判断である。
 ヘルスチェックが `pg_isready` ではなく `psql` で実際に問い合わせているのはこのためである。
+
+**ただし、検知が働くのは `up` を通った場合だけである。**
+`docker compose restart` と `start` は**コンテナを作り直さず、`.env` を読み直さない**
+（実行して確認した。`restart` のあとも古い値が焼き付いたままだった）。
+ヘルスチェックが見ているのは**コンテナの環境変数と DB の中身の一致**であり、
+`.env` と DB の一致ではない。両者が揃うのはコンテナが作り直されたときだけである。
+
+**`.env` を変えたら `restart` ではなく `up -d --wait` を使う。**
+`restart` で済ませると、**ヘルスチェックは緑のまま、新しい値で繋ぐアプリだけが落ちる。**
 
 `down -v` は手元のデータを消す。**消したくないなら、DB 側に利用者を作り直すほうを選ぶ。**
 
@@ -210,8 +226,13 @@ redis://127.0.0.1:<REDIS_PORT>
 > 手で確かめるには次を実行する。
 
 ```
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION pg_bigm;"'
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION pg_bigm; DROP EXTENSION pg_bigm;"'
 ```
+
+**同じ1行で `DROP` まで済ませるのは、確認が状態を変えないようにするためである。**
+作ったまま放置すると、**この手順を実行した人の DB にだけ拡張が残る。**
+すぐ上に書いた「起動しただけの DB に pg_bigm は入っていない」という前提が、
+**手順に従った直後に、その人の手元でだけ崩れる。** 再現しない差が最も厄介である。
 
 **`sh -c` で包むのは、変数をコンテナの中で展開させるためである。**
 `.env` を読むのは compose であって手元のシェルではない。
