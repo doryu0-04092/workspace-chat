@@ -194,6 +194,12 @@ expect_ng "README のリンク先を除外ディレクトリの配下にする" 
 expect_ng "README のリンク先を除外ファイル名（.env）にする" README.md \
   's|(docs/requirements.md)|(.env)|' \
   'は検査の対象外のファイル名 .env に一致'
+# h で始まる相対リンク。旧実装は http を外すために先頭1文字を [^)h] で弾いており、
+# handbook/... のような相対リンクまで黙って対象外にしていた。
+# 「見たと表示しながら見ていない範囲がある」状態は、それ自体では検出できない。
+expect_ng "README のリンク先を h で始まる存在しない相対パスに" README.md \
+  's|(docs/requirements.md)|(handbook/hooks.md)|' \
+  'README.md -> handbook/hooks.md が存在しない'
 
 # --- 検査2: 機能IDの連番と重複
 expect_ng "features.md から F-20 の行を削除して欠番を作る" docs/features.md \
@@ -290,5 +296,31 @@ expect_ok "node_modules の中のリンク切れは無視される" node_modules
   '[壊れたリンク](./does-not-exist.md)'
 expect_ok "入れ子の node_modules の中のリンク切れも無視される" apps/api/node_modules/pkg/README.md \
   '[壊れたリンク](./does-not-exist.md)'
+
+# --- 検査の対象に入っている Markdown でも、落ちてはならないもの。
+#     expect_ok は「置いたファイルが除外されていること」を前提にするため流用できない。
+expect_ok_doc() { # $1=説明 $2=作るファイル $3=中身
+  n=$((n + 1))
+  mkdir -p "$work/$(dirname "$2")"
+  printf '%s\n' "$3" > "$work/$2"
+  # 置いたファイルが検査の対象に入っていることを先に確かめる。除外の側に落ちると
+  # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
+  if ! (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF "$2"); then
+    echo "  NG: $n. $1 — 置いたファイルが検査の対象に入っていない。ケースが成立していない"
+    fail=1; rm -f "$work/$2"; return
+  fi
+  if run_check; then
+    echo "  OK: $n. $1"
+  else
+    echo "  NG: $n. $1 — 落ちてはならないのに検査が落ちた"
+    (cd "$work" && bash scripts/check-docs.sh 2>&1 | grep '^  NG' | sed 's/^/        実際: /')
+    fail=1
+  fi
+  rm -f "$work/$2"
+}
+# 外部リンクを飛ばす判断はスキームで行う。現物の文書にも https のリンクはあるが、
+# それが消えた瞬間にこの経路の確認も消える。専用のケースとして残す。
+expect_ok_doc "外部リンク（https / mailto）は存在を確かめない" docs/probe-external-link.md \
+  '[外部の文書](https://example.invalid/does-not-exist) と [連絡先](mailto:nobody@example.invalid)'
 if [ "$fail" -ne 0 ]; then echo "検査の検査に失敗しました"; exit 1; fi
 echo "$n 通りの確認をすべて通過しました"
