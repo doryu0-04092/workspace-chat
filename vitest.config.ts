@@ -22,6 +22,10 @@ export default defineConfig({
         },
       },
       {
+        // web の実際のビルド設定を読む。読まないと、共有パッケージの
+        // CommonJS 変換など vite.config.ts 側の設定がテストに効かず、
+        // テストは通るのにビルドだけが落ちる状態を作り得る。
+        extends: './apps/web/vite.config.ts',
         test: {
           name: 'web',
           root: './apps/web',

@@ -7,6 +7,3 @@
 #
 # eol=lf は core.autocrlf より優先される。Windows でも作業ツリーが LF になる。
 * text=auto eol=lf
-
-# 生成物・ロックファイルは差分を出さない
-package-lock.json -diff
