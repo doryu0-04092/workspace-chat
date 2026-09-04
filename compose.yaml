@@ -57,8 +57,13 @@ services:
       # ホスト名を使っても、初期化中の一時サーバーは listen_addresses='' で
       # TCP を開かないため、**初期化の途中で healthy を返す**問題は起きない。
       #
-      # 渡しているのは変数の名前であり、値ではない。`docker inspect` に出るのも
-      # `$POSTGRES_PASSWORD` という文字列のままである。
+      # ここに書いてあるのは変数の名前であり、値ではない。`docker inspect` の
+      # `Config.Healthcheck.Test` にも `$POSTGRES_PASSWORD` の文字列のまま出る。
+      #
+      # **ただし「docker inspect に秘密が出ない」という意味ではない。**
+      # 上の environment: は解決済みの値を渡すため、`Config.Env` には
+      # `POSTGRES_PASSWORD=<実際の値>` が平文で出る（実行して確認した）。
+      # **その出力を課題や PR に貼らない。**
       test:
         - CMD-SHELL
         - PGPASSWORD="$$POSTGRES_PASSWORD" psql -h db -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "SELECT 1" >/dev/null
