@@ -8,6 +8,10 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # チェックアウトとスクリプトの実行だけで、書き込み権限は要らない。
+    # 書かないとリポジトリ設定の既定値に依存し、write が付きうる。
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: ドキュメントの検査

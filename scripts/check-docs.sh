@@ -32,15 +32,31 @@ last=$((10#${ids[-1]}))
 echo "  完了（F-01 〜 F-$last、$count 件）"
 
 echo "3. 件数表記の整合"
-declared=$(grep -o "合計 [0-9]* 件" docs/features.md | head -1 | grep -o "[0-9]*")
-[ "$declared" = "$count" ] || note "features.md の「合計 $declared 件」が実際の $count 件と一致しない"
-grep -q "全 $count 件" README.md || note "README.md の件数表記が $count 件になっていない"
-# tech-stack.md も件数を語る。ここが検査から漏れていたため「機能34件」が38件になっても放置された。
-ts=$(grep -o "機能 *[0-9][0-9]* *件" docs/tech-stack.md | head -1 | grep -o "[0-9]*")
-[ -n "$ts" ] || note "tech-stack.md から「機能N件」を読み取れない"
-[ "$ts" = "$count" ] || note "tech-stack.md の「機能$ts 件」が実際の $count 件と一致しない"
 
-# 内訳も2文書に手書きで重複している。合計だけを見ていると、ある機能の区分が
+# 宣言の読み取りは head -1 で先頭1件だけを見ない。前方に正しい数のおとりが現れると、
+# 検査対象が黙ってそちらに移り、本命が古いまま無検査で通る。一致したものはすべて照合する。
+# 0件なら NG。黙って通すと、言い回しを変えた時点で検査が落ちるのではなく消える。
+decls() { # $1=ファイル $2=宣言の正規表現。宣言に含まれる数をすべて返す
+  grep -o "$2" "$1" | grep -o "[0-9][0-9]*"
+}
+compare_decls() { # $1=数の並び（改行区切り） $2=期待値 $3=宣言の呼び名
+  # パイプで渡すと while がサブシェルで回り、note の fail=1 が親に伝わらない。
+  # ヒアストリングで現在のシェルのまま回す。
+  local found=0 v
+  while IFS= read -r v; do
+    [ -n "$v" ] || continue
+    found=1
+    [ "$v" = "$2" ] || note "$3: $v と書かれているが、実際は $2"
+  done <<< "$1"
+  [ "$found" = 1 ] || note "$3 を読み取れない（言い回しが変わった可能性）"
+}
+
+compare_decls "$(decls docs/features.md   '合計 [0-9][0-9]* 件')"     "$count" "features.md の「合計 N 件」"
+compare_decls "$(decls README.md          '全 [0-9][0-9]* 件')"       "$count" "README.md の「全 N 件」"
+# tech-stack.md も件数を語る。ここが検査から漏れていたため「機能34件」が38件になっても放置された。
+compare_decls "$(decls docs/tech-stack.md '機能 *[0-9][0-9]* *件')"   "$count" "tech-stack.md の「機能N件」"
+
+# 内訳も複数の文書に手書きで重複している。合計だけを見ていると、ある機能の区分が
 # 「派生 → 提案・承認済」に変わったとき合計は動かず、内訳だけが黙ってずれる。
 # 区分は表の4列目にあるため機械的に数えられる。
 kind_count() { # $1=区分名。強調記号と空白を落として4列目と突き合わせる
@@ -49,27 +65,23 @@ kind_count() { # $1=区分名。強調記号と空白を落として4列目と�
 }
 # requirements.md 3.1〜3.3 も同じ数を「全N件」と宣言する。区分名を伴わない書き方のため
 # 上の grep では拾えない。節を特定して読む。節の見出しが変われば読み取りに失敗して NG になる。
-sec_decl() { # $1=節の見出しの正規表現。その節に現れる最初の「全N件」を返す
+sec_decls() { # $1=節の見出しの正規表現。その節に現れる「全N件」の数をすべて返す
   # 終端は「#### 以外のあらゆる見出し」とする。^### だけで抜けると、次の見出しが ## だった場合に
   # 章をまたいで読み進み、節の外の数字を正しく読めたかのように返す。読み取り失敗より気づきにくい。
   # ubuntu-latest の既定 awk は mawk のため、^#{1,3} のような区間表現は使わない。
   awk -v h="$1" '$0 ~ h { in_sec=1; next }
                  in_sec && /^#/ && $0 !~ /^#### / { exit }
                  in_sec { print }' docs/requirements.md \
-    | grep -o "全 *[0-9][0-9]* *件" | head -1 | grep -o "[0-9]*"
+    | grep -o "全 *[0-9][0-9]* *件" | grep -o "[0-9][0-9]*"
 }
 sum=0
 for kind in 要求 派生 提案・承認済; do
   n=$(kind_count "$kind")
   sum=$((sum + n))
   [ "$n" -gt 0 ] || note "features.md の表から区分「$kind」の行を1件も読み取れない"
-  fd=$(grep -o "$kind [0-9][0-9]* 件" docs/features.md | head -1 | grep -o "[0-9]*")
-  if [ -z "$fd" ]; then note "features.md から「$kind N 件」の内訳を読み取れない"
-  elif [ "$fd" != "$n" ]; then note "features.md の内訳「$kind $fd 件」が実際の $n 件と一致しない"; fi
 
-  rd=$(grep -o "$kind [0-9][0-9]*" README.md | head -1 | grep -o "[0-9]*")
-  if [ -z "$rd" ]; then note "README.md から「$kind N」の内訳を読み取れない"
-  elif [ "$rd" != "$n" ]; then note "README.md の内訳「$kind $rd」が実際の $n 件と一致しない"; fi
+  compare_decls "$(decls docs/features.md "$kind [0-9][0-9]* 件")" "$n" "features.md の内訳「$kind」"
+  compare_decls "$(decls README.md        "$kind [0-9][0-9]*")"    "$n" "README.md の内訳「$kind」"
 
   # 見出しは awk の動的正規表現に渡すため、ドットはエスケープしない（警告になるうえ、
   # ここでは任意の1文字に一致しても見出し文字列が十分に具体的で誤検出しない）。
@@ -78,9 +90,7 @@ for kind in 要求 派生 提案・承認済; do
     派生)         sec='^### 3.2 要求の実現に必要となる派生機能' ;;
     提案・承認済) sec='^### 3.3 提案し、承認を得て実装した機能' ;;
   esac
-  qd=$(sec_decl "$sec")
-  if [ -z "$qd" ]; then note "requirements.md の「$kind」の節から「全N件」を読み取れない（節の見出しが変わった可能性）"
-  elif [ "$qd" != "$n" ]; then note "requirements.md の「$kind」の節の「全$qd 件」が実際の $n 件と一致しない"; fi
+  compare_decls "$(sec_decls "$sec")" "$n" "requirements.md の「$kind」の節の「全N件」"
 done
 [ "$sum" = "$count" ] || note "内訳の合計 $sum 件が機能数 $count 件と一致しない（区分の表記ゆれの可能性）"
 echo "  完了（合計 $count 件 / 内訳の合計 $sum 件）"
@@ -107,19 +117,11 @@ rev=$(printf '%s\n' "$rev_items" | grep -c .)
 # 本文が「N項目である」と数を宣言している箇所も、一覧の実数と突き合わせる。
 # 宣言は複数の文書にある。1つだけ検査すると、検査していない側を直し忘れて同じ見落としが再発する。
 # 読み取れなかった場合は NG とする。黙って通すと、言い回しを変えた時点で検査が消える。
-# head -1 で先頭の1件だけを見ると、同じファイルに宣言が増えたとき検査対象が黙って
-# そちらに移り、本命が無検査のまま通る。一致したものはすべて照合する。
-check_decl() { # $1=ファイル $2=宣言の正規表現 $3=一覧の実数
-  local found=0 d
-  while IFS= read -r d; do
-    found=1
-    [ "$d" = "$3" ] || note "$1 の「$d 項目」が一覧の $3 件と一致しない"
-  done < <(grep -o "$2" "$1" | grep -o "[0-9][0-9]*")
-  [ "$found" = 1 ] || note "$1 から「N項目」の宣言を読み取れない（言い回しが変わった可能性）"
-}
+# 宣言の照合は3章の compare_decls に寄せる。同じ欠陥（先頭1件だけを見る）を
+# 1箇所だけ直して他に残す、という事態を避けるため、読み取りの経路は1つにする。
 # パターンは宣言の行にしか無い後続語まで含めて一意にする。
-check_decl docs/requirements.md "「必ずテストを書く箇所」の *[0-9][0-9]* *項目" "$req"
-check_decl REVIEW.md "下記の *[0-9][0-9]* *項目に該当する変更" "$rev"
+compare_decls "$(decls docs/requirements.md "「必ずテストを書く箇所」の *[0-9][0-9]* *項目")" "$req" "requirements.md の「N項目」の宣言"
+compare_decls "$(decls REVIEW.md "下記の *[0-9][0-9]* *項目に該当する変更")"                  "$rev" "REVIEW.md の「N項目」の宣言"
 echo "  完了（$req 項目）"
 
 if [ "$fail" -ne 0 ]; then echo "検査に失敗しました"; exit 1; fi
