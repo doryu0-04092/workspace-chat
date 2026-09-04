@@ -118,6 +118,6 @@ WebSocket のイベント定義（7種類）をフロントとバックで二重
 |---|---|
 | 要件定義 | **完了**（2026-09-04。総点検の指摘22件への対応を反映済み） |
 | **AI コードレビューの観点** | **完了**（[REVIEW.md](REVIEW.md)） |
+| **AI コードレビューの設定** | **完了**（[claude_code_review.yml](.github/workflows/claude_code_review.yml)。導入手順と制約は [README](README.md)） |
 | CI の構築 | **未着手**（次の作業） |
-| AI コードレビューの設定（GitHub Actions / OAuth トークン） | 未着手 |
 | 実装 | 未着手 |
