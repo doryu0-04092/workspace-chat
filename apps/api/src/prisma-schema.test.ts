@@ -223,6 +223,17 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toContain('User_userId_key');
     });
 
+    it('ユーザーID の長さの上限が列で効く', async () => {
+      // 要件が数値で決めている上限（30文字。機能一覧 1.1）は列の型に入れてある。
+      // **アプリ側の検証を1箇所書き漏らしても、DB が受け付けない。**
+      const id = randomUUID();
+      const output = await expectSqlToFail(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+         VALUES ('${id}', '${'a'.repeat(31)}', '長すぎる', 'argon2id-placeholder');`,
+      );
+      expect(output).toContain('character varying(30)');
+    });
+
     it('退会したユーザーID も再利用できない', async () => {
       // 論理削除の行が残る以上、一意制約はそのまま効く。
       // **過去のメンションが別人を指すことを防ぐ**（機能一覧 1.5）。
@@ -601,6 +612,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 「API がこの形の問い合わせを使う」ことではない。API はまだ存在しない。
      * **API を実装する PR は、この形に乗っていることを自分のテストで示す必要がある**
      * （要件定義書 4.8 の「必ずテストを書く箇所」1・8）。
+     *
+     * **判定しているのは「取得してよいか」であって「一覧に出すか」ではない。**
+     * アーカイブ済みのチャンネルは、**参加者は読めるが一覧からは外れる**
+     * （機能一覧 3.2）。**一覧の API は、この条件に加えて `AND c."archivedAt" IS NULL`
+     * が要る。** この形をそのまま一覧に写すと、アーカイブ済みが一覧に出る。
      */
     function visibleChannels(userId: string, workspaceId: string): string {
       return `

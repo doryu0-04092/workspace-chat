@@ -7,12 +7,12 @@ CREATE TYPE "ChannelVisibility" AS ENUM ('PUBLIC', 'PRIVATE');
 -- CreateTable
 CREATE TABLE "User" (
     "id" UUID NOT NULL,
-    "userId" TEXT NOT NULL,
+    "userId" VARCHAR(30) NOT NULL,
     "displayName" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "avatarUrl" TEXT,
     "statusEmoji" TEXT,
-    "statusText" TEXT,
+    "statusText" VARCHAR(100),
     "deletedAt" TIMESTAMPTZ(3),
     "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
