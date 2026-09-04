@@ -261,6 +261,9 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | **ESLint** | **10.9.1** | 10.9.1 | **9 系は採らない。** `npm install` が `This version is no longer supported` を返す。本書の方針（サポート期間を優先する）に反する。`typescript-eslint` 8 は ESLint 10 を受け入れる |
 | **Vite** | **7.3.6** | 8.2.2 | 上表のとおり 7 に留める。**ただし Vitest 4 は依存として Vite を引き、放置すると 8 系が同居する。**ワークスペース全体を 7 に固定する（`overrides`） |
 | **NestJS** | **11.2.3** | 12.0.1 | 上表のとおり 11 に留める |
+| **Vitest** | **4.1.11** | 4.1.11 | 最新。Vite 6〜8 を受け入れるため、Vite 7 に固定した構成でも使える |
+| **Prettier** | **3.9.6** | 3.9.6 | 最新。**Markdown は対象にしない**（表のセルを桁揃えするため、`scripts/check-docs.sh` が依存する行の形が壊れる） |
+| **typescript-eslint** | **8.69.0** | 8.69.0 | 最新。ESLint 10 と TypeScript 5.9 の両方を受け入れる |
 
 #### TypeScript 7 を採らない理由
 

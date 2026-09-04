@@ -45,7 +45,7 @@ probe=$(mktemp -d)
 # ただし直接書くだけでは「足したのに効いていない」（綴り間違い等）を検出できないため、
 # 木を作る前に集合として一致することを確かめる。
 probe_dirs=(.git node_modules .pnp dist build .vite coverage .nyc_output
-            playwright-report test-results blob-report generated uploads tmp
+            playwright-report test-results blob-report reports generated uploads tmp
             .terraform .vscode .idea)
 probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars')
 probe_keep_files=('.env.example')

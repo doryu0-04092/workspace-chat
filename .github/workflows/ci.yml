@@ -12,6 +12,12 @@ on:
   push:
     branches: [main]
 
+# 同じ PR に連続で push した場合、古い実行を打ち切る。レビューの指摘に
+# 対応する過程では push が続くため、打ち切らないと古い実行が走り続ける。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ジョブ名は docs.yml と重ねない。ブランチ保護の必須チェックは
   # ジョブ名で指定するため、同名だとどちらを指しているか区別できない。

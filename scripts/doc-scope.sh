@@ -29,7 +29,7 @@ DOC_PRUNE_DIRS=(
   .git
   node_modules .pnp
   dist build .vite
-  coverage .nyc_output playwright-report test-results blob-report
+  coverage .nyc_output playwright-report test-results blob-report reports
   generated
   uploads tmp
   .terraform
