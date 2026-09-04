@@ -90,6 +90,11 @@ services:
     #
     # このイメージは build: を持たないため、`build --pull` の対象にならない。
     # パッチ修正を受け取るには `docker compose pull redis` が要る（README.md の操作表）。
+    #
+    # **requirepass を設けない（認証を掛けない）。** 127.0.0.1 にだけ束縛しており、
+    # ローカルでは守るものが無い。代償は docs/tech-stack.md に書いた
+    # （本番の ElastiCache は AUTH トークンと転送時暗号化を持つため、
+    # アプリ側の設定にその経路が一度も現れない）。
     image: redis:7.2-alpine
     # 永続化を明示的に切る。用途は Pub/Sub による配信共有と在席状態の保持だけで、
     # データを蓄積しない（docs/tech-stack.md）。

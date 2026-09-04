@@ -303,6 +303,11 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
   `shared_preload_libraries=pg_bigm` も渡す必要がある。
   **環境は「ローカル・RDS」の2つではなく、テストを含めて3つある**
 
+- **ElastiCache で AUTH トークンと転送時暗号化（`rediss://`）を使うかを決め、
+  `@socket.io/redis-adapter` がその接続で動くことを確認する。**
+  **ローカルの Redis は無認証の `redis://` であり、この経路を一度も通らない**
+  （下記「ローカルの Redis に認証を掛けない」）
+
 > **代償を明記する。** 上の3つ目は**まだ決めていない**。Testcontainers に
 > ビルド済みのイメージをどう渡すか（毎回ビルドするか、名前で参照するか）を
 > 決めないまま検索の実装に入ると、**検索のテストだけが動かない**か、
@@ -315,13 +320,20 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
 
 | 項目 | 結果 |
 |---|---|
-| 環境 | `postgres:17-bookworm`（**確認した時点の server_version は 17.11**）＋ pg_bigm `v1.2-20250903` をソースからビルド |
+| 環境 | `postgres:17-bookworm`（**確認した時点の server_version は 17.11**）＋ pg_bigm をソースからビルド |
 | `CREATE EXTENSION pg_bigm` | **通った**（extversion 1.2） |
 | `gin_bigm_ops` の索引が `LIKE '%…%'` で使われること | **確認した**（`Bitmap Index Scan` になる） |
 | RDS PostgreSQL 17 | **未確認**。Terraform で環境を作る段で確かめる |
 
 **pg_bigm は PGDG の apt リポジトリに存在しない**（bookworm / trixie の `Packages` を
 取得して検索し 0 件）。ローカルは [Dockerfile](../docker/postgres/Dockerfile) でビルドしている。
+
+**pg_bigm の版番号は本書に書き写さない。** 持つのは
+[Dockerfile](../docker/postgres/Dockerfile) の `ARG PG_BIGM_TAG` と `ARG PG_BIGM_COMMIT` だけとする。
+同じ Dockerfile が「更新は手で `ARG` を上げる」と明記している以上、**書き写すと更新のたびに
+片方だけが古くなる経路ができる。** `scripts/check-docs.sh` は版番号を照合しないため、
+**ずれても CI は緑のまま本書だけが古い版を主張する。**
+件数の表記で同じ失敗が起きた記録が、その検査自身のコメントに残っている。
 
 **土台のイメージはタグで指しており、ダイジェストで固定していない。**
 上の 17.11 は「確認した時点の版」であり、タグの指す先が変われば動く。
@@ -353,6 +365,20 @@ ElastiCache の「7.1」は AWS 側の版番号であり、upstream の版番号
 > 2. Redis OSS 7.x は AWS 側で新機能の開発対象から外れている。
 >    Valkey へ移すかどうかは決めていない。**決めるまで、本書の「ElastiCache for Redis」は
 >    上限 7.1 の意味で読む必要がある。**
+
+#### ローカルの Redis に認証を掛けない
+
+`compose.yaml` の redis は `requirepass` を設けず、`redis://` で繋ぐ。
+**127.0.0.1 にだけ束縛しており、ローカルでは守るものが無い**ためである。
+
+> **代償を明記する。** 本番の ElastiCache は **AUTH トークン**と**転送時暗号化**（`rediss://`）を持つ。
+> ローカルが無認証の `redis://` だと、**アプリの Redis クライアント設定に認証と TLS の経路が
+> 一度も現れない。** PostgreSQL 側はパスワードのずれをヘルスチェックが検知するところまで
+> 作ってあるが、**Redis にはそれに対応するものが無く、作りようもない**（掛ける認証が無いため）。
+> 露見するのは Terraform で環境を作ったあと、**版差と同じく最も遅い段階**である。
+>
+> **ローカルにも `requirepass` を掛ける案は採らなかった。** 掛けても TLS は再現できず、
+> 「本番に近づけた」という誤った安心だけが残る。**近くない、と書くほうを選ぶ。**
 
 ---
 
