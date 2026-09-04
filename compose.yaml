@@ -40,11 +40,22 @@ services:
       # `docker compose up -d --wait` と depends_on が起動完了を待てるようにする。
       # $$ は compose の変数展開ではなくコンテナ内のシェルに渡すための書き方。
       #
+      # pg_isready ではなく psql で実際に問い合わせる。**pg_isready は利用者も
+      # データベースも検証しない。** 存在しない利用者を渡しても
+      # 「accepting connections」を返して終了コード 0 になる（実行して確認した）。
+      # .env を初期化後に書き換えた場合、pg_isready だと healthy のまま
+      # アプリだけが繋がらない、という最も追いにくい形になる。
+      #
       # -h 127.0.0.1 を省いてはいけない。省くと Unix ドメインソケットを見る。
       # 公式イメージは初回の初期化中に listen_addresses='' の一時サーバーを
       # ソケット上で立てるため、**初期化の途中で healthy を返しうる**。
       # 一時サーバーは TCP を開かないので、TCP を見れば初期化中は必ず失敗する。
-      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      #
+      # パスワードは要らない。イメージが作る pg_hba.conf が
+      # `host all all 127.0.0.1/32 trust` を持つため、**秘密をここに書かずに済む**。
+      test:
+        - CMD-SHELL
+        - psql -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -c "SELECT 1" >/dev/null
       interval: 5s
       timeout: 5s
       # 初回はイメージのビルドではなく initdb に時間がかかる。余裕を取る。

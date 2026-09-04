@@ -289,6 +289,13 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
 - **`CREATE EXTENSION pg_bigm` が RDS PostgreSQL 17 で通ること。** pg_bigm は PostgreSQL の
   バージョンごとにビルドが必要なため、最初のマイグレーションで実際に確認する。
   通らない場合は RDS PostgreSQL 18.4、または MySQL 8.4 の ngram 索引に切り替える
+- **その前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
+  pg_bigm は共有ライブラリの事前読み込みを必須としている（公式ドキュメント）。
+  **ローカルは `compose.yaml` が `postgres -c shared_preload_libraries=pg_bigm` で渡しているが、
+  RDS には同じ指定が無い。** RDS では DB パラメータグループに書く必要があり、
+  **これは静的パラメータであるため、反映にインスタンスの再起動を伴う**（Terraform を書く段の作業）。
+  **上の `CREATE EXTENSION` の検証は、この設定が入っていることを前提とする。**
+  設定が無い状態で試して落ちても、それは pg_bigm が使えない証拠にはならない
 
 #### ローカルでの確認結果（2026-09-04）
 
