@@ -24,12 +24,18 @@ echo "  完了"
 echo "2. 機能IDの連番と重複"
 mapfile -t ids < <(grep -o "^| F-[0-9][0-9]" docs/features.md | sed 's/^| F-//' | sort -n)
 count=${#ids[@]}
-uniq_count=$(printf '%s\n' "${ids[@]}" | sort -u | wc -l | tr -d ' ')
-[ "$count" -gt 0 ] || note "機能一覧表から機能IDを1件も読み取れない"
-[ "$count" = "$uniq_count" ] || note "機能IDが重複している（$count 行 / $uniq_count 種）"
-last=$((10#${ids[-1]}))
-[ "$count" = "$last" ] || note "機能IDに欠番がある（最大 F-$last / $count 件）"
-echo "  完了（F-01 〜 F-$last、$count 件）"
+if [ "$count" -eq 0 ]; then
+  # 以降の検査はすべて機能数を土台にしている。ここで抜けないと ${ids[-1]} が
+  # 未定義参照になり、set -u でスクリプトが途中で落ちて残りの指摘が出なくなる。
+  note "機能一覧表から機能IDを1件も読み取れない"
+  echo "  完了（0 件）"
+else
+  uniq_count=$(printf '%s\n' "${ids[@]}" | sort -u | wc -l | tr -d ' ')
+  [ "$count" = "$uniq_count" ] || note "機能IDが重複している（$count 行 / $uniq_count 種）"
+  last=$((10#${ids[-1]}))
+  [ "$count" = "$last" ] || note "機能IDに欠番がある（最大 F-$last / $count 件）"
+  echo "  完了（F-01 〜 F-$last、$count 件）"
+fi
 
 echo "3. 件数表記の整合"
 

@@ -21,11 +21,14 @@ echo "作業ディレクトリ: $work"
 
 # check-docs.sh は相対リンクを検査するため、リンク先になるファイルも複製する。
 # ここが欠けると検査1が常に失敗し、どの壊し方でも「落ちた」ことになって検査にならない。
-mkdir -p "$work/docs" "$work/scripts" "$work/.github/workflows"
-cp "$repo"/*.md                        "$work/"
-cp "$repo"/docs/*.md                   "$work/docs/"
-cp "$repo"/scripts/check-docs.sh       "$work/scripts/"
-cp "$repo"/.github/workflows/*.yml     "$work/.github/workflows/"
+# 複製するファイルは列挙しない。check-docs.sh は find でその場の Markdown をすべて
+# 対象にするため、列挙で書くと docs/ の下に階層を切った瞬間に複製から漏れる。
+# 漏れても失敗にはならず、検査がその文書を見ないだけで全ケースが緑のまま通る。
+# 「本物の検査が見ている範囲」と「テストが検査させている範囲」が黙ってずれる。
+while IFS= read -r p; do
+  mkdir -p "$work/$(dirname "$p")"
+  cp "$repo/$p" "$work/$p"
+done < <(cd "$repo" && find . -path ./.git -prune -o -type f -print | sed 's|^\./||')
 
 run_check() { (cd "$work" && bash scripts/check-docs.sh >/dev/null 2>&1); }
 restore()   { cp "$repo/$1" "$work/$1"; }
@@ -48,11 +51,22 @@ fi
 # 終了コードだけを見る検査ではこの欠陥を素通りする（実際に素通りさせた）。
 # 期待する指摘の文言まで突き合わせる。
 n=0
-expect_ng() { # $1=説明 $2=対象ファイル $3=sed 式 $4=NG に含まれるべき文言
+expect_ng() { # $1=説明 $2=対象ファイル $3=sed 式 $4=NG に含まれるべき文言 $5=壊した後のファイルに要る文字列（省略可）
   local out rc
   n=$((n + 1))
   restore "$2"
   sed -i "$3" "$work/$2"
+  # sed が空振りしていないか見る。式を2つ持つケースでは、2つ目さえ当たれば期待の文言が
+  # 出てしまい、1つ目（おとりの挿入など）が空振りしても OK になる。
+  # そうなるとケースは静かに別のケースへ退化し、検出したかった経路が緑のまま消える。
+  if cmp -s "$repo/$2" "$work/$2"; then
+    echo "  NG: $n. $1 — sed が空振りしてファイルが変わっていない"
+    fail=1; restore "$2"; return
+  fi
+  if [ -n "${5:-}" ] && ! grep -q "$5" "$work/$2"; then
+    echo "  NG: $n. $1 — 壊した後のファイルに「$5」が入っていない"
+    fail=1; restore "$2"; return
+  fi
   out=$(cd "$work" && bash scripts/check-docs.sh 2>&1); rc=$?
   if [ "$rc" -eq 0 ]; then
     echo "  NG: $n. $1 — 壊しても検査が通ってしまった"
@@ -89,14 +103,14 @@ expect_ng "tech-stack.md の「機能38件」を34件に" docs/tech-stack.md \
 # 前方に正しい数のおとりを置き、本命だけを壊す。先頭1件しか見ていないと素通りする。
 expect_ng "tech-stack.md の前方におとりを置き、本命だけ34件に" docs/tech-stack.md \
   's/^## 選定の前提$/## 選定の前提\n\n（検査の検査が置いたおとり）機能38件\n/; s/機能38件、うちリアルタイム/機能34件、うちリアルタイム/' \
-  'tech-stack.md の「機能N件」: 34 と書かれているが、実際は 38'
+  'tech-stack.md の「機能N件」: 34 と書かれているが、実際は 38' '検査の検査が置いたおとり'
 
 # --- 検査3: 内訳
 expect_ng "features.md の内訳を「要求 18 件」に" docs/features.md \
   's/内訳: 要求 19 件/内訳: 要求 18 件/' 'features.md の内訳「要求」: 18 と書かれているが、実際は 19'
 expect_ng "features.md の前方におとりを置き、本命の内訳だけ18件に" docs/features.md \
   's/^## 機能一覧表$/## 機能一覧表\n\n（検査の検査が置いたおとり）要求 19 件\n/; s/内訳: 要求 19 件/内訳: 要求 18 件/' \
-  'features.md の内訳「要求」: 18 と書かれているが、実際は 19'
+  'features.md の内訳「要求」: 18 と書かれているが、実際は 19' '検査の検査が置いたおとり'
 expect_ng "README.md の内訳を「要求 18」に" README.md \
   's/（要求 19 \/ 派生 9/（要求 18 \/ 派生 9/' 'README.md の内訳「要求」: 18 と書かれているが、実際は 19'
 expect_ng "F-01 の区分を 要求→派生 に（合計は 38 のまま動かない）" docs/features.md \
@@ -124,7 +138,22 @@ expect_ng "REVIEW.md の宣言の言い回しを変えて読み取れなくす�
   's/下記の8項目に該当する変更/下記の一覧に該当する変更/' 'REVIEW.md の「N項目」の宣言 を読み取れない'
 expect_ng "REVIEW.md の前方に正しい数のおとりを置き、本命だけ7項目に" REVIEW.md \
   's/^## 1\. 重大度の定義$/## 1. 重大度の定義\n\n下記の8項目に該当する変更（検査の検査が置いたおとり）\n/; s/下記の8項目に該当する変更で、テストが無い場合/下記の7項目に該当する変更で、テストが無い場合/' \
-  'REVIEW.md の「N項目」の宣言: 7 と書かれているが、実際は 8'
+  'REVIEW.md の「N項目」の宣言: 7 と書かれているが、実際は 8' '検査の検査が置いたおとり'
 
+
+# --- 検査が「1件も読み取れない」と言う経路。ここを踏まないと、
+#     表の形が変わって検査が何も見なくなったときに気づけない。
+expect_ng "features.md の 要求 の行をすべて別の区分名に書き換える" docs/features.md \
+  's/^\(| F-[0-9][0-9] |[^|]*|[^|]*\)| 要求 |/\1| **要検討** |/' \
+  'features.md の表から区分「要求」の行を1件も読み取れない'
+expect_ng "F-01 の区分だけを未知の区分名にする（合計は 38 のまま動かない）" docs/features.md \
+  's/^\(| F-01 |[^|]*|[^|]*\)| 要求 |/\1| **要検討** |/' \
+  '内訳の合計 37 件が機能数 38 件と一致しない'
+expect_ng "features.md の機能IDの接頭辞を F- から G- に変える" docs/features.md \
+  's/^| F-\([0-9][0-9]\) |/| G-\1 |/' \
+  '機能一覧表から機能IDを1件も読み取れない'
+expect_ng "requirements.md の一覧の見出しを変えて読み取れなくする" docs/requirements.md \
+  's/^#### 必ずテストを書く箇所$/#### 必ずテストを書く項目/' \
+  'requirements.md から一覧を読み取れない'
 if [ "$fail" -ne 0 ]; then echo "検査の検査に失敗しました"; exit 1; fi
 echo "$n 通りすべてで、壊すと検査が落ちることを確認しました"
