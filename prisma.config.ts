@@ -10,6 +10,15 @@ import { defineConfig } from 'prisma/config';
  * である。根で `npx prisma migrate dev` を実行すれば、`--schema` を毎回渡さずに済む。
  */
 
+// **必要な環境変数は `DATABASE_URL` の1つである。**
+//
+// `prisma generate` を除くすべての `prisma` のコマンド（`migrate dev` / `migrate deploy` /
+// `migrate diff` / `db execute` など）がこれを必要とする。設定していないと、
+// 接続先が undefined のまま Prisma に渡り、**原因の分かりにくいエラーになる。**
+//
+// 値はここにも .env.example にも書かない（CLAUDE.md 禁止事項）。
+// **手元で動かすときは、開発用データベースの接続 URL を `DATABASE_URL` に入れる。**
+//
 // **Prisma 7 は .env を自動では読み込まない。**
 // 依存を増やさずに読むため、Node 24 の組み込み機能を使う。
 //
