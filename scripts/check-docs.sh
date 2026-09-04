@@ -144,5 +144,57 @@ compare_decls "$(decls docs/requirements.md "「必ずテストを書く箇所�
 compare_decls "$(decls REVIEW.md "下記の *[0-9][0-9]* *項目に該当する変更")"                  "$rev" "REVIEW.md の「N項目」の宣言"
 echo "  完了（$req 項目）"
 
+# 「N経路」「N種類」も同じ形の宣言である。どちらも実体は表であり、機械的に数えられる。
+# 経路は REVIEW.md 2.1 が最優先とする箇所で、1つ欠けたまま実装されると認可の穴になる。
+# 実際、requirements.md が「3経路」と書いて WebSocket の配信が抜けていた
+# （PR #6 で文言は直したが、検査は入れていなかった）。
+echo "5. 「N経路」と「N種類」の宣言"
+
+# 経路の実数は REVIEW.md 2.1 の表の行数。行は「| 1 |」で始まる。
+# ここは awk のリテラル正規表現なのでドットをエスケープする。しないと「### 2-1 認可」でも
+# 一致してしまい、見出しが変わったのに読み取れたことになる（検査の検査が実際に踏んだ）。
+routes=$(awk '$0 ~ /^### 2\.1 / { in_sec = 1; next }
+              in_sec && /^#/ { exit }
+              in_sec && /^\| [0-9]+ \|/ { c++ }
+              END { print c+0 }' REVIEW.md)
+if [ "$routes" -eq 0 ]; then
+  # 以降の照合はすべてこの数を土台にしている。0 のまま進むと、
+  # 宣言側が何を書いていても「実際は 0」と鳴るだけで、読み取り失敗が埋もれる。
+  note "REVIEW.md 2.1 の表から経路を1件も読み取れない"
+else
+  # 「N経路」は数字の直後の語が場所ごとに違う。requirements.md の「残る2経路」は
+  # 4のうち2という別の数であり、まとめて拾うと正しい記述が NG になる。
+  # 宣言の行にしか無い後続語まで含めて一意にする（検査4と同じ方針）。
+  # requirements.md は強調記号が数字と後続語の間に入る（4経路**すべてを塞いで）ため \** を挟む。
+  compare_decls "$(decls REVIEW.md          '[0-9][0-9]*経路すべてを塞ぐ')"       "$routes" "REVIEW.md の「N経路すべてを塞ぐ」"
+  compare_decls "$(decls REVIEW.md          '経路は[0-9][0-9]*つある')"           "$routes" "REVIEW.md の「経路はNつある」"
+  compare_decls "$(decls docs/requirements.md '[0-9][0-9]*経路\**すべてを塞いで')" "$routes" "requirements.md の「N経路すべてを塞いで」"
+  compare_decls "$(decls docs/requirements.md '[0-9][0-9]*経路のうち')"            "$routes" "requirements.md の「N経路のうち」"
+fi
+
+# リアルタイム配信のイベント表は requirements.md と features.md に重複している。
+# 表を1つに寄せる案もあるが、どちらの文書も単独で読まれる前提であり、
+# 内容欄の参照先も違う（提-3 と F-34）。2つのまま、イベント名の列で突き合わせる。
+events() { # $1=ファイル $2=見出しの正規表現。イベント表の1列目を返す
+  awk -F'|' -v h="$2" '$0 ~ h { in_sec = 1; next }
+                       in_sec && /^#/ { exit }
+                       in_sec && /^\| `/ { e = $2; gsub(/^ +| +$/, "", e); print e }' "$1"
+}
+req_events=$(events docs/requirements.md '^#+ リアルタイム配信の対象イベント')
+fea_events=$(events docs/features.md     '^#+ 5.1 配信するイベント')
+kinds=$(printf '%s\n' "$req_events" | grep -c .)
+if [ "$kinds" -eq 0 ]; then
+  note "requirements.md からイベント表を読み取れない"
+else
+  # 数ではなく中身で突き合わせる。7種類のまま1つだけ差し替えられても数では気づけない
+  # （検査4と同じ理由）。守りたいのは「どのイベントを配信するか」の合意である。
+  [ "$req_events" = "$fea_events" ] || note "requirements.md と features.md でイベント表の内容が違う"
+  # 宣言は4つの文書にある。1つだけ検査すると、検査していない側を直し忘れて同じ見落としが再発する。
+  for f in CLAUDE.md docs/requirements.md docs/features.md docs/tech-stack.md; do
+    compare_decls "$(decls "$f" '[0-9][0-9]*種類')" "$kinds" "$f の「N種類」"
+  done
+fi
+echo "  完了（$routes 経路 / $kinds 種類）"
+
 if [ "$fail" -ne 0 ]; then echo "検査に失敗しました"; exit 1; fi
 echo "すべての検査に合格しました"

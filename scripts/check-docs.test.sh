@@ -90,7 +90,7 @@ else
 fi
 
 # --- 前提: 検査対象が1件も無いときに落ちること -------------------------------
-# この分岐だけがケース1〜27 のどれからも踏まれない。踏まないまま置くと、
+# この分岐だけがケース1〜40 のどれからも踏まれない。踏まないまま置くと、
 # 検査が何も見ていない状態を「合格」と表示するようになっても気づけない。
 echo "0b. Markdown が1件も無いときに落ちること"
 bare=$(mktemp -d)
@@ -302,6 +302,52 @@ expect_ng "features.md の機能IDの接頭辞を F- から G- に変える" doc
 expect_ng "requirements.md の一覧の見出しを変えて読み取れなくする" docs/requirements.md \
   's/^#### 必ずテストを書く箇所$/#### 必ずテストを書く項目/' \
   'requirements.md から一覧を読み取れない'
+
+# --- 検査5: 「N経路」（実体は REVIEW.md 2.1 の表）
+# 経路が1つ欠けたまま実装されると認可の穴になる。表と宣言の両側から壊す。
+expect_ng "REVIEW.md 2.1 の表から経路を1行消す" REVIEW.md \
+  '/^| 2 | \*\*検索\*\* |/d' \
+  'REVIEW.md の「N経路すべてを塞ぐ」: 4 と書かれているが、実際は 3'
+expect_ng "REVIEW.md の見出しの「4経路」を3経路に" REVIEW.md \
+  's/4経路すべてを塞ぐ/3経路すべてを塞ぐ/' \
+  'REVIEW.md の「N経路すべてを塞ぐ」: 3 と書かれているが、実際は 4'
+expect_ng "REVIEW.md の「経路は4つある」を3つに" REVIEW.md \
+  's/経路は4つある/経路は3つある/' \
+  'REVIEW.md の「経路はNつある」: 3 と書かれているが、実際は 4'
+expect_ng "requirements.md の「4経路すべてを塞いで」を3経路に" docs/requirements.md \
+  's/の4経路\*\*すべてを塞いで/の3経路**すべてを塞いで/' \
+  'requirements.md の「N経路すべてを塞いで」: 3 と書かれているが、実際は 4'
+# 同じ文書の「残る2経路」は4のうち2という別の数である。ここが NG にならないことは
+# 上のケースが通ること自体が示している（まとめて拾う実装なら 2 で落ちる）。
+expect_ng "requirements.md の「4経路のうち」を3経路に" docs/requirements.md \
+  's/4経路のうち/3経路のうち/' \
+  'requirements.md の「N経路のうち」: 3 と書かれているが、実際は 4'
+expect_ng "REVIEW.md 2.1 の見出しを変えて表を読み取れなくする" REVIEW.md \
+  's/^### 2\.1 認可/### 2-1 認可/' \
+  'REVIEW.md 2.1 の表から経路を1件も読み取れない' '^### 2-1 認可'
+
+# --- 検査5: 「N種類」（実体は requirements.md と features.md のイベント表）
+expect_ng "features.md のイベント名を1つ書き換える（7行のまま動かない）" docs/features.md \
+  's/^| `presence:changed` |/| `presence:updated` |/' \
+  'requirements.md と features.md でイベント表の内容が違う' '`presence:updated`'
+expect_ng "requirements.md のイベント表から1行消す" docs/requirements.md \
+  '/^| `unread:updated` |/d' \
+  'CLAUDE.md の「N種類」: 7 と書かれているが、実際は 6'
+expect_ng "CLAUDE.md の「7種類」を6種類に" CLAUDE.md \
+  's/イベント定義（7種類）/イベント定義（6種類）/' \
+  'CLAUDE.md の「N種類」: 6 と書かれているが、実際は 7'
+expect_ng "requirements.md の「4.1 の7種類」を6種類に" docs/requirements.md \
+  's/（4.1 の7種類）/（4.1 の6種類）/' \
+  'docs/requirements.md の「N種類」: 6 と書かれているが、実際は 7'
+expect_ng "features.md の「この7種類以外」を6種類に" docs/features.md \
+  's/この7種類以外/この6種類以外/' \
+  'docs/features.md の「N種類」: 6 と書かれているが、実際は 7'
+expect_ng "tech-stack.md の「7種類の WebSocket イベント」を6種類に" docs/tech-stack.md \
+  's/7種類の WebSocket イベント/6種類の WebSocket イベント/' \
+  'docs/tech-stack.md の「N種類」: 6 と書かれているが、実際は 7'
+expect_ng "requirements.md のイベント表の見出しを変えて読み取れなくする" docs/requirements.md \
+  's/^#### リアルタイム配信の対象イベント$/#### 配信するイベント/' \
+  'requirements.md からイベント表を読み取れない' '^#### 配信するイベント'
 
 # --- 落ちてはならないこと。$4 で、置いたファイルが検査の対象に入るはず（in）か
 #     除外されるはず（out）かを切り替える。関数を2つに分けると、失敗時の出力や
