@@ -359,9 +359,10 @@ expect_ok "外部リンク（https / mailto）は存在を確かめない" docs/
 # ケースが成立していることを先に見る。.env.example が PRUNE のパターンに一致しなければ、
 # KEEP が無くてもこのリンクは通る。つまり KEEP を何も検査していないことになる。
 keep_pruned=0
+keep_target=.env.example   # case の対象を変数にする（定数を直接書くと shellcheck SC2194）
 for g in "${DOC_PRUNE_FILES[@]}"; do
   # shellcheck disable=SC2254
-  case .env.example in $g) keep_pruned=1 ;; esac
+  case "$keep_target" in $g) keep_pruned=1 ;; esac
 done
 if [ "$keep_pruned" = 0 ]; then
   echo "  NG: .env.example が DOC_PRUNE_FILES のどれにも一致しない。KEEP を踏むケースが成立していない"
