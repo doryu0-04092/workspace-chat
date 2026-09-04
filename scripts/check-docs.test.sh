@@ -113,28 +113,51 @@ fi
 # 判定は git 自身に行わせる。.gitignore を読んで一致規則を書き直すと、
 # その実装が本物とずれたときに気づけない。
 #
-# --no-index を必ず付ける。既定の check-ignore はインデックスを見て、
-# 追跡済みのパスを「無視されない」と報告する。付けないと、追跡済みの README.md に対する
-# 下の確認が .gitignore をどう壊しても緑のままになり、落ちる条件を持たなくなる。
-# （手元で確認: 一時の除外ファイルに README.md を書いて実行すると、
-#  既定は終了コード 1、--no-index 付きは 0 になった。）
+# 見るのは「リポジトリの .gitignore が無視するか」だけである。終了コードを見るだけでは足りない。
+#
+#   1. 既定の check-ignore はインデックスを見て、追跡済みのパスを「無視されない」と報告する。
+#      --no-index を付けないと、追跡済みの README.md に対する下の確認は .gitignore を
+#      どう壊しても緑のままになり、落ちる条件を持たなくなる。
+#      （手元で確認: 一時の除外ファイルに README.md を書いて実行すると、
+#       既定は終了コード 1、--no-index 付きは 0 になった。）
+#   2. check-ignore は .git/info/exclude と core.excludesFile にも一致する。
+#      GitHub 公式の Terraform.gitignore をグローバル除外に置いている手元では、
+#      リポジトリの .gitignore に *.tfvars.json が無くてもこの確認が緑になる。
+#      逆に、グローバル除外が *.example を持つ手元では下の gi_tracked が偽の NG を出す。
+#      -v で一致元とパターンまで見て、.gitignore に書かれた肯定パターンだけを認める。
 echo "0c. 値を持つファイル名が .gitignore で無視されること"
+gi_why=""
+gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
+  local line head src pat
+  # 出力は <一致元>:<行番号>:<パターン><TAB><パス>。一致が無ければ空。
+  line=$(git -C "$repo" check-ignore -v --no-index "$1")
+  gi_why=${line:-一致なし}
+  [ -n "$line" ] || return 1
+  head=${line%%$'\t'*}
+  src=${head%%:*}
+  pat=${head#*:}; pat=${pat#*:}
+  [ "$src" = .gitignore ] || return 1
+  # 打ち消しパターン（!）に一致したものは無視されない。
+  case "$pat" in '!'*) return 1 ;; esac
+  return 0
+}
 gi_ignored=(.env .env.local terraform.tfstate terraform.tfstate.backup
             prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json)
 # 上の実名の列挙だけだと、DOC_PRUNE_FILES にパターンを足して .gitignore に足し忘れた場合に
-# 素通りする（新しい名前がこの一覧に無いため）。0a:66-69 と同じ導出で機械的に補う。
+# 素通りする（新しい名前がこの一覧に無いため）。0a の
+# 「除外されるはずのファイルは一覧から導出する」と同じ置換で機械的に補う。
 for g in "${probe_prune_files[@]}"; do gi_ignored+=("${g//\*/x}"); done
 # 無視されては困るもの。片側だけ見ると「全部無視する」設定でも緑になる。
 gi_tracked=(.env.example prod.tfvars.example README.md)
 gi_ng=0
 for p in "${gi_ignored[@]}"; do
-  if ! git -C "$repo" check-ignore -q --no-index "$p"; then
-    echo "  NG: $p が .gitignore で無視されない（値がコミットされうる）"; gi_ng=1
+  if ! gi_ignored_by_gitignore "$p"; then
+    echo "  NG: $p が .gitignore で無視されない（値がコミットされうる。一致: $gi_why）"; gi_ng=1
   fi
 done
 for p in "${gi_tracked[@]}"; do
-  if git -C "$repo" check-ignore -q --no-index "$p"; then
-    echo "  NG: $p が .gitignore で無視される（追跡対象のはず）"; gi_ng=1
+  if gi_ignored_by_gitignore "$p"; then
+    echo "  NG: $p が .gitignore で無視される（追跡対象のはず。一致: $gi_why）"; gi_ng=1
   fi
 done
 if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
