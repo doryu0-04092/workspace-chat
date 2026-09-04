@@ -1,0 +1,30 @@
+# 依存の更新を継続的に受け取る。
+# 要件定義書 4.3 が「npm audit と Dependabot を CI で継続的に実行する」と定めている。
+version: 2
+updates:
+  # npm。ワークスペースはルートの package.json / package-lock.json が束ねるため、
+  # ディレクトリはルートだけでよい。
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # 開発用の依存はまとめて1つの PR にする。個別に来るとレビューの回数が増え、
+    # 1件あたりに向ける注意が薄くなる。
+    groups:
+      development:
+        dependency-type: development
+      production:
+        dependency-type: production
+    commit-message:
+      prefix: 'chore'
+
+  # GitHub Actions。この PR で checkout などが Node 20 ランタイムのまま
+  # 取り残されていたのを、レビューに指摘されて気づいた。機械に見張らせる。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: 'chore'

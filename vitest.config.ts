@@ -22,9 +22,14 @@ export default defineConfig({
         },
       },
       {
-        // web の実際のビルド設定を読む。読まないと、共有パッケージの
-        // CommonJS 変換など vite.config.ts 側の設定がテストに効かず、
-        // テストは通るのにビルドだけが落ちる状態を作り得る。
+        // web の設定を読む。テストにも要るプラグイン（JSX の変換など）を
+        // ビルドと共有するため。
+        //
+        // **ビルド設定の回帰はここでは捕まえられない。** build.commonjsOptions は
+        // vite build（Rollup）にしか作用せず、Vitest は dev / SSR の変換経路で
+        // 処理する。optimizeDeps も Vitest では既定で無効。
+        // 「テストは通るのにビルドだけが落ちる」を捕まえるのは ci.yml の
+        // ビルドのステップである。ここを理由にビルドの検査を外さない。
         extends: './apps/web/vite.config.ts',
         test: {
           name: 'web',
