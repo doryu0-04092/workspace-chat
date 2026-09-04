@@ -1,63 +1,53 @@
-# 依存の更新を継続的に受け取る。
-# 要件定義書 4.3 が「npm audit と Dependabot を CI で継続的に実行する」と定めている。
+# 依存の更新をどう扱うかの設定。
+# 要件定義書 4.3 が「依存の脆弱性を継続的に検査する」と定めている。
+#
+# ==========================================================================
+# 方針（2026-09-04 決定）: npm の版は、動くことを確かめた組み合わせで固定する。
+# ==========================================================================
+#
+# 版を上げるかどうかは**一度だけ判断し、以後は自動提案を受け取らない**。
+# 最初に選んだ版は、互いに噛み合うことを確かめた組み合わせであり、
+# **1つだけ動かすと噛み合わなくなる**ためである。
+#
+# 根拠となった実例（PR #21。開発依存3件の一括提案）:
+#   - @types/node 24 -> 26 : ランタイムは Node 24 に固定している。
+#                            Node 26 の型を入れると、存在しない API を書いても
+#                            型検査が通り、**実行して初めて落ちる**
+#   - @vitejs/plugin-react 5 -> 6 : vite@^8 を要求する。Vite 7 では入らない
+#   - jsdom 28 -> 30 : 問題なし
+#
+# **3件のうち2件が、受け入れてはいけないものだった。** CI は3件とも緑だった。
+# 毎週この判断を繰り返しても、判断の質は保てない。
+#
+# 代償（承知のうえで受け入れる）:
+#   - **依存の版は自動では上がらなくなる。** 上げるのは、必要が生じたときの手作業になる
+#   - 脆弱性を直す更新も、自動では PR にならない。
+#     ただし **検知は audit.yml が毎週続ける**（npm audit --audit-level=high）。
+#     落ちたら、そのとき直す版を人が選ぶ。「気づけない」状態にはならない
 version: 2
 updates:
-  # npm。ワークスペースはルートの package.json / package-lock.json が束ねるため、
-  # ディレクトリはルートだけでよい。
+  # npm。open-pull-requests-limit: 0 は、この生態系の版更新 PR を止める指定である。
+  # 設定ごと消さないのは、**止めていることを設定として残すため**。
+  # ファイルから消すと「設定し忘れ」と区別がつかない。
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
-    # メジャー更新を止めるのは、tech-stack.md が**理由を書いて版を選んでいるものだけ**。
-    # 自動 PR で上がると、その決定が記録の無いまま崩れる。
-    # 移行は文書を直す作業と一体で行う。
-    #
-    # すべてを止めない理由: メジャー版でしか修正されない脆弱性が出たとき、
-    # Dependabot が PR を出さない一方で audit.yml は落ち続け、
-    # **自動で直す経路が無いままマージが塞がる。**
-    ignore:
-      - dependency-name: 'typescript'
-        update-types: ['version-update:semver-major']
-      - dependency-name: 'vite'
-        update-types: ['version-update:semver-major']
-      - dependency-name: 'react'
-        update-types: ['version-update:semver-major']
-      - dependency-name: 'react-dom'
-        update-types: ['version-update:semver-major']
-      - dependency-name: 'tailwindcss'
-        update-types: ['version-update:semver-major']
-      - dependency-name: '@tailwindcss/*'
-        update-types: ['version-update:semver-major']
-      - dependency-name: '@nestjs/*'
-        update-types: ['version-update:semver-major']
-    # 開発用の依存はまとめて1つの PR にする。個別に来るとレビューの回数が増え、
-    # 1件あたりに向ける注意が薄くなる。
-    #
-    # 代償: **1件でも CI を落とす更新が混ざると、そのグループ全体が止まる。**
-    # 個別に来ていれば他は通っていた。止まったときは、原因の1件を ignore に
-    # 足すのではなく、まずその1件が落ちる理由を確かめる。
-    groups:
-      development:
-        dependency-type: development
-      production:
-        dependency-type: production
-    commit-message:
-      prefix: 'chore'
+    open-pull-requests-limit: 0
 
-  # GitHub Actions。この PR で checkout などが Node 20 ランタイムのまま
-  # 取り残されていたのを、レビューに指摘されて気づいた。機械に見張らせる。
+  # GitHub Actions は止めない。
+  # npm と違い、こちらのメジャーは**実行環境（Node 20 -> 24）の移行**を含む。
+  # 放置すると非推奨のランタイムで動き続け、いずれ動かなくなる。
+  # PR #4 のレビューで、実際に checkout が Node 20 のまま取り残されていた。
+  # **機械に見張らせる価値が、npm とは別にある。**
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
-    # npm 側と同じ理由でまとめる。個別に来るとレビューの回数が増える。
+    # 個別に来るとレビューの回数が増え、1件あたりに向ける注意が薄くなる。
     groups:
       actions:
         patterns: ['*']
-    # こちらはメジャーも受け取る。アクションのメジャーは
-    # ランタイム（Node 20 → 24）の移行を含み、放置すると非推奨のまま残る。
-    # この PR で実際にそうなっていた。
     commit-message:
       prefix: 'chore'
