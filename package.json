@@ -11,6 +11,7 @@
     "apps/web"
   ],
   "scripts": {
+    "postinstall": "prisma generate",
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.tools.json && npm run build -w @workspace-chat/shared && npm run typecheck -w @workspace-chat/shared && npm run typecheck -w @workspace-chat/api && npm run typecheck -w @workspace-chat/web",
@@ -20,9 +21,11 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@swc/core": "^1.16.1",
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/node": "^24.13.3",
     "eslint": "^10.9.1",
     "prettier": "^3.9.6",
+    "prisma": "^7.10.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.69.0",
     "unplugin-swc": "^1.5.11",
@@ -30,6 +33,8 @@
     "vitest": "^4.1.11"
   },
   "overrides": {
-    "vite": "$vite"
+    "vite": "$vite",
+    "deepmerge-ts": "^8.0.2",
+    "mysql2": "^3.24.3"
   }
 }
