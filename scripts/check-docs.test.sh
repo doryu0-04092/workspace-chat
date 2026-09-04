@@ -58,11 +58,16 @@ done
 mkdir -p "$probe/apps/api/node_modules" && : > "$probe/apps/api/node_modules/x.md"
 : > "$probe/.env"
 : > "$probe/.env.local"
+: > "$probe/terraform.tfstate"
+: > "$probe/terraform.tfstate.backup"
+: > "$probe/prod.tfvars"
 : > "$probe/keep.md"
-: > "$probe/.env.example"   # .gitignore が追跡対象に戻しているため、除外してはいけない
+# .gitignore が追跡対象に戻しているものは、除外してはいけない
+: > "$probe/.env.example"
+: > "$probe/prod.tfvars.example"
 got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
-if [ "$got" = ".env.example keep.md " ]; then
-  echo "  OK（keep.md と .env.example だけが残る）"
+if [ "$got" = ".env.example keep.md prod.tfvars.example " ]; then
+  echo "  OK（keep.md と、.gitignore が戻している2件だけが残る）"
 else
   echo "  NG: 除外の範囲が想定と違う → $got"
   fail=1
@@ -142,6 +147,9 @@ echo "1. 壊したときに落ちること"
 # --- 検査1: 相対リンク
 expect_ng "README のリンク先を存在しないファイルに" README.md \
   's|(docs/requirements.md)|(docs/nonexistent.md)|' 'README.md -> docs/nonexistent.md が存在しない'
+expect_ng "README のリンク先を除外ディレクトリの配下にする" README.md \
+  's|(docs/requirements.md)|(node_modules/pkg/README.md)|' \
+  'は検査の対象外ディレクトリ node_modules の配下'
 
 # --- 検査2: 機能IDの連番と重複
 expect_ng "features.md から F-20 の行を削除して欠番を作る" docs/features.md \

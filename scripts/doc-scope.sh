@@ -15,8 +15,8 @@
 #   2. check-docs.test.sh — 一時ディレクトリへ複製するファイルを選ぶ
 # ところがリンク検査はリンク「先」の存在を実ファイルシステムで見ており、doc_find を
 # 通していない。そのため除外ディレクトリの中の追跡対象ファイルをリンク先にすると、
-# 本物のリポジトリでは通るのに、複製先には存在しないためテストだけが落ちる。
-# しかも出るのは「壊す前から検査が落ちている」であり、原因が読み取れない。
+# 本物のリポジトリでは通るのに、複製先には存在しないためテストの前提チェックだけが落ちる。
+# 原因の切り分けに時間がかかるため、check-docs.sh の検査1がこの制約を直接見る。
 #
 # .gitignore が `!` で追跡対象に戻しているもの（.env.example / .vscode/extensions.json）が
 # これに当たる。.env.example は README から参照されやすいため下で除外から外している。
@@ -49,9 +49,15 @@ doc_find() { # $1... = find に渡す残りの条件（例: -name '*.md' -print�
   # .env.example は変数名しか持たないので対象に残す（.gitignore も !.env.example で
   # 追跡対象に戻している）。ここで除外すると、README がそこへリンクした時点で
   # 「本物の検査は通るのにテストだけが落ちる」というずれが生まれる。
+  # Terraform の state と tfvars も値を持つ。terraform.tfstate は RDS のパスワードなどを
+  # 平文で保持する。DOC_PRUNE_DIRS に .terraform を入れている以上、ディレクトリだけ
+  # 除外して同じ .gitignore の秘密ファイルを残すのは非対称である。
+  # *.tfvars.example は .gitignore が追跡対象に戻しているため対象に残す。
   find . \
     \( "${expr[@]}" \
        -name '.env' \
-       -o \( -name '.env.*' ! -name '.env.example' \) \) -prune -o \
+       -o \( -name '.env.*' ! -name '.env.example' \) \
+       -o -name '*.tfstate' -o -name '*.tfstate.*' \
+       -o \( -name '*.tfvars' ! -name '*.tfvars.example' \) \) -prune -o \
     "$@"
 }
