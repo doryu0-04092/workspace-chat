@@ -32,12 +32,14 @@ blob-report/
 **/generated/
 
 # Terraform
+# .terraform.lock.hcl は意図的に無視しない。プロバイダのバージョンとチェックサムを
+# 固定するファイルであり、追跡しないと手元・CI・本番で違うプロバイダが入りうる。
 .terraform/
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+# *.tfvars は末尾一致のため prod.tfvars.example には一致しない。
+# .env と違い、例示ファイルを打ち消す行（!*.tfvars.example）は要らない。
 *.tfvars
-!*.tfvars.example
 crash.log
 override.tf
 override.tf.json
