@@ -177,8 +177,8 @@ docker volume rm workspace-chat_db-data
 （`compose.yaml` が `name: workspace-chat` を固定しているため、
 コンテナ名もボリューム名も作業ツリーの置き場所によらずこの名前になる）
 
-**`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` を後から変えるときは
-`down -v` が要る。** これらを読むのは公式イメージの初期化処理で、
+**`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` を後から変えたら、
+`up -d --wait` を通し直す。** これらを読むのは公式イメージの初期化処理で、
 **走るのはデータ領域が空のときだけ**である。ボリュームができたあとに `.env` を直しても、
 **DB の中の利用者名・パスワード・データベース名は初回の値のまま変わらない。3つともである。**
 
@@ -196,7 +196,11 @@ docker volume rm workspace-chat_db-data
 **`.env` を変えたら `restart` ではなく `up -d --wait` を使う。**
 `restart` で済ませると、**ヘルスチェックは緑のまま、新しい値で繋ぐアプリだけが落ちる。**
 
-`down -v` は手元のデータを消す。**消したくないなら、3つとも消さずに直せる。**
+**直し方は2つある。どちらを選ぶかは、手元のデータを捨ててよいかで決める。**
+
+- **捨ててよいなら `docker compose down -v` して `up -d --wait`。** 初期化からやり直す
+- **捨てたくないなら、下の表のとおり DB 側を直す。3つとも消さずに直せる**
+
 下はすべて実際に実行して確かめた結果である。
 
 | ずれた値 | 消さずに直す方法 |
@@ -212,7 +216,7 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 ```
 
 ```
-workspace_chat=# \password
+<POSTGRES_DB の値>=# \password
 ```
 
 **入力するのは `.env` に書いた `POSTGRES_PASSWORD` と同じ値である。**
@@ -263,13 +267,13 @@ Unix ドメインソケット（`local all all trust`）を通るためである
 **実行して確かめた結果**は次のとおりである。
 
 ```
-表の所有者（改名前）: devuser
-.env を devuser2 に変えて up      → 想定どおり unhealthy
-CREATE ROLE / ALTER ROLE / DROP ROLE → いずれも成功
-                                  → 10 秒後: healthy（コンテナは作り直していない）
-表の所有者（改名後）: devuser2
-t の行数: 1
-公開ポート経由（新しい名前とパスワード）: 1
+表の所有者（改名前）: <古い名前>
+.env を <新しい名前> に変えて up      → 想定どおり unhealthy
+CREATE ROLE / ALTER ROLE / DROP ROLE  → いずれも成功
+                                      → 10 秒後: healthy（コンテナは作り直していない）
+表の所有者（改名後）: <新しい名前>
+表の行数: 変わっていない
+公開ポート経由（新しい名前とパスワード）: 繋がった
 ```
 
 **`--build` が要るのは、`up` が既にあるイメージを作り直さないためである。**
@@ -311,7 +315,7 @@ redis://127.0.0.1:<REDIS_PORT>
 | 確かめたこと | 結果 |
 |---|---|
 | ホストの `127.0.0.1:<POSTGRES_PORT>` / `<REDIS_PORT>` に TCP が通る | 両方とも通った |
-| 上の接続 URL の形で `SELECT version()` | `PostgreSQL 17.11` が返った |
+| 上の接続 URL の形で `SELECT version()` | `PostgreSQL 17.x` が返った（**確認した時点は 17.11**。土台はタグ指定なので `--pull` で動く） |
 | Redis に `ping` | `PONG` |
 | **パスワードを誤った接続 URL** | `password authentication failed` で**拒否された** |
 

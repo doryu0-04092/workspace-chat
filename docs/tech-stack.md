@@ -317,6 +317,11 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
 
 **ローカルの Docker では通った。RDS では未確認である。**
 
+> **この確認は手元での実行であり、CI では回っていない。**
+> `compose.yaml` と [Dockerfile](../docker/postgres/Dockerfile) を壊す変更が入っても、
+> **CI は緑のまま通る。** ここに載せた結果は、その時点で人が実行した記録にすぎない。
+> **判断して外したのではなく、まだ作っていない。** CI で検証する件はイシュー #28 に切り出してある。
+
 | 項目 | 結果 |
 |---|---|
 | 環境 | `postgres:17-bookworm`（**確認した時点の server_version は 17.11**）＋ pg_bigm をソースからビルド |
