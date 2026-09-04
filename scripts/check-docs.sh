@@ -3,12 +3,14 @@
 # 目的は「実行した事実を成果物に残すこと」であり、内容の正しさは人間とレビューが見る。
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# 対象範囲の定義は check-docs.test.sh と共有する（scripts/doc-scope.sh）
+. scripts/doc-scope.sh
 
 fail=0
 note() { echo "  NG: $*"; fail=1; }
 
 # git の追跡状態に依存しない。未コミットのファイルも検査対象にするため。
-mapfile -t docs < <(find . -name '*.md' -not -path './.git/*' | sed 's|^\./||' | sort)
+mapfile -t docs < <(doc_find -name '*.md' -print | sed 's|^\./||' | sort)
 [ "${#docs[@]}" -gt 0 ] || { echo "NG: 検査対象の Markdown が1件も見つからない"; exit 1; }
 
 echo "1. 相対リンクの検証（対象 ${#docs[@]} ファイル）"

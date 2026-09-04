@@ -11,6 +11,8 @@
 # 元のリポジトリは書き換えない。
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# 対象範囲の定義は check-docs.sh と共有する
+. scripts/doc-scope.sh
 repo=$(pwd)
 
 fail=0
@@ -28,10 +30,31 @@ echo "作業ディレクトリ: $work"
 while IFS= read -r p; do
   mkdir -p "$work/$(dirname "$p")"
   cp "$repo/$p" "$work/$p"
-done < <(cd "$repo" && find . -path ./.git -prune -o -type f -print | sed 's|^\./||')
+done < <(cd "$repo" && doc_find -type f -print | sed 's|^\./||')
 
 run_check() { (cd "$work" && bash scripts/check-docs.sh >/dev/null 2>&1); }
 restore()   { cp "$repo/$1" "$work/$1"; }
+
+# --- 前提: 除外の定義が効くこと ---------------------------------------------
+# リポジトリに node_modules や .env がまだ無いため、実物では「除外できている」ことを
+# 確かめられない（何も無いので何も漏れない）。専用の木を作って doc_find だけを見る。
+echo "0a. 除外の定義（doc_find）が効くこと"
+probe=$(mktemp -d)
+mkdir -p "$probe/node_modules/pkg" "$probe/apps/api/node_modules" "$probe/dist" "$probe/.git"
+: > "$probe/.env"
+: > "$probe/.env.local"
+: > "$probe/node_modules/pkg/README.md"
+: > "$probe/apps/api/node_modules/x.md"
+: > "$probe/dist/x.md"
+: > "$probe/.git/config"
+: > "$probe/keep.md"
+got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
+if [ "$got" = "keep.md " ]; then
+  echo "  OK（keep.md だけが残る）"
+else
+  echo "  NG: 除外が効いていない → $got"
+  fail=1
+fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
 # これが通らないと、以降の「落ちた」は壊したせいではなく複製の不備によるものになる。
@@ -161,5 +184,25 @@ expect_ng "features.md の機能IDの接頭辞を F- から G- に変える" doc
 expect_ng "requirements.md の一覧の見出しを変えて読み取れなくする" docs/requirements.md \
   's/^#### 必ずテストを書く箇所$/#### 必ずテストを書く項目/' \
   'requirements.md から一覧を読み取れない'
+
+# --- 除外されたディレクトリの中の Markdown は検査対象にならないこと。
+#     ここが効かないと、依存パッケージの README のリンク切れで CI が落ちる。
+expect_ok() { # $1=説明 $2=作るファイル $3=中身
+  n=$((n + 1))
+  mkdir -p "$work/$(dirname "$2")"
+  printf '%s\n' "$3" > "$work/$2"
+  if run_check; then
+    echo "  OK: $n. $1"
+  else
+    echo "  NG: $n. $1 — 除外されるはずのファイルで検査が落ちた"
+    (cd "$work" && bash scripts/check-docs.sh 2>&1 | grep '^  NG' | sed 's/^/        実際: /')
+    fail=1
+  fi
+  rm -f "$work/$2"
+}
+expect_ok "node_modules の中のリンク切れは無視される" node_modules/pkg/README.md \
+  '[壊れたリンク](./does-not-exist.md)'
+expect_ok "入れ子の node_modules の中のリンク切れも無視される" apps/api/node_modules/pkg/README.md \
+  '[壊れたリンク](./does-not-exist.md)'
 if [ "$fail" -ne 0 ]; then echo "検査の検査に失敗しました"; exit 1; fi
-echo "$n 通りすべてで、壊すと検査が落ちることを確認しました"
+echo "$n 通りの確認をすべて通過しました"
