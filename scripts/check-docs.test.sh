@@ -48,7 +48,7 @@ probe_dirs=(.git node_modules .pnp dist build .vite coverage .nyc_output
             playwright-report test-results blob-report generated uploads tmp
             .terraform .vscode .idea)
 probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars')
-probe_keep_files=('.env.example' '*.tfvars.example')
+probe_keep_files=('.env.example')
 same() { # $1=期待の一覧名 $2...=比較する2組（改行区切り）
   [ "$2" = "$3" ] || { echo "  NG: 0a の一覧と $1 がずれている（除外を足したら、この一覧にも足す）"; fail=1; }
 }
@@ -62,18 +62,23 @@ for d in "${probe_dirs[@]}"; do
   mkdir -p "$probe/$d" && : > "$probe/$d/x.md"
 done
 mkdir -p "$probe/apps/api/node_modules" && : > "$probe/apps/api/node_modules/x.md"
-: > "$probe/.env"
+# 除外されるはずのファイルは一覧から導出する（グロブの * を x に置き換える）。
+# 手書きで並べると、一覧にパターンを足しても木にファイルが増えず、
+# 「足したのに効いていない」が素通りする。ディレクトリ側と同じ水準にそろえる。
+for g in "${probe_prune_files[@]}"; do : > "$probe/${g//\*/x}"; done
+# 実際に出てくる名前でも当たることを見る（導出名だけだと現実の綴りを外しても気づけない）
 : > "$probe/.env.local"
 : > "$probe/terraform.tfstate"
 : > "$probe/terraform.tfstate.backup"
 : > "$probe/prod.tfvars"
+# 残るはずのもの
+for g in "${probe_keep_files[@]}"; do : > "$probe/${g//\*/x}"; done
+: > "$probe/prod.tfvars.example"   # *.tfvars は末尾一致のため、KEEP が無くても残る
 : > "$probe/keep.md"
-# .gitignore が追跡対象に戻しているものは、除外してはいけない
-: > "$probe/.env.example"
-: > "$probe/prod.tfvars.example"
+expected=$(printf '%s\n' keep.md prod.tfvars.example "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
 got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
-if [ "$got" = ".env.example keep.md prod.tfvars.example " ]; then
-  echo "  OK（keep.md と、.gitignore が戻している2件だけが残る）"
+if [ "$got" = "$expected" ]; then
+  echo "  OK（残るのは $expected）"
 else
   echo "  NG: 除外の範囲が想定と違う → $got"
   fail=1
