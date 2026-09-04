@@ -33,6 +33,10 @@ updates:
         update-types: ['version-update:semver-major']
     # 開発用の依存はまとめて1つの PR にする。個別に来るとレビューの回数が増え、
     # 1件あたりに向ける注意が薄くなる。
+    #
+    # 代償: **1件でも CI を落とす更新が混ざると、そのグループ全体が止まる。**
+    # 個別に来ていれば他は通っていた。止まったときは、原因の1件を ignore に
+    # 足すのではなく、まずその1件が落ちる理由を確かめる。
     groups:
       development:
         dependency-type: development

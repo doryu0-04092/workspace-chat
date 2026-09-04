@@ -24,6 +24,8 @@ concurrency:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    # 既定は6時間。ぶら下がった実行がランナーの時間を食い尽くすのを避ける。
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
