@@ -8,7 +8,15 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # チェックアウトとスクリプトの実行だけで、書き込み権限は要らない。
+    # 書かないとリポジトリ設定の既定値に依存し、write が付きうる。
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: ドキュメントの検査
         run: bash scripts/check-docs.sh
+      # 検査が「落ちるべきときに落ちる」ことを確かめる。
+      # 上のステップは正常系を1回通すだけで、検査が壊れて何も検出しなくなっても緑になる。
+      - name: 検査が壊れたときに落ちることの確認
+        run: bash scripts/check-docs.test.sh
