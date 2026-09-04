@@ -48,7 +48,7 @@ probe=$(mktemp -d)
 probe_dirs=(.git node_modules .pnp dist build .vite coverage .nyc_output
             playwright-report test-results blob-report reports generated uploads tmp
             .terraform .vscode .idea)
-probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars')
+probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json')
 probe_keep_files=('.env.example')
 same() { # $1=期待の一覧名 $2...=比較する2組（改行区切り）
   [ "$2" = "$3" ] || { echo "  NG: 0a の一覧と $1 がずれている（除外を足したら、この一覧にも足す）"; fail=1; }
@@ -72,6 +72,10 @@ for g in "${probe_prune_files[@]}"; do : > "$probe/${g//\*/x}"; done
 : > "$probe/terraform.tfstate"
 : > "$probe/terraform.tfstate.backup"
 : > "$probe/prod.tfvars"
+# Terraform は JSON 版の変数ファイル（terraform.tfvars.json / *.auto.tfvars.json）も読む。
+# *.tfvars は末尾一致のため、これらには一致しない。
+: > "$probe/terraform.tfvars.json"
+: > "$probe/secrets.auto.tfvars.json"
 # 残るはずのもの
 for g in "${probe_keep_files[@]}"; do : > "$probe/${g//\*/x}"; done
 : > "$probe/prod.tfvars.example"   # *.tfvars は末尾一致のため、KEEP が無くても残る
@@ -100,6 +104,31 @@ else
   printf '%s\n' "$bare_out" | sed 's/^/        実際: /'
   fail=1
 fi
+
+# --- 前提: 値を持つファイルが .gitignore で無視されること ---------------------
+# doc-scope.sh の除外が保証するのは「検査が読みに行かない」ことだけで、
+# 「値がコミットされない」ことは .gitignore が担う。両者は同じ穴を持ちうる
+# （*.tfvars が terraform.tfvars.json に一致しない、が実例）。片方だけ直すと
+# 検査は緑のまま秘密がコミットされうるため、ここで .gitignore 側も突き合わせる。
+# 判定は git 自身に行わせる。.gitignore を読んで一致規則を書き直すと、
+# その実装が本物とずれたときに気づけない。
+echo "0c. 値を持つファイル名が .gitignore で無視されること"
+gi_ignored=(.env .env.local terraform.tfstate terraform.tfstate.backup
+            prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json)
+# 無視されては困るもの。片側だけ見ると「全部無視する」設定でも緑になる。
+gi_tracked=(.env.example prod.tfvars.example README.md)
+gi_ng=0
+for p in "${gi_ignored[@]}"; do
+  if ! git -C "$repo" check-ignore -q "$p"; then
+    echo "  NG: $p が .gitignore で無視されない（値がコミットされうる）"; gi_ng=1
+  fi
+done
+for p in "${gi_tracked[@]}"; do
+  if git -C "$repo" check-ignore -q "$p"; then
+    echo "  NG: $p が .gitignore で無視される（追跡対象のはず）"; gi_ng=1
+  fi
+done
+if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
 # これが通らないと、以降の「落ちた」は壊したせいではなく複製の不備によるものになる。

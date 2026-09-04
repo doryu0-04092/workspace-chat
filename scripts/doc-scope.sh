@@ -43,9 +43,11 @@ DOC_PRUNE_DIRS=(
 # 「存在と変数名までに留める」と定めている。terraform.tfstate は RDS のパスワードなどを
 # 平文で保持する。DOC_PRUNE_DIRS に .terraform を入れている以上、ディレクトリだけ
 # 除外して同じ .gitignore の秘密ファイルを残すのは非対称である。
+# `*.tfvars.json` を別に挙げるのは、`*.tfvars` が末尾一致であり
+# Terraform が読む JSON 版（terraform.tfvars.json / *.auto.tfvars.json）に一致しないため。
 DOC_PRUNE_FILES=(
   '.env' '.env.*'
-  '*.tfstate' '*.tfstate.*' '*.tfvars'
+  '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json'
 )
 
 # 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、
