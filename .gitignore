@@ -1,0 +1,59 @@
+# 依存
+node_modules/
+.pnp/
+.pnp.js
+
+# ビルド成果物
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# 環境変数（値は絶対にコミットしない）
+.env
+.env.*
+!.env.example
+
+# ログ
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# テスト・カバレッジ
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+
+# Prisma（生成物）
+**/generated/
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+
+# IDE / エディタ
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# アップロードの一時領域（ローカル開発用）
+uploads/
+tmp/
