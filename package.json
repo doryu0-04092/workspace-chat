@@ -11,9 +11,11 @@
     "apps/web"
   ],
   "scripts": {
-    "postinstall": "prisma generate",
+    "generate": "prisma generate",
     "lint": "eslint .",
     "format:check": "prettier --check .",
+    "pretypecheck": "npm run generate",
+    "prebuild": "npm run generate",
     "typecheck": "tsc --noEmit -p tsconfig.tools.json && npm run build -w @workspace-chat/shared && npm run typecheck -w @workspace-chat/shared && npm run typecheck -w @workspace-chat/api && npm run typecheck -w @workspace-chat/web",
     "build": "npm run build -w @workspace-chat/shared && npm run build -w @workspace-chat/api && npm run build -w @workspace-chat/web",
     "test": "npm run build -w @workspace-chat/shared && vitest run"

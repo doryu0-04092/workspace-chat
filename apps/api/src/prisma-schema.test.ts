@@ -289,6 +289,23 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toContain('RecoveryCode_single_unused_per_user');
     });
 
+    it('未使用のリカバリーコードは、利用者ごとに1つずつ持てる', async () => {
+      // **この制約は「1人につき1つ」であって「システム全体で1つ」ではない。**
+      // 同じ利用者で重複を試すだけでは、索引の定義から "userId" が落ちても気づけない。
+      // チャンネル名の一意制約に「別のワークスペースなら作れる」を置いたのと同じ理由で、
+      // **範囲が広すぎても落ちる形にする。**
+      const first = randomUUID();
+      const second = randomUUID();
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash") VALUES
+          ('${first}',  'u-${first.slice(0, 8)}',  '利用者1', 'argon2id-placeholder'),
+          ('${second}', 'u-${second.slice(0, 8)}', '利用者2', 'argon2id-placeholder');
+        INSERT INTO "RecoveryCode" ("id", "userId", "codeHash") VALUES
+          ('${randomUUID()}', '${first}',  'argon2id-placeholder'),
+          ('${randomUUID()}', '${second}', 'argon2id-placeholder');
+      `);
+    });
+
     it('使用済みにすれば新しいリカバリーコードを発行できる', async () => {
       // 「再設定の完了時に新しいコードを発行する」（機能一覧 1.1）が
       // 上の制約と両立することを見る。**古いコードを無効にしない限り新しく出せない。**
@@ -462,6 +479,31 @@ describe('Prisma のスキーマとマイグレーション', () => {
          FROM "Channel" WHERE "id" = '${id}';`,
       );
       expect(output).toBe('arch-e-1:arch-e:1');
+    });
+
+    it('復元したチャンネルを再びアーカイブしても、名前と採番は変わらない', async () => {
+      // **既に採番を持つ行を再アーカイブするときは、採番も改名も行わない。**
+      //
+      // 採番の規則（名前が空いている最小の番号）をそのまま当てると、
+      // **自分自身が arch-h-1 を占有しているため 2 が選ばれ、名前が arch-h-2 に変わる。**
+      // アーカイブと復元を繰り返すたびに番号が進み、名前がずれ続ける。
+      // 「復元しても番号は外れない」（機能一覧 3.2）と読み合わせが取れない。
+      //
+      // **検査制約はこれを止めない。** 据え置きも採番し直しも、どちらも通る。
+      // 規則を文書とテストの両方に置かないと、実装側で決まってしまう。
+      const id = await createChannel('arch-h');
+      const archive = `UPDATE "Channel"
+         SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
+         WHERE "id" = '${id}';`;
+      await expectSqlToSucceed(archive);
+      await expectSqlToSucceed(`UPDATE "Channel" SET "archivedAt" = NULL WHERE "id" = '${id}';`);
+
+      // 再アーカイブ。**採番と名前には触れない。**
+      await expectSqlToSucceed(`UPDATE "Channel" SET "archivedAt" = now() WHERE "id" = '${id}';`);
+      const output = await expectSqlToSucceed(
+        `SELECT "name" || ':' || "archiveSequence" FROM "Channel" WHERE "id" = '${id}';`,
+      );
+      expect(output).toBe('arch-h-1:1');
     });
 
     it('同じ基底名に同じ採番を二度使えない', async () => {
