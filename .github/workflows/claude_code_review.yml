@@ -23,7 +23,7 @@ jobs:
       issues: read
       id-token: write # 必須。OIDC トークンを Claude GitHub App のトークンに交換する経路で使う
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
