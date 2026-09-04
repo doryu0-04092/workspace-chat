@@ -141,8 +141,6 @@ cp .env.example .env    変数名だけが入っている。値を書き込む
 **特に `@` は別の宛先に繋ごうとする**形になり、「認証に失敗する」より原因を追いにくい。
 記号を使うなら URL エンコードが要る。
 
-**利用者名は特に気をつける。** 下の表のとおり、**3つのうち利用者名だけは
-`down -v` せずに直せない。**
 
 | 操作 | コマンド |
 |---|---|
@@ -198,14 +196,14 @@ docker volume rm workspace-chat_db-data
 **`.env` を変えたら `restart` ではなく `up -d --wait` を使う。**
 `restart` で済ませると、**ヘルスチェックは緑のまま、新しい値で繋ぐアプリだけが落ちる。**
 
-`down -v` は手元のデータを消す。消したくない場合、**直せるのは3つのうち2つだけである。**
+`down -v` は手元のデータを消す。**消したくないなら、3つとも消さずに直せる。**
 下はすべて実際に実行して確かめた結果である。
 
-| ずれた値 | 消さずに直せるか |
+| ずれた値 | 消さずに直す方法 |
 |---|---|
-| `POSTGRES_PASSWORD` | **直せる。**下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
-| `POSTGRES_DB` | **直せる。**下記の `ALTER DATABASE ... RENAME TO`（**その DB に接続したままでは実行できない**ので `-d postgres` で繋ぐ） |
-| `POSTGRES_USER` | **直せない。**`down -v` するか、`.env` を元の名前に戻す |
+| `POSTGRES_PASSWORD` | 下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
+| `POSTGRES_DB` | 下記の `ALTER DATABASE ... RENAME TO`（**その DB に接続したままでは実行できない**ので `-d postgres` で繋ぐ） |
+| `POSTGRES_USER` | 下記の**一時ロールを作ってから** `ALTER ROLE ... RENAME TO`（自分自身は改名できない） |
 
 **パスワード**は `psql` に入って `\password` で変える。
 
@@ -240,13 +238,39 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DAT
 まだ存在しない。`-d postgres` を使うのは、**`POSTGRES_DB` の値によらず initdb が必ず作るデータベース**
 だからである。改名したあとも、コンテナを作り直さずに緑に戻る（実行して確認した。表も残っていた）。
 
-**利用者名だけが直せないのは、改名しようとしている本人しかログインできる利用者がいないためである。**
-`ALTER ROLE ... RENAME TO` は `session user cannot be renamed` で拒否される。
-公式イメージは `POSTGRES_USER` の1つしかログイン可能なロールを作らないため、
-**別の利用者で入って改名する、という逃げ道が無い。**
+**利用者名**は一時ロールを作ってから改名する。
 
-利用者を新しく作って乗り換える手はあるが、**既存の表の所有者は古いロールのままである。**
-所有権の付け替えまで要るので、この段階では `down -v` のほうが確実である。
+```
+docker compose exec db psql -U <古い名前> -d postgres -c 'CREATE ROLE tmp_rename SUPERUSER LOGIN;'
+docker compose exec db sh -c 'psql -U tmp_rename -d postgres -c "ALTER ROLE \"<古い名前>\" RENAME TO \"$POSTGRES_USER\";"'
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP ROLE tmp_rename;"'
+```
+
+**一時ロールが要るのは、`ALTER ROLE ... RENAME TO` が
+`session user cannot be renamed` で自分自身の改名だけを拒むためである。**
+公式イメージは `POSTGRES_USER` の1つしかログイン可能なロールを作らないので、
+**改名する側のロールを自分で用意する。**
+
+**新しいロールを作って乗り換えるのではなく、旧ロール自身を改名する。**
+乗り換えると既存の表の所有者は古いロールのままだが、改名ならロールの識別子が変わらないため
+**所有権も権限も付いて回る。** パスワードも残る（PostgreSQL 17 の既定は `scram-sha-256` で、
+検証子に利用者名を含まない。`md5` なら壊れるが、このイメージは使っていない）。
+
+**一時ロールにパスワードを設けないのは、`docker compose exec` からの接続が
+Unix ドメインソケット（`local all all trust`）を通るためである。**
+公開ポート経由では入れない。使い終わったら `DROP ROLE` する。
+
+**実行して確かめた結果**は次のとおりである。
+
+```
+表の所有者（改名前）: devuser
+.env を devuser2 に変えて up      → 想定どおり unhealthy
+CREATE ROLE / ALTER ROLE / DROP ROLE → いずれも成功
+                                  → 10 秒後: healthy（コンテナは作り直していない）
+表の所有者（改名後）: devuser2
+t の行数: 1
+公開ポート経由（新しい名前とパスワード）: 1
+```
 
 **`--build` が要るのは、`up` が既にあるイメージを作り直さないためである。**
 [Dockerfile](docker/postgres/Dockerfile) は pg_bigm の版を `ARG` で固定しており、
@@ -279,6 +303,10 @@ redis://127.0.0.1:<REDIS_PORT>
 
 **この経路は実際に叩いて確かめた。** ヘルスチェックはコンテナの中から見ているだけで、
 **公開ポートを通らない。** api が使うのはこちらだけなので、別に確認した。
+
+**ここでの `127.0.0.1` はホスト側である。** `compose.yaml` のヘルスチェックが避けている
+「ループバック宛はパスワードを検証しない」は**コンテナの中の `127.0.0.1`** の話で、別物である。
+ホストからの接続は Docker の NAT を通るため、下のとおりパスワードが検証される。
 
 | 確かめたこと | 結果 |
 |---|---|

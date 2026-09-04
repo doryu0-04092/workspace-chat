@@ -302,13 +302,12 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
   [開発環境と同じイメージ](../docker/postgres/Dockerfile)（または同等の pg_bigm 入りイメージ）とし、
   `shared_preload_libraries=pg_bigm` も渡す必要がある。
   **環境は「ローカル・RDS」の2つではなく、テストを含めて3つある**
-
 - **ElastiCache で AUTH トークンと転送時暗号化（`rediss://`）を使うかを決め、
   `@socket.io/redis-adapter` がその接続で動くことを確認する。**
   **ローカルの Redis は無認証の `redis://` であり、この経路を一度も通らない**
   （下記「ローカルの Redis に認証を掛けない」）
 
-> **代償を明記する。** 上の3つ目は**まだ決めていない**。Testcontainers に
+> **代償を明記する。** **テストの実行環境の項目**は**まだ決めていない**。Testcontainers に
 > ビルド済みのイメージをどう渡すか（毎回ビルドするか、名前で参照するか）を
 > 決めないまま検索の実装に入ると、**検索のテストだけが動かない**か、
 > **2-gram 索引が効いていることを検証しないテスト**になる。
@@ -321,7 +320,7 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
 | 項目 | 結果 |
 |---|---|
 | 環境 | `postgres:17-bookworm`（**確認した時点の server_version は 17.11**）＋ pg_bigm をソースからビルド |
-| `CREATE EXTENSION pg_bigm` | **通った**（extversion 1.2） |
+| `CREATE EXTENSION pg_bigm` | **通った**（`extversion` は Dockerfile が固定する版に対応する。ここには書き写さない） |
 | `gin_bigm_ops` の索引が `LIKE '%…%'` で使われること | **確認した**（`Bitmap Index Scan` になる） |
 | RDS PostgreSQL 17 | **未確認**。Terraform で環境を作る段で確かめる |
 
