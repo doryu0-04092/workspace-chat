@@ -47,6 +47,12 @@ jobs:
       - name: lint（ESLint）
         run: npm run lint
 
+      # 上の lint が通ることと、走査範囲が正しいことは別である。
+      # .claude/ の中まで走査すると手元でだけ lint が落ちるようになり、
+      # CI は緑のまま「手元で lint を回さない」状態に倒れる。
+      - name: ESLint の走査範囲の確認
+        run: bash scripts/lint-scope.test.sh
+
       - name: 整形の検査（Prettier）
         run: npm run format:check
 
