@@ -14,7 +14,10 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | 要件定義 | **完了**（2026-09-04） |
 | AI コードレビューの観点 | **完了**（[REVIEW.md](REVIEW.md)） |
 | AI コードレビューの設定 | **完了**（[claude_code_review.yml](.github/workflows/claude_code_review.yml)） |
-| CI の構築 | 未着手（次の作業） |
+| ドキュメント検査の CI | **完了**（docs.yml） |
+| lint・型チェック・ビルド・テストの CI | **完了**（ci.yml） |
+| プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
+| 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
 | 実装 | 未着手 |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する

@@ -1,0 +1,59 @@
+name: ci
+
+# 実装を検査する CI。ドキュメントの検査は docs.yml が担う。
+#
+# パスで絞り込まない。`paths` で絞ると、そのパスに変更が無い PR ではジョブが
+# 実行されず pending のまま残り、ブランチ保護の必須チェックにすると
+# ドキュメントだけの PR が永久にマージできなくなる。
+# 代償: 変更に関係のない検査も毎回走る。現在の規模では数分に収まる。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # チェックアウトと検査の実行だけで、書き込み権限は要らない。
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      # npm ci は package-lock.json のとおりに入れる。install と違い、
+      # 手元と CI で依存の版がずれない。
+      - name: 依存の取得
+        run: npm ci
+
+      - name: lint（ESLint）
+        run: npm run lint
+
+      - name: 整形の検査（Prettier）
+        run: npm run format:check
+
+      - name: 型チェック（tsc）
+        run: npm run typecheck
+
+      # 型が通ってもビルドで落ちることがある。ソースが正しくても、
+      # ビルド時の設定漏れで動かない成果物が出る事故は実際に起きている。
+      - name: ビルド
+        run: npm run build
+
+      - name: テスト（Vitest）
+        run: npm test
+
+      # 失敗時こそ残す。CI を実行した事実と結果を成果物として残すのが目的。
+      - name: テストレポートの保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: reports/
+          if-no-files-found: error
+          retention-days: 14

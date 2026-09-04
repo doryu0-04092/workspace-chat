@@ -57,3 +57,6 @@ desktop.ini
 # アップロードの一時領域（ローカル開発用）
 uploads/
 tmp/
+
+# テストレポート（CI では Artifact として残す）
+reports/

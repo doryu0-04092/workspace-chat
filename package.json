@@ -1,0 +1,33 @@
+{
+  "name": "workspace-chat",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "workspaces": [
+    "packages/shared",
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run build -w @workspace-chat/shared && npm run typecheck -w @workspace-chat/api && npm run typecheck -w @workspace-chat/web",
+    "build": "npm run build -w @workspace-chat/shared && npm run build -w @workspace-chat/api && npm run build -w @workspace-chat/web",
+    "test": "npm run build -w @workspace-chat/shared && vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.13.3",
+    "eslint": "^10.9.1",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.69.0",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "vite": "$vite"
+  }
+}

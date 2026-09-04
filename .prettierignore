@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+coverage/
+reports/
+package-lock.json
+
+# Markdown は Prettier の対象にしない。
+# Prettier は表のセルを桁揃えするため、`| F-01 | 新規登録 |` のような行に
+# 空白が入る。scripts/check-docs.sh と scripts/check-docs.test.sh は
+# その行の形にそのまま依存しており、整形すると検査が壊れる。
+# 代償: Markdown の整形は機械的に検査されない。内容の整合は check-docs.sh が見る。
+*.md
