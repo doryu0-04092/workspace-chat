@@ -12,3 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: ドキュメントの検査
         run: bash scripts/check-docs.sh
+      # 検査が「落ちるべきときに落ちる」ことを確かめる。
+      # 上のステップは正常系を1回通すだけで、検査が壊れて何も検出しなくなっても緑になる。
+      - name: 検査が壊れたときに落ちることの確認
+        run: bash scripts/check-docs.test.sh
