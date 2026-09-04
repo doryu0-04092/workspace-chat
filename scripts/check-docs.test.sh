@@ -361,7 +361,15 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   n=$((n + 1))
   mkdir -p "$work/$(dirname "$file")"
   printf '%s\n' "$body" > "$work/$file"
+  # $file と違い $extra は複製済みの木に既にありうる（.env.example がまさにその候補）。
+  # 上書きすると本物を空に切り詰めたうえで消してしまい、以降のケースが
+  # 「.env.example が消えた木」の上で黙って別物になる。expect_ng の restore と違い
+  # 元に戻らないため、作る前に検出して落とす。
   for extra in "$@"; do
+    if [ -e "$work/$extra" ]; then
+      echo "  NG: $n. $desc — $extra は既に複製の中にある（上書きするとその木が壊れる）"
+      fail=1; rm -f "${made[@]}"; return
+    fi
     mkdir -p "$work/$(dirname "$extra")"
     : > "$work/$extra"
     made+=("$work/$extra")
@@ -405,9 +413,10 @@ expect_ok "外部リンク（https / mailto）は存在を確かめない" docs/
 # ケースが成立していることを先に見る。.env.example が PRUNE のパターンに一致しなければ、
 # KEEP が無くてもこのリンクは通る。つまり KEEP を何も検査していないことになる。
 keep_pruned=0
+keep_target=.env.example   # case の対象を変数にする（定数を直接書くと shellcheck SC2194）
 for g in "${DOC_PRUNE_FILES[@]}"; do
   # shellcheck disable=SC2254
-  case .env.example in $g) keep_pruned=1 ;; esac
+  case "$keep_target" in $g) keep_pruned=1 ;; esac
 done
 if [ "$keep_pruned" = 0 ]; then
   echo "  NG: .env.example が DOC_PRUNE_FILES のどれにも一致しない。KEEP を踏むケースが成立していない"
