@@ -59,7 +59,15 @@ jobs:
         run: npm run build
 
       - name: テスト（Vitest）
+        id: test
         run: npm test
+
+      # テストが通ったのにレポートが出ていない場合を落とす。
+      # 下の保存ステップは reports/ が無いと黙って飛ぶため、
+      # 「Artifact が無い」ことに誰も気づけない。
+      - name: テストレポートが出ていることの確認
+        if: steps.test.outcome == 'success'
+        run: test -s reports/vitest-junit.xml
 
       # テストが失敗したときこそ残す。CI を実行した事実と結果を成果物として残すのが目的。
       # ただしレポートが実際に出ている場合に限る。前段で落ちたときや、テストの
