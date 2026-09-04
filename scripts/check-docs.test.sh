@@ -51,34 +51,39 @@ fi
 # 終了コードだけを見る検査ではこの欠陥を素通りする（実際に素通りさせた）。
 # 期待する指摘の文言まで突き合わせる。
 n=0
-expect_ng() { # $1=説明 $2=対象ファイル $3=sed 式 $4=NG に含まれるべき文言 $5=壊した後のファイルに要る文字列（省略可）
-  local out rc
+expect_ng() { # $1=説明 $2=対象ファイル $3=sed 式 $4=NG に含まれるべき文言 $5...=壊した後のファイルに要る文字列
+  local desc="$1" file="$2" script="$3" expect="$4"
+  shift 4
+  local out rc pat
   n=$((n + 1))
-  restore "$2"
-  sed -i "$3" "$work/$2"
-  # sed が空振りしていないか見る。式を2つ持つケースでは、2つ目さえ当たれば期待の文言が
-  # 出てしまい、1つ目（おとりの挿入など）が空振りしても OK になる。
-  # そうなるとケースは静かに別のケースへ退化し、検出したかった経路が緑のまま消える。
-  if cmp -s "$repo/$2" "$work/$2"; then
-    echo "  NG: $n. $1 — sed が空振りしてファイルが変わっていない"
-    fail=1; restore "$2"; return
+  restore "$file"
+  sed -i "$script" "$work/$file"
+  # sed が空振りしていないか見る。cmp は「どれか1つでも当たれば」差分ありと判定するため、
+  # 式を複数持つケースでは残りが空振りしても通ってしまう。そうなるとケースは静かに
+  # 別のケースへ退化し、検出したかった経路が緑のまま消える。
+  # 複数式のケースには、式ごとの結果を必須文字列として渡して個別に確かめる。
+  if cmp -s "$repo/$file" "$work/$file"; then
+    echo "  NG: $n. $desc — sed が空振りしてファイルが変わっていない"
+    fail=1; restore "$file"; return
   fi
-  if [ -n "${5:-}" ] && ! grep -q "$5" "$work/$2"; then
-    echo "  NG: $n. $1 — 壊した後のファイルに「$5」が入っていない"
-    fail=1; restore "$2"; return
-  fi
+  for pat in "$@"; do
+    if ! grep -q "$pat" "$work/$file"; then
+      echo "  NG: $n. $desc — 壊した後のファイルに「$pat」が入っていない"
+      fail=1; restore "$file"; return
+    fi
+  done
   out=$(cd "$work" && bash scripts/check-docs.sh 2>&1); rc=$?
   if [ "$rc" -eq 0 ]; then
-    echo "  NG: $n. $1 — 壊しても検査が通ってしまった"
+    echo "  NG: $n. $desc — 壊しても検査が通ってしまった"
     fail=1
-  elif ! printf '%s\n' "$out" | grep -q "$4"; then
-    echo "  NG: $n. $1 — 落ちたが、期待した指摘「$4」が出ていない"
+  elif ! printf '%s\n' "$out" | grep -q "$expect"; then
+    echo "  NG: $n. $desc — 落ちたが、期待した指摘「$expect」が出ていない"
     printf '%s\n' "$out" | grep '^  NG' | sed 's/^/        実際: /'
     fail=1
   else
-    echo "  OK: $n. $1"
+    echo "  OK: $n. $desc"
   fi
-  restore "$2"
+  restore "$file"
 }
 
 echo "1. 壊したときに落ちること"
@@ -121,7 +126,8 @@ expect_ng "requirements.md 3.2 の節見出しを変えて読み取れなくす�
   's/^### 3\.2 要求の実現に必要となる派生機能$/### 3.2 派生機能/' 'requirements.md の「派生」の節の「全N件」 を読み取れない'
 expect_ng "3.4・3.5 の見出しレベルを下げ、章をまたいだ先に「全99件」を置く" docs/requirements.md \
   's/^### 3\.4 /#### 3.4 /; s/^### 3\.5 /#### 3.5 /; s/^全10件。\*\*提-1/**提-1/; s/^## 4\. 非機能要件$/## 4. 非機能要件\n\n全99件。/' \
-  'requirements.md の「提案・承認済」の節の「全N件」 を読み取れない'
+  'requirements.md の「提案・承認済」の節の「全N件」 を読み取れない' \
+  '#### 3.4 ' '#### 3.5 ' '全99件。'
 
 # --- 検査4: 一覧の本文
 expect_ng "REVIEW.md の一覧の1項目だけ本文を書き換え（8件のまま）" REVIEW.md \
