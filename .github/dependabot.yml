@@ -9,12 +9,27 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-    # メジャー更新は自動で上げない。
-    # tech-stack.md は NestJS 11（最新は12）/ Vite 7（最新は8）/ TypeScript 5（最新は7）を
-    # **理由を書いたうえで意図的に選んでいる。** 自動 PR で上げると、その決定が
-    # 記録の無いまま崩れる。メジャーの移行は文書を直す作業と一体で行う。
+    # メジャー更新を止めるのは、tech-stack.md が**理由を書いて版を選んでいるものだけ**。
+    # 自動 PR で上がると、その決定が記録の無いまま崩れる。
+    # 移行は文書を直す作業と一体で行う。
+    #
+    # すべてを止めない理由: メジャー版でしか修正されない脆弱性が出たとき、
+    # Dependabot が PR を出さない一方で audit.yml は落ち続け、
+    # **自動で直す経路が無いままマージが塞がる。**
     ignore:
-      - dependency-name: '*'
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'vite'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react-dom'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'tailwindcss'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@tailwindcss/*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@nestjs/*'
         update-types: ['version-update:semver-major']
     # 開発用の依存はまとめて1つの PR にする。個別に来るとレビューの回数が増え、
     # 1件あたりに向ける注意が薄くなる。

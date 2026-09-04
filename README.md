@@ -99,9 +99,13 @@ npm audit --audit-level=high
 | [claude_code_review.yml](.github/workflows/claude_code_review.yml) | AI コードレビュー（下記） |
 
 依存の更新は [dependabot.yml](.github/dependabot.yml) が毎週提案する。
-**npm のメジャー更新は自動で上げない。** [技術スタック](docs/tech-stack.md) が
-NestJS 11 / Vite 7 / TypeScript 5 を理由付きで選んでいるため、
-メジャーの移行は文書を直す作業と一体で行う。
+**メジャー更新を止めているのは、[技術スタック](docs/tech-stack.md) が理由を書いて版を
+選んでいるものだけ**（TypeScript / Vite / React / Tailwind / NestJS）。
+移行は文書を直す作業と一体で行う。
+
+それ以外のメジャーは受け取る。**すべて止めると、メジャー版でしか修正されない
+脆弱性が出たときに、Dependabot が PR を出さない一方で監査は落ち続け、
+自動で直す経路が無いままマージが塞がる。**
 
 ### 動かす
 
