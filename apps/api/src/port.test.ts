@@ -4,7 +4,12 @@ import { resolvePort } from './port';
 describe('resolvePort', () => {
   it('未設定なら 3000', () => {
     expect(resolvePort(undefined)).toBe(3000);
-    expect(resolvePort('')).toBe(3000);
+  });
+
+  // PORT= と空のまま渡すのは設定の書きかけであり、既定値に落とすと
+  // 意図と違うポートで黙って動く。未設定とは区別して落とす。
+  it('空文字列は未設定と区別して落とす', () => {
+    expect(() => resolvePort('')).toThrowError(/10進の整数/);
   });
 
   it('10進の整数はその値', () => {

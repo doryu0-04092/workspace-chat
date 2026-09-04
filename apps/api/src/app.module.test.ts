@@ -29,8 +29,12 @@ describe('AppModule', () => {
   });
 
   // 共有パッケージは CommonJS で出している（tech-stack.md）。
-  // api 側から実際に読めることを確かめる。読めなければここで落ちる。
+  // api 側から実際に読めることだけを確かめる。参照が切れれば import の解決で落ちる。
+  //
+  // 件数（7）は期待値にしない。それは shared 側のテストが持っており、
+  // ここで重ねると、イベントが正当に増減したときに目的の違うこのテストが
+  // 道連れで落ちる。落ちた側を読んでも原因を取り違える。
   it('共有パッケージを読める', () => {
-    expect(REALTIME_EVENT_KINDS).toHaveLength(7);
+    expect(REALTIME_EVENT_KINDS.length).toBeGreaterThan(0);
   });
 });

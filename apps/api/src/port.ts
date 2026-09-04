@@ -10,9 +10,12 @@
  * 走ってしまい、テストからは呼べないためである。
  */
 export function resolvePort(raw: string | undefined): number {
-  if (raw === undefined || raw === '') {
+  if (raw === undefined) {
     return 3000;
   }
+  // PORT= と空のまま渡す事故は .env や ECS のタスク定義で現実に起きる。
+  // 既定値に落とすと、8080 のつもりが黙って 3000 で待ち受ける。
+  // この関数の目的は設定ミスを起動時に落とすことなので、空も落とす。
   if (!/^[0-9]+$/.test(raw)) {
     throw new Error(`PORT の値が不正です（10進の整数を指定してください）: ${raw}`);
   }
