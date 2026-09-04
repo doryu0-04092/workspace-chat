@@ -47,17 +47,37 @@ kind_count() { # $1=区分名。強調記号と空白を落として4列目と�
   awk -F'|' -v kind="$1" '/^\| F-[0-9][0-9] \|/ { k=$5; gsub(/[* ]/, "", k); if (k == kind) n++ }
                           END { print n+0 }' docs/features.md
 }
+# requirements.md 3.1〜3.3 も同じ数を「全N件」と宣言する。区分名を伴わない書き方のため
+# 上の grep では拾えない。節を特定して読む。節の見出しが変われば読み取りに失敗して NG になる。
+sec_decl() { # $1=節の見出しの正規表現。その節に現れる最初の「全N件」を返す
+  awk -v h="$1" '$0 ~ h { in_sec=1; next }
+                 in_sec && /^### / { exit }
+                 in_sec { print }' docs/requirements.md \
+    | grep -o "全 *[0-9][0-9]* *件" | head -1 | grep -o "[0-9]*"
+}
 sum=0
 for kind in 要求 派生 提案・承認済; do
   n=$(kind_count "$kind")
   sum=$((sum + n))
   [ "$n" -gt 0 ] || note "features.md の表から区分「$kind」の行を1件も読み取れない"
   fd=$(grep -o "$kind [0-9][0-9]* 件" docs/features.md | head -1 | grep -o "[0-9]*")
+  if [ -z "$fd" ]; then note "features.md から「$kind N 件」の内訳を読み取れない"
+  elif [ "$fd" != "$n" ]; then note "features.md の内訳「$kind $fd 件」が実際の $n 件と一致しない"; fi
+
   rd=$(grep -o "$kind [0-9][0-9]*" README.md | head -1 | grep -o "[0-9]*")
-  [ -n "$fd" ] || note "features.md から「$kind N 件」の内訳を読み取れない"
-  [ -n "$rd" ] || note "README.md から「$kind N」の内訳を読み取れない"
-  [ "$fd" = "$n" ] || note "features.md の内訳「$kind $fd 件」が実際の $n 件と一致しない"
-  [ "$rd" = "$n" ] || note "README.md の内訳「$kind $rd」が実際の $n 件と一致しない"
+  if [ -z "$rd" ]; then note "README.md から「$kind N」の内訳を読み取れない"
+  elif [ "$rd" != "$n" ]; then note "README.md の内訳「$kind $rd」が実際の $n 件と一致しない"; fi
+
+  # 見出しは awk の動的正規表現に渡すため、ドットはエスケープしない（警告になるうえ、
+  # ここでは任意の1文字に一致しても見出し文字列が十分に具体的で誤検出しない）。
+  case "$kind" in
+    要求)         sec='^### 3.1 顧客要求に基づく機能' ;;
+    派生)         sec='^### 3.2 要求の実現に必要となる派生機能' ;;
+    提案・承認済) sec='^### 3.3 提案し、承認を得て実装した機能' ;;
+  esac
+  qd=$(sec_decl "$sec")
+  if [ -z "$qd" ]; then note "requirements.md の「$kind」の節から「全N件」を読み取れない（節の見出しが変わった可能性）"
+  elif [ "$qd" != "$n" ]; then note "requirements.md の「$kind」の節の「全$qd 件」が実際の $n 件と一致しない"; fi
 done
 [ "$sum" = "$count" ] || note "内訳の合計 $sum 件が機能数 $count 件と一致しない（区分の表記ゆれの可能性）"
 echo "  完了（合計 $count 件 / 内訳の合計 $sum 件）"
