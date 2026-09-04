@@ -112,19 +112,28 @@ fi
 # 検査は緑のまま秘密がコミットされうるため、ここで .gitignore 側も突き合わせる。
 # 判定は git 自身に行わせる。.gitignore を読んで一致規則を書き直すと、
 # その実装が本物とずれたときに気づけない。
+#
+# --no-index を必ず付ける。既定の check-ignore はインデックスを見て、
+# 追跡済みのパスを「無視されない」と報告する。付けないと、追跡済みの README.md に対する
+# 下の確認が .gitignore をどう壊しても緑のままになり、落ちる条件を持たなくなる。
+# （手元で確認: 一時の除外ファイルに README.md を書いて実行すると、
+#  既定は終了コード 1、--no-index 付きは 0 になった。）
 echo "0c. 値を持つファイル名が .gitignore で無視されること"
 gi_ignored=(.env .env.local terraform.tfstate terraform.tfstate.backup
             prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json)
+# 上の実名の列挙だけだと、DOC_PRUNE_FILES にパターンを足して .gitignore に足し忘れた場合に
+# 素通りする（新しい名前がこの一覧に無いため）。0a:66-69 と同じ導出で機械的に補う。
+for g in "${probe_prune_files[@]}"; do gi_ignored+=("${g//\*/x}"); done
 # 無視されては困るもの。片側だけ見ると「全部無視する」設定でも緑になる。
 gi_tracked=(.env.example prod.tfvars.example README.md)
 gi_ng=0
 for p in "${gi_ignored[@]}"; do
-  if ! git -C "$repo" check-ignore -q "$p"; then
+  if ! git -C "$repo" check-ignore -q --no-index "$p"; then
     echo "  NG: $p が .gitignore で無視されない（値がコミットされうる）"; gi_ng=1
   fi
 done
 for p in "${gi_tracked[@]}"; do
-  if git -C "$repo" check-ignore -q "$p"; then
+  if git -C "$repo" check-ignore -q --no-index "$p"; then
     echo "  NG: $p が .gitignore で無視される（追跡対象のはず）"; gi_ng=1
   fi
 done
