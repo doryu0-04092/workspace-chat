@@ -308,10 +308,18 @@ expect_ng "requirements.md の一覧の見出しを変えて読み取れなく�
 #     後片付けに手を入れたとき片方が黙って取り残される（doc-scope.sh 冒頭と同じ理由）。
 #     判定は doc_find -name '*.md' に統一する。検査1が見るのは Markdown だけである。
 expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対象に入る）| out（除外される）
-  local desc="$1" file="$2" body="$3" want="$4" got
+              # $5...=併せて空で置くファイル（リンク先にする実体）
+  local desc="$1" file="$2" body="$3" want="$4" got extra
+  shift 4
+  local made=("$work/$file")
   n=$((n + 1))
   mkdir -p "$work/$(dirname "$file")"
   printf '%s\n' "$body" > "$work/$file"
+  for extra in "$@"; do
+    mkdir -p "$work/$(dirname "$extra")"
+    : > "$work/$extra"
+    made+=("$work/$extra")
+  done
   # 置いたファイルが想定した側にあることを先に確かめる。逆側に落ちると
   # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
   if (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF "$file"); then
@@ -321,7 +329,7 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   fi
   if [ "$got" != "$want" ]; then
     echo "  NG: $n. $desc — 置いたファイルが $want ではなく $got の側にある。ケースが成立していない"
-    fail=1; rm -f "$work/$file"; return
+    fail=1; rm -f "${made[@]}"; return
   fi
   if run_check; then
     echo "  OK: $n. $desc"
@@ -330,7 +338,7 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
     (cd "$work" && bash scripts/check-docs.sh 2>&1 | grep '^  NG' | sed 's/^/        実際: /')
     fail=1
   fi
-  rm -f "$work/$file"
+  rm -f "${made[@]}"
 }
 # 除外されたディレクトリの中の Markdown は検査対象にならないこと。
 # ここが効かないと、依存パッケージの README のリンク切れで CI が落ちる。
@@ -342,6 +350,25 @@ expect_ok "入れ子の node_modules の中のリンク切れも無視される"
 # それが消えた瞬間にこの経路の確認も消える。専用のケースとして残す。
 expect_ok "外部リンク（https / mailto）は存在を確かめない" docs/probe-external-link.md \
   '[外部の文書](https://example.invalid/does-not-exist) と [連絡先](mailto:nobody@example.invalid)' in
+
+# doc_excluded の DOC_KEEP_FILES の分岐（PRUNE に一致しても除外しない）を踏む唯一のケース。
+# doc-scope.sh は「.env.example は README から参照されやすいため除外から外している」と
+# 目的まで宣言している。踏まないと、KEEP のループを丸ごと消しても全ケースが緑のまま通り、
+# README が .env.example を参照した瞬間に正当なリンクが NG になる。
+#
+# ケースが成立していることを先に見る。.env.example が PRUNE のパターンに一致しなければ、
+# KEEP が無くてもこのリンクは通る。つまり KEEP を何も検査していないことになる。
+keep_pruned=0
+for g in "${DOC_PRUNE_FILES[@]}"; do
+  # shellcheck disable=SC2254
+  case .env.example in $g) keep_pruned=1 ;; esac
+done
+if [ "$keep_pruned" = 0 ]; then
+  echo "  NG: .env.example が DOC_PRUNE_FILES のどれにも一致しない。KEEP を踏むケースが成立していない"
+  fail=1
+fi
+expect_ok "KEEP に挙げた .env.example へのリンクは「リンク先にできない」にならない" \
+  probe-env-example-link.md '[環境変数の例](.env.example)' in .env.example
 
 # --- 「N通り」の宣言が実数と一致すること -------------------------------------
 # check-docs.sh の3章は「合計 N 件」「全 N 件」「機能N件」「N項目」を照合するが、
