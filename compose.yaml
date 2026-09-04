@@ -81,14 +81,19 @@ services:
     # データを蓄積しない（docs/tech-stack.md）。
     #
     # 代償: 再起動で在席状態が消える。接続から作り直せる情報のため許容する。
-    # 既定のまま動かすと、公式イメージが宣言する VOLUME /data により
-    # 起動のたびに匿名ボリュームが積み上がる。
     command:
       - redis-server
       - --save
       - ''
       - --appendonly
       - 'no'
+    # /data に tmpfs を当てる。**書き込みを止めるだけでは足りない。**
+    # 匿名ボリュームを作るのは redis の設定ではなくイメージの `VOLUME /data` 宣言であり、
+    # その位置にマウントが無いと**コンテナを作るたびに Docker が匿名ボリュームを作る**。
+    # `docker compose down`（-v 無し）は匿名ボリュームを消さないため、
+    # down -> up を繰り返すだけで積み上がる（実際に増えることを確認した）。
+    tmpfs:
+      - /data
     ports:
       - '127.0.0.1:${REDIS_PORT:?.env に REDIS_PORT を設定してください}:6379'
     healthcheck:

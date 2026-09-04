@@ -315,13 +315,17 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
 
 | 項目 | 結果 |
 |---|---|
-| 環境 | `postgres:17-bookworm`（server_version 17.11）＋ pg_bigm `v1.2-20250903` をソースからビルド |
+| 環境 | `postgres:17-bookworm`（**確認した時点の server_version は 17.11**）＋ pg_bigm `v1.2-20250903` をソースからビルド |
 | `CREATE EXTENSION pg_bigm` | **通った**（extversion 1.2） |
 | `gin_bigm_ops` の索引が `LIKE '%…%'` で使われること | **確認した**（`Bitmap Index Scan` になる） |
 | RDS PostgreSQL 17 | **未確認**。Terraform で環境を作る段で確かめる |
 
 **pg_bigm は PGDG の apt リポジトリに存在しない**（bookworm / trixie の `Packages` を
 取得して検索し 0 件）。ローカルは [Dockerfile](../docker/postgres/Dockerfile) でビルドしている。
+
+**土台のイメージはタグで指しており、ダイジェストで固定していない。**
+上の 17.11 は「確認した時点の版」であり、タグの指す先が変われば動く。
+固定しない理由と代償は [Dockerfile](../docker/postgres/Dockerfile) に記した。
 
 > **RDS では話が変わる。** RDS は利用者が拡張をビルドして持ち込めない。
 > 使えるのは AWS が同梱した拡張だけであり、**pg_bigm が同梱されていることが前提**になる。

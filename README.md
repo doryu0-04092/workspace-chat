@@ -192,7 +192,22 @@ docker volume rm workspace-chat_db-data
 **`.env` を変えたら `restart` ではなく `up -d --wait` を使う。**
 `restart` で済ませると、**ヘルスチェックは緑のまま、新しい値で繋ぐアプリだけが落ちる。**
 
-`down -v` は手元のデータを消す。**消したくないなら、DB 側に利用者を作り直すほうを選ぶ。**
+`down -v` は手元のデータを消す。消したくない場合、**直せるのは3つのうち2つだけである。**
+下はすべて実際に実行して確かめた結果である。
+
+| ずれた値 | 消さずに直せるか |
+|---|---|
+| `POSTGRES_PASSWORD` | **直せる。**`ALTER ROLE <利用者> PASSWORD '<新しい値>';` |
+| `POSTGRES_DB` | **直せる。**`ALTER DATABASE <古い名前> RENAME TO <新しい名前>;`。**その DB に接続したままでは実行できない**ので `-d postgres` で繋ぐ |
+| `POSTGRES_USER` | **直せない。**`down -v` するか、`.env` を元の名前に戻す |
+
+**利用者名だけが直せないのは、改名しようとしている本人しかログインできる利用者がいないためである。**
+`ALTER ROLE ... RENAME TO` は `session user cannot be renamed` で拒否される。
+公式イメージは `POSTGRES_USER` の1つしかログイン可能なロールを作らないため、
+**別の利用者で入って改名する、という逃げ道が無い。**
+
+利用者を新しく作って乗り換える手はあるが、**既存の表の所有者は古いロールのままである。**
+所有権の付け替えまで要るので、この段階では `down -v` のほうが確実である。
 
 **`--build` が要るのは、`up` が既にあるイメージを作り直さないためである。**
 [Dockerfile](docker/postgres/Dockerfile) は pg_bigm の版を `ARG` で固定しており、
