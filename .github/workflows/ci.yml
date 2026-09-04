@@ -71,25 +71,3 @@ jobs:
           path: reports/
           if-no-files-found: error
           retention-days: 14
-
-  # 依存の脆弱性検査。要件定義書 4.3 が「npm audit と Dependabot を CI で
-  # 継続的に実行する」と定めている。
-  #
-  # 本体の検査とジョブを分けている。npm audit は registry の応答に依存しており、
-  # 落ちたときに lint やテストの結果まで巻き添えで読めなくなるのを避けるため。
-  #
-  # 代償: --audit-level=high としているため、moderate 以下は止めない。
-  # 開発用の推移依存に moderate が出ただけで全員の作業が止まると、
-  # 「とりあえず外す」方向に働く。moderate 以下は Dependabot の PR で追う。
-  audit:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-      - name: 依存の脆弱性検査
-        run: npm audit --audit-level=high

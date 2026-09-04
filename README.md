@@ -86,7 +86,11 @@ npm run format:check
 npm run typecheck
 npm run build
 npm test
+npm audit --audit-level=high
 ```
+
+このほかに CI は [docs.yml](.github/workflows/docs.yml) でドキュメントの検査
+（`scripts/check-docs.sh` と、その検査自身の検査 `scripts/check-docs.test.sh`）を回す。
 
 ### 動かす
 

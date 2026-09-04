@@ -1,0 +1,39 @@
+name: audit
+
+# 依存の脆弱性検査。要件定義書 4.3 が「npm audit と Dependabot を CI で
+# 継続的に実行する」と定めている。
+#
+# ci.yml と分けている理由は2つ。
+# 1. npm audit は registry の応答に依存する。落ちたときに lint やテストの結果まで
+#    巻き添えで読めなくなるのを避ける
+# 2. **「継続的に」を満たすには定期実行が要る。** PR と push だけでは、
+#    コードが動かない期間に公表された脆弱性を誰も拾わない
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # 毎週月曜 09:00 JST（UTC 00:00）
+    - cron: '0 0 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      # 代償: --audit-level=high としているため、moderate 以下は止めない。
+      # 開発用の推移依存に moderate が出ただけで全員の作業が止まると、
+      # 「とりあえず外す」方向に働く。moderate 以下は Dependabot の PR で追う。
+      - name: 依存の脆弱性検査
+        run: npm audit --audit-level=high
