@@ -327,11 +327,15 @@ expect_ng "REVIEW.md 2.1 の見出しを変えて表を読み取れなくする"
   'REVIEW.md 2.1 の表から経路を1件も読み取れない' '^### 2-1 認可'
 
 # --- 検査5: 「N種類」（実体は requirements.md と features.md のイベント表）
+# イベント名は表の中でバッククォートに囲まれている。sed 式に直接書くと
+# SC2016（単一引用符の中では展開されない）を shellcheck が出すため、文字を変数に逃がす。
+# \140 は8進数のバッククォート。
+bt=$'\140'
 expect_ng "features.md のイベント名を1つ書き換える（7行のまま動かない）" docs/features.md \
-  's/^| `presence:changed` |/| `presence:updated` |/' \
-  'requirements.md と features.md でイベント表の内容が違う' '`presence:updated`'
+  "s/^| ${bt}presence:changed${bt} |/| ${bt}presence:updated${bt} |/" \
+  'requirements.md と features.md でイベント表の内容が違う' "${bt}presence:updated${bt}"
 expect_ng "requirements.md のイベント表から1行消す" docs/requirements.md \
-  '/^| `unread:updated` |/d' \
+  "/^| ${bt}unread:updated${bt} |/d" \
   'CLAUDE.md の「N種類」: 7 と書かれているが、実際は 6'
 expect_ng "CLAUDE.md の「7種類」を6種類に" CLAUDE.md \
   's/イベント定義（7種類）/イベント定義（6種類）/' \
