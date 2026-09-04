@@ -40,11 +40,19 @@ restore()   { cp "$repo/$1" "$work/$1"; }
 # 確かめられない（何も無いので何も漏れない）。専用の木を作って doc_find だけを見る。
 echo "0a. 除外の定義（doc_find）が効くこと"
 probe=$(mktemp -d)
-# 期待値は DOC_PRUNE_DIRS から導出しない。一覧を回して木を作ると、
-# 一覧から項目が消えたときに木からも消え、検証が素通りする。ここに直接書く。
-for d in .git node_modules .pnp dist build .vite coverage .nyc_output \
-         playwright-report test-results blob-report generated uploads tmp \
-         .terraform .vscode .idea; do
+# 木を作る一覧は DOC_PRUNE_DIRS から導出しない。導出すると、一覧から項目が消えたときに
+# 木からも消え、検証が素通りする。ここに直接書く。
+# ただし直接書くだけでは「足したのに効いていない」（綴り間違い等）を検出できないため、
+# 木を作る前に集合として一致することを確かめる。
+probe_dirs=(.git node_modules .pnp dist build .vite coverage .nyc_output
+            playwright-report test-results blob-report generated uploads tmp
+            .terraform .vscode .idea)
+if [ "$(printf '%s\n' "${probe_dirs[@]}" | sort)" \
+  != "$(printf '%s\n' "${DOC_PRUNE_DIRS[@]}" | sort)" ]; then
+  echo "  NG: 0a の一覧と DOC_PRUNE_DIRS がずれている（除外を足したら、この一覧にも足す）"
+  fail=1
+fi
+for d in "${probe_dirs[@]}"; do
   mkdir -p "$probe/$d" && : > "$probe/$d/x.md"
 done
 mkdir -p "$probe/apps/api/node_modules" && : > "$probe/apps/api/node_modules/x.md"
