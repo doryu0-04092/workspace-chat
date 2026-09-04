@@ -125,6 +125,14 @@ fi
 #      リポジトリの .gitignore に *.tfvars.json が無くてもこの確認が緑になる。
 #      逆に、グローバル除外が *.example を持つ手元では下の gi_tracked が偽の NG を出す。
 #      -v で一致元とパターンまで見て、.gitignore に書かれた肯定パターンだけを認める。
+#   3. .gitignore は既に追跡されているファイルには効かない。git add -f や
+#      「.gitignore に足す前のコミット」で入ったものはパターンが揃っていても値が入っている。
+#      追跡の側からも見る。
+#
+# 代償: この確認だけが git の作業ツリーを前提にする。check-docs.sh は「git の追跡状態に
+# 依存しない」（未コミットのファイルも検査対象にする）方針だが、.gitignore が何を無視するかは
+# git にしか判定できないため、ここは例外とする。git が無い環境や作業ツリーでない場所では
+# 0c が NG になる。CI（actions/checkout）と手元はどちらも作業ツリーである。
 echo "0c. 値を持つファイル名が .gitignore で無視されること"
 gi_why=""
 gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
@@ -160,6 +168,16 @@ for p in "${gi_tracked[@]}"; do
     echo "  NG: $p が .gitignore で無視される（追跡対象のはず。一致: $gi_why）"; gi_ng=1
   fi
 done
+# 追跡済みのファイルは .gitignore の影響を受けない。パターンが揃っていても値は入っている。
+# 判定は doc_excluded と同じ doc_excluded_name に寄せる（一覧を手で並べ直すと黙ってずれる）。
+gi_committed=()
+while IFS= read -r p; do
+  doc_excluded_name "$(basename "$p")" >/dev/null && gi_committed+=("$p")
+done < <(git -C "$repo" ls-files)
+if [ ${#gi_committed[@]} -gt 0 ]; then
+  echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
+  gi_ng=1
+fi
 if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
