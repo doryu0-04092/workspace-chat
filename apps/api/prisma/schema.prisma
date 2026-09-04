@@ -96,11 +96,13 @@ model User {
   deletedAt DateTime? @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
-  memberships    Membership[]
-  channelMembers ChannelMember[]
-  recoveryCodes  RecoveryCode[]
+  memberships   Membership[]
+  recoveryCodes RecoveryCode[]
+
+  /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
+  /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
 }
 
 /// パスワードを忘れたときの唯一の復旧手段（F-37）。
@@ -178,8 +180,13 @@ model Membership {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  /// **この行が消えると、その利用者のチャンネル参加もすべて消える。**
+  /// キック・退出が全チャンネルからの離脱になることを、DB が担保する。
+  channelMembers ChannelMember[]
+
   /// 同じ利用者が同じワークスペースに二重に参加しないこと。
-  /// この索引は「そのワークスペースの参加者一覧」の取得にも効く。
+  /// この索引は「そのワークスペースの参加者一覧」の取得にも効き、
+  /// `ChannelMember` の複合外部キーの参照先にもなる。
   @@unique([workspaceId, userId])
   /// 「その利用者が所属するワークスペースの一覧」（サイドバーの切替）に効く。
   @@index([userId])
@@ -240,11 +247,20 @@ model Channel {
 
   /// 同じ基底名の中での通し番号。**一度アーカイブされた行が持つ。**
   /// 復元しても外れないため、**現役の行が持っていることもある**（上の説明を参照）。
-  /// 次の番号は `MAX(archiveSequence) + 1`（同一ワークスペース・同一 baseName）で求める。
+  ///
+  /// 次の番号は「**その基底名で、名前がまだ空いている最小の番号**」とする。
+  /// **`MAX(archiveSequence) + 1` にしてはならない。** チャンネル名に制限は無いため、
+  /// 利用者が自分で `general-1` を作れる。その状態で `general` をアーカイブすると
+  /// MAX + 1 は 1 を選び、**名前が衝突してアーカイブ自体が失敗する。**
+  /// 改名の機能は無いため、そのチャンネルは**永久にアーカイブできない**（F-35 は Must）。
+  ///
+  /// 並行してアーカイブすると2つの操作が同じ番号を選びうる。
+  /// **一意制約違反を捕まえて番号を進め、やり直すこと。**
+  /// 番号を採る問い合わせの形は apps/api/src/prisma-schema.test.ts が持つ。
   archiveSequence Int?
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   members   ChannelMember[]
@@ -262,6 +278,10 @@ model Channel {
   /// B-tree であり、「チャンネル一覧をワークスペース単位で引く」問い合わせにそのまま使える。
   /// 単独の索引は問い合わせ能力を1つも足さず、書き込みのたびの索引更新と容量だけを増やす。
   @@unique([workspaceId, name])
+  /// **一意性のためではない。** id は主キーであり、これだけで一意である。
+  /// `ChannelMember` の複合外部キー `(channelId, workspaceId)` の**参照先として要る**
+  /// （PostgreSQL は一意制約の無い列の組を外部キーの参照先にできない）。
+  @@unique([id, workspaceId])
 }
 
 /// チャンネルへの参加（第2層）。
@@ -273,6 +293,30 @@ model Channel {
 /// オーナーであっても、この表に行が無ければプライベートチャンネルの中身は見えない
 /// （要件定義書 3.5.1 / 4.4）。**オーナーの権限は人の出入りの管理であって、
 /// 会話の閲覧ではない。**
+///
+/// ## 参照先は User ではなく Membership である
+///
+/// **チャンネル参加は、ワークスペース参加の上にしか成り立たない。**
+/// `userId` から `User` を直接参照すると、**ワークスペースからキック・退出した
+/// 利用者の行がこの表に残り続ける。** この表だけで可視性を判定する実装がそれを拾えば、
+/// **キックされた利用者がプライベートチャンネルを読み続けられる**
+/// （機能一覧 2.2 の受け入れ条件「所属していた全チャンネルから自動的に外れる」
+/// 「そのワークスペースのデータに一切アクセスできなくなる」が成立しない）。
+///
+/// そこで `workspaceId` を持たせ、`(workspaceId, userId)` で `Membership` を参照する。
+/// **キック・退出（Membership の削除）が、そのまま全チャンネルからの離脱になる。**
+/// 同時に、**ワークスペース外の利用者をプライベートチャンネルに招待できなくなる**
+/// （機能一覧 2.2）。どちらもアプリ側の実装ではなく DB が担保する。
+///
+/// 代償: 列が1つ増え、`Channel` に `@@unique([id, workspaceId])` が要る
+/// （複合外部キーの参照先には一意制約が要る）。主キーがある以上この索引は
+/// 一意性の役には立たず、**参照先として使うためだけに存在する。**
+///
+/// 代償（削除の扱い）: **この表と `Membership` は物理削除である。**
+/// 退出・キックの履歴は残らず、**「いつ誰が抜けたか」を後から追えない。**
+/// 論理削除にすれば追えるが、可視性の判定すべてに「抜けていないこと」の条件が増え、
+/// **1箇所でも書き漏らすと、抜けた利用者に見え続ける。** 追跡可能性より、
+/// 判定を単純に保つことを採った（機能一覧 2.2）。
 model ChannelMember {
   /// 複合主キー（channelId, userId）にせず、UUIDv7 の代理キーを置く。
   /// 主キーの形を全モデルでそろえるためであり、
@@ -280,12 +324,23 @@ model ChannelMember {
   id String @id @default(uuid(7)) @db.Uuid
 
   channelId String @db.Uuid
-  userId    String @db.Uuid
+
+  /// チャンネルが属するワークスペース。**channelId から導けるが、あえて持つ。**
+  /// 下の2本の複合外部キーの両方に要るためであり、
+  /// 食い違いは `ChannelMember_channelId_workspaceId_fkey` が拒否する。
+  workspaceId String @db.Uuid
+
+  userId String @db.Uuid
 
   joinedAt DateTime @default(now()) @db.Timestamptz(3)
 
-  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// チャンネルとワークスペースの組が実在すること。**食い違いを許さない。**
+  channel Channel @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  /// **その利用者がそのワークスペースに参加していること。**
+  /// User を直接参照しない。参照先を Membership にすることで、
+  /// キック・退出がこの表まで連鎖する。
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
 
   /// 二重参加を防ぐ。この索引は「そのチャンネルの参加者一覧」にも効く。
   @@unique([channelId, userId])

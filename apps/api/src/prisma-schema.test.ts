@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -133,9 +134,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
         ('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000a1', 'general', 'general', 'PUBLIC'),
         ('00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', 'secret',  'secret',  'PRIVATE');
 
-      INSERT INTO "ChannelMember" ("id", "channelId", "userId") VALUES
-        ('00000000-0000-7000-8000-0000000000d1', '00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-000000000002'),
-        ('00000000-0000-7000-8000-0000000000d2', '00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-000000000002');
+      INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId") VALUES
+        ('00000000-0000-7000-8000-0000000000d1', '00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002'),
+        ('00000000-0000-7000-8000-0000000000d2', '00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002');
     `);
     // 20 分。初回はイメージの取得が入る。
   }, 1_200_000);
@@ -247,8 +248,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
 
     it('同じチャンネルに同じ利用者を二重に参加させられない', async () => {
       const output = await expectSqlToFail(
-        `INSERT INTO "ChannelMember" ("id", "channelId", "userId")
-         VALUES ('00000000-0000-7000-8000-0000000000fb', '00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-000000000002');`,
+        `INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+         VALUES ('00000000-0000-7000-8000-0000000000fb', '00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002');`,
       );
       expect(output).toContain('ChannelMember_channelId_userId_key');
     });
@@ -296,21 +297,118 @@ describe('Prisma のスキーマとマイグレーション', () => {
     });
   });
 
+  describe('ワークスペース参加との整合', () => {
+    /**
+     * **チャンネル参加は、ワークスペース参加の上にしか成り立たない。**
+     *
+     * `ChannelMember` を可視性の根拠にする以上、ワークスペースから外れた利用者の行が
+     * 残ってはならない。残ると、**キックされた利用者がプライベートチャンネルを
+     * 読み続けられる**（機能一覧 2.2「所属していた全チャンネルから自動的に外れる」
+     * 「そのワークスペースのデータに一切アクセスできなくなる」）。
+     *
+     * アプリ側の実装に委ねず、複合外部キーで DB に守らせる。
+     */
+
+    /** このブロック専用のワークスペースと利用者を作る。他のテストの行を触らない。 */
+    async function createWorkspaceWithMember(): Promise<{
+      workspaceId: string;
+      userId: string;
+      channelId: string;
+    }> {
+      const workspaceId = randomUUID();
+      const userId = randomUUID();
+      const channelId = randomUUID();
+      const name = `ch-${channelId.slice(0, 8)}`;
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${userId}', 'u-${userId.slice(0, 8)}', '検査用', 'argon2id-placeholder');
+        INSERT INTO "Workspace" ("id", "name") VALUES ('${workspaceId}', '検査用ワークスペース');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${workspaceId}', '${userId}', 'OWNER');
+        INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
+          VALUES ('${channelId}', '${workspaceId}', '${name}', '${name}', 'PRIVATE');
+      `);
+      return { workspaceId, userId, channelId };
+    }
+
+    it('ワークスペースに参加していない利用者はチャンネルに参加できない', async () => {
+      // 機能一覧 2.2「プライベートチャンネルへの招待で、ワークスペース外の利用者は
+      // 指定できない」を、DB が受け入れない形にする。
+      const { workspaceId, channelId } = await createWorkspaceWithMember();
+      const outsiderId = randomUUID();
+      await expectSqlToSucceed(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+         VALUES ('${outsiderId}', 'u-${outsiderId.slice(0, 8)}', 'よその人', 'argon2id-placeholder');`,
+      );
+      const output = await expectSqlToFail(
+        `INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+         VALUES ('${randomUUID()}', '${channelId}', '${workspaceId}', '${outsiderId}');`,
+      );
+      expect(output).toContain('ChannelMember_workspaceId_userId_fkey');
+    });
+
+    it('ワークスペースからキックすると、チャンネル参加も消える', async () => {
+      const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
+      await expectSqlToSucceed(
+        `INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+         VALUES ('${randomUUID()}', '${channelId}', '${workspaceId}', '${userId}');`,
+      );
+      // キック・退出は Membership の削除である。
+      await expectSqlToSucceed(
+        `DELETE FROM "Membership" WHERE "workspaceId" = '${workspaceId}' AND "userId" = '${userId}';`,
+      );
+      const remaining = await expectSqlToSucceed(
+        `SELECT count(*) FROM "ChannelMember" WHERE "userId" = '${userId}';`,
+      );
+      expect(remaining).toBe('0');
+    });
+
+    it('チャンネルと食い違うワークスペースの組み合わせは入れられない', async () => {
+      // workspaceId を持たせた以上、**チャンネルの所属と食い違う値**を入れられては
+      // 意味がない。食い違うと、上のキックの連鎖が別のワークスペースに向かう。
+      const first = await createWorkspaceWithMember();
+      const second = await createWorkspaceWithMember();
+      const output = await expectSqlToFail(
+        `INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+         VALUES ('${randomUUID()}', '${first.channelId}', '${second.workspaceId}', '${second.userId}');`,
+      );
+      expect(output).toContain('ChannelMember_channelId_workspaceId_fkey');
+    });
+  });
+
   describe('チャンネルのアーカイブと名前の採番', () => {
+    const workspace = '00000000-0000-7000-8000-0000000000a1';
+
+    /**
+     * このブロック専用のチャンネルを作る。
+     *
+     * **各テストが自分の行だけを触る。** 直前の `it` の副作用に頼ると、
+     * `.only` や `-t` で1件だけ走らせたときに、投入されていない行を参照して落ちる。
+     * **落ちた原因がスキーマなのか実行順なのかを、失敗した人が区別できない。**
+     */
+    async function createChannel(name: string): Promise<string> {
+      const id = randomUUID();
+      await expectSqlToSucceed(
+        `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
+         VALUES ('${id}', '${workspace}', '${name}', '${name}', 'PUBLIC');`,
+      );
+      return id;
+    }
+
     it('採番せずにアーカイブできない', async () => {
       // **改名がアーカイブと不可分であることを、DB の検査制約で担保する。**
       // アプリ側の実装に委ねると、片方だけ実行した状態が作れてしまう。
+      const id = await createChannel('arch-a');
       const output = await expectSqlToFail(
-        `UPDATE "Channel" SET "archivedAt" = now()
-         WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
+        `UPDATE "Channel" SET "archivedAt" = now() WHERE "id" = '${id}';`,
       );
       expect(output).toContain('Channel_archive_naming_check');
     });
 
     it('改名せずにアーカイブできない', async () => {
+      const id = await createChannel('arch-b');
       const output = await expectSqlToFail(
-        `UPDATE "Channel" SET "archivedAt" = now(), "archiveSequence" = 1
-         WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
+        `UPDATE "Channel" SET "archivedAt" = now(), "archiveSequence" = 1 WHERE "id" = '${id}';`,
       );
       expect(output).toContain('Channel_archive_naming_check');
     });
@@ -319,24 +417,22 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 「アーカイブしていないのに採番できない」ではない。
       // **復元した行は、現役のまま採番を持ち続ける。** 禁じているのは
       // 採番と名前が食い違うことであって、現役の行が採番を持つことではない。
+      const id = await createChannel('arch-c');
       const output = await expectSqlToFail(
-        `UPDATE "Channel" SET "archiveSequence" = 1
-         WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
+        `UPDATE "Channel" SET "archiveSequence" = 1 WHERE "id" = '${id}';`,
       );
       expect(output).toContain('Channel_archive_naming_check');
     });
 
     it('アーカイブと採番と改名を同時に行えば通り、同じ名前で作り直せる', async () => {
+      const id = await createChannel('arch-d');
       await expectSqlToSucceed(
         `UPDATE "Channel"
          SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
-         WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
+         WHERE "id" = '${id}';`,
       );
-      // アーカイブ済みの名前は general-1 になったので、general が空く。
-      await expectSqlToSucceed(
-        `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
-         VALUES ('00000000-0000-7000-8000-0000000000c3', '00000000-0000-7000-8000-0000000000a1', 'general', 'general', 'PUBLIC');`,
-      );
+      // アーカイブ済みの名前は arch-d-1 になったので、arch-d が空く。
+      await createChannel('arch-d');
     });
 
     it('復元しても名前と採番が保たれる', async () => {
@@ -344,40 +440,86 @@ describe('Prisma のスキーマとマイグレーション', () => {
       //
       // 検査制約を archivedAt で場合分けすると、復元が
       // 「採番を外して名前を baseName に戻すこと」まで要求してしまい、
-      // **上で作り直した general と衝突して復元そのものができなくなる。**
+      // **作り直した同名のチャンネルと衝突して復元そのものができなくなる。**
       // このテストが無いと、その矛盾が誰にも見えないまま土台に残る。
+      const id = await createChannel('arch-e');
       await expectSqlToSucceed(
-        `UPDATE "Channel" SET "archivedAt" = NULL
-         WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
+        `UPDATE "Channel"
+         SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
+         WHERE "id" = '${id}';`,
       );
+      await createChannel('arch-e');
+
+      await expectSqlToSucceed(`UPDATE "Channel" SET "archivedAt" = NULL WHERE "id" = '${id}';`);
       const output = await expectSqlToSucceed(
         `SELECT "name" || ':' || "baseName" || ':' || "archiveSequence"
-         FROM "Channel" WHERE "id" = '00000000-0000-7000-8000-0000000000c1';`,
+         FROM "Channel" WHERE "id" = '${id}';`,
       );
-      expect(output).toBe('general-1:general:1');
+      expect(output).toBe('arch-e-1:arch-e:1');
     });
 
     it('同じ基底名に同じ採番を二度使えない', async () => {
+      const first = await createChannel('arch-f');
       await expectSqlToSucceed(
         `UPDATE "Channel"
-         SET "archivedAt" = now(), "archiveSequence" = 2, "name" = "baseName" || '-2'
-         WHERE "id" = '00000000-0000-7000-8000-0000000000c3';`,
+         SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
+         WHERE "id" = '${first}';`,
       );
-      await expectSqlToSucceed(
-        `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
-         VALUES ('00000000-0000-7000-8000-0000000000c4', '00000000-0000-7000-8000-0000000000a1', 'general', 'general', 'PUBLIC');`,
-      );
-      // 2 は general-2 が使っている。
+      const second = await createChannel('arch-f');
+      // 1 は arch-f-1 が使っている。
       //
       // **採番そのものに一意制約は置いていない。** 検査制約により
-      // アーカイブ済みの名前は `baseName-<採番>` に決まるため、
+      // 名前は `baseName-<採番>` に決まるため、
       // **採番が重複すれば名前が必ず重複する。** 名前の一意制約が同じことを担保する。
       const output = await expectSqlToFail(
         `UPDATE "Channel"
-         SET "archivedAt" = now(), "archiveSequence" = 2, "name" = "baseName" || '-2'
-         WHERE "id" = '00000000-0000-7000-8000-0000000000c4';`,
+         SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
+         WHERE "id" = '${second}';`,
       );
       expect(output).toContain('Channel_workspaceId_name_key');
+    });
+
+    /**
+     * 次の採番を求める問い合わせ。
+     *
+     * **「MAX(archiveSequence) + 1」ではない。** チャンネル名に制限は無いため、
+     * 利用者が自分で `arch-g-1` という名前を付けられる。その状態で `arch-g` を
+     * アーカイブすると、MAX + 1 では 1 を選び、**名前が衝突してアーカイブ自体が失敗する。**
+     * 改名の機能は無いため、そのチャンネルは**永久にアーカイブできない**状態になる。
+     * F-35 は Must であり、これは受け入れられない。
+     *
+     * よって「**その基底名で、名前がまだ空いている最小の番号**」と定義する。
+     * 探索の上限をワークスペース内のチャンネル数 + 1 に取れるのは、
+     * **N 件のチャンネルが塞げる名前は高々 N 個**だからである。
+     */
+    function nextArchiveSequence(baseName: string): string {
+      return `
+        SELECT COALESCE(MIN(s.n), 1)
+        FROM generate_series(
+          1,
+          (SELECT count(*) + 1 FROM "Channel" WHERE "workspaceId" = '${workspace}')
+        ) AS s(n)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM "Channel" c
+          WHERE c."workspaceId" = '${workspace}'
+            AND c."name" = '${baseName}' || '-' || s.n
+        );
+      `;
+    }
+
+    it('利用者が先に「基底名-1」を作っていても、アーカイブできる', async () => {
+      const id = await createChannel('arch-g');
+      // **利用者が自分で付けられる名前である。** 禁止していない。
+      await createChannel('arch-g-1');
+
+      const next = await expectSqlToSucceed(nextArchiveSequence('arch-g'));
+      expect(next).toBe('2');
+
+      await expectSqlToSucceed(
+        `UPDATE "Channel"
+         SET "archivedAt" = now(), "archiveSequence" = ${next}, "name" = "baseName" || '-${next}'
+         WHERE "id" = '${id}';`,
+      );
     });
   });
 

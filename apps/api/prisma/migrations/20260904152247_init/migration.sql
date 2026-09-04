@@ -70,6 +70,7 @@ CREATE TABLE "Channel" (
 CREATE TABLE "ChannelMember" (
     "id" UUID NOT NULL,
     "channelId" UUID NOT NULL,
+    "workspaceId" UUID NOT NULL,
     "userId" UUID NOT NULL,
     "joinedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -92,6 +93,9 @@ CREATE UNIQUE INDEX "Membership_workspaceId_userId_key" ON "Membership"("workspa
 CREATE UNIQUE INDEX "Channel_workspaceId_name_key" ON "Channel"("workspaceId", "name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Channel_id_workspaceId_key" ON "Channel"("id", "workspaceId");
+
+-- CreateIndex
 CREATE INDEX "ChannelMember_userId_idx" ON "ChannelMember"("userId");
 
 -- CreateIndex
@@ -110,10 +114,10 @@ ALTER TABLE "Membership" ADD CONSTRAINT "Membership_userId_fkey" FOREIGN KEY ("u
 ALTER TABLE "Channel" ADD CONSTRAINT "Channel_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ChannelMember" ADD CONSTRAINT "ChannelMember_channelId_fkey" FOREIGN KEY ("channelId") REFERENCES "Channel"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ChannelMember" ADD CONSTRAINT "ChannelMember_channelId_workspaceId_fkey" FOREIGN KEY ("channelId", "workspaceId") REFERENCES "Channel"("id", "workspaceId") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ChannelMember" ADD CONSTRAINT "ChannelMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ChannelMember" ADD CONSTRAINT "ChannelMember_workspaceId_userId_fkey" FOREIGN KEY ("workspaceId", "userId") REFERENCES "Membership"("workspaceId", "userId") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- ============================================================================
 -- ここから下は Prisma のスキーマ言語で表せない制約である。
