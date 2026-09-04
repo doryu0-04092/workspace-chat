@@ -14,9 +14,12 @@ on:
 
 # 同じ PR に連続で push した場合、古い実行を打ち切る。レビューの指摘に
 # 対応する過程では push が続くため、打ち切らないと古い実行が走り続ける。
+#
+# 打ち切るのは PR のときだけにする。main への push で打ち切ると、
+# どの版が検査を通ったのかの記録が欠ける。
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ジョブ名は docs.yml と重ねない。ブランチ保護の必須チェックは
@@ -54,7 +57,6 @@ jobs:
         run: npm run build
 
       - name: テスト（Vitest）
-        id: test
         run: npm test
 
       # テストが失敗したときこそ残す。CI を実行した事実と結果を成果物として残すのが目的。

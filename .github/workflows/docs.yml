@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+# ci.yml と同じ理由。連続で push したとき古い実行を打ち切る。
+# 打ち切るのは PR のときだけにする。main への push で打ち切ると、
+# どの版が検査を通ったのかの記録が欠ける。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # ジョブ名は ci.yml と重ねない。ブランチ保護の必須チェックはジョブ名で
   # 指定するため、同名だとどちらを指しているか区別できない。
