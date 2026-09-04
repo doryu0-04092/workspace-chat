@@ -64,7 +64,9 @@ Slack 風のチャットアプリケーション。スクール課題として�
 
 ## 開発の始め方
 
-Node.js 24 が要る（`package.json` の `engines` で強制している）。
+**Node.js 24 が要る。** `package.json` の `engines` に加えて `.npmrc` で
+`engine-strict=true` を設定しているため、**合わない Node ではインストールが止まる**
+（既定では警告が出るだけで通ってしまう）。
 
 ```
 npm ci          依存を入れる（package-lock.json のとおりに入る）
@@ -84,10 +86,19 @@ npm test
 
 ### 動かす
 
+**先に `npm run build` を1度通す。** `packages/shared` は `dist/` を公開しており、
+`dist/` は追跡していない。組んでいない状態で起動すると
+`@workspace-chat/shared` が解決できずに落ちる。
+
 | 対象 | 手順 |
 |---|---|
 | フロントエンド | `npm run dev -w @workspace-chat/web` |
 | バックエンド | **端末を2つ使う。** 片方で `npm run build:watch -w @workspace-chat/api`、もう片方で `npm run dev -w @workspace-chat/api` |
+
+**`packages/shared` を編集したら `npm run build -w @workspace-chat/shared` を実行する。**
+api の `build:watch` が見ているのは api の `src` だけで、
+**共有パッケージを直しても api も web も古い `dist` を読み続ける。**
+「直したはずの型が反映されない」の原因はたいていこれである。
 
 バックエンドが2端末なのは、**ビルドと実行を分けているため**である。
 NestJS 11 は CommonJS で、TypeScript をそのまま実行しない。
