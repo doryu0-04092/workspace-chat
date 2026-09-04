@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# このファイルは実行せず、他のスクリプトから読み込む（shebang を持たない）。
 # 検査の対象範囲。check-docs.sh と check-docs.test.sh の両方が読む。
 #
 # なぜ1箇所に置くか。片方だけに書くと「本物の検査が見ている範囲」と
@@ -29,7 +31,7 @@ DOC_PRUNE_DIRS=(
   .git
   node_modules .pnp
   dist build .vite
-  coverage .nyc_output playwright-report test-results blob-report
+  coverage .nyc_output playwright-report test-results blob-report reports
   generated
   uploads tmp
   .terraform

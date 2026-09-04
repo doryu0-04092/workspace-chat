@@ -1,0 +1,9 @@
+# 改行コードを LF に固定する。
+#
+# scripts/*.sh は ubuntu のランナーで bash が実行する。CRLF が混ざると
+# `$'\r': command not found` で落ちるが、原因が改行だと分かるまで時間がかかる。
+# Prettier は .sh を扱えず、ESLint と tsc は改行を見ないため、
+# git 側で固定しない限り誰も止められない。
+#
+# eol=lf は core.autocrlf より優先される。Windows でも作業ツリーが LF になる。
+* text=auto eol=lf

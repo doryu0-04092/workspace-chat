@@ -119,6 +119,10 @@ WebSocket のイベント定義（7種類）をフロントとバックで二重
 - メッセージは日本語。形式: `<種別>: <変更内容の要約>`
 - 種別: `feat` / `fix` / `docs` / `test` / `chore` / `refactor`
 
+**Dependabot が作るコミットは英語になる**（`chore: bump X from 1.0 to 1.1`）。
+人が書くものではないため、この規約の対象外とする。
+**メッセージを日本語にするために自動更新を止める、という順序にはしない。**
+
 ## 禁止事項
 
 - `.env` の値をコミット・出力しない（存在と変数名までに留める）
@@ -136,5 +140,9 @@ WebSocket のイベント定義（7種類）をフロントとバックで二重
 | 要件定義 | **完了**（2026-09-04。総点検の指摘22件への対応を反映済み） |
 | **AI コードレビューの観点** | **完了**（[REVIEW.md](REVIEW.md)） |
 | **AI コードレビューの設定** | **完了**（[claude_code_review.yml](.github/workflows/claude_code_review.yml)。導入手順と制約は [README](README.md)） |
-| CI の構築 | **未着手**（次の作業） |
+| **ドキュメント検査の CI** | **完了**（[docs.yml](.github/workflows/docs.yml)。検査そのものの検査を28通り含む） |
+| lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
+| 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml) と [dependabot.yml](.github/dependabot.yml)） |
+| プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
+| 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
 | 実装 | 未着手 |

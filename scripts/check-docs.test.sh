@@ -10,8 +10,9 @@
 # 方針: 文書一式を一時ディレクトリに複製し、1箇所ずつ壊して exit 1 になることを見る。
 # 元のリポジトリは書き換えない。
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 # 対象範囲の定義は check-docs.sh と共有する
+# shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh
 repo=$(pwd)
 
@@ -45,7 +46,7 @@ probe=$(mktemp -d)
 # ただし直接書くだけでは「足したのに効いていない」（綴り間違い等）を検出できないため、
 # 木を作る前に集合として一致することを確かめる。
 probe_dirs=(.git node_modules .pnp dist build .vite coverage .nyc_output
-            playwright-report test-results blob-report generated uploads tmp
+            playwright-report test-results blob-report reports generated uploads tmp
             .terraform .vscode .idea)
 probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars')
 probe_keep_files=('.env.example')

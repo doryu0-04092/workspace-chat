@@ -1,0 +1,63 @@
+# 依存の更新を継続的に受け取る。
+# 要件定義書 4.3 が「npm audit と Dependabot を CI で継続的に実行する」と定めている。
+version: 2
+updates:
+  # npm。ワークスペースはルートの package.json / package-lock.json が束ねるため、
+  # ディレクトリはルートだけでよい。
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # メジャー更新を止めるのは、tech-stack.md が**理由を書いて版を選んでいるものだけ**。
+    # 自動 PR で上がると、その決定が記録の無いまま崩れる。
+    # 移行は文書を直す作業と一体で行う。
+    #
+    # すべてを止めない理由: メジャー版でしか修正されない脆弱性が出たとき、
+    # Dependabot が PR を出さない一方で audit.yml は落ち続け、
+    # **自動で直す経路が無いままマージが塞がる。**
+    ignore:
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'vite'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react-dom'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'tailwindcss'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@tailwindcss/*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@nestjs/*'
+        update-types: ['version-update:semver-major']
+    # 開発用の依存はまとめて1つの PR にする。個別に来るとレビューの回数が増え、
+    # 1件あたりに向ける注意が薄くなる。
+    #
+    # 代償: **1件でも CI を落とす更新が混ざると、そのグループ全体が止まる。**
+    # 個別に来ていれば他は通っていた。止まったときは、原因の1件を ignore に
+    # 足すのではなく、まずその1件が落ちる理由を確かめる。
+    groups:
+      development:
+        dependency-type: development
+      production:
+        dependency-type: production
+    commit-message:
+      prefix: 'chore'
+
+  # GitHub Actions。この PR で checkout などが Node 20 ランタイムのまま
+  # 取り残されていたのを、レビューに指摘されて気づいた。機械に見張らせる。
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    # npm 側と同じ理由でまとめる。個別に来るとレビューの回数が増える。
+    groups:
+      actions:
+        patterns: ['*']
+    # こちらはメジャーも受け取る。アクションのメジャーは
+    # ランタイム（Node 20 → 24）の移行を含み、放置すると非推奨のまま残る。
+    # この PR で実際にそうなっていた。
+    commit-message:
+      prefix: 'chore'
