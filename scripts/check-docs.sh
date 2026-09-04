@@ -4,6 +4,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 # 対象範囲の定義は check-docs.test.sh と共有する（scripts/doc-scope.sh）
+# shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh
 
 fail=0

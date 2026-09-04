@@ -25,6 +25,11 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+      # スクリプト自身の静的検査。150行を超える bash が CI の土台になっており、
+      # ここが壊れると検査そのものが止まる。shellcheck は ubuntu のランナーに
+      # 既定で入っているため、依存は増えない。
+      - name: シェルスクリプトの検査
+        run: shellcheck scripts/*.sh
       - name: ドキュメントの検査
         run: bash scripts/check-docs.sh
       # 検査が「落ちるべきときに落ちる」ことを確かめる。

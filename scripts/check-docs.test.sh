@@ -12,6 +12,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 # 対象範囲の定義は check-docs.sh と共有する
+# shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh
 repo=$(pwd)
 

@@ -94,7 +94,13 @@ npm run typecheck
 npm run build
 npm test
 npm audit --audit-level=high
+shellcheck scripts/*.sh
+bash scripts/check-docs.sh
+bash scripts/check-docs.test.sh
 ```
+
+（`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
+この1行だけ飛ばす）
 
 このほかに CI は次を回す。
 
