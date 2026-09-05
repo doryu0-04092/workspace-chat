@@ -885,8 +885,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `;
     }
 
-    // beforeAll が入れているプライベートチャンネル。参加者は insider だけである。
+    // beforeAll が入れているチャンネル。どちらも参加者は insider だけである。
     const secretChannel = '00000000-0000-7000-8000-0000000000c2';
+    const publicChannel = '00000000-0000-7000-8000-0000000000c1';
 
     it('参加者は、そのチャンネルの参加者一覧を取得できる', async () => {
       const output = await expectSqlToSucceed(channelMemberViewers(insider, secretChannel));
@@ -909,6 +910,23 @@ describe('Prisma のスキーマとマイグレーション', () => {
     it('ワークスペースの外の利用者は、参加者一覧を取得できない', async () => {
       const output = await expectSqlToSucceed(channelMemberViewers(stranger, secretChannel));
       expect(output).toBe('');
+    });
+
+    it('パブリックチャンネルでも、参加していないメンバーは参加者一覧を取得できない', async () => {
+      // **この条件は `visibility` を見ない**（機能一覧 3.1 の但し書き）。
+      // 決まっていなかったことを**閉じる側に倒した**記録であり、
+      // 開ける側は機能を1つ増やすため、提案と承認の手順が要る。
+      //
+      // **この it が無いと、後から `c."visibility" = 'PUBLIC' OR` を足して
+      // 緩めても1件も落ちない。** 承認を経ない変更が静かに通るのを防ぐ。
+      const output = await expectSqlToSucceed(channelMemberViewers(outsider, publicChannel));
+      expect(output).toBe('');
+    });
+
+    it('パブリックチャンネルの参加者は、参加者一覧を取得できる', async () => {
+      // 上の it だけだと、**パブリックを一律で閉じる実装でも緑になる。**
+      const output = await expectSqlToSucceed(channelMemberViewers(insider, publicChannel));
+      expect(output).toBe(publicChannel);
     });
   });
 });
