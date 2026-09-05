@@ -354,24 +354,40 @@ SELECT rolname FROM pg_authid WHERE oid = 10;
 **止まったままでは繋がらない**（`service "db" is not running`。実行して確認した）。
 **どちらの状態にいるかで手が違う。**
 
-**コンテナが残っている場合**（上で `docker stop` しただけ）。**先に `.env` を書き戻す。**
+**分かれ目はコンテナの有無ではなく、書き戻す値が作成時と同じかどうかである。**
 
-```
-docker start workspace-chat-db-1
-```
+**値を変えるなら、コンテナが残っていても `docker start` を使わない。**
+`docker start` は**コンテナを作り直さないので、中の環境変数は作成時のまま**である。
+下の復旧手順は `$POSTGRES_USER` / `$POSTGRES_DB` を**コンテナの中で**展開するため、
+**`.env` を直しても古い値のまま実行される。**
 
-`docker start` は compose を通らないので `.env` が無くても動くが、
-**この先の `docker compose exec` は止まる**（後述）。書き戻しはここで済ませる。
+> **実行して確認した。** `.env` を `olduser` から `newuser` に書き換えて `docker start` したところ、
+> コンテナの中は `POSTGRES_USER=olduser` のままで、**ヘルスチェックは終始 `healthy` だった。**
+> その状態で利用者名の改名を叩くと、`ALTER ROLE "olduser" RENAME TO "olduser"` になり
+> **`ERROR: role "olduser" already exists` で落ちる。**
+> `.env` を直したのに何も変わらず、**赤にもならない。**
+> これは本書がずっと潰してきた「ずれが緑のまま隠れる」形そのものである。
 
-**コンテナを失っている場合**（`docker rm -f` を通った。この節の本来の前提）。
-`docker start` は `Error: No such container` になる。**先に `.env` を書き戻してから**作り直す。
+**値を変える場合**（3つのどれかを別の値にする。復旧手順を踏むのはこの場合である）。
+**`.env` を書き戻してから作り直す。**
 
 ```
 docker compose up -d
 ```
 
+**値は作成時と同じで、ただ止めただけの場合**（`docker stop` しただけで `.env` も変えていない）。
+このときだけ `docker start` でよい。
+
+```
+docker start workspace-chat-db-1
+```
+
+**コンテナを失っている場合**（`docker rm -f` を通った。この節の本来の前提）は
+`docker start` が `Error: No such container` になる。上の `docker compose up -d` に進む。
+
 **`.env` が無いと `up` も止まる**（`${VAR:?...}` は compose の読み込み時に評価されるため、
-`build` / `down` / `ps` と同じく止まる）。**書き戻すのは、これから使いたい新しい値でよい。**
+`build` / `down` / `ps` と同じく止まる）。
+**`docker compose up -d` に書き戻すのは、これから使いたい新しい値でよい。**
 引いた古い値は `.env` ではなく、下の手順の `<古い名前>` に使う。
 
 **`docker compose up -d` の側は `--wait` を付けない。** 作り直したコンテナには
