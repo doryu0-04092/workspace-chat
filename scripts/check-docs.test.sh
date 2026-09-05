@@ -162,6 +162,12 @@ fi
 # 0c が保証するのは「リポジトリの .gitignore がどうなっているか」だけである。
 # これは意図した限定である。守りたいのは「このリポジトリを clone した誰の手元でも
 # 値がコミットされないこと」であり、個人の環境設定はその保証に数えられない。
+#
+# 代償 3: 追跡ファイルの走査は、決め打ちの一覧を流す確認（下の gi_probe_*）でしか
+# 落ちる条件を持たない。実物の git ls-files から -z を外す崩し方は、それだけでは
+# 検出できない（検出するには非 ASCII 名の追跡ファイルを実際に置く必要があり、
+# 値を持つ名前をリポジトリに置くことになるため採らない）。
+# 守れているのは「読み取り・basename・KEEP の差し引き」までである。
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
@@ -179,9 +185,12 @@ gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無�
   return 0
 }
 # 現実の綴りは 0a と同じ一覧を見る（手で書き写すと、片方に足したとき
-# もう片方の見る範囲が静かに狭くなる）。.env は probe_prune_files に
-# パターンとして載っており導出名と同じ文字列になるため、ここだけ実名で足す。
-gi_ignored=(.env "${probe_real_names[@]}")
+# もう片方の見る範囲が静かに狭くなる）。
+# .env はここに直書きしない。probe_prune_files の '.env' は `*` を含まないため、
+# 下の導出（${g//\*/x}）が .env そのものを作る。直書きと導出の両方に置くと、
+# DOC_PRUNE_FILES から .env を外して .gitignore の該当行も併せて外したとき、
+# 導出側は消えるのに直書きだけが残り、根拠を失った NG が出る（KEEP 側と同じ穴）。
+gi_ignored=("${probe_real_names[@]}")
 # 上の実名の列挙だけだと、DOC_PRUNE_FILES にパターンを足して .gitignore に足し忘れた場合に
 # 素通りする（新しい名前がこの一覧に無いため）。0a の
 # 「除外されるはずのファイルは一覧から導出する」と同じ置換で機械的に補う。
@@ -190,8 +199,7 @@ for g in "${probe_prune_files[@]}"; do gi_ignored+=("${g//\*/x}"); done
 # KEEP 由来の名前はここに直書きしない。下の導出だけが持つ形にそろえる。
 # 直書きと導出の両方に置くと、DOC_KEEP_FILES から外して .gitignore の `!` 行も
 # 併せて外したとき、導出側は消えるのに直書きだけが残り、根拠を失った NG が出る。
-# （gi_ignored 側は実名 .env と導出名 .env.x が別の文字列になるため両方に意味があるが、
-#   .env.example は `*` を含まないため導出結果が実名と完全に同一である。）
+# （PRUNE 側の .env も同じ理由で直書きしていない。上を参照。）
 gi_tracked=(README.md "${probe_real_keeps[@]}")
 # KEEP は .gitignore が `!` で追跡対象へ戻しているファイルを写したものである。
 # 実名の列挙だけだと、DOC_KEEP_FILES に足して .gitignore の打ち消し行を足し忘れた場合に
@@ -218,7 +226,6 @@ done
 # 代償: そのぶん 0c は、.terraform/ や uploads/ の配下に追跡ファイルがあっても
 # 何も言わない。0c が保証するのは「値を持つ**ファイル名**が追跡されていないこと」だけである。
 # ディレクトリ側まで見るなら、KEEP に相当する打ち消しの一覧を別に持つことになる。
-gi_committed=()
 # -z で NUL 区切りにする。core.quotePath は既定で有効であり、既定の ls-files は
 # 非 ASCII を含むパスを二重引用符で囲みバックスラッシュでエスケープして出力する。
 # 「本番.tfvars」が追跡されていると "\346\234\254\347\225\252.tfvars" となり、
@@ -226,9 +233,31 @@ gi_committed=()
 # （.gitignore は追跡済みに効かない）そのものが素通りする。
 # この文書もコミットメッセージも日本語であり、その命名は起こりうる。
 # NUL 区切りにすると引用も、パスに改行を含む場合の問題も同時に消える。
-while IFS= read -r -d '' p; do
-  doc_excluded_name "$(basename "$p")" >/dev/null && gi_committed+=("$p")
-done < <(git -C "$repo" ls-files -z)
+#
+# 走査は関数に切り出す。実物を渡す経路と、下の決め打ちを渡す確認が
+# 同じ読み取りを通るようにするため（2箇所に書くと黙ってずれる）。
+gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致したものを改行区切りで返す
+  local p
+  while IFS= read -r -d '' p; do
+    doc_excluded_name "$(basename "$p")" >/dev/null && printf '%s\n' "$p"
+  done
+}
+# 走査そのものに落ちる条件を持たせる。リポジトリに DOC_PRUNE_FILES に一致する
+# 追跡ファイルは1件も無く、実物を流すかぎり結果は常に空である。つまりこのループを
+# 丸ごと削っても、-z を外しても、basename を外しても 28通りすべてが緑で通る。
+# 決め打ちの一覧を同じ関数に流し、読み取り・basename・KEEP の差し引きを同時に見る。
+#   secrets.auto.tfvars.json … ドットを複数含む現実の綴り（*.tfvars.json に一致）
+#   本番.tfvars              … 非 ASCII 名（引用されると一致しなくなる側）
+#   sub/.env                 … basename を外すと .env に一致しなくなる（区切りを踏む）
+#   .env.example / README.md … 一致してはならない側（KEEP と通常のファイル）
+gi_probe_want=$'secrets.auto.tfvars.json\n本番.tfvars\nsub/.env'
+gi_probe_got=$(printf '%s\0' secrets.auto.tfvars.json 本番.tfvars sub/.env .env.example README.md \
+  | gi_scan_tracked)
+if [ "$gi_probe_got" != "$gi_probe_want" ]; then
+  echo "  NG: 追跡ファイルの走査が想定と違う（期待: ${gi_probe_want//$'\n'/ } / 実際: ${gi_probe_got//$'\n'/ }）"
+  gi_ng=1
+fi
+mapfile -t gi_committed < <(git -C "$repo" ls-files -z | gi_scan_tracked)
 if [ ${#gi_committed[@]} -gt 0 ]; then
   echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
   gi_ng=1
