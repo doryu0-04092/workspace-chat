@@ -88,7 +88,9 @@ doc_excluded() { # $1=リンク先のパス。除外なら理由を出力して 
   for d in "${DOC_PRUNE_DIRS[@]}"; do
     case "/$p/" in */"$d"/*) echo "対象外ディレクトリ $d の配下"; return 0 ;; esac
   done
-  g=$(doc_excluded_name "$(basename "$p")") && { echo "対象外のファイル名 $g に一致"; return 0; }
+  # 名前の取り出しに basename は使わない。先頭が - のパスを option と解釈して
+  # 空を返し、除外が黙って外れる（実測: `basename "-x.tfvars"` は終了コード 1）。
+  g=$(doc_excluded_name "${p##*/}") && { echo "対象外のファイル名 $g に一致"; return 0; }
   return 1
 }
 
