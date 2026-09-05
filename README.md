@@ -202,17 +202,18 @@ docker inspect workspace-chat-db-1 --format '{{range .Config.Env}}{{println .}}{
 （公式イメージが作るログイン可能なロールは `POSTGRES_USER` の1つだけで、
 その名前が分からないと繋げないため。後述）が、**単一ユーザーモードは認証を通らない。**
 
+**叩く前に、必ず db を止める。**
+
 ```
-printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg_database WHERE datname NOT IN ('postgres','template0','template1');\n" \
-  | docker run --rm -i -v workspace-chat_db-data:/var/lib/postgresql/data \
-      --user postgres --entrypoint postgres workspace-chat-db:local \
-      --single -D /var/lib/postgresql/data postgres
+docker stop workspace-chat-db-1
 ```
 
-**必ず db を止めてから叩く**（`docker compose down`、または `docker stop workspace-chat-db-1`）。
+**`docker compose down` を使わない。** compose を通るため `.env` を失っている状況では実行できず、
+通る状況でも**コンテナごと消えるので、上の `docker inspect` からの取得経路が同時に失われる。**
+止めるだけでよい。
 
-> **PostgreSQL は拒んでくれない。確かめた。**
-> db を `healthy` のまま動かした状態で上のコマンドを叩いたところ、
+> **止め忘れても PostgreSQL は拒んでくれない。確かめた。**
+> db を `healthy` のまま動かした状態で下のコマンドを叩いたところ、
 > **単一ユーザーモードは何の警告もなく起動し、問い合わせを実行し、
 > 稼働中のデータ領域に対してチェックポイントまで書いた。**
 > 二重起動の検査は `postmaster.pid` に記録された PID の生存確認で行われるが、
@@ -220,6 +221,15 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
 > ロックが stale と判断される。**
 > ここで守ろうとしているのは、その時点で値の唯一の複製であるデータ領域である。
 > **止め忘れると、救うつもりで壊す。**
+
+止めたら叩く。
+
+```
+printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg_database WHERE datname NOT IN ('postgres','template0','template1');\n" \
+  | docker run --rm -i -v workspace-chat_db-data:/var/lib/postgresql/data \
+      --user postgres --entrypoint postgres workspace-chat-db:local \
+      --single -D /var/lib/postgresql/data postgres
+```
 
 出力は起動ログに混ざって `rolname = "<利用者名>"` / `datname = "<データベース名>"` の形で出る。
 
@@ -231,8 +241,13 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
 （実行して確認した。コンテナを `docker rm -f` で消し `.env` も消した状態から、
 ボリュームだけで**利用者名とデータベース名の両方を引けた**）
 
-**ボリュームまで失ったら、そこで終わりである。** 残るのは後述の
-「捨ててよいなら `down -v`」だけになる。
+**ボリュームまで失ったら、そこで終わりである。**
+残るのは `.env.example` から `.env` を作り直し、`up -d --wait` で初期化からやり直すことだけになる。
+**古い値は要らない**（データ領域が空なので初期化処理が走り、`.env` の値がそのまま入る）。
+**データは戻らない。**
+
+**この場合に `down -v` は要らない。** 消す対象がもう無いうえ、
+`.env` を失っているなら `down` 自体が通らない（下記）。
 
 **控えたら、`.env` を作り直す前に `docker compose down` を済ませる。**
 `${VAR:?...}` が評価されるのは compose がファイルを読む時点であり、

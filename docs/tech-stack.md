@@ -247,7 +247,7 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | **React 19.2** | 現行 | 最新パッチは 19.2.8（2026-07）。React 20 の発表なし。19.0 は 2024-12 リリースで十分に枯れている |
 | **Vite 7** | 採用 | Vite 8 は 2026-03 に安定版となったが、内部バンドラを Rolldown / Oxc に刷新している。**プラグイン互換の実績を待つ** |
 | **Tailwind CSS 4** | 安定 | 2025-01 リリース。1年半以上経過 |
-| **PostgreSQL 17** | 採用 | **Amazon RDS でのサポートは 2030-02 まで**。RDS PostgreSQL 18.4 も利用可能（2031-02 まで）だが、**pg_bigm の対応実績を優先して 17 を選ぶ** |
+| **PostgreSQL 17** | 採用 | **Amazon RDS でのサポートは 2030-02 まで**。RDS PostgreSQL 18.4 も利用可能（2031-02 まで）。**pg_bigm は 17 と 18 のどちらにも同梱されており、選定の分かれ目にはならない**（[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html)。確認日 2026-09-05）。17 を採るのは、**ローカルで `CREATE EXTENSION pg_bigm` まで実際に通した構成が 17 だから**である（下記の確認結果）。18 へ寄せるかは技術スタックの変更にあたるため、必要になった時点で別に判断する |
 | **Socket.IO 4** | 安定 | 2021 年から 4.x 系が継続 |
 | **Prisma** | 安定 | メジャーバージョンで管理されている。Drizzle は v1.0.0 が未リリースのため不採用 |
 
