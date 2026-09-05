@@ -202,15 +202,19 @@ docker inspect workspace-chat-db-1 --format '{{range .Config.Env}}{{println .}}{
 （公式イメージが作るログイン可能なロールは `POSTGRES_USER` の1つだけで、
 その名前が分からないと繋げないため。後述）が、**単一ユーザーモードは認証を通らない。**
 
-**叩く前に、必ず db を止める。**
+**コンテナがまだ残っているなら、叩く前に必ず止める。**
 
 ```
 docker stop workspace-chat-db-1
 ```
 
-**`docker compose down` を使わない。** compose を通るため `.env` を失っている状況では実行できず、
-通る状況でも**コンテナごと消えるので、上の `docker inspect` からの取得経路が同時に失われる。**
-止めるだけでよい。
+**`Error: No such container` が出たらそのまま次へ進んでよい。**
+コンテナが無いのがこの手順の前提であり、止めるものが無いだけである。
+（コンテナが残っているなら、まずは上の `docker inspect` のほうが早い）
+
+**残っている場合でも `docker compose down` は使わない。** compose を通るため
+`.env` を失っている状況では実行できず、通る状況でも**コンテナごと消えるので、
+上の `docker inspect` からの取得経路が同時に失われる。** 止めるだけでよい。
 
 > **止め忘れても PostgreSQL は拒んでくれない。確かめた。**
 > db を `healthy` のまま動かした状態で下のコマンドを叩いたところ、
@@ -225,13 +229,19 @@ docker stop workspace-chat-db-1
 止めたら叩く。
 
 ```
-printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg_database WHERE datname NOT IN ('postgres','template0','template1');\n" \
+printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg_database WHERE datname NOT IN ('template0','template1');\n" \
   | docker run --rm -i -v workspace-chat_db-data:/var/lib/postgresql/data \
       --user postgres --entrypoint postgres workspace-chat-db:local \
       --single -D /var/lib/postgresql/data postgres
 ```
 
 出力は起動ログに混ざって `rolname = "<利用者名>"` / `datname = "<データベース名>"` の形で出る。
+
+**`postgres` は必ず出る。** initdb が `POSTGRES_DB` の値によらず作るためである。
+**それが `POSTGRES_DB` の値だった可能性もある**（公式イメージの既定がこの名前であり、
+`.env` に `POSTGRES_DB=postgres` と書けてしまう）。
+**除外していないのはそのためである。** 除外すると、その設定にしていた人には
+**エラーではなく無出力**が返り、「引けなかった」と読み違えて初期化からやり直すことになる。
 
 **組み込みロールは `rolcanlogin` で落ちる**（`pg_` で始まる定義済みロールはすべて `NOLOGIN`）。
 **利用者名を OID で絞ろうとしないこと。** `POSTGRES_USER` は initdb が作る
@@ -298,8 +308,13 @@ docker volume rm workspace-chat_db-data
 **走るのはデータ領域が空のときだけ**である。ボリュームができたあとに `.env` を直しても、
 **DB の中の利用者名・パスワード・データベース名は初回の値のまま変わらない。3つともである。**
 
-**古い値を控えていないなら、ここから先の「消さずに直す」は踏めない**
-（上の「`.env` に触る前に、いまの `POSTGRES_USER` と `POSTGRES_DB` を控える」）。
+**古い値を控えていないなら、先に引く。** ここから先の「消さずに直す」は
+`<古い名前>` を引数に取る。**控えそこねても、引く経路は2つある**（上に書いた）。
+
+**この時点で使えるのは単一ユーザーモードのほうである。**
+`docker inspect` は**そのコンテナが持っている値**を返すので、
+`up` を通してコンテナが作り直された後は**新しい値しか返らない。**
+`up` を通す前に気づいたなら `docker inspect` のほうが早い。
 
 このとき `up -d --wait` は**ヘルスチェックが通らずに失敗する**。
 **3つとも検知する**（パスワードだけずらした場合も含めて実行して確かめた）。
