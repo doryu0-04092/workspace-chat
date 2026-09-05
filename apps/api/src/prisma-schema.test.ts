@@ -155,7 +155,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
 
       INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility") VALUES
         ('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000a1', 'general', 'general', 'PUBLIC'),
-        ('00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', 'secret',  'secret',  'PRIVATE');
+        ('00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', 'secret',  'secret',  'PRIVATE'),
+        -- 第2ワークスペースのチャンネル。**肯定側の固定に使う。**
+        -- これが無いと、第2ワークスペースのオーナーを使う it が
+        -- 「空であること」しか見ず、**前提データが消えても素通りで緑になる。**
+        ('00000000-0000-7000-8000-0000000000c3', '00000000-0000-7000-8000-0000000000a2', 'their-secret', 'their-secret', 'PRIVATE');
 
       INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId") VALUES
         ('00000000-0000-7000-8000-0000000000d1', '00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002'),
@@ -823,6 +827,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
     const stranger = '00000000-0000-7000-8000-000000000004';
     // 第2ワークスペースのオーナー。**第1ワークスペースには参加していない。**
     const otherWorkspaceOwner = '00000000-0000-7000-8000-000000000005';
+    // 第2ワークスペースのプライベートチャンネル。
+    const otherWorkspaceChannel = '00000000-0000-7000-8000-0000000000c3';
 
     it('参加者にはプライベートチャンネルが見える', async () => {
       const output = await expectSqlToSucceed(visibleChannels(insider, workspace));
@@ -934,6 +940,18 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 上の it だけだと、**パブリックを一律で閉じる実装でも緑になる。**
       const output = await expectSqlToSucceed(channelMemberViewers(insider, publicChannel));
       expect(output).toBe(publicChannel);
+    });
+
+    it('第2ワークスペースのオーナーは、自分のワークスペースでは参加者一覧を取得できる', async () => {
+      // **下の2件（空を期待する側）と対になる肯定側の固定である。**
+      // これが無いと、`b4` の `Membership` が落ちても UUID が1文字ずれても、
+      // 下の2件は空を返して**緑のまま**になり、
+      // 「所属ワークスペースが一致すること」を守っているつもりの2件が
+      // **何も守らない状態に静かに落ちる。**
+      const output = await expectSqlToSucceed(
+        channelMemberViewers(otherWorkspaceOwner, otherWorkspaceChannel),
+      );
+      expect(output).toBe(otherWorkspaceChannel);
     });
 
     it('別のワークスペースのオーナーには、参加者一覧が見えない', async () => {

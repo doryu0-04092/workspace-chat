@@ -41,6 +41,15 @@ import { defineConfig } from 'prisma/config';
 // 下の `catch` は握り潰すので何も出力されず、`datasource.url` が undefined のまま渡り、
 // **上のコメントが避けたいと書いている「原因の分かりにくいエラー」がそのまま起きる。**
 // 「根で実行すること」を規約で守らせるのではなく、仕組みで固定する。
+//
+// **優先順位はこのファイルの中で確定させる。** 上の実測（環境側が勝つ）に
+// 寄りかからず、読み込む前の値を控えておいて、それを優先する。
+// **`npm test` の接続先が手元の .env に差し替わると、起動したコンテナではなく
+// 開発用の DB に対して `migrate deploy` / `migrate diff` を当てることになる。**
+// Node の版が上がったときも、将来 `dotenv` などに置き換えたときも、
+// **その事故だけは、この1行があれば起きない。**
+const databaseUrlFromEnvironment = process.env.DATABASE_URL;
+
 try {
   process.loadEnvFile(join(import.meta.dirname, '.env'));
 } catch {
@@ -58,6 +67,7 @@ export default defineConfig({
     path: join(import.meta.dirname, 'apps/api/prisma/migrations'),
   },
   datasource: {
-    url: process.env.DATABASE_URL,
+    // **環境に入っていた値が常に勝つ。** 上の説明を参照。
+    url: databaseUrlFromEnvironment ?? process.env.DATABASE_URL,
   },
 });
