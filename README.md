@@ -139,12 +139,14 @@ cp .env.example .env    変数名だけが入っている。値を書き込む
 docker compose version
 ```
 
-**v1 の `docker-compose` では動かない。** v1 は `docker-compose.yml` / `docker-compose.yaml` しか
-探さないため**このリポジトリの `compose.yaml` を読まない**うえ、`up --wait` を持たない。
-**このリポジトリでは、下の操作表の行はどれも v1 では動かない。**
-`--wait` を持たない行も同じで、`compose.yaml` を読めない時点で止まる。
-古い環境で出るのは `no configuration file provided` である。
-**最低のマイナー版までは特定していない**（`up --wait` を持つ v2 が要る、とだけ言える）。
+**このリポジトリの手順は、確認用の上の1行も下の操作表も、すべて `docker compose`
+（v2 の CLI プラグイン）で書いてある。`docker-compose` に読み替えないこと。**
+
+確かめたのは、**操作表が使う `up --wait` が v2 の機能である**ことだけである
+（`docker compose up --help` に出る）。
+**旧来の v1（`docker-compose`）がどう振る舞うかは確認していない**
+——`compose.yaml` を探索対象に含めるか、読み替えたときにどの文言で止まるかは、
+手元に v1 が無く叩けなかった。**最低のマイナー版も特定していない。**
 
 **変数を1つでも空のままにすると起動が止まる。** 既定値には落とさない。
 落とすと設定の書き忘れが「動いてしまう」形で隠れる（`PORT` と同じ考え方）。
@@ -196,9 +198,30 @@ docker inspect workspace-chat-db-1 --format '{{range .Config.Env}}{{println .}}{
 `up` はコンテナを作り直すので、**新しい値で `up` を通したあとに叩いても新しい値しか返らない**
 （実行して確認した）。`down` と `docker rm -f` でも消える。**残っているうちに引く。**
 
-**コンテナも失ったら、DB 側からは引けない。** 公式イメージが作るログイン可能なロールは
-`POSTGRES_USER` の1つだけであり（後述）、**その名前が分からないと繋げない。**
-そうなると、残るのは後述の「捨ててよいなら `down -v`」だけである。
+**コンテナも失っても、ボリュームが残っていれば引ける。** 通常の接続では繋げない
+（公式イメージが作るログイン可能なロールは `POSTGRES_USER` の1つだけで、
+その名前が分からないと繋げないため。後述）が、**単一ユーザーモードは認証を通らない。**
+
+```
+printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg_database WHERE datname NOT IN ('postgres','template0','template1');\n" \
+  | docker run --rm -i -v workspace-chat_db-data:/var/lib/postgresql/data \
+      --user postgres --entrypoint postgres workspace-chat-db:local \
+      --single -D /var/lib/postgresql/data postgres
+```
+
+**db を止めてから叩く。** 同じデータ領域に2つのサーバーは立てられない。
+出力は起動ログに混ざって `rolname = "<利用者名>"` / `datname = "<データベース名>"` の形で出る。
+
+**組み込みロールは `rolcanlogin` で落ちる**（`pg_` で始まる定義済みロールはすべて `NOLOGIN`）。
+**利用者名を OID で絞ろうとしないこと。** `POSTGRES_USER` は initdb が作る
+ブートストラップ superuser であり、**OID は 10 で、利用者が作ったロールの範囲に入らない**
+（実際に `oid >= 16384` で絞って空振りした）。
+
+（実行して確認した。コンテナを `docker rm -f` で消し `.env` も消した状態から、
+ボリュームだけで `lostuser` と `lostdb` を引けた）
+
+**ボリュームまで失ったら、そこで終わりである。** 残るのは後述の
+「捨ててよいなら `down -v`」だけになる。
 
 **控えたら、`.env` を作り直す前に `docker compose down` を済ませる。**
 `${VAR:?...}` が評価されるのは compose がファイルを読む時点であり、
@@ -323,6 +346,18 @@ docker compose exec db psql -U <古い名前> -d postgres -c 'DROP ROLE tmp_rena
 
 **`-U tmp_rename` では消せない**（`ERROR: current user cannot be dropped`）。
 消してから1行目に戻る。
+
+**ヘルスチェックが緑になっても、3行目は必ず叩く。**
+緑になるのは2行目（改名）が済んだ時点であり、**後始末が済んだ証拠ではない。**
+3行目を忘れても、落としても、**緑のままパスワードを持たない `SUPERUSER` が残る。**
+
+**最後に、残っていないことを数えて確かめる。**
+
+```
+docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT count(*) FROM pg_roles WHERE rolname = 'tmp_rename'\""
+```
+
+（実行して確認した。`DROP ROLE` の前は 1、後は 0 になった）
 
 （すべて実行して確認した。`<古い名前>` を打ち間違えて2行目を
 `ERROR: role "..." does not exist` で落としたところ、3行目は
