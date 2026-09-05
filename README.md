@@ -329,7 +329,10 @@ docker compose up -d
 **この場合に `down -v` は要らない。** 消す対象がもう無いうえ、
 `.env` を失っているなら `down` 自体が通らない（下記）。
 
-**控えたら、`.env` を作り直す前に `docker compose down` を済ませる。**
+**ここまでが、値を引けなくなった場合の話である。** 以下は状態が違う。
+
+**コンテナがまだ動いていて、これから `.env` を書き換える場合**（値を控えた直後）は、
+**`.env` を作り直す前に `docker compose down` を済ませる。**
 `${VAR:?...}` が評価されるのは compose がファイルを読む時点であり、
 **`up` だけでなく `down` / `ps` / `logs` / `exec` もすべて止まる**（実行して確認した）。
 値を消してから片付けようとすると、**コンテナもボリュームも compose では消せなくなる。**
@@ -503,6 +506,22 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DAT
 **`-d "$POSTGRES_DB"` で繋いではいけない。** その値は**これから作ろうとしている新しい名前**であり、
 まだ存在しない。`-d postgres` を使うのは、**`POSTGRES_DB` の値によらず initdb が必ず作るデータベース**
 だからである。改名したあとも、コンテナを作り直さずに緑に戻る（実行して確認した。表も残っていた）。
+
+**`<古い名前>` が `postgres` の場合だけは `-d postgres` が使えない。**
+改名しようとしている当の DB に繋ぐことになり、**`ERROR: current database cannot be renamed`**
+で止まる（実行して確認した）。`.env` に `POSTGRES_DB=postgres` と書けてしまう以上、
+これは起こりうる（前述）。**その場合は `-d template1` に繋ぐ。**
+
+```
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d template1 -c "ALTER DATABASE \"postgres\" RENAME TO \"$POSTGRES_DB\";"'
+```
+
+`template1` は接続を許しているため繋げる（実行して確認した。これで改名が通った）。
+
+> **代償。** 改名すると、**`postgres` という名前のデータベースは無くなる。**
+> initdb が作るのは初回だけで、改名は作り直さない。
+> `-d postgres` を既定の接続先にしている道具は、以後そのままでは繋がらない。
+> **`POSTGRES_DB` に `postgres` を選ばないほうが、この分岐ごと避けられる。**
 
 **条件はもう1つある。旧データベースに他のセッションが1本でも繋いでいると失敗する。**
 `-d postgres` で繋いだかどうかとは別の話であり、**自分が `-d postgres` を守っていても止まる。**
