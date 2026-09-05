@@ -84,18 +84,26 @@ doc_find() { # $1... = find に渡す残りの条件（例: -name '*.md' -print�
 # リンク先にできないパスかどうかを判定する。check-docs.sh の検査1が使う。
 # ディレクトリ側だけを見ると、.env や terraform.tfstate へのリンクを見逃す。
 doc_excluded() { # $1=リンク先のパス。除外なら理由を出力して 0 を返す
-  local p="$1" base d g
-  base=$(basename "$p")
+  local p="$1" d g
   for d in "${DOC_PRUNE_DIRS[@]}"; do
     case "/$p/" in */"$d"/*) echo "対象外ディレクトリ $d の配下"; return 0 ;; esac
   done
+  g=$(doc_excluded_name "$(basename "$p")") && { echo "対象外のファイル名 $g に一致"; return 0; }
+  return 1
+}
+
+# ファイル名だけで見た除外判定（KEEP を差し引いた DOC_PRUNE_FILES）。
+# doc_excluded と、check-docs.test.sh の「値を持つ名前が追跡されていないか」の確認が
+# 同じ規則を見るように、判定は1箇所に置く。2箇所に書くと黙ってずれる。
+doc_excluded_name() { # $1=ファイル名（basename）。除外なら一致したパターンを出力して 0
+  local base="$1" g
   for g in "${DOC_KEEP_FILES[@]}"; do
     # shellcheck disable=SC2254
     case "$base" in $g) return 1 ;; esac
   done
   for g in "${DOC_PRUNE_FILES[@]}"; do
     # shellcheck disable=SC2254
-    case "$base" in $g) echo "対象外のファイル名 $g に一致"; return 0 ;; esac
+    case "$base" in $g) echo "$g"; return 0 ;; esac
   done
   return 1
 }
