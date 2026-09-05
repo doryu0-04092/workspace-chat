@@ -123,6 +123,11 @@ done
 # 先頭が - のファイル名でも除外されること。ここだけが doc_excluded（doc_find でも
 # doc_excluded_name でもない側）を直接呼ぶ。doc_excluded は渡されたパスから
 # 名前を取り出して doc_excluded_name に渡しており、その取り出しに落ちる条件が無かった。
+#
+# **本番の呼び出し元が作らない形の入力である。** check-docs.sh の検査1 は
+# `$(dirname "$f")/$l` を渡すため、先頭は必ず `./` か `docs/` になる。
+# ここが固定しているのは、呼び出し元の形に依存しない関数単体の性質である。
+# 実際に先頭が - のまま流れるのは、git ls-files の出力を渡す 0c の走査のほう。
 for f in "${probe_dash_names[@]}"; do
   if ! doc_excluded "$f" >/dev/null 2>&1; then
     echo "  NG: 先頭が - のファイル名 $f が除外されない（doc_excluded の名前の取り出しが壊れている）"
