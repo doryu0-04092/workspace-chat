@@ -338,14 +338,20 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   mkdir -p "$work/$(dirname "$file")"
   printf '%s\n' "$body" > "$work/$file"
   # $file と違い $extra は複製済みの木に既にありうる（.env.example がまさにその候補）。
-  # 上書きすると本物を空に切り詰めたうえで消してしまい、以降のケースが
-  # 「.env.example が消えた木」の上で黙って別物になる。expect_ng の restore と違い
-  # 元に戻らないため、作る前に検出して落とす。
+  # そのときは作らず・消さずにそのまま使う。$extra に求めているのは
+  # 「リンク先の実体が存在すること」だけで、複製されたものはそれを満たす。
+  #
+  # 既にある場合を失敗にしてはならない。.env.example は DOC_KEEP_FILES にあるため
+  # doc_find の対象に入り、冒頭の複製ループで $work に入る。つまり
+  # リポジトリに .env.example が置かれた瞬間、下のケース31 は本体まで到達せず落ちる。
+  # KEEP に .env.example を挙げている理由自体が「README から参照されやすい」であり、
+  # そのケースが想定している状況がまさに来たときに検査が落ちる、という向きになる。
+  #
+  # 上書きもしてはならない。本物を空に切り詰めたうえで消してしまい、以降のケースが
+  # 「.env.example が消えた木」の上で黙って別物になる（expect_ng の restore と違い
+  # 元に戻らない）。made に入れないことで、後片付けの対象からも外す。
   for extra in "$@"; do
-    if [ -e "$work/$extra" ]; then
-      echo "  NG: $n. $desc — $extra は既に複製の中にある（上書きするとその木が壊れる）"
-      fail=1; rm -f "${made[@]}"; return
-    fi
+    [ -e "$work/$extra" ] && continue
     mkdir -p "$work/$(dirname "$extra")"
     : > "$work/$extra"
     made+=("$work/$extra")
