@@ -37,11 +37,6 @@ NEG_ROOT=".claude/worktrees/$NEG_NAME"
 NEG_DIR="$NEG_ROOT/apps/api/src"
 NEG="$NEG_DIR/probe.ts"
 
-# cleanup が上へ登るのをここで止める。**NEG_ROOT から導くこと。**
-# 直書きにすると、NEG_ROOT を階層の違う場所へ動かしたときに条件が一致しなくなり、
-# 自分が mkdir していない .claude まで rmdir しに行く。
-NEG_STOP="$(dirname "$NEG_ROOT")"
-
 # 走査対象であるべき場所（陽性対照）
 #
 # **陰性の名前が、陽性の名前の部分文字列になってはならない。**
@@ -63,6 +58,9 @@ POS="$POS_ROOT/probe.ts"
 # あとは rmdir で空のディレクトリだけを下から畳む。
 # **rmdir は中身のあるディレクトリを消せない**ため、
 # 取り違えても実体のあるものを壊しようがない。
+#
+# 畳む範囲の終端は NEG_STOP（下で mkdir の直前に求める）。
+# **「自分がこれから作る分」から導く。深さで決め打ちしない。**
 cleanup() {
   rm -f "$NEG" "$POS"
   d="$NEG_DIR"
@@ -84,6 +82,28 @@ for existing in "$NEG_ROOT" "$POS_ROOT"; do
     exit 1
   fi
 done
+
+# 後片付けの終端を、**mkdir -p がこれから新しく作る最上位**から求める。
+#
+# 深さで決め打ちすると、片付ける範囲が「自分が作ったもの」ではなくなる。
+# .claude/ がまだ無い環境——**CI がまさにそれである**——では、mkdir -p が
+# .claude/ と .claude/worktrees/ も新しく作る。終端を .claude/worktrees に
+# 固定していると、この2階層が毎回そこに残り続ける。
+#
+# 逆に、既にワークツリーを使っている手元では .claude/worktrees/ が既存なので
+# ループはそこで止まり、**自分が作っていないものには触らない。**
+# rmdir を使う構造は変えていないので、中身があれば失敗して残る保護もそのまま効く。
+#
+# **この計算は mkdir より前でなければならない。** 後に置くと、自分が作った
+# ディレクトリが「既にある」ことになり、終端が一番深いところに寄ってしまう。
+# trap より前でもある。trap の発火時に NEG_STOP が未定義だと set -u で落ちる。
+p="$NEG_DIR"
+NEG_TOP="$p"
+while [ ! -d "$p" ]; do
+  NEG_TOP="$p"
+  p="$(dirname "$p")"
+done
+NEG_STOP="$(dirname "$NEG_TOP")"
 
 # ここから先は自分が置いたものしか無い。後片付けを仕掛けてよい。
 trap cleanup EXIT

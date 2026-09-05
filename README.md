@@ -104,8 +104,14 @@ bash scripts/check-docs.test.sh
 この1行だけ飛ばす）
 
 `scripts/lint-scope.test.sh` は、ESLint と Prettier が `.claude/`（エージェントが作る
-git のワークツリーが入る）を走査しないことを確かめる。**この不具合は CI では起きない。**
-`.claude/` は CI のチェックアウトに無いためである。**手元で回さなければ誰も気づけない。**
+git のワークツリーが入る）を走査しないことを確かめる。
+
+`.claude/` は CI のチェックアウトに無い。そのため除外が消えても、
+**`npm run lint` と `npm run format:check` は CI では緑のまま**で、手元でだけ落ちる。
+この検査は probe を自分で `.claude/` の下に置いてから道具を走らせるので、
+**CI でも欠落を検出できる**（だから [ci.yml](.github/workflows/ci.yml) で回している）。
+手元で回す意味は、**症状（自分の環境で lint が落ちる）が出るより先に、
+原因（除外が消えた）に気づけること**にある。
 
 このほかに CI は次を回す。
 
