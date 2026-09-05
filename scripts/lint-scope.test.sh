@@ -25,11 +25,29 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # 走査対象から外れているべき場所（陰性）
-NEG_ROOT='.claude/worktrees/__lint_scope_probe__'
+#
+# **出力の中から probe を探すのに使うのは「パス」ではなく「名前」（NEG_NAME）である。**
+# ESLint は Windows で C:\...\.claude\worktrees\__lint_scope_probe__\... のように
+# 区切りが \ の絶対パスを出し、Prettier は .claude/worktrees/... の相対パスを出す。
+# NEG_ROOT（区切りが /）で探すと ESLint の出力に一致せず、
+# **除外が壊れていても手元でだけ「OK」を出す**。名前で探せばどちらにも一致する。
+# 直書きの文字列は置かない。名前を変えたら判定も一緒に変わる。
+NEG_NAME='__lint_scope_probe__'
+NEG_ROOT=".claude/worktrees/$NEG_NAME"
 NEG_DIR="$NEG_ROOT/apps/api/src"
 NEG="$NEG_DIR/probe.ts"
 
+# cleanup が上へ登るのをここで止める。**NEG_ROOT から導くこと。**
+# 直書きにすると、NEG_ROOT を階層の違う場所へ動かしたときに条件が一致しなくなり、
+# 自分が mkdir していない .claude まで rmdir しに行く。
+NEG_STOP="$(dirname "$NEG_ROOT")"
+
 # 走査対象であるべき場所（陽性対照）
+#
+# **陰性の名前が、陽性の名前の部分文字列になってはならない。**
+# なると陰性の判定が陽性対照に反応し、除外が効いていても NG になる。
+# 現在は成り立っている（__lint_scope_probe__ は probe の後が __、
+# __lint_scope_probe_positive__ は _p であり、前者は後者に含まれない）。
 #
 # **この置き場所を .gitignore に足してはならない。** Prettier 3 の既定の ignore-path は
 # .gitignore と .prettierignore の両方であり、足すと Prettier がここを走査しなくなって、
@@ -48,7 +66,7 @@ POS="$POS_ROOT/probe.ts"
 cleanup() {
   rm -f "$NEG" "$POS"
   d="$NEG_DIR"
-  while [ "$d" != '.claude/worktrees' ] && [ "$d" != '.' ] && [ "$d" != '/' ]; do
+  while [ "$d" != "$NEG_STOP" ] && [ "$d" != '.' ] && [ "$d" != '/' ]; do
     rmdir "$d" 2>/dev/null || true
     d="$(dirname "$d")"
   done
@@ -82,8 +100,9 @@ PROBE_BODY='const    使われない変数:any   =    1'
 printf '%s\n' "$PROBE_BODY" > "$NEG"
 printf '%s\n' "$PROBE_BODY" > "$POS"
 
+# -F を付ける。probe の名前に正規表現の意味を持たせない。
 contains() {
-  printf '%s' "$1" | grep -q "$2"
+  printf '%s' "$1" | grep -qF "$2"
 }
 
 # 道具を1回走らせ、次の3つを判定する。
@@ -109,10 +128,10 @@ check_tool() {
     return 1
   fi
 
-  if contains "$out" '__lint_scope_probe__'; then
+  if contains "$out" "$NEG_NAME"; then
     echo "  NG: .claude/ の中を走査している" >&2
     echo "      $ignore_hint" >&2
-    printf '%s\n' "$out" | grep '__lint_scope_probe__' | head -5 >&2
+    printf '%s\n' "$out" | grep -F "$NEG_NAME" | head -5 >&2
     return 1
   fi
 
