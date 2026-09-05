@@ -209,7 +209,18 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
       --single -D /var/lib/postgresql/data postgres
 ```
 
-**db を止めてから叩く。** 同じデータ領域に2つのサーバーは立てられない。
+**必ず db を止めてから叩く**（`docker compose down`、または `docker stop workspace-chat-db-1`）。
+
+> **PostgreSQL は拒んでくれない。確かめた。**
+> db を `healthy` のまま動かした状態で上のコマンドを叩いたところ、
+> **単一ユーザーモードは何の警告もなく起動し、問い合わせを実行し、
+> 稼働中のデータ領域に対してチェックポイントまで書いた。**
+> 二重起動の検査は `postmaster.pid` に記録された PID の生存確認で行われるが、
+> **別のコンテナは別の PID 名前空間にいるため、その PID が見つからず
+> ロックが stale と判断される。**
+> ここで守ろうとしているのは、その時点で値の唯一の複製であるデータ領域である。
+> **止め忘れると、救うつもりで壊す。**
+
 出力は起動ログに混ざって `rolname = "<利用者名>"` / `datname = "<データベース名>"` の形で出る。
 
 **組み込みロールは `rolcanlogin` で落ちる**（`pg_` で始まる定義済みロールはすべて `NOLOGIN`）。
@@ -218,7 +229,7 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
 （実際に `oid >= 16384` で絞って空振りした）。
 
 （実行して確認した。コンテナを `docker rm -f` で消し `.env` も消した状態から、
-ボリュームだけで `lostuser` と `lostdb` を引けた）
+ボリュームだけで**利用者名とデータベース名の両方を引けた**）
 
 **ボリュームまで失ったら、そこで終わりである。** 残るのは後述の
 「捨ててよいなら `down -v`」だけになる。
@@ -244,8 +255,11 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
 `.env` を戻せない場合は、**コンテナを直接消す。脱出に要るのはこれだけである。**
 
 **消す前に、上の `docker inspect` で `POSTGRES_USER` と `POSTGRES_DB` を引いておく。**
-`.env` も失っているこの状況では、**そのコンテナが値の最後の複製である。**
-下のコマンドはそれごと消す。
+`.env` も失っているこの状況では、**そのコンテナが最も手軽な取得元である。**
+下のコマンドはそれを消す。
+
+**消したあとでも詰みではない。** ボリュームが残っていれば、上の単一ユーザーモードで引ける
+（手間はかかる）。**戻せなくなるのはボリュームまで消したときである。**
 
 ```
 docker rm -f workspace-chat-db-1 workspace-chat-redis-1
