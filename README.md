@@ -260,11 +260,16 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
 
 出力は起動ログに混ざって `rolname = "<利用者名>"` / `datname = "<データベース名>"` の形で出る。
 
+**最後の引数の `postgres` は接続先のデータベースである。**
+`FATAL: database "postgres" does not exist` で止まったら、**`template1` に読み替える。**
+後述の「`<古い名前>` が `postgres` の場合」の改名を通っていると、この名前は無くなっている。
+
 **`postgres` はふつう出る。** initdb が `POSTGRES_DB` の値によらず作るためである
 （**初回に作られたあと改名していなければ**残っている。後述の `postgres` からの改名を
 通っていると無い）。
-**それが `POSTGRES_DB` の値だった可能性もある**（公式イメージの既定がこの名前であり、
-`.env` に `POSTGRES_DB=postgres` と書けてしまう）。
+**それが `POSTGRES_DB` の値だった可能性もある。**
+本書は `POSTGRES_DB` に `postgres` を選ばないことにしている（前述）が、
+**公式イメージの既定がこの名前であり、その規則を置く前に作った `.env` にはありうる。**
 **除外していないのはそのためである。** 除外すると、その設定にしていた人には
 **エラーではなく無出力**が返り、「引けなかった」と読み違えて初期化からやり直すことになる。
 
@@ -524,8 +529,8 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DAT
 
 **`<古い名前>` が `postgres` の場合だけは `-d postgres` が使えない。**
 改名しようとしている当の DB に繋ぐことになり、**`ERROR: current database cannot be renamed`**
-で止まる（実行して確認した）。`.env` に `POSTGRES_DB=postgres` と書けてしまう以上、
-これは起こりうる（前述）。**その場合は `-d template1` に繋ぐ。**
+で止まる（実行して確認した）。本書は `POSTGRES_DB` に `postgres` を選ばないことにしている（前述）が、
+**その規則を置く前に作った `.env` ではありうる。その場合は `-d template1` に繋ぐ。**
 
 ```
 docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d template1 -c "ALTER DATABASE \"postgres\" RENAME TO \"$POSTGRES_DB\";"'
