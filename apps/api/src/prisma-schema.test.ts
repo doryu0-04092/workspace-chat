@@ -942,6 +942,51 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe(publicChannel);
     });
 
+    /**
+     * オーナー向けの**管理のためのチャンネル一覧**（機能一覧 3.1。2026-09-05 決定）。
+     *
+     * **`visibleChannels` とは別の経路である。** あちらは「会話を取得してよいか」で、
+     * 参加していないオーナーにはプライベートチャンネルを返さない。
+     * こちらは**存在と名前だけを返す。** これが無いと、オーナーは
+     * 参加者一覧を取得する権限を持ちながら **`channelId` を知る手段が1つも無い。**
+     *
+     * **返すものは名前までである。** メッセージ・添付は返さない。
+     * 境界は `visibleChannels` と同じく「人の出入りの管理」と「会話の閲覧」の間にある。
+     *
+     * **この形をそのまま写さないこと。** `workspaceId` は URL のパスパラメータ由来である。
+     * 実装ではプレースホルダとして渡す（REVIEW.md 3 / CWE-89）。
+     */
+    function manageableChannels(userId: string, workspaceId: string): string {
+      return `
+        SELECT c."name"
+        FROM "Channel" c
+        JOIN "Membership" m
+          ON m."workspaceId" = c."workspaceId" AND m."userId" = '${userId}'
+        WHERE c."workspaceId" = '${workspaceId}'
+          AND m."role" = 'OWNER'
+        ORDER BY c."name";
+      `;
+    }
+
+    it('オーナーには、参加していないプライベートチャンネルも一覧に出る', async () => {
+      // **これが無いと F-09 が成立しない。** 参加者一覧を取得する権限があっても、
+      // チャンネルの id を知る手段が無ければ行使できない。
+      const output = await expectSqlToSucceed(manageableChannels(owner, workspace));
+      expect(output.split('\n')).toContain('secret');
+    });
+
+    it('オーナーでないメンバーには、管理の一覧が1件も返らない', async () => {
+      // **オーナー専用の経路であることを固定する。**
+      // これが無いと、`m."role" = 'OWNER'` を落としても1件も落ちない。
+      const output = await expectSqlToSucceed(manageableChannels(insider, workspace));
+      expect(output).toBe('');
+    });
+
+    it('別のワークスペースのオーナーには、管理の一覧が1件も返らない', async () => {
+      const output = await expectSqlToSucceed(manageableChannels(otherWorkspaceOwner, workspace));
+      expect(output).toBe('');
+    });
+
     it('第2ワークスペースのオーナーは、自分のワークスペースでは参加者一覧を取得できる', async () => {
       // **下の2件（空を期待する側）と対になる肯定側の固定である。**
       // これが無いと、`b4` の `Membership` が落ちても UUID が1文字ずれても、
