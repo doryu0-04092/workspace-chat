@@ -1122,6 +1122,55 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `;
     }
 
+    /**
+     * あるチャンネルの**参加者一覧**を返す問い合わせ。
+     *
+     * **退会済みを除くのは、ここでも読み取り側の条件である**（機能一覧 1.5）。
+     * 退会の処理は同一トランザクションで `Membership` を消すと決めているが、
+     * **それはアプリ側の規約であり、DB は止めない。**
+     * **退会処理が1件でも取りこぼせば、退会した利用者が参加者一覧に居座る。**
+     * 復旧・ログイン・招待と同じく2段構えにする。
+     *
+     * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
+     * （REVIEW.md 3 / CWE-89）。
+     */
+    function channelMemberList(channelId: string): string {
+      return `
+        SELECT u."userId"
+        FROM "ChannelMember" cm
+        JOIN "User" u ON u."id" = cm."userId"
+        WHERE cm."channelId" = '${channelId}'
+          AND u."deletedAt" IS NULL
+        ORDER BY u."userId";
+      `;
+    }
+
+    it('退会した利用者は、参加者一覧に出ない', async () => {
+      // **`Membership` の行が残っていても出さない。**
+      // これが無いと、`u."deletedAt" IS NULL` を落としても1件も落ちない。
+      const userId = randomUUID();
+      const loginId = `ghost_${randomUUID().slice(0, 8)}`;
+      const channelId = '00000000-0000-7000-8000-0000000000c1';
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${userId}', '${loginId}', '退会する人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${userId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '${channelId}', '${ws}', '${userId}');
+      `);
+
+      // 退会させる前は出ること。**肯定側が無いと、常に空を返す実装でも緑になる。**
+      const before = await expectSqlToSucceed(channelMemberList(channelId));
+      expect(before.split('\n')).toContain(loginId);
+
+      // 退会（論理削除）。**`Membership` はあえて残したままにする。**
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';`);
+      const after = await expectSqlToSucceed(channelMemberList(channelId));
+      expect(after.split('\n')).not.toContain(loginId);
+    });
+
     it('現役の利用者は、ユーザーID から引ける', async () => {
       // **否定側だけだと、常に空を返す実装でも緑になる。**
       const output = await expectSqlToSucceed(activeUserByLoginId('owner'));
