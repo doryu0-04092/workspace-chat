@@ -161,6 +161,11 @@ gi_ignored=(.env .env.local terraform.tfstate terraform.tfstate.backup
 for g in "${probe_prune_files[@]}"; do gi_ignored+=("${g//\*/x}"); done
 # 無視されては困るもの。片側だけ見ると「全部無視する」設定でも緑になる。
 gi_tracked=(.env.example prod.tfvars.example prod.tfvars.json.example README.md)
+# KEEP は .gitignore が `!` で追跡対象へ戻しているファイルを写したものである。
+# 実名の列挙だけだと、DOC_KEEP_FILES に足して .gitignore の打ち消し行を足し忘れた場合に
+# 素通りする。上の gi_ignored（DOC_PRUNE_FILES 側）と同じ置換で機械的に補う。
+# 0a は KEEP・PRUNE の両側を導出しているため、揃えないとこの非対称が 0c にだけ残る。
+for g in "${probe_keep_files[@]}"; do gi_tracked+=("${g//\*/x}"); done
 gi_ng=0
 for p in "${gi_ignored[@]}"; do
   if ! gi_ignored_by_gitignore "$p"; then
