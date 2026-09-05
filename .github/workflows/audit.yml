@@ -60,11 +60,16 @@ jobs:
         run: npm audit --audit-level=high
 
       # moderate 以下を人が拾うための出力。**ここは落とさない。**
-      # 上のステップが落ちても実行する（always）。落ちたときこそ、
+      # 上のステップが落ちても実行する。落ちたときこそ、
       # high 以外に何が出ているかを一度に見たい。
+      #
+      # **always() は使わない。** always() はワークフローが打ち切られたときにも
+      # 実行されるため、上の concurrency（PR では cancel-in-progress: true）で
+      # 打ち切った実行がここまで走ってしまう。**打ち切る指定が意味を失う。**
+      # success() || failure() なら、成功と失敗では走り、打ち切り時には走らない。
       #
       # || true を付けているのは、npm audit が「1件でも見つかると非ゼロ」を返すためで、
       # **検査の結果を握り潰しているのではない。** 合否は上のステップが決める。
       - name: 依存の脆弱性の全件表示（合否には影響しない）
-        if: always()
+        if: success() || failure()
         run: npm audit || true
