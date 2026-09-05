@@ -168,7 +168,25 @@ docker compose version
 `--wait` を付けるとヘルスチェックが通るまで戻らない。付けないと、
 **まだ初期化中の DB に接続しようとして落ちる。**
 
-**`.env` を作り直すときは、先に `docker compose down` を済ませる。**
+**`.env` に触る前に、いまの `POSTGRES_USER` と `POSTGRES_DB` を控える。**
+`POSTGRES_USER` / `POSTGRES_DB` を変えたあと**データを捨てずに直す**には古い名前が要る（後述）。
+**控えられるのはこの時点だけである。** `.env` を書き換えれば `.env` 側から消え、
+`docker compose down` すればコンテナからも消える（`down` はコンテナを削除するので `exec` の相手が無くなる）。
+
+```
+docker compose exec db sh -c 'echo "$POSTGRES_USER"; echo "$POSTGRES_DB"'
+```
+
+**`<古い名前>` を引数に取るのは、利用者名とデータベース名を直す手順の2つである。**
+**パスワードは控えなくてよい**（`\password` で上書きするため）。
+`env` や `docker inspect` を丸ごと出すとパスワードまで平文で出るので、変数を名指しする。
+
+**控えそこねると、DB 側からは引けない。** 公式イメージが作るログイン可能なロールは
+`POSTGRES_USER` の1つだけであり（後述）、**その名前が分からないと繋げない。**
+`.env` を空にしてしまった場合は `exec` 自体が通らない（下記）。
+**どちらの場合も、残るのは後述の「捨ててよいなら `down -v`」だけである。**
+
+**控えたら、`.env` を作り直す前に `docker compose down` を済ませる。**
 `${VAR:?...}` が評価されるのは compose がファイルを読む時点であり、
 **`up` だけでなく `down` / `ps` / `logs` / `exec` もすべて止まる**（実行して確認した）。
 値を消してから片付けようとすると、**コンテナもボリュームも compose では消せなくなる。**
@@ -210,22 +228,8 @@ docker volume rm workspace-chat_db-data
 **走るのはデータ領域が空のときだけ**である。ボリュームができたあとに `.env` を直しても、
 **DB の中の利用者名・パスワード・データベース名は初回の値のまま変わらない。3つともである。**
 
-**ただし `up` を通す前に、古い `POSTGRES_USER` と `POSTGRES_DB` を控える。**
-下の復旧手順はどれも `<古い名前>` を引数に取るが、**`up` はコンテナを作り直すため、
-旧コンテナに焼き付いていた古い値がそこで消える。**
-`.env` を `.env.example` から作り直した場合は、`.env` 側にも残っていない。
-
-```
-docker compose exec db sh -c 'echo "$POSTGRES_USER"; echo "$POSTGRES_DB"'
-```
-
-**パスワードは控えなくてよい**（`\password` で上書きするため）。
-`env` や `docker inspect` を丸ごと出すとパスワードまで平文で出るので、変数を名指しする。
-
-**控えそこねると、DB 側からは引けない。** 公式イメージが作るログイン可能なロールは
-`POSTGRES_USER` の1つだけであり（後述）、**その名前が分からないと繋げない。**
-`.env` を空にしてしまった場合は `exec` 自体が通らない（前述）。
-**どちらの場合も、残るのは下の「捨ててよいなら `down -v`」だけである。**
+**古い値を控えていないなら、ここから先の「消さずに直す」は踏めない**
+（上の「`.env` に触る前に、いまの `POSTGRES_USER` と `POSTGRES_DB` を控える」）。
 
 このとき `up -d --wait` は**ヘルスチェックが通らずに失敗する**。
 **3つとも検知する**（パスワードだけずらした場合も含めて実行して確かめた）。
@@ -248,76 +252,23 @@ docker compose exec db sh -c 'echo "$POSTGRES_USER"; echo "$POSTGRES_DB"'
 
 下はすべて実際に実行して確かめた結果である。
 
-**2つ以上ずれている場合は、`POSTGRES_USER` → `POSTGRES_DB` → `POSTGRES_PASSWORD` の順に直す。
-下の表はその逆順に並んでいるので、上から順に叩かない。**
-各手順は**残りが一致していることを前提に繋ぐ**ためである。`\password` は
-`-U "$POSTGRES_USER" -d "$POSTGRES_DB"` で繋ぐので利用者名と DB 名の両方が要る。
-`ALTER DATABASE` は `-U "$POSTGRES_USER"` で繋ぐので利用者名が要る。
+**2つ以上ずれている場合は `POSTGRES_USER` → `POSTGRES_DB` → `POSTGRES_PASSWORD` の順に直す。
+下の表も、そのあとの手順も、この順に並べてある。上から順に叩けばよい。**
+
+各手順は**残りが一致していることを前提に繋ぐ**ためである。
 利用者名の改名だけが `-U <古い名前>` を直接指定するため、前提を持たない。
+`ALTER DATABASE` は `-U "$POSTGRES_USER"` で繋ぐので利用者名が要る。
+`\password` は `-U "$POSTGRES_USER" -d "$POSTGRES_DB"` で繋ぐので利用者名と DB 名の両方が要る。
 
 **`.env` を `.env.example` から作り直した場合は3つとも新しい値になる**ので、この順序が要る。
-表の1行目から叩くと `FATAL: role "<新しい利用者名>" does not exist` で止まる（実行して確認した）。
+逆順に叩くと、最初の1つで `FATAL: role "<新しい利用者名>" does not exist` になる
+（実行して確認した。パスワード・DB 名のどちらから始めても同じところで止まった）。
 
 | ずれた値 | 消さずに直す方法 |
 |---|---|
-| `POSTGRES_PASSWORD` | 下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
-| `POSTGRES_DB` | 下記の `ALTER DATABASE ... RENAME TO`（**その DB への接続が1本でも残っていると実行できない。** 自分は `-d postgres` で繋ぐ） |
 | `POSTGRES_USER` | 下記の**一時ロールを作ってから** `ALTER ROLE ... RENAME TO`（自分自身は改名できない） |
-
-**パスワード**は `psql` に入って `\password` で変える。
-
-```
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-```
-
-```
-<POSTGRES_DB の値>=# \password
-```
-
-**入力するのは `.env` に書いた `POSTGRES_PASSWORD` と同じ値である。**
-別の値を入れると、DB は変わったのに**ヘルスチェックは赤のまま**になり、
-「`\password` が効かなかった」と読み違える。
-
-**正しく入力すれば、コンテナを作り直さずに次のヘルスチェックで緑に戻る**
-（実行して確認した。10 秒後に `healthy`）。ずれているのは DB の中身だけで、
-コンテナの環境変数は `up` の時点ですでに新しいためである。
-**`restart` では直らない**（前述）のと逆の向きの話になる。
-
-**`ALTER ROLE ... PASSWORD '<平文>'` を1行で叩かない。** 平文が手元のシェル履歴と
-コンテナ内のプロセス引数に残る。`\password` は**入力を受け取ってから
-クライアント側でハッシュに変換して送る**ため、どちらにも平文が残らない。
-
-**データベース名**は `-d postgres` に繋いで改名する。
-
-```
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DATABASE \"<古い名前>\" RENAME TO \"$POSTGRES_DB\";"'
-```
-
-**`-d "$POSTGRES_DB"` で繋いではいけない。** その値は**これから作ろうとしている新しい名前**であり、
-まだ存在しない。`-d postgres` を使うのは、**`POSTGRES_DB` の値によらず initdb が必ず作るデータベース**
-だからである。改名したあとも、コンテナを作り直さずに緑に戻る（実行して確認した。表も残っていた）。
-
-**条件はもう1つある。旧データベースに他のセッションが1本でも繋いでいると失敗する。**
-`-d postgres` で繋いだかどうかとは別の話であり、**自分が `-d postgres` を守っていても止まる。**
-別の端末で開いたままの `psql` や、止め忘れた `npm run dev -w @workspace-chat/api` が該当する。
-
-```
-ERROR:  database "<古い名前>" is being accessed by other users
-DETAIL:  There is 1 other session using the database.
-```
-
-**改名の前に数えて確かめる。0 でなければ、その接続を閉じてから叩く。**
-
-```
-docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT count(*) FROM pg_stat_activity WHERE datname = '<古い名前>'\""
-```
-
-（この行だけ `sh -c` の外側が二重引用符なのは、**SQL の中に単一引用符が要る**ためである。
-`$POSTGRES_USER` をコンテナの中で展開させる目的は他の行と同じで、`\$` で手元のシェルから逃がす）
-
-（実行して確認した。接続を1本張ったまま叩くと上のエラーになり、閉じて 0 にしてから
-叩き直すと `ALTER DATABASE` が通った。**`psql` のプロセスを手元で切っただけでは 0 にならない**
-場合がある。数えるのはサーバー側の接続であり、こちらが確実である）
+| `POSTGRES_DB` | 下記の `ALTER DATABASE ... RENAME TO`（**その DB への接続が1本でも残っていると実行できない。** 自分は `-d postgres` で繋ぐ） |
+| `POSTGRES_PASSWORD` | 下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
 
 **利用者名**は一時ロールを作ってから改名する。
 
@@ -352,6 +303,61 @@ CREATE ROLE / ALTER ROLE / DROP ROLE  → いずれも成功
 表の行数: 変わっていない
 公開ポート経由（新しい名前とパスワード）: 繋がった
 ```
+
+**データベース名**は `-d postgres` に繋いで改名する。
+
+```
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DATABASE \"<古い名前>\" RENAME TO \"$POSTGRES_DB\";"'
+```
+
+**`-d "$POSTGRES_DB"` で繋いではいけない。** その値は**これから作ろうとしている新しい名前**であり、
+まだ存在しない。`-d postgres` を使うのは、**`POSTGRES_DB` の値によらず initdb が必ず作るデータベース**
+だからである。改名したあとも、コンテナを作り直さずに緑に戻る（実行して確認した。表も残っていた）。
+
+**条件はもう1つある。旧データベースに他のセッションが1本でも繋いでいると失敗する。**
+`-d postgres` で繋いだかどうかとは別の話であり、**自分が `-d postgres` を守っていても止まる。**
+別の端末で開いたままの `psql` や、止め忘れた `npm run dev -w @workspace-chat/api` が該当する。
+
+```
+ERROR:  database "<古い名前>" is being accessed by other users
+DETAIL:  There is 1 other session using the database.
+```
+
+**改名の前に数えて確かめる。0 でなければ、その接続を閉じてから叩く。**
+
+```
+docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT count(*) FROM pg_stat_activity WHERE datname = '<古い名前>'\""
+```
+
+（この行だけ `sh -c` の外側が二重引用符なのは、**SQL の中に単一引用符が要る**ためである。
+`$POSTGRES_USER` をコンテナの中で展開させる目的は他の行と同じで、`\$` で手元のシェルから逃がす）
+
+（実行して確認した。接続を1本張ったまま叩くと上のエラーになり、閉じて 0 にしてから
+叩き直すと `ALTER DATABASE` が通った。**`psql` のプロセスを手元で切っただけでは 0 にならない**
+場合がある。数えるのはサーバー側の接続であり、こちらが確実である）
+
+**パスワード**は `psql` に入って `\password` で変える。
+
+```
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+```
+<POSTGRES_DB の値>=# \password
+```
+
+**入力するのは `.env` に書いた `POSTGRES_PASSWORD` と同じ値である。**
+別の値を入れると、DB は変わったのに**ヘルスチェックは赤のまま**になり、
+「`\password` が効かなかった」と読み違える。
+
+**正しく入力すれば、コンテナを作り直さずに次のヘルスチェックで緑に戻る**
+（実行して確認した。10 秒後に `healthy`）。ずれているのは DB の中身だけで、
+コンテナの環境変数は `up` の時点ですでに新しいためである。
+**`restart` では直らない**（前述）のと逆の向きの話になる。
+
+**`ALTER ROLE ... PASSWORD '<平文>'` を1行で叩かない。** 平文が手元のシェル履歴と
+コンテナ内のプロセス引数に残る。`\password` は**入力を受け取ってから
+クライアント側でハッシュに変換して送る**ため、どちらにも平文が残らない。
 
 **`--build` が要るのは、`up` が既にあるイメージを作り直さないためである。**
 [Dockerfile](docker/postgres/Dockerfile) は pg_bigm の版を `ARG` で固定しており、
