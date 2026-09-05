@@ -50,6 +50,16 @@ probe_dirs=(.git node_modules .pnp dist build .vite coverage .nyc_output
             .terraform .vscode .idea)
 probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json')
 probe_keep_files=('.env.example')
+# 現実に出てくる綴り。0a（木を作る）と 0c（.gitignore に問う）が同じものを見る。
+# 導出（${g//\*/x}）は1パターンにつき代表1名しか作らないため、
+# secrets.auto.tfvars.json のようなドットを複数含む綴りはこの一覧にしか依存しない。
+# 0a と 0c で別々に書き写すと、片方に足したときもう片方が静かに狭くなる。
+probe_real_names=(.env.local terraform.tfstate terraform.tfstate.backup
+                  prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json)
+# 一致しては困る対（末尾一致であることの裏打ち）。
+# *.tfvars / *.tfvars.json はいずれも末尾一致であり、例示ファイルには一致しない。
+# この対を置かないと、末尾一致でない形へ崩しても 0a・0c が緑で通る。
+probe_real_keeps=(prod.tfvars.example prod.tfvars.json.example)
 same() { # $1=期待の一覧名 $2...=比較する2組（改行区切り）
   [ "$2" = "$3" ] || { echo "  NG: 0a の一覧と $1 がずれている（除外を足したら、この一覧にも足す）"; fail=1; }
 }
@@ -68,23 +78,12 @@ mkdir -p "$probe/apps/api/node_modules" && : > "$probe/apps/api/node_modules/x.m
 # 「足したのに効いていない」が素通りする。ディレクトリ側と同じ水準にそろえる。
 for g in "${probe_prune_files[@]}"; do : > "$probe/${g//\*/x}"; done
 # 実際に出てくる名前でも当たることを見る（導出名だけだと現実の綴りを外しても気づけない）
-: > "$probe/.env.local"
-: > "$probe/terraform.tfstate"
-: > "$probe/terraform.tfstate.backup"
-: > "$probe/prod.tfvars"
-# Terraform は JSON 版の変数ファイル（terraform.tfvars.json / *.auto.tfvars.json）も読む。
-# *.tfvars は末尾一致のため、これらには一致しない。
-: > "$probe/terraform.tfvars.json"
-: > "$probe/secrets.auto.tfvars.json"
-# 残るはずのもの
+for f in "${probe_real_names[@]}"; do : > "$probe/$f"; done
+# 残るはずのもの（KEEP に一致するもの と、末尾一致のため一致しない例示ファイル）
 for g in "${probe_keep_files[@]}"; do : > "$probe/${g//\*/x}"; done
-: > "$probe/prod.tfvars.example"   # *.tfvars は末尾一致のため、KEEP が無くても残る
-# *.tfvars.json も末尾一致であり、例示ファイルには一致しない。この対を置かないと、
-# *.tfvars.json を *.tfvars.json* のように末尾一致でない形へ崩しても
-# prod.tfvars.example は一致しないままで、0a も 0c も緑で通る。
-: > "$probe/prod.tfvars.json.example"
+for f in "${probe_real_keeps[@]}"; do : > "$probe/$f"; done
 : > "$probe/keep.md"
-expected=$(printf '%s\n' keep.md prod.tfvars.example prod.tfvars.json.example "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
+expected=$(printf '%s\n' keep.md "${probe_real_keeps[@]}" "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
 got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
 if [ "$got" = "$expected" ]; then
   echo "  OK（残るのは $expected）"
@@ -146,10 +145,17 @@ fi
 #      「.gitignore に足す前のコミット」で入ったものはパターンが揃っていても値が入っている。
 #      追跡の側からも見る。
 #
-# 代償: この確認だけが git の作業ツリーを前提にする。check-docs.sh は「git の追跡状態に
+# 代償 1: この確認だけが git の作業ツリーを前提にする。check-docs.sh は「git の追跡状態に
 # 依存しない」（未コミットのファイルも検査対象にする）方針だが、.gitignore が何を無視するかは
 # git にしか判定できないため、ここは例外とする。git が無い環境や作業ツリーでない場所では
 # 0c が NG になる。CI（actions/checkout）と手元はどちらも作業ツリーである。
+#
+# 代償 2: 一致元を .gitignore に限ったため、.git/info/exclude や core.excludesFile だけで
+# 無視している手元では gi_ignored 側が NG になる。逆に gi_tracked 側は、グローバル除外に
+# 一致していても緑のままになる（.gitignore に書かれていないため）。
+# 0c が保証するのは「リポジトリの .gitignore がどうなっているか」だけである。
+# これは意図した限定である。守りたいのは「このリポジトリを clone した誰の手元でも
+# 値がコミットされないこと」であり、個人の環境設定はその保証に数えられない。
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
@@ -166,8 +172,10 @@ gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無�
   case "$pat" in '!'*) return 1 ;; esac
   return 0
 }
-gi_ignored=(.env .env.local terraform.tfstate terraform.tfstate.backup
-            prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json)
+# 現実の綴りは 0a と同じ一覧を見る（手で書き写すと、片方に足したとき
+# もう片方の見る範囲が静かに狭くなる）。.env は probe_prune_files に
+# パターンとして載っており導出名と同じ文字列になるため、ここだけ実名で足す。
+gi_ignored=(.env "${probe_real_names[@]}")
 # 上の実名の列挙だけだと、DOC_PRUNE_FILES にパターンを足して .gitignore に足し忘れた場合に
 # 素通りする（新しい名前がこの一覧に無いため）。0a の
 # 「除外されるはずのファイルは一覧から導出する」と同じ置換で機械的に補う。
@@ -178,7 +186,7 @@ for g in "${probe_prune_files[@]}"; do gi_ignored+=("${g//\*/x}"); done
 # 併せて外したとき、導出側は消えるのに直書きだけが残り、根拠を失った NG が出る。
 # （gi_ignored 側は実名 .env と導出名 .env.x が別の文字列になるため両方に意味があるが、
 #   .env.example は `*` を含まないため導出結果が実名と完全に同一である。）
-gi_tracked=(prod.tfvars.example prod.tfvars.json.example README.md)
+gi_tracked=(README.md "${probe_real_keeps[@]}")
 # KEEP は .gitignore が `!` で追跡対象へ戻しているファイルを写したものである。
 # 実名の列挙だけだと、DOC_KEEP_FILES に足して .gitignore の打ち消し行を足し忘れた場合に
 # 素通りする。上の gi_ignored（DOC_PRUNE_FILES 側）と同じ置換で機械的に補う。
@@ -431,8 +439,15 @@ expect_ok "入れ子の node_modules の中のリンク切れも無視される"
   '[壊れたリンク](./does-not-exist.md)' out
 # 外部リンクを飛ばす判断はスキームで行う。現物の文書にも https のリンクはあるが、
 # それが消えた瞬間にこの経路の確認も消える。専用のケースとして残す。
-expect_ok "外部リンク（https / mailto）は存在を確かめない" docs/probe-external-link.md \
-  '[外部の文書](https://example.invalid/does-not-exist) と [連絡先](mailto:nobody@example.invalid)' in
+#
+# case が列挙する3つのスキームは、3つとも1本ずつ置く。ここがスキーム判定の唯一の確認で
+# あるため、置かなかった枝は個別に無検査になる。http:// を置かないと、その枝を
+# 丸ごと削っても全ケースが緑で通る（https は http:// に一致しないため冗長ではない）。
+# 消えた場合の帰結は、文書に http:// のリンクが1本入った時点で
+# 「http://… が存在しない」という偽の NG が出て CI が止まることであり、
+# しかも文面は「リンク切れ」と読めるため、本来直す必要のないリンクの方を疑わせる。
+expect_ok "外部リンク（http / https / mailto）は存在を確かめない" docs/probe-external-link.md \
+  '[外部の文書](https://example.invalid/does-not-exist) と [平文の外部](http://example.invalid/x) と [連絡先](mailto:nobody@example.invalid)' in
 
 # doc_excluded の DOC_KEEP_FILES の分岐（PRUNE に一致しても除外しない）を踏む唯一のケース。
 # doc-scope.sh は「.env.example は README から参照されやすいため除外から外している」と
