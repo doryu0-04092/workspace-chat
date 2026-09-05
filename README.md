@@ -259,8 +259,22 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
 ブートストラップ superuser であり、**OID は 10 で、利用者が作ったロールの範囲に入らない**
 （実際に `oid >= 16384` で絞って空振りした）。
 
-（実行して確認した。コンテナを `docker rm -f` で消し `.env` も消した状態から、
-ボリュームだけで**利用者名とデータベース名の両方を引けた**）
+**`workspace-chat-db:local` が手元に無ければ、土台の `postgres:17-bookworm` に置き換えてよい。**
+この手順が読むのは `pg_authid` と `pg_database` だけで、**pg_bigm は要らない**
+（`shared_preload_libraries` を渡しているのは `compose.yaml` の `command` であり、
+データ領域の `postgresql.conf` には入っていない）。
+
+**置き換えが要る場面は実際にある。** `workspace-chat-db:local` はレジストリに存在しないため、
+手元から消えていると `docker run` はプルを試みて `pull access denied` で止まる。
+`docker system prune -a` は使っていないイメージを消す一方、名前付きボリュームは
+`--volumes` を付けない限り残す。**この手順が想定しているのはコンテナを失った状況であり、
+コンテナの無いイメージはまさに prune の対象である。**
+そのうえ `.env` を失っていれば `docker compose build db` も compose の読み込みで止まる。
+
+（**上のコマンドをそのままの形で実行して確認した。** コンテナを `docker rm -f` で消し
+`.env` も消した状態から、ボリュームだけで利用者名とデータベース名を引けた。
+返ったのは `rolname` が1行、`datname` が `postgres` と利用者のデータベース名の2行である。
+**`workspace-chat-db:local` と `postgres:17-bookworm` の両方で、同じ結果になった**）
 
 **ボリュームまで失ったら、そこで終わりである。**
 残るのは `.env.example` から `.env` を作り直し、`up -d --wait` で初期化からやり直すことだけになる。
