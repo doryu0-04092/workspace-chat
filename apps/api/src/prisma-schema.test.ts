@@ -127,6 +127,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
     // 置くと、describe の並べ替え・`.only`・`-t` での絞り込みのいずれでも
     // 「投入されていない行を参照する」形で落ち、
     // **落ちた原因がスキーマなのか実行順なのかを、失敗した人が区別できない。**
+    //
+    // **`"userId"` という列名は2つの違うものを指す。** `User."userId"` は
+    // ログイン識別子（`VARCHAR(30)`。`schema.prisma` では `loginId`）であり、
+    // `RecoveryCode` / `Membership` / `ChannelMember` の `"userId"` は
+    // `User."id"` への外部キー（`UUID`）である。**この SQL でも両方が出てくる。**
     await expectSqlToSucceed(`
       INSERT INTO "User" ("id", "userId", "displayName", "passwordHash") VALUES
         ('00000000-0000-7000-8000-000000000001', 'owner',    'オーナー',   'argon2id-placeholder'),
