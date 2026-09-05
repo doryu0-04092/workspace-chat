@@ -726,6 +726,16 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * アーカイブ済みのチャンネルは、**参加者は読めるが一覧からは外れる**
      * （機能一覧 3.2）。**一覧の API は、この条件に加えて `AND c."archivedAt" IS NULL`
      * が要る。** この形をそのまま一覧に写すと、アーカイブ済みが一覧に出る。
+     *
+     * **参加者一覧の経路には、この条件を使わない。** 機能一覧 3.1 は
+     * 「**オーナーは、参加していないプライベートチャンネルの参加者一覧は取得できる**」
+     * と定めている（REVIEW.md 2.1 も同じ境界）。この問い合わせは
+     * `ChannelMember` に行が無いオーナーにチャンネル行そのものを返さないため、
+     * **そのまま参加者一覧に写すとオーナーに 404 が返る。**
+     * そうなると「誰がいるか見えなければキックすべき相手を特定できない」に当たり、
+     * **F-09 の管理者権限が機能しなくなる。**
+     * 参加者一覧の判定は `Membership.role = 'OWNER'` で行うこと。
+     * **境界は「人の出入りの管理」と「会話の閲覧」の間に引く。**
      */
     function visibleChannels(userId: string, workspaceId: string): string {
       return `
@@ -762,9 +772,12 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output.length).toBeGreaterThan(0);
     });
 
-    it('オーナーでも、参加していないプライベートチャンネルは見えない', async () => {
+    it('オーナーでも、参加していないプライベートチャンネルの中身は見えない', async () => {
       // 要件定義書 3.5.1 / 4.4。オーナーの権限は**人の出入りの管理**であって
       // **会話の閲覧ではない**。この境界がデータの側で守られていることを見る。
+      //
+      // **見えないのはチャンネルの中身までである。** 参加者一覧は取得できる
+      // （機能一覧 3.1）。その経路はこの問い合わせを使わない（上の説明を参照）。
       const output = await expectSqlToSucceed(visibleChannels(owner, workspace));
       expect(output.split('\n')).not.toContain('secret');
       expect(output.length).toBeGreaterThan(0);
