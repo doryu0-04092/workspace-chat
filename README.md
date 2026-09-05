@@ -117,7 +117,7 @@ git のワークツリーが入る）を走査しないことを確かめる。
 
 | ワークフロー | 内容 |
 |---|---|
-| [docs.yml](.github/workflows/docs.yml) | ドキュメントの検査（`scripts/check-docs.sh`）と、**その検査自身が壊れたら落ちることの確認**（`scripts/check-docs.test.sh`、28通り） |
+| [docs.yml](.github/workflows/docs.yml) | ドキュメントの検査（`scripts/check-docs.sh`）と、**その検査自身が壊れたら落ちることの確認**（`scripts/check-docs.test.sh`、32通り） |
 | [audit.yml](.github/workflows/audit.yml) | 依存の脆弱性検査。PR・push に加えて**毎週月曜に定期実行する**（要件定義書 4.3 の「継続的に」） |
 | [claude_code_review.yml](.github/workflows/claude_code_review.yml) | AI コードレビュー（下記） |
 
