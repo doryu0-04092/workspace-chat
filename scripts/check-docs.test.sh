@@ -60,6 +60,15 @@ probe_real_names=(.env.local terraform.tfstate terraform.tfstate.backup
 # *.tfvars / *.tfvars.json はいずれも末尾一致であり、例示ファイルには一致しない。
 # この対を置かないと、末尾一致でない形へ崩しても 0a・0c が緑で通る。
 probe_real_keeps=(prod.tfvars.example prod.tfvars.json.example)
+# 先頭が - になるファイル名。名前の取り出しに basename を使うと option として
+# 解釈され、名前が空になって一致しなくなる（実測: `basename "-x.tfvars"` は
+# `unknown option -- x` を出して終了コード 1、標準出力は空）。
+# 先頭が `*` のパターンからだけ作る。`.env` のように `*` で始まらないものは、
+# 先頭に - を足すと本当にどのパターンにも一致せず、根拠の無い NG になる。
+probe_dash_names=()
+for g in "${probe_prune_files[@]}"; do
+  case "$g" in '*'*) probe_dash_names+=("-${g//\*/x}") ;; esac
+done
 same() { # $1=期待の一覧名 $2...=比較する2組（改行区切り）
   [ "$2" = "$3" ] || { echo "  NG: 0a の一覧と $1 がずれている（除外を足したら、この一覧にも足す）"; fail=1; }
 }
@@ -111,8 +120,18 @@ for g in "${probe_keep_files[@]}"; do
   fi
 done
 
+# 先頭が - のファイル名でも除外されること。ここだけが doc_excluded（doc_find でも
+# doc_excluded_name でもない側）を直接呼ぶ。doc_excluded は渡されたパスから
+# 名前を取り出して doc_excluded_name に渡しており、その取り出しに落ちる条件が無かった。
+for f in "${probe_dash_names[@]}"; do
+  if ! doc_excluded "$f" >/dev/null 2>&1; then
+    echo "  NG: 先頭が - のファイル名 $f が除外されない（doc_excluded の名前の取り出しが壊れている）"
+    fail=1
+  fi
+done
+
 # --- 前提: 検査対象が1件も無いときに落ちること -------------------------------
-# この分岐だけがケース1〜27 のどれからも踏まれない。踏まないまま置くと、
+# この分岐だけが番号付きのケースのどれからも踏まれない。踏まないまま置くと、
 # 検査が何も見ていない状態を「合格」と表示するようになっても気づけない。
 echo "0b. Markdown が1件も無いときに落ちること"
 bare=$(mktemp -d)
@@ -239,15 +258,15 @@ done
 gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致したものを改行区切りで返す
   local p
   while IFS= read -r -d '' p; do
-    doc_excluded_name "$(basename "$p")" >/dev/null && printf '%s\n' "$p"
+    doc_excluded_name "${p##*/}" >/dev/null && printf '%s\n' "$p"
   done
 }
 # 走査そのものに落ちる条件を持たせる。リポジトリに DOC_PRUNE_FILES に一致する
 # 追跡ファイルは1件も無く、実物を流すかぎり結果は常に空である。つまりこのループを
-# 丸ごと削っても、-z を外しても、basename を外しても全ケースが緑で通る
+# 丸ごと削っても、-z を外しても、名前の取り出しを外しても全ケースが緑で通る
 # （ここに件数を書かない。ケースを足すたびに古くなるうえ、コメントの数は
 #   どこからも照合されない。0b の注記と同じ理由）。
-# 決め打ちの一覧を同じ関数に流し、読み取り・basename・KEEP の差し引きを同時に見る。
+# 決め打ちの一覧を同じ関数に流し、読み取り・名前の取り出し・KEEP の差し引きを同時に見る。
 #
 # 名前は一覧から導出する。手書きで並べると、DOC_PRUNE_FILES / DOC_KEEP_FILES を
 # 変えたときに走査は正しく動いているのに期待値だけが取り残され、
@@ -256,10 +275,18 @@ gi_probe_pass=("${probe_real_names[@]}")
 # 非 ASCII 名。パターンの * を「本番」に置き換えて作る。
 # 既定の ls-files が引用して出す側であり、引用が残ると一致しなくなる。
 for g in "${probe_prune_files[@]}"; do gi_probe_pass+=("${g//\*/本番}"); done
-# ディレクトリを含むパス。basename を外すと、パターンが先頭から当たらず一致しなくなる。
+# ディレクトリを含むパス。名前の取り出しを外すと、パターンが先頭から当たらず一致しなくなる。
 for f in "${probe_real_names[@]}"; do gi_probe_pass+=("sub/$f"); done
-# 一致してはならない側（KEEP に挙げたもの と、値を持たない通常のファイル）。
-gi_probe_skip=("${probe_keep_files[@]//\*/x}" README.md)
+# 先頭が - のファイル名。名前の取り出しを basename に戻すと、option として
+# 解釈されて名前が空になり、一致しなくなる。
+gi_probe_pass+=("${probe_dash_names[@]}")
+# 一致してはならない側（KEEP に挙げたもの、末尾一致であることの裏打ちになる対、
+# 値を持たない通常のファイル）。
+# probe_real_keeps をここに入れるのは、これを doc_excluded_name に尋ねる経路が
+# ほかに無いためである。0a の expected は doc_find の別経路であり、
+# 0c の gi_tracked が問うのは .gitignore であって doc_excluded_name ではない。
+# 入れないと、末尾一致（`case "$base" in $g)`）を前方一致に崩しても全ケースが緑で通る。
+gi_probe_skip=("${probe_keep_files[@]//\*/x}" "${probe_real_keeps[@]}" README.md)
 gi_probe_want=$(printf '%s\n' "${gi_probe_pass[@]}")
 gi_probe_got=$(printf '%s\0' "${gi_probe_pass[@]}" "${gi_probe_skip[@]}" | gi_scan_tracked)
 if [ "$gi_probe_got" != "$gi_probe_want" ]; then
