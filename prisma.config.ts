@@ -40,10 +40,15 @@ if (!process.env.DATABASE_URL) {
   }
 }
 
+// **パスも .env と同じ基準（このファイルの位置）で解決する。**
+// Prisma 7 がこの2つを cwd 起点で解くのか設定ファイルの位置起点で解くのかは
+// **確かめていない。** どちらであっても正しくなる形にして、その曖昧さを消す。
+// 片方だけ `import.meta.dirname` にすると、**同じファイルの中に解決の基準が
+// 2種類あるように読める。**
 export default defineConfig({
-  schema: 'apps/api/prisma/schema.prisma',
+  schema: join(import.meta.dirname, 'apps/api/prisma/schema.prisma'),
   migrations: {
-    path: 'apps/api/prisma/migrations',
+    path: join(import.meta.dirname, 'apps/api/prisma/migrations'),
   },
   datasource: {
     url: process.env.DATABASE_URL,

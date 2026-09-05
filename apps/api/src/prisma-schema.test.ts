@@ -845,5 +845,70 @@ describe('Prisma のスキーマとマイグレーション', () => {
       const output = await expectSqlToSucceed(visibleChannels(stranger, workspace));
       expect(output).toBe('');
     });
+
+    /**
+     * 「その利用者が、そのチャンネルの**参加者一覧**を取得してよいか」を求める問い合わせ。
+     *
+     * **`visibleChannels` とは条件が違う。** あちらは「チャンネルの中身を取得してよいか」
+     * であり、オーナーであっても参加していなければ通さない。
+     * こちらは**オーナーを通す**（機能一覧 3.1 / REVIEW.md 2.1）。
+     * **境界は「人の出入りの管理」と「会話の閲覧」の間に引く。**
+     * 誰がいるか見えなければキックすべき相手を特定できず、F-09 が機能しない。
+     *
+     * **散文で書いた条件を、ここで固定する。** すぐ上の
+     * `visibleChannels` の説明は「参加者 または オーナー」と書いているが、
+     * **書いただけでは、片側だけの実装に書き換えても1件も落ちない。**
+     * 誤りは2方向にある。**両方を別々の `it` で押さえる。**
+     *
+     *   - オーナー専用にする → **参加者本人が自分のチャンネルの一覧を引けない**
+     *   - 参加者だけにする   → **オーナーが F-09 を行使できない**
+     *   - 全員に開ける       → 非参加者にも参加者一覧が漏れる
+     *
+     * **この形をそのまま写さないこと。** `channelId` は URL のパスパラメータ由来である。
+     * 実装では `channelId` も `userId` もプレースホルダとして渡す
+     * （REVIEW.md 3 / CWE-89）。`visibleChannels` / `nextArchiveSequence` と同じ扱いである。
+     */
+    function channelMemberViewers(userId: string, channelId: string): string {
+      return `
+        SELECT c."id"
+        FROM "Channel" c
+        -- ワークスペースに参加していること自体を条件にする。
+        -- 外すと、退出・キックされた利用者に参加者一覧が見え続ける。
+        JOIN "Membership" m
+          ON m."workspaceId" = c."workspaceId" AND m."userId" = '${userId}'
+        LEFT JOIN "ChannelMember" cm
+          ON cm."channelId" = c."id" AND cm."userId" = '${userId}'
+        WHERE c."id" = '${channelId}'
+          -- 参加者、**または**そのワークスペースのオーナー。
+          -- オーナーは例外の側であって、条件そのものではない。
+          AND (cm."userId" IS NOT NULL OR m."role" = 'OWNER');
+      `;
+    }
+
+    // beforeAll が入れているプライベートチャンネル。参加者は insider だけである。
+    const secretChannel = '00000000-0000-7000-8000-0000000000c2';
+
+    it('参加者は、そのチャンネルの参加者一覧を取得できる', async () => {
+      const output = await expectSqlToSucceed(channelMemberViewers(insider, secretChannel));
+      expect(output).toBe(secretChannel);
+    });
+
+    it('参加していないオーナーでも、参加者一覧は取得できる', async () => {
+      // **中身は見えないが、人の出入りは管理できる。** すぐ上の
+      // 「オーナーでも、参加していないプライベートチャンネルの中身は見えない」と対になる。
+      const output = await expectSqlToSucceed(channelMemberViewers(owner, secretChannel));
+      expect(output).toBe(secretChannel);
+    });
+
+    it('参加していないメンバーは、参加者一覧を取得できない', async () => {
+      // **これが無いと「全員に開ける」実装でも緑になる。**
+      const output = await expectSqlToSucceed(channelMemberViewers(outsider, secretChannel));
+      expect(output).toBe('');
+    });
+
+    it('ワークスペースの外の利用者は、参加者一覧を取得できない', async () => {
+      const output = await expectSqlToSucceed(channelMemberViewers(stranger, secretChannel));
+      expect(output).toBe('');
+    });
   });
 });
