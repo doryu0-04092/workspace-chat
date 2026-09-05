@@ -123,6 +123,11 @@ WebSocket のイベント定義（7種類）をフロントとバックで二重
 人が書くものではないため、この規約の対象外とする。
 **メッセージを日本語にするために自動更新を止める、という順序にはしない。**
 
+**現在この経路が残っているのは GitHub Actions の更新だけである。**
+npm の版更新は止めた（[README](README.md) の「依存の版を上げない方針」）。
+**止めた理由は、実際に3件中3件が受け入れられなかったからであり、
+コミットメッセージの言語とは無関係である。** 上の順序は変えていない。
+
 ## 禁止事項
 
 - `.env` の値をコミット・出力しない（存在と変数名までに留める）
@@ -142,7 +147,8 @@ WebSocket のイベント定義（7種類）をフロントとバックで二重
 | **AI コードレビューの設定** | **完了**（[claude_code_review.yml](.github/workflows/claude_code_review.yml)。導入手順と制約は [README](README.md)） |
 | **ドキュメント検査の CI** | **完了**（[docs.yml](.github/workflows/docs.yml)。検査そのものの検査を28通り含む） |
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
-| 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml) と [dependabot.yml](.github/dependabot.yml)） |
+| 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
+| 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
 | 実装 | 未着手 |
