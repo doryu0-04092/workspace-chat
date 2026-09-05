@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { defineConfig } from 'prisma/config';
 
 /**
@@ -24,9 +25,16 @@ import { defineConfig } from 'prisma/config';
 //
 // 既に環境変数が入っているときは読まない。テストは接続先を環境変数で直接渡しており、
 // **手元に置いてある .env がそれを上書きすると、テストが開発用の DB を壊す。**
+//
+// **読む場所は、このファイルの位置から決める。** `process.loadEnvFile()` は
+// 引数が無いと `path.resolve(process.cwd(), '.env')` を読むため、
+// **`apps/api` など根以外を cwd にして `prisma` を実行すると、根の .env が読まれない。**
+// 下の `catch` は握り潰すので何も出力されず、`datasource.url` が undefined のまま渡り、
+// **上のコメントが避けたいと書いている「原因の分かりにくいエラー」がそのまま起きる。**
+// 「根で実行すること」を規約で守らせるのではなく、仕組みで固定する。
 if (!process.env.DATABASE_URL) {
   try {
-    process.loadEnvFile();
+    process.loadEnvFile(join(import.meta.dirname, '.env'));
   } catch {
     // .env が無い環境（CI）では、環境変数が直接渡される。ここで止めない。
   }
