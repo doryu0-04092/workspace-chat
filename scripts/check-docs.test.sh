@@ -418,25 +418,28 @@ decl_mismatches() { # $1=期待する数。README.md と CLAUDE.md の「N通り
 # 下の確認は文書に何を書いても通る。0a・0c と同じく「ケースが成立していない」を検出する。
 # 「1件でも出たか」ではなく文書ごとに出たかを見る。合計で見ると、片方の宣言が
 # 読み取れなくなっても、もう片方の食い違いだけでこの自己確認が緑のまま通る。
-decl_probe=$(decl_mismatches "$((n + 1))")
+#
+# 渡す数は、宣言として現れ得ない -1 にする。n + 1 だと、宣言がたまたまその数のとき
+# （ケースを1件減らして宣言を直し忘れた場合が該当する。この検査が最も想定している変化である）
+# その文書だけ食い違いが出ず、「突き合わせが効いていない」という**原因を取り違えた NG** が出る。
+# decls が数を取り出すのは grep -o "[0-9][0-9]*" であり、負数は決して現れない。
+decl_probe=$(decl_mismatches -1)
 decl_probe_ng=0
 for f in "${decl_files[@]}"; do
   printf '%s\n' "$decl_probe" | grep -q "^$f の" || {
-    echo "  NG: 「N通り」の突き合わせが $f に効いていない（わざと違う数を渡しても食い違いが出ない）"
+    echo "  NG: 「N通り」の突き合わせが $f に効いていない（宣言に現れ得ない数を渡しても食い違いが出ない）"
     decl_probe_ng=1
   }
 done
-if [ "$decl_probe_ng" != 0 ]; then
+# 自己確認が落ちた場合も本体の結果を出す。どちらが原因かを1回の実行で切り分けるため。
+decl_out=$(decl_mismatches "$n")
+if [ -n "$decl_out" ]; then
+  printf '%s\n' "$decl_out" | sed 's/^/  NG: /'
   fail=1
-else
-  decl_out=$(decl_mismatches "$n")
-  if [ -z "$decl_out" ]; then
-    echo "  OK（$n 通り）"
-  else
-    printf '%s\n' "$decl_out" | sed 's/^/  NG: /'
-    fail=1
-  fi
+elif [ "$decl_probe_ng" = 0 ]; then
+  echo "  OK（$n 通り）"
 fi
+[ "$decl_probe_ng" = 0 ] || fail=1
 
 if [ "$fail" -ne 0 ]; then echo "検査の検査に失敗しました"; exit 1; fi
 echo "$n 通りの確認をすべて通過しました"
