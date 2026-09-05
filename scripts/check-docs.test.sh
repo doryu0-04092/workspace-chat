@@ -182,11 +182,20 @@ fi
 # これは意図した限定である。守りたいのは「このリポジトリを clone した誰の手元でも
 # 値がコミットされないこと」であり、個人の環境設定はその保証に数えられない。
 #
-# 代償 3: 追跡ファイルの走査は、決め打ちの一覧を流す確認（下の gi_probe_*）でしか
-# 落ちる条件を持たない。実物の git ls-files から -z を外す崩し方は、それだけでは
-# 検出できない（検出するには非 ASCII 名の追跡ファイルを実際に置く必要があり、
-# 値を持つ名前をリポジトリに置くことになるため採らない）。
-# 守れているのは「読み取り・basename・KEEP の差し引き」までである。
+# 代償 3: 下の gi_probe_* が落ちる条件を与えているのは **gi_scan_tracked の中身**
+# （読み取り・名前の取り出し・KEEP の差し引き）だけである。
+# **実物を流す呼び出し（git ls-files -z | gi_scan_tracked）そのものには、
+# 落ちる条件が1つも無い。** リポジトリに DOC_PRUNE_FILES に一致する追跡ファイルが
+# 1件も無く結果が常に空であるため、次のどれも全ケースが緑で通る。
+#
+#   - git ls-files から -z を外す
+#   - 呼び出しの数行を丸ごと削る（確認そのものが消えても緑）
+#   - pathspec を足して走査範囲を狭める（例: -- docs/）
+#   - -C "$repo" の指し先を変える
+#
+# 落ちる条件を持たせるには、値を持つ名前の追跡ファイルをリポジトリに置くことになる。
+# 0c が塞ごうとしている状態そのものを作ることになるため採らない。
+# **守れているのは関数の中身までである、と読むこと。**
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
@@ -253,20 +262,30 @@ done
 # この文書もコミットメッセージも日本語であり、その命名は起こりうる。
 # NUL 区切りにすると引用も、パスに改行を含む場合の問題も同時に消える。
 #
+# **入口だけを NUL にしても足りない。** 出力を改行区切りにすると、
+# read -r -d '' が1件として読んだ改行入りのパスが、受け側の mapfile -t で再び割れる。
+# 検出（件数が 0 でないこと）は失われないが、NG に出すパスが2件に見え、
+# そのまま git rm --cached に渡しても当たらない。経路の端から端まで NUL でそろえる。
+#
 # 走査は関数に切り出す。実物を渡す経路と、下の決め打ちを渡す確認が
 # 同じ読み取りを通るようにするため（2箇所に書くと黙ってずれる）。
-gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致したものを改行区切りで返す
+gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致したものを NUL 区切りで返す
   local p
   while IFS= read -r -d '' p; do
-    doc_excluded_name "${p##*/}" >/dev/null && printf '%s\n' "$p"
+    doc_excluded_name "${p##*/}" >/dev/null && printf '%s\0' "$p"
   done
 }
-# 走査そのものに落ちる条件を持たせる。リポジトリに DOC_PRUNE_FILES に一致する
-# 追跡ファイルは1件も無く、実物を流すかぎり結果は常に空である。つまりこのループを
-# 丸ごと削っても、-z を外しても、名前の取り出しを外しても全ケースが緑で通る
+# 関数の中身に落ちる条件を持たせる。リポジトリに DOC_PRUNE_FILES に一致する
+# 追跡ファイルは1件も無く、実物を流すかぎり結果は常に空である。つまり、この確認を
+# 置くまでは、上のループを丸ごと削っても、-z を外しても、名前の取り出しを外しても
+# 全ケースが緑で通った
 # （ここに件数を書かない。ケースを足すたびに古くなるうえ、コメントの数は
 #   どこからも照合されない。0b の注記と同じ理由）。
 # 決め打ちの一覧を同じ関数に流し、読み取り・名前の取り出し・KEEP の差し引きを同時に見る。
+#
+# **ここで塞がるのは関数の中身だけである。** 実物を流す呼び出し側
+# （下の git ls-files -z | gi_scan_tracked）にはいまも落ちる条件が無い。
+# 上の「代償 3」に、その範囲を書いてある。
 #
 # 名前は一覧から導出する。手書きで並べると、DOC_PRUNE_FILES / DOC_KEEP_FILES を
 # 変えたときに走査は正しく動いているのに期待値だけが取り残され、
@@ -280,6 +299,12 @@ for f in "${probe_real_names[@]}"; do gi_probe_pass+=("sub/$f"); done
 # 先頭が - のファイル名。名前の取り出しを basename に戻すと、option として
 # 解釈されて名前が空になり、一致しなくなる。
 gi_probe_pass+=("${probe_dash_names[@]}")
+# 改行を含む名前。パターンの * を「改行 + x」に置き換えて作る。
+# 出力を改行区切りに戻すと、ここで1件が2件に割れて件数が合わなくなる。
+# `*` を含むパターンからだけ作る（`.env` は置き換えが起こらず、既にある名前と重複する）。
+for g in "${probe_prune_files[@]}"; do
+  case "$g" in *'*'*) gi_probe_pass+=("${g//\*/$'\n'x}") ;; esac
+done
 # 一致してはならない側（KEEP に挙げたもの、末尾一致であることの裏打ちになる対、
 # 値を持たない通常のファイル）。
 # probe_real_keeps をここに入れるのは、これを doc_excluded_name に尋ねる経路が
@@ -287,13 +312,16 @@ gi_probe_pass+=("${probe_dash_names[@]}")
 # 0c の gi_tracked が問うのは .gitignore であって doc_excluded_name ではない。
 # 入れないと、末尾一致（`case "$base" in $g)`）を前方一致に崩しても全ケースが緑で通る。
 gi_probe_skip=("${probe_keep_files[@]//\*/x}" "${probe_real_keeps[@]}" README.md)
-gi_probe_want=$(printf '%s\n' "${gi_probe_pass[@]}")
-gi_probe_got=$(printf '%s\0' "${gi_probe_pass[@]}" "${gi_probe_skip[@]}" | gi_scan_tracked)
-if [ "$gi_probe_got" != "$gi_probe_want" ]; then
-  echo "  NG: 追跡ファイルの走査が想定と違う（期待: ${gi_probe_want//$'\n'/ } / 実際: ${gi_probe_got//$'\n'/ }）"
+# 結果は配列で受ける。$( ) は NUL を落とすため、NUL 区切りの出力を変数には入れられない。
+mapfile -d '' -t gi_probe_got < <(printf '%s\0' "${gi_probe_pass[@]}" "${gi_probe_skip[@]}" | gi_scan_tracked)
+if [ "${#gi_probe_got[@]}" -ne "${#gi_probe_pass[@]}" ] ||
+   [ "${gi_probe_got[*]}" != "${gi_probe_pass[*]}" ]; then
+  echo "  NG: 追跡ファイルの走査が想定と違う（期待 ${#gi_probe_pass[@]} 件 / 実際 ${#gi_probe_got[@]} 件）"
+  echo "        期待: ${gi_probe_pass[*]}"
+  echo "        実際: ${gi_probe_got[*]}"
   gi_ng=1
 fi
-mapfile -t gi_committed < <(git -C "$repo" ls-files -z | gi_scan_tracked)
+mapfile -d '' -t gi_committed < <(git -C "$repo" ls-files -z | gi_scan_tracked)
 if [ ${#gi_committed[@]} -gt 0 ]; then
   echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
   gi_ng=1
