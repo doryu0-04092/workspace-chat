@@ -26,18 +26,9 @@ services:
       - postgres
       - -c
       - shared_preload_libraries=pg_bigm
-    # shm_size は指定しない。/dev/shm は Docker の既定の 64MB のままである
-    # （`df -h /dev/shm` で確認した）。PostgreSQL の動的共有メモリは
-    # `dynamic_shared_memory_type = posix` でここを使い、並列プランの
-    # ワーカー間通信に要る（`max_parallel_workers_per_gather` の既定は 2。
-    # どちらも実際に問い合わせて確認した）。
-    #
-    # 代償: 開発用の規模では 64MB で足りると判断したが、**足りなくなると
-    # `could not resize shared memory segment ...: No space left on device` で
-    # 問い合わせが落ちる。** RDS 側にこの制約は無いため、
-    # **本番では通る検索がローカルだけで落ちる**という向きの差になる。
-    # 全文検索（pg_bigm）は並列プランが効く経路であり、無関係ではない。
-    # 踏んだら shm_size を足す。**踏むまでは足さない**（足りない証拠が無いため）。
+    # shm_size は指定しない。/dev/shm は Docker の既定の 64MB のままである。
+    # 判断と代償（本番では通る検索がローカルだけで落ちうる）は
+    # docs/tech-stack.md「ローカルの PostgreSQL の /dev/shm を広げない」に書いた。
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?.env に POSTGRES_USER を設定してください}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?.env に POSTGRES_PASSWORD を設定してください}

@@ -293,17 +293,30 @@ SELECT rolname FROM pg_authid WHERE oid = 10;
 返ったのは `rolname` が1行、`datname` が `postgres` と利用者のデータベース名の2行である。
 **`workspace-chat-db:local` と `postgres:17-bookworm` の両方で、同じ結果になった**）
 
-**値を引いたら、db を起動し直す。** 下の復旧手順はどれも `docker compose exec` を使うので、
-**止めたままでは繋がらない**（`service "db" is not running`。実行して確認した）。
+**値を引いたら、db を動く状態に戻す。** 下の復旧手順はどれも `docker compose exec` を使うので、
+**止まったままでは繋がらない**（`service "db" is not running`。実行して確認した）。
+**どちらの状態にいるかで手が違う。**
+
+**コンテナが残っている場合**（上で `docker stop` しただけ）。
 
 ```
 docker start workspace-chat-db-1
 ```
 
-**ここで `--wait` を付けない。** `up -d --wait` を使うと、値がまだずれているので
+**コンテナを失っている場合**（`docker rm -f` を通った。この節の本来の前提）。
+`docker start` は `Error: No such container` になる。**先に `.env` を書き戻してから**作り直す。
+
+```
+docker compose up -d
+```
+
+**`.env` が無いと `up` も止まる**（`${VAR:?...}` は compose の読み込み時に評価されるため、
+`build` / `down` / `ps` と同じく止まる）。**書き戻すのは、これから使いたい新しい値でよい。**
+引いた古い値は `.env` ではなく、下の手順の `<古い名前>` に使う。
+
+**どちらの場合も `--wait` を付けない。** 値がまだずれているので
 **必ず `unhealthy` で失敗する**（前述）。直すのはこれからであり、失敗して当然の段階である。
 コンテナさえ動いていれば `exec` には進める。
-（コンテナごと作り直したい場合は `docker compose up -d`。やはり `--wait` は付けない）
 
 **ボリュームまで失ったら、そこで終わりである。**
 残るのは `.env.example` から `.env` を作り直し、`up -d --wait` で初期化からやり直すことだけになる。
