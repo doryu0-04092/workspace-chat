@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -11,6 +11,19 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * SQLite やモックでは意味を持たない。ここで確かめたいのは
  * 「一意制約が本当に効くか」「検査制約が本当に拒否するか」であり、
  * それは実際の DB エンジンでしか分からない（#34）。
+ *
+ * ## 実行の前提: **Docker のデーモンが動いていること**
+ *
+ * このファイルは Testcontainers で `postgres:17` のコンテナを起動する。
+ * そのため **`npm test` は Docker が動いていることを前提とする。**
+ * 動いていない環境では `beforeAll` がコンテナを起動できず、
+ * **このファイルのテストが一式落ちる。スキーマともマイグレーションとも無関係な理由で
+ * 赤くなるため、原因を取り違えやすい。**
+ * 落ちたメッセージに `docker` / `Could not find a working container runtime` が
+ * 出ているなら、疑うのはスキーマではなく Docker である。
+ *
+ * （下の 600 秒はイメージの取得を待つための猶予であり、
+ * 「待たされる理由」であって「動かない理由」ではない。）
  *
  * ## Prisma のクライアントを使わない理由
  *
@@ -223,6 +236,32 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toContain('User_userId_key');
     });
 
+    it('大文字小文字だけが違うユーザーID は登録できない', async () => {
+      // ユーザーID の一意性は**大文字小文字を区別しない**（機能一覧 1.1）。
+      // 区別すると `@owner` と `@Owner` が別人を指し、**メンションでは見分けがつかない。**
+      // 既定の照合順序で作られる `User_userId_key` だけでは、これは止まらない。
+      const output = await expectSqlToFail(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+         VALUES ('${randomUUID()}', 'Owner', '大文字にした別人', 'argon2id-placeholder');`,
+      );
+      expect(output).toContain('User_userId_lower_key');
+    });
+
+    it('退会したユーザーID は、綴りを変えても再利用できない', async () => {
+      // F-36 の「ユーザーID を再利用させない」が、綴り違いで抜けないことを見る。
+      // **この it は自分の行を作る。** 他の it が退会させた行に相乗りすると、
+      // 落ちた原因が実行順なのかスキーマなのかを、失敗した人が区別できない。
+      await expectSqlToSucceed(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash", "deletedAt")
+         VALUES ('${randomUUID()}', 'retired_user', '退会した人', 'argon2id-placeholder', now());`,
+      );
+      const output = await expectSqlToFail(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+         VALUES ('${randomUUID()}', 'Retired_User', '後から来た人', 'argon2id-placeholder');`,
+      );
+      expect(output).toContain('User_userId_lower_key');
+    });
+
     it('ユーザーID の長さの上限が列で効く', async () => {
       // 要件が数値で決めている上限（30文字。機能一覧 1.1）は列の型に入れてある。
       // **アプリ側の検証を1箇所書き漏らしても、DB が受け付けない。**
@@ -286,6 +325,39 @@ describe('Prisma のスキーマとマイグレーション', () => {
         `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
          VALUES ('00000000-0000-7000-8000-0000000000f9', '00000000-0000-7000-8000-0000000000a2', 'general', 'general', 'PUBLIC');`,
       );
+    });
+
+    it('チャンネル名の事実上の上限は、文字数では決まらない', async () => {
+      // **チャンネル名に数値の上限は決めていない**（機能一覧 3.1）。
+      // しかし「上限が無い」わけではない。この列は一意索引
+      // `Channel_workspaceId_name_key`（B-tree）に載っており、
+      // **B-tree の索引タプルには約 2704 バイトの上限がある。**
+      //
+      // **ただし、その上限に当たるのは圧縮後の大きさである。**
+      // 索引タプルの値は行の外に出せない（TOAST できない）が、インラインでの圧縮は効く。
+      // よって**同じ文字数でも、通るか落ちるかが中身で変わる。**
+      // この it が2つを並べて確かめるのは、`schema.prisma` の name のコメントが
+      // 「事実上の上限はあるが、文字数では表せない」と書いているためである。
+      // **書いただけで確かめないと、記述だけが古くなる。**
+      const workspace = '00000000-0000-7000-8000-0000000000a2';
+
+      // 圧縮がよく効く 6000 文字。**通る。**
+      const compressible = 'x'.repeat(6000);
+      await expectSqlToSucceed(
+        `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
+         VALUES ('${randomUUID()}', '${workspace}', '${compressible}', '${compressible}', 'PUBLIC');`,
+      );
+
+      // 同じ 6000 文字でも、圧縮の効かない乱数なら**落ちる。**
+      const incompressible = randomBytes(3000).toString('hex');
+      const output = await expectSqlToFail(
+        `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
+         VALUES ('${randomUUID()}', '${workspace}', '${incompressible}', '${incompressible}', 'PUBLIC');`,
+      );
+      // 失敗の理由が「索引タプルの大きさ」であることまで見る。
+      // **別の制約で落ちて緑になるのを防ぐ。**
+      expect(output).toContain('index row size');
+      expect(output).toContain('Channel_workspaceId_name_key');
     });
 
     /**
