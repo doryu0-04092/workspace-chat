@@ -235,12 +235,32 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('一意制約', () => {
+    /**
+     * ユーザーID の一意性に違反したことを、**索引の作成順に依存せずに**確かめる。
+     *
+     * **綴りが完全に一致する重複は、2つの索引の両方に違反する**
+     * （`User_userId_key` と `User_userId_lower_key`）。どちらの名前が返るかは
+     * PostgreSQL が索引を走査する順、すなわち**索引の OID（作成順）**で決まる。
+     * 今は `User_userId_key` が先に作られているというだけの理由で、その名前が返る。
+     * **マイグレーションを整理して順序が入れ替わると、一意性は正しく効いているのに
+     * このテストだけが落ちる。** 落ちた人が原因を取り違える。
+     * （実測で確かめた。`lower` 索引を先に作ると `User_userId_lower_key` が返る。）
+     *
+     * **「一意制約違反であること」だけを見る形にはしない。** それだと
+     * `id` の重複など**別の一意制約で落ちても緑になる。**
+     * 見るのは「**ユーザーID の一意性に違反したこと**」までである。
+     */
+    function expectUserIdUniquenessViolation(output: string): void {
+      expect(output).toContain('duplicate key value violates unique constraint');
+      expect(output).toMatch(/User_userId(_lower)?_key/);
+    }
+
     it('ユーザーID は重複できない', async () => {
       const output = await expectSqlToFail(
         `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
          VALUES ('00000000-0000-7000-8000-0000000000ff', 'owner', '別人', 'argon2id-placeholder');`,
       );
-      expect(output).toContain('User_userId_key');
+      expectUserIdUniquenessViolation(output);
     });
 
     it('大文字小文字だけが違うユーザーID は登録できない', async () => {
@@ -305,7 +325,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
         `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
          VALUES ('${randomUUID()}', 'left_user', '後から来た人', 'argon2id-placeholder');`,
       );
-      expect(output).toContain('User_userId_key');
+      expectUserIdUniquenessViolation(output);
     });
 
     it('同じワークスペースに同じ利用者を二重に参加させられない', async () => {
@@ -736,6 +756,14 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **F-09 の管理者権限が機能しなくなる。**
      * 参加者一覧の判定は `Membership.role = 'OWNER'` で行うこと。
      * **境界は「人の出入りの管理」と「会話の閲覧」の間に引く。**
+     *
+     * **この形をそのまま写さないこと。** ここは固定の文字列を連結しているが、
+     * **`workspaceId` は URL のパスパラメータ由来である**（機能一覧 2.1 の
+     * 「所属していないワークスペースの情報は取得できない」の判定対象そのもの）。
+     * `$queryRaw` へそのまま写した時点で注入経路になる。
+     * **実装では `workspaceId` も `userId` もプレースホルダとして渡す**
+     * （REVIEW.md 3 / CWE-89）。写してよいのは**条件の形**であって、
+     * 値の埋め込み方ではない。`nextArchiveSequence` にも同じ注意がある。
      */
     function visibleChannels(userId: string, workspaceId: string): string {
       return `

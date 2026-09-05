@@ -152,6 +152,23 @@ model User {
   deletedAt DateTime? @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  /// **この列だけは DB が担保しない。**
+  ///
+  /// `@updatedAt` は **Prisma のクライアント経由の更新でしか作用しない。**
+  /// マイグレーションが作るのは `DEFAULT CURRENT_TIMESTAMP` だけであり、
+  /// **更新時に値を進めるトリガは無い。**
+  ///
+  /// このスキーマは、一意性・検査制約・連鎖削除をすべて DB に置いている。
+  /// **この列はその方針から外れる唯一のものである**（CLAUDE.md 4）。
+  /// 代償: **生 SQL の `UPDATE` では据え置かれる。**
+  /// チャンネルのアーカイブ（採番と改名）は生 SQL を想定しているため、
+  /// **その経路で更新した行の `updatedAt` は進まない。**
+  ///
+  /// トリガを置かなかった理由: **現時点でこの列に依存する要求が1つも無い。**
+  /// 置くなら `BEFORE UPDATE` のトリガを手書きし、このファイル冒頭の
+  /// 「Prisma の記法で書けない制約」の一覧を4つから5つに増やすことになる。
+  /// **この列を根拠に何かを判定する要求が出たら、その時点で見直すこと。**
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
   memberships   Membership[]
@@ -376,6 +393,11 @@ model Channel {
   archiveSequence Int?
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  /// **この列だけは DB が担保しない。** 理由と代償は `User.updatedAt` に書いた。
+  /// **この表では特に効く。** アーカイブの採番と改名は生 SQL を想定しており、
+  /// `@updatedAt` は Prisma のクライアント経由でしか作用しないため、
+  /// **アーカイブした行の `updatedAt` は据え置かれる。**
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
