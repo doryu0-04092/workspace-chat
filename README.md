@@ -231,9 +231,14 @@ docker stop workspace-chat-db-1
 > db を `healthy` のまま動かした状態で下のコマンドを叩いたところ、
 > **単一ユーザーモードは何の警告もなく起動し、問い合わせを実行し、
 > 稼働中のデータ領域に対してチェックポイントまで書いた。**
-> 二重起動の検査は `postmaster.pid` に記録された PID の生存確認で行われるが、
-> **別のコンテナは別の PID 名前空間にいるため、その PID が見つからず
-> ロックが stale と判断される。**
+> **理由は「PID が見つからないから」ではない。**
+> 公式イメージはエントリポイントの最後で `exec postgres` するため、
+> **db の postmaster はコンテナの中で PID 1 になる**
+> （`docker compose exec db head -1 /var/lib/postgresql/data/postmaster.pid` が `1` を返す。確認した）。
+> 上の `docker run` の単一ユーザーモードも**新しいコンテナの中で PID 1** である。
+> **記録されている PID と、検査する側の PID が一致してしまう。**
+> PostgreSQL はそれを自分自身の残骸と見なしてロックを引き継ぐ。
+> **PID が見えていれば拒んでくれる、ということにはならない。**
 > ここで守ろうとしているのは、その時点で値の唯一の複製であるデータ領域である。
 > **止め忘れると、救うつもりで壊す。**
 
@@ -255,9 +260,21 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
 **エラーではなく無出力**が返り、「引けなかった」と読み違えて初期化からやり直すことになる。
 
 **組み込みロールは `rolcanlogin` で落ちる**（`pg_` で始まる定義済みロールはすべて `NOLOGIN`）。
-**利用者名を OID で絞ろうとしないこと。** `POSTGRES_USER` は initdb が作る
-ブートストラップ superuser であり、**OID は 10 で、利用者が作ったロールの範囲に入らない**
-（実際に `oid >= 16384` で絞って空振りした）。
+
+**`rolname` が2行返ることがある。** 利用者名の改名手順（後述）の3行目を叩き忘れると、
+`SUPERUSER LOGIN` の `tmp_rename` が残り、**これは `rolcanlogin` で落ちない。**
+その場合は OID で一意に決まる。
+
+```
+SELECT rolname FROM pg_authid WHERE oid = 10;
+```
+
+`POSTGRES_USER` は **initdb が作るブートストラップ superuser であり、OID は 10** である。
+（実行して確認した。`tmp_rename` を残した状態で `rolcanlogin` は2行返り、
+`oid = 10` は `POSTGRES_USER` の側だけを返した）
+
+**ただし `oid >= 16384` で絞ろうとしないこと。** OID が 10 である以上、
+**利用者が作ったロールの範囲には入らない**ため空振りする（実際に叩いて空振りした）。
 
 **`workspace-chat-db:local` が手元に無ければ、土台の `postgres:17-bookworm` に置き換えてよい。**
 この手順が読むのは `pg_authid` と `pg_database` だけで、**pg_bigm は要らない**
@@ -275,6 +292,18 @@ printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg
 `.env` も消した状態から、ボリュームだけで利用者名とデータベース名を引けた。
 返ったのは `rolname` が1行、`datname` が `postgres` と利用者のデータベース名の2行である。
 **`workspace-chat-db:local` と `postgres:17-bookworm` の両方で、同じ結果になった**）
+
+**値を引いたら、db を起動し直す。** 下の復旧手順はどれも `docker compose exec` を使うので、
+**止めたままでは繋がらない**（`service "db" is not running`。実行して確認した）。
+
+```
+docker start workspace-chat-db-1
+```
+
+**ここで `--wait` を付けない。** `up -d --wait` を使うと、値がまだずれているので
+**必ず `unhealthy` で失敗する**（前述）。直すのはこれからであり、失敗して当然の段階である。
+コンテナさえ動いていれば `exec` には進める。
+（コンテナごと作り直したい場合は `docker compose up -d`。やはり `--wait` は付けない）
 
 **ボリュームまで失ったら、そこで終わりである。**
 残るのは `.env.example` から `.env` を作り直し、`up -d --wait` で初期化からやり直すことだけになる。
