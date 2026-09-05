@@ -168,6 +168,33 @@ else
   compare_decls "$(decls REVIEW.md          '経路は[0-9][0-9]*つある')"           "$routes" "REVIEW.md の「経路はNつある」"
   compare_decls "$(decls docs/requirements.md '[0-9][0-9]*経路\**すべてを塞いで')" "$routes" "requirements.md の「N経路すべてを塞いで」"
   compare_decls "$(decls docs/requirements.md '[0-9][0-9]*経路のうち')"            "$routes" "requirements.md の「N経路のうち」"
+
+  # 数だけでは足りない。4のまま1つが別物に差し替わっても気づけない。
+  # REVIEW.md 2.1 は本ファイルが最優先と定めた箇所であり、経路が差し替わることは
+  # 欠けることと影響が同じである（塞ぐ対象の合意がずれる）。イベント表と同じく中身で見る。
+  route_names=$(awk -F'|' '$0 ~ /^### 2\.1 / { in_sec = 1; next }
+                           in_sec && /^#/ { exit }
+                           in_sec && /^\| [0-9]+ \|/ {
+                             r = $3; gsub(/\*/, "", r); gsub(/^ +| +$/, "", r); print r }' REVIEW.md)
+  # requirements.md 側は1行に4つ並ぶ。行を特定し、「/」で分割して集合として突き合わせる。
+  #
+  # 包含（grep -qF）で見てはいけない。「検索」は「全文検索」に含まれるため、
+  # 列挙側を 検索 → 全文検索 に書き換えても素通りする（検査の検査が実際に踏んだ）。
+  # 集合で見れば、名前の差し替え・増減のどちらも検出できる。
+  # 行を読み取れない場合は NG（消えるのではなく鳴らす）。
+  route_line=$(grep -m1 '[0-9][0-9]*経路\**すべてを塞いで' docs/requirements.md)
+  if [ -z "$route_line" ]; then
+    note "requirements.md の経路を列挙している行を読み取れない"
+  else
+    # 「> **一覧・取得 API / … / WebSocket の配信の4経路**すべてを塞いで」から列挙だけを取る。
+    req_routes=$(printf '%s\n' "$route_line" \
+      | sed 's/^> *//; s/^\*\*//; s/の[0-9][0-9]*経路.*//' \
+      | tr '/' '\n' | sed 's/^ *//; s/ *$//')
+    rev_sorted=$(printf '%s\n' "$route_names" | sort | paste -sd'/' -)
+    req_sorted=$(printf '%s\n' "$req_routes"  | sort | paste -sd'/' -)
+    [ "$rev_sorted" = "$req_sorted" ] ||
+      note "REVIEW.md 2.1 の表と requirements.md で経路の名前が違う（表: $rev_sorted / 列挙: $req_sorted）"
+  fi
 fi
 
 # リアルタイム配信のイベント表は requirements.md と features.md に重複している。
@@ -187,10 +214,21 @@ else
   # 数ではなく中身で突き合わせる。7種類のまま1つだけ差し替えられても数では気づけない
   # （検査4と同じ理由）。守りたいのは「どのイベントを配信するか」の合意である。
   [ "$req_events" = "$fea_events" ] || note "requirements.md と features.md でイベント表の内容が違う"
-  # 宣言は4つの文書にある。1つだけ検査すると、検査していない側を直し忘れて同じ見落としが再発する。
-  for f in CLAUDE.md docs/requirements.md docs/features.md docs/tech-stack.md; do
-    compare_decls "$(decls "$f" '[0-9][0-9]*種類')" "$kinds" "$f の「N種類」"
-  done
+  # 宣言は4つの文書・6箇所にある。1つだけ検査すると、検査していない側を直し忘れて
+  # 同じ見落としが再発する。パターンは経路と同じく場所ごとに分ける
+  # （宣言の行にしか無い後続語まで含めて一意にする）。総称の [0-9][0-9]*種類 を
+  # 4文書へ一律に当てると、イベントと無関係な「N種類」が1つ入った時点で
+  # 正しい記述が NG になる。アップロードの許可形式やロールの説明は同じ文書にあり、
+  # 書かれうる場所である。同じ検査の中に方針が2つあると、次に触る人が寄せ先を判断できない。
+  #
+  # requirements.md の宣言は「（4.1 の7種類）」である。節番号を含めると decls が
+  # 4 と 1 も数として返すため、節番号を含めないパターンにする。
+  compare_decls "$(decls CLAUDE.md            'イベント定義（[0-9][0-9]*種類）')"      "$kinds" "CLAUDE.md の「イベント定義（N種類）」"
+  compare_decls "$(decls docs/requirements.md 'の[0-9][0-9]*種類）')"                   "$kinds" "requirements.md の「4.1 のN種類」"
+  compare_decls "$(decls docs/features.md     '[0-9][0-9]*種類のイベントを配信')"       "$kinds" "features.md の「N種類のイベントを配信」"
+  compare_decls "$(decls docs/features.md     'この[0-9][0-9]*種類以外')"               "$kinds" "features.md の「このN種類以外」"
+  compare_decls "$(decls docs/tech-stack.md   '[0-9][0-9]*種類の WebSocket イベント')"  "$kinds" "tech-stack.md の「N種類の WebSocket イベント」"
+  compare_decls "$(decls docs/tech-stack.md   '[0-9][0-9]*種類のイベント定義')"         "$kinds" "tech-stack.md の「N種類のイベント定義」"
 fi
 echo "  完了（$routes 経路 / $kinds 種類）"
 
