@@ -137,7 +137,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
         ('00000000-0000-7000-8000-000000000001', 'owner',    'オーナー',   'argon2id-placeholder'),
         ('00000000-0000-7000-8000-000000000002', 'insider',  '参加者',     'argon2id-placeholder'),
         ('00000000-0000-7000-8000-000000000003', 'outsider', '非参加者',   'argon2id-placeholder'),
-        ('00000000-0000-7000-8000-000000000004', 'stranger', 'よその人',   'argon2id-placeholder');
+        ('00000000-0000-7000-8000-000000000004', 'stranger', 'よその人',   'argon2id-placeholder'),
+        -- **第2ワークスペースのオーナー。第1ワークスペースには参加していない。**
+        -- これが無いと、可視性の条件から「所属ワークスペースが一致すること」だけを
+        -- 落としても1件も落ちない（役割だけを見る書き間違いが素通りする）。
+        ('00000000-0000-7000-8000-000000000005', 'other_owner', '別ワークスペースのオーナー', 'argon2id-placeholder');
 
       INSERT INTO "Workspace" ("id", "name") VALUES
         ('00000000-0000-7000-8000-0000000000a1', '第1ワークスペース'),
@@ -146,7 +150,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
       INSERT INTO "Membership" ("id", "workspaceId", "userId", "role") VALUES
         ('00000000-0000-7000-8000-0000000000b1', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000001', 'OWNER'),
         ('00000000-0000-7000-8000-0000000000b2', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002', 'MEMBER'),
-        ('00000000-0000-7000-8000-0000000000b3', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000003', 'MEMBER');
+        ('00000000-0000-7000-8000-0000000000b3', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000003', 'MEMBER'),
+        ('00000000-0000-7000-8000-0000000000b4', '00000000-0000-7000-8000-0000000000a2', '00000000-0000-7000-8000-000000000005', 'OWNER');
 
       INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility") VALUES
         ('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000a1', 'general', 'general', 'PUBLIC'),
@@ -816,6 +821,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
     const insider = '00000000-0000-7000-8000-000000000002';
     const outsider = '00000000-0000-7000-8000-000000000003';
     const stranger = '00000000-0000-7000-8000-000000000004';
+    // 第2ワークスペースのオーナー。**第1ワークスペースには参加していない。**
+    const otherWorkspaceOwner = '00000000-0000-7000-8000-000000000005';
 
     it('参加者にはプライベートチャンネルが見える', async () => {
       const output = await expectSqlToSucceed(visibleChannels(insider, workspace));
@@ -927,6 +934,25 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 上の it だけだと、**パブリックを一律で閉じる実装でも緑になる。**
       const output = await expectSqlToSucceed(channelMemberViewers(insider, publicChannel));
       expect(output).toBe(publicChannel);
+    });
+
+    it('別のワークスペースのオーナーには、参加者一覧が見えない', async () => {
+      // **「所属ワークスペースが一致すること」を落としても落ちるようにする。**
+      // これが無いと、条件から `m."workspaceId" = c."workspaceId"` だけを外しても
+      // 1件も落ちない。**役割だけを見る書き間違い**が素通りする形になり、
+      // **どこか1つのワークスペースのオーナーが、他人のワークスペースの
+      // プライベートチャンネルの参加者一覧を取得できる**（機能一覧 2.1）。
+      const output = await expectSqlToSucceed(
+        channelMemberViewers(otherWorkspaceOwner, secretChannel),
+      );
+      expect(output).toBe('');
+    });
+
+    it('別のワークスペースのオーナーには、チャンネルが1つも見えない', async () => {
+      // `visibleChannels` 側も同じ形の書き間違いを起こしうる。
+      // **パブリックチャンネルまで見えてしまう**ため、こちらも押さえる。
+      const output = await expectSqlToSucceed(visibleChannels(otherWorkspaceOwner, workspace));
+      expect(output).toBe('');
     });
   });
 });
