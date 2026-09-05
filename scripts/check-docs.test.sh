@@ -92,6 +92,19 @@ else
   echo "  NG: 除外の範囲が想定と違う → $got"
   fail=1
 fi
+# doc_excluded_name の KEEP 分岐も直接踏む。上の doc_find は配列から find の式を
+# 組み立てる別経路であり、doc_excluded_name を通らない。0c の gi_committed は通るが、
+# リポジトリに .env* が1つも無いため KEEP に一致する入力がそもそも流れない。
+# つまり doc_excluded_name の KEEP のループを丸ごと削っても全ケースが緑で通る。
+# 壊れたときの帰結は、0c が「値を持つ名前のファイルが追跡されている」と偽の NG を出して
+# CI を止めることであり（.env.example は .gitignore が `!` で追跡対象へ戻している）、
+# 落ちる条件を持たせておく必要がある。名前は一覧から導出する（足したら自動で増える）。
+for g in "${probe_keep_files[@]}"; do
+  if doc_excluded_name "${g//\*/x}" >/dev/null; then
+    echo "  NG: KEEP のファイル名 ${g//\*/x} が除外されている（doc_excluded_name の KEEP 分岐が効いていない）"
+    fail=1
+  fi
+done
 
 # --- 前提: 検査対象が1件も無いときに落ちること -------------------------------
 # この分岐だけがケース1〜27 のどれからも踏まれない。踏まないまま置くと、
@@ -192,9 +205,16 @@ done
 # 何も言わない。0c が保証するのは「値を持つ**ファイル名**が追跡されていないこと」だけである。
 # ディレクトリ側まで見るなら、KEEP に相当する打ち消しの一覧を別に持つことになる。
 gi_committed=()
-while IFS= read -r p; do
+# -z で NUL 区切りにする。core.quotePath は既定で有効であり、既定の ls-files は
+# 非 ASCII を含むパスを二重引用符で囲みバックスラッシュでエスケープして出力する。
+# 「本番.tfvars」が追跡されていると "\346\234\254\347\225\252.tfvars" となり、
+# basename の結果に " が残って *.tfvars に一致しない。つまり 0c が塞ごうとしている穴
+# （.gitignore は追跡済みに効かない）そのものが素通りする。
+# この文書もコミットメッセージも日本語であり、その命名は起こりうる。
+# NUL 区切りにすると引用も、パスに改行を含む場合の問題も同時に消える。
+while IFS= read -r -d '' p; do
   doc_excluded_name "$(basename "$p")" >/dev/null && gi_committed+=("$p")
-done < <(git -C "$repo" ls-files)
+done < <(git -C "$repo" ls-files -z)
 if [ ${#gi_committed[@]} -gt 0 ]; then
   echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
   gi_ng=1
@@ -354,6 +374,16 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   n=$((n + 1))
   mkdir -p "$work/$(dirname "$file")"
   printf '%s\n' "$body" > "$work/$file"
+  # ファイルを置けたことを先に確かめる。下の got=out は「doc_find の結果に含まれない」
+  # でしか判定しておらず、「除外された」と「そもそも置けていない」の両方で成立する。
+  # mkdir -p や printf > が失敗しても（set -e は無いので継続する）got=out になり、
+  # want=out のケースは一致し、run_check は壊れたリンクが1つも無い状態で当然通る。
+  # つまり壊れたリンクを一度も置かないまま「無視されることを確認した」と表示する。
+  # in 側は doc_find に現れることで存在も同時に保証されるが、out 側だけ保証が無い。
+  if [ ! -f "$work/$file" ]; then
+    echo "  NG: $n. $desc — ファイルを置けていない。ケースが成立していない"
+    fail=1; return
+  fi
   # $file と違い $extra は複製済みの木に既にありうる（.env.example がまさにその候補）。
   # そのときは作らず・消さずにそのまま使う。$extra に求めているのは
   # 「リンク先の実体が存在すること」だけで、複製されたものはそれを満たす。
