@@ -33,8 +33,16 @@ ARG POSTGRES_IMAGE=postgres:17-bookworm
 
 FROM ${POSTGRES_IMAGE} AS build
 
-# タグは付け替えられるが、コミットの SHA-1 は中身から決まるため動かせない。
-# タグだけを指すと、同じ Dockerfile が別の中身をビルドしうる。
+# **取得も SHA-1 で行う。** コミットの SHA-1 は中身から決まるため動かせない。
+#
+# 以前はタグで clone してから SHA-1 を照合していた。それでは
+# **「別の中身がビルドされる」ことは防げても、「同じ中身をビルドできる」ことは守れない。**
+# 上流でタグが付け替えられるか消されると、clone か照合のどちらかが落ち、
+# **ARG を手で上げるまで開発環境が立たなくなる。**
+# SHA-1 で fetch すれば、タグが動いても消えても同じ中身が取れる。
+#
+# PG_BIGM_TAG は**人が版を読むための注記**であり、取得には使わない。
+# ビルドログに出して、どの版に対応する SHA-1 かを追えるようにする。
 ARG PG_BIGM_TAG=v1.2-20250903
 ARG PG_BIGM_COMMIT=735dceba0ecdd8ac1aaaaa207226a7102b6bbd71
 
@@ -48,8 +56,12 @@ RUN set -eux; \
       ca-certificates \
       git \
       "postgresql-server-dev-$PG_MAJOR"; \
-    git clone --depth 1 --branch "$PG_BIGM_TAG" https://github.com/pgbigm/pg_bigm.git /tmp/pg_bigm; \
+    echo "pg_bigm $PG_BIGM_TAG ($PG_BIGM_COMMIT)"; \
+    git init /tmp/pg_bigm; \
     cd /tmp/pg_bigm; \
+    git remote add origin https://github.com/pgbigm/pg_bigm.git; \
+    git fetch --depth 1 origin "$PG_BIGM_COMMIT"; \
+    git checkout FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = "$PG_BIGM_COMMIT"; \
     make USE_PGXS=1; \
     make USE_PGXS=1 install DESTDIR=/staging
