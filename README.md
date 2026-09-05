@@ -89,6 +89,7 @@ CI が回すのと同じ検査を手元で通すには次を順に実行する�
 
 ```
 npm run lint
+bash scripts/lint-scope.test.sh
 npm run format:check
 npm run typecheck
 npm run build
@@ -101,6 +102,10 @@ bash scripts/check-docs.test.sh
 
 （`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
 この1行だけ飛ばす）
+
+`scripts/lint-scope.test.sh` は、ESLint と Prettier が `.claude/`（エージェントが作る
+git のワークツリーが入る）を走査しないことを確かめる。**この不具合は CI では起きない。**
+`.claude/` は CI のチェックアウトに無いためである。**手元で回さなければ誰も気づけない。**
 
 このほかに CI は次を回す。
 

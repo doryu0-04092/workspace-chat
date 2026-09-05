@@ -30,6 +30,12 @@ NEG_DIR="$NEG_ROOT/apps/api/src"
 NEG="$NEG_DIR/probe.ts"
 
 # 走査対象であるべき場所（陽性対照）
+#
+# **この置き場所を .gitignore に足してはならない。** Prettier 3 の既定の ignore-path は
+# .gitignore と .prettierignore の両方であり、足すと Prettier がここを走査しなくなって、
+# 陽性対照が必ず「検出されなかった」で落ちる。
+# 「後片付けし損ねた probe が誤ってコミットされるのを防ぐ」目的でも足さない。
+# それは下の cleanup が担う。**.gitignore を触ると Prettier の走査範囲が動く。**
 POS_ROOT='__lint_scope_probe_positive__'
 POS="$POS_ROOT/probe.ts"
 
@@ -121,9 +127,10 @@ set -e
 check_tool 'ESLint' 'eslint.config.js の ignores に .claude/** が入っているか確かめる。' \
   "$ESLINT_OUT" "$ESLINT_CODE"
 
-# Prettier は .gitignore を既定では読まない。.prettierignore に書かなければ
-# .claude/ の中の作業中ファイルまで対象に入る。ESLint 側だけ直しても、
-# format:check が手元でだけ落ちる状態が残る。
+# Prettier 3 の既定の ignore-path は .gitignore と .prettierignore の両方だが、
+# **.claude/ はそのどちらにも書かれていない**ため走査対象に入る。
+# .prettierignore に書かなければ .claude/ の中の作業中ファイルまで対象になり、
+# ESLint 側だけ直しても format:check が手元でだけ落ちる状態が残る。
 echo "2. Prettier"
 set +e
 PRETTIER_OUT="$(npx prettier --check . 2>&1)"
