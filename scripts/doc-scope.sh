@@ -20,7 +20,10 @@
 # ■ 制約: 次のどちらかに当たるファイルを、Markdown のリンク先にしてはならない。
 #     1. DOC_PRUNE_DIRS 配下のファイル
 #     2. DOC_KEEP_FILES を除く DOC_PRUNE_FILES に一致する名前のファイル（.env など）
-#   KEEP に挙げたもの（.env.example）だけは、下のとおり除外から外してあるためリンク先にできる。
+#   KEEP に挙げたもの（.env.example）は **2 の対象から外れる**ためリンク先にできる。
+#   ただし 1 は KEEP を見ない。doc_excluded はディレクトリ側で先に返すため、
+#   .terraform/.env.example のような置き方は KEEP に挙がっていてもリンク先にできない。
+#   DOC_KEEP_FILES が差し引くのは DOC_PRUNE_FILES だけである。
 #   check-docs.sh の検査1が呼ぶ doc_excluded は、ディレクトリ側とファイル名側の両方を見る。
 #
 # doc_find は2つの用途を兼ねている。

@@ -575,6 +575,23 @@ fi
 expect_ok "KEEP に挙げた .env.example へのリンクは「リンク先にできない」にならない" \
   probe-env-example-link.md '[環境変数の例](.env.example)' in .env.example
 
+# $extra の「既にあればそのまま使う」分岐に落ちる条件を持たせる。
+#
+# 上のケース31 が渡す .env.example は、まだリポジトリに無い。つまり `[ -e ] && continue` は
+# 一度も真にならず、**この1行を丸ごと削っても、1巡目の「既にあるなら失敗にする」形へ
+# 戻しても、全ケースが緑で通る。** どちらの退化も、.env.example が置かれた PR の CI で
+# 初めて表面化する（原因を作った PR ではなく、無関係な PR が赤くなる）。
+#
+# package.json を使う。DOC_PRUNE_DIRS にも DOC_PRUNE_FILES にも当たらないため
+# 冒頭の複製ループで必ず $work に入り、リンク先としても正当である。
+# 分岐が外れると `: >` で空に切り詰めたうえ made 経由で消されるため、下の cmp が落ちる。
+expect_ok "既に複製にある実体をリンク先にしても、その実体を壊さない" \
+  probe-existing-target.md '[ルートの package.json](package.json)' in package.json
+if ! cmp -s "$repo/package.json" "$work/package.json"; then
+  echo "  NG: 既に \$work にあった package.json が壊れた（\$extra を上書き・削除している）"
+  fail=1
+fi
+
 # --- 「N通り」の宣言が実数と一致すること -------------------------------------
 # check-docs.sh の3章は「合計 N 件」「全 N 件」「機能N件」「N項目」を照合するが、
 # 「N通り」は見ていない。実数 $n はテストを走らせて初めて確定するため、ここで突き合わせる。
