@@ -91,13 +91,19 @@ else
   echo "  NG: 除外の範囲が想定と違う → $got"
   fail=1
 fi
-# doc_excluded_name の KEEP 分岐も直接踏む。上の doc_find は配列から find の式を
-# 組み立てる別経路であり、doc_excluded_name を通らない。0c の gi_committed は通るが、
-# リポジトリに .env* が1つも無いため KEEP に一致する入力がそもそも流れない。
-# つまり doc_excluded_name の KEEP のループを丸ごと削っても全ケースが緑で通る。
+# doc_excluded_name の KEEP 分岐を、判定関数を直接呼んで踏む。
+#
+# 上の doc_find は配列から find の式を組み立てる別経路であり、doc_excluded_name を
+# 通らない。0c の gi_committed は通るが、リポジトリに .env* が1つも無いため
+# KEEP に一致する入力がそもそも流れない。**この2つだけでは KEEP 分岐に
+# 落ちる条件が無い。**
+#
 # 壊れたときの帰結は、0c が「値を持つ名前のファイルが追跡されている」と偽の NG を出して
 # CI を止めることであり（.env.example は .gitignore が `!` で追跡対象へ戻している）、
 # 落ちる条件を持たせておく必要がある。名前は一覧から導出する（足したら自動で増える）。
+#
+# ここが見るのは doc_excluded_name の単体である。doc_excluded の委譲と
+# check-docs.sh の検査1 まで通した経路は、この確認では踏まない。
 for g in "${probe_keep_files[@]}"; do
   if doc_excluded_name "${g//\*/x}" >/dev/null; then
     echo "  NG: KEEP のファイル名 ${g//\*/x} が除外されている（doc_excluded_name の KEEP 分岐が効いていない）"
