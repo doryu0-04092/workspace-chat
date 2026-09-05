@@ -371,23 +371,55 @@ expect_ok "外部リンク（https / mailto）は存在を確かめない" docs/
 # 無いと、ケースを1件足すたびに文書の宣言が古くなり、しかもどの検査も落ちない。
 # 検査3で「tech-stack.md が漏れていたため機能34件が38件になっても放置された」のと同型。
 echo "2. 「N通り」の宣言が実数と一致すること"
+decl_files=(README.md CLAUDE.md)
+# パターンは宣言の行にしか無い後続語まで含めて一意にする（check-docs.sh の
+# compare_decls と同じ方針）。総称の [0-9][0-9]*通り で拾うと、ケース数と無関係な
+# 「起動は2通り」のような1行が入った時点で「2 と書かれているが、実際は 30」という
+# 偽の NG が出る。しかも文面は「宣言が古い」と読めるため、受け取った側は
+# 本来直す必要のない文の方を書き換えてしまう。
+# 読み取れない場合を NG にする扱いは下に入れてあるので、具体化しても
+# 「言い回しを変えたら検査が消える」ことにはならない。
+decl_pattern() { # $1=ファイル名。その文書の宣言のパターンを出力する
+  case "$1" in
+    README.md) echo 'check-docs\.test\.sh`、[0-9][0-9]*通り' ;;
+    CLAUDE.md) echo '検査そのものの検査を[0-9][0-9]*通り含む' ;;
+    *) return 1 ;;
+  esac
+}
 decl_mismatches() { # $1=期待する数。README.md と CLAUDE.md の「N通り」のうち食い違うものを返す
-  local f v found=0
-  for f in README.md CLAUDE.md; do
+  local f v pat found
+  for f in "${decl_files[@]}"; do
+    if ! pat=$(decl_pattern "$f"); then
+      echo "$f の「N通り」のパターンが定義されていない（decl_pattern に足す）"
+      continue
+    fi
+    # found は文書ごとに持つ。ループの外に置くと、片方が読めているだけで
+    # もう片方の「読み取れない」が出なくなり、その文書が黙って対象から外れる。
+    # check-docs.sh の compare_decls が宣言ごとに呼ばれているのと同じ粒度にそろえる。
+    found=0
     while IFS= read -r v; do
       [ -n "$v" ] || continue
       found=1
       [ "$v" = "$1" ] || echo "$f の「N通り」: $v と書かれているが、実際は $1"
-    done < <(grep -o "[0-9][0-9]*通り" "$repo/$f" | grep -o "[0-9][0-9]*")
+    done < <(grep -o "$pat" "$repo/$f" | grep -o "[0-9][0-9]*")
+    # 読み取れないのも NG。黙って通すと、言い回しを変えた時点で検査が落ちるのではなく消える
+    # （check-docs.sh の compare_decls と同じ扱い）。
+    [ "$found" = 1 ] || echo "$f の「N通り」を読み取れない（言い回しが変わった可能性）"
   done
-  # 読み取れないのも NG。黙って通すと、言い回しを変えた時点で検査が落ちるのではなく消える
-  # （check-docs.sh の compare_decls と同じ扱い）。
-  [ "$found" = 1 ] || echo "README.md / CLAUDE.md の「N通り」を読み取れない（言い回しが変わった可能性）"
 }
 # 突き合わせ自体が働いていることを先に見る。わざと違う数を渡して何も出ないなら、
 # 下の確認は文書に何を書いても通る。0a・0c と同じく「ケースが成立していない」を検出する。
-if [ -z "$(decl_mismatches "$((n + 1))")" ]; then
-  echo "  NG: 「N通り」の突き合わせが働いていない（わざと違う数を渡しても食い違いが出ない）"
+# 「1件でも出たか」ではなく文書ごとに出たかを見る。合計で見ると、片方の宣言が
+# 読み取れなくなっても、もう片方の食い違いだけでこの自己確認が緑のまま通る。
+decl_probe=$(decl_mismatches "$((n + 1))")
+decl_probe_ng=0
+for f in "${decl_files[@]}"; do
+  printf '%s\n' "$decl_probe" | grep -q "^$f の" || {
+    echo "  NG: 「N通り」の突き合わせが $f に効いていない（わざと違う数を渡しても食い違いが出ない）"
+    decl_probe_ng=1
+  }
+done
+if [ "$decl_probe_ng" != 0 ]; then
   fail=1
 else
   decl_out=$(decl_mismatches "$n")
