@@ -79,8 +79,12 @@ for g in "${probe_prune_files[@]}"; do : > "$probe/${g//\*/x}"; done
 # 残るはずのもの
 for g in "${probe_keep_files[@]}"; do : > "$probe/${g//\*/x}"; done
 : > "$probe/prod.tfvars.example"   # *.tfvars は末尾一致のため、KEEP が無くても残る
+# *.tfvars.json も末尾一致であり、例示ファイルには一致しない。この対を置かないと、
+# *.tfvars.json を *.tfvars.json* のように末尾一致でない形へ崩しても
+# prod.tfvars.example は一致しないままで、0a も 0c も緑で通る。
+: > "$probe/prod.tfvars.json.example"
 : > "$probe/keep.md"
-expected=$(printf '%s\n' keep.md prod.tfvars.example "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
+expected=$(printf '%s\n' keep.md prod.tfvars.example prod.tfvars.json.example "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
 got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
 if [ "$got" = "$expected" ]; then
   echo "  OK（残るのは $expected）"
@@ -105,7 +109,7 @@ else
   fail=1
 fi
 
-# --- 前提: 値を持つファイルが .gitignore で無視されること ---------------------
+# --- 前提: 値を持つファイルが .gitignore で無視され、かつ追跡されていないこと ---
 # doc-scope.sh の除外が保証するのは「検査が読みに行かない」ことだけで、
 # 「値がコミットされない」ことは .gitignore が担う。両者は同じ穴を持ちうる
 # （*.tfvars が terraform.tfvars.json に一致しない、が実例）。片方だけ直すと
@@ -133,7 +137,7 @@ fi
 # 依存しない」（未コミットのファイルも検査対象にする）方針だが、.gitignore が何を無視するかは
 # git にしか判定できないため、ここは例外とする。git が無い環境や作業ツリーでない場所では
 # 0c が NG になる。CI（actions/checkout）と手元はどちらも作業ツリーである。
-echo "0c. 値を持つファイル名が .gitignore で無視されること"
+echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
   local line head src pat
@@ -156,7 +160,7 @@ gi_ignored=(.env .env.local terraform.tfstate terraform.tfstate.backup
 # 「除外されるはずのファイルは一覧から導出する」と同じ置換で機械的に補う。
 for g in "${probe_prune_files[@]}"; do gi_ignored+=("${g//\*/x}"); done
 # 無視されては困るもの。片側だけ見ると「全部無視する」設定でも緑になる。
-gi_tracked=(.env.example prod.tfvars.example README.md)
+gi_tracked=(.env.example prod.tfvars.example prod.tfvars.json.example README.md)
 gi_ng=0
 for p in "${gi_ignored[@]}"; do
   if ! gi_ignored_by_gitignore "$p"; then
