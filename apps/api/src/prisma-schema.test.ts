@@ -1091,4 +1091,68 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe('');
     });
   });
+
+  describe('退会済みアカウントの照合', () => {
+    /**
+     * ユーザーID から**復旧・ログイン・招待の対象になる利用者**を引く問い合わせ。
+     *
+     * **退会済みを除くのは、照合の側の条件である**（機能一覧 1.1 / 1.2 / 2.2）。
+     * 退会は論理削除で `User` の行が残るため、**`lower("userId")` の照合は
+     * 退会済みの行にそのまま当たる。DB は止めない。**
+     *
+     * **`deletedAt` を落とすと、退会済みアカウントのパスワードを
+     * リカバリーコードで書き換えられる。** 1.5 の「削除後、リカバリーコードによる
+     * パスワード再設定もできない」を支えているのが
+     * 「退会処理が同一トランザクションで `usedAt` を埋める」という規約1本だけだと、
+     * **退会処理が1件でも取りこぼした時点で通ってしまう。**
+     * 読み取り側にも条件を置いて二重にする。
+     *
+     * **メンション（機能一覧 9.1）はこの問い合わせを使わない。**
+     * あちらは退会済みにも当ててよい（「削除済みの利用者」として表示するため）。
+     * **経路ごとに書き分けること。**
+     *
+     * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
+     * （REVIEW.md 3 / CWE-89）。`lower()` で引くのは機能一覧 1.1 の決定による。
+     */
+    function activeUserByLoginId(loginId: string): string {
+      return `
+        SELECT "id" FROM "User"
+        WHERE lower("userId") = lower('${loginId}')
+          AND "deletedAt" IS NULL;
+      `;
+    }
+
+    it('現役の利用者は、ユーザーID から引ける', async () => {
+      // **否定側だけだと、常に空を返す実装でも緑になる。**
+      const output = await expectSqlToSucceed(activeUserByLoginId('owner'));
+      expect(output).toBe('00000000-0000-7000-8000-000000000001');
+    });
+
+    it('大文字小文字が違っても、現役の利用者は引ける', async () => {
+      const output = await expectSqlToSucceed(activeUserByLoginId('OWNER'));
+      expect(output).toBe('00000000-0000-7000-8000-000000000001');
+    });
+
+    it('退会した利用者は、ユーザーID から引けない', async () => {
+      // **この it が無いと、`deletedAt IS NULL` を落としても1件も落ちない。**
+      // 落とすと、退会済みアカウントがリカバリーコードで復旧できる。
+      const loginId = `left_${randomUUID().slice(0, 8)}`;
+      await expectSqlToSucceed(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash", "deletedAt")
+         VALUES ('${randomUUID()}', '${loginId}', '退会した人', 'argon2id-placeholder', now());`,
+      );
+      const output = await expectSqlToSucceed(activeUserByLoginId(loginId));
+      expect(output).toBe('');
+    });
+
+    it('退会した利用者は、綴りを変えても引けない', async () => {
+      const loginId = `left_${randomUUID().slice(0, 8)}`;
+      await expectSqlToSucceed(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash", "deletedAt")
+         VALUES ('${randomUUID()}', '${loginId}', '退会した人', 'argon2id-placeholder', now());`,
+      );
+      const output = await expectSqlToSucceed(activeUserByLoginId(loginId.toUpperCase()));
+      expect(output).toBe('');
+    });
+  });
 });

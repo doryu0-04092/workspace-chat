@@ -52,8 +52,17 @@ const databaseUrlFromEnvironment = process.env.DATABASE_URL;
 
 try {
   process.loadEnvFile(join(import.meta.dirname, '.env'));
-} catch {
-  // .env が無い環境（CI）では、環境変数が直接渡される。ここで止めない。
+} catch (error) {
+  // **握り潰してよいのは「ファイルが無い」ことだけである。**
+  // .env が無い環境（CI）では環境変数が直接渡されるため、そこは止めない。
+  //
+  // **理由を見ずに握り潰すと、.env があるのに読めない場合**
+  // （権限が無い・壊れたシンボリックリンク・`.env` という名前のディレクトリ）**も
+  // 同じく無視される。** そのとき `DATABASE_URL` は環境にも無いため
+  // `datasource.url` が undefined のまま渡り、**上のコメントが「避けたい」と
+  // 名指ししている「原因の分かりにくいエラー」がそのまま起きる。**
+  // **「置いた .env が読まれていない」ことが利用者に一切伝わらない**のが本質である。
+  if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
 }
 
 // **パスも .env と同じ基準（このファイルの位置）で解決する。**
