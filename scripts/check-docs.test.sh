@@ -11,7 +11,7 @@
 # 元のリポジトリは書き換えない。
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
-# 対象範囲の定義は check-docs.sh と共有する
+# 検査の対象範囲と、宣言から数を読み取る規則は check-docs.sh と共有する
 # shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh
 repo=$(pwd)
@@ -164,7 +164,12 @@ gi_ignored=(.env .env.local terraform.tfstate terraform.tfstate.backup
 # 「除外されるはずのファイルは一覧から導出する」と同じ置換で機械的に補う。
 for g in "${probe_prune_files[@]}"; do gi_ignored+=("${g//\*/x}"); done
 # 無視されては困るもの。片側だけ見ると「全部無視する」設定でも緑になる。
-gi_tracked=(.env.example prod.tfvars.example prod.tfvars.json.example README.md)
+# KEEP 由来の名前はここに直書きしない。下の導出だけが持つ形にそろえる。
+# 直書きと導出の両方に置くと、DOC_KEEP_FILES から外して .gitignore の `!` 行も
+# 併せて外したとき、導出側は消えるのに直書きだけが残り、根拠を失った NG が出る。
+# （gi_ignored 側は実名 .env と導出名 .env.x が別の文字列になるため両方に意味があるが、
+#   .env.example は `*` を含まないため導出結果が実名と完全に同一である。）
+gi_tracked=(prod.tfvars.example prod.tfvars.json.example README.md)
 # KEEP は .gitignore が `!` で追跡対象へ戻しているファイルを写したものである。
 # 実名の列挙だけだと、DOC_KEEP_FILES に足して .gitignore の打ち消し行を足し忘れた場合に
 # 素通りする。上の gi_ignored（DOC_PRUNE_FILES 側）と同じ置換で機械的に補う。

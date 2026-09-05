@@ -3,7 +3,8 @@
 # 目的は「実行した事実を成果物に残すこと」であり、内容の正しさは人間とレビューが見る。
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
-# 対象範囲の定義は check-docs.test.sh と共有する（scripts/doc-scope.sh）
+# 検査の対象範囲と、宣言から数を読み取る規則は check-docs.test.sh と共有する
+# （scripts/doc-scope.sh）
 # shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh
 
@@ -90,7 +91,7 @@ sec_decls() { # $1=節の見出しの正規表現。その節に現れる「全N
   awk -v h="$1" '$0 ~ h { in_sec=1; next }
                  in_sec && /^#/ && $0 !~ /^#### / { exit }
                  in_sec { print }' docs/requirements.md \
-    | grep -o "全 *[0-9][0-9]* *件" | grep -o "[0-9][0-9]*"
+    | decls_in "全 *[0-9][0-9]* *件"
 }
 sum=0
 for kind in 要求 派生 提案・承認済; do
