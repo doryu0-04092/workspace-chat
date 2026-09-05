@@ -275,15 +275,30 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toContain('character varying(30)');
     });
 
+    it('statusText の長さの上限が列で効く', async () => {
+      // `userId` と**同じ理由・同じ扱い**で列の型に入れてある（100文字。機能一覧 1.3）。
+      // **片方にしか検証が無いと、片方だけ列から外れても誰も気づけない。**
+      const output = await expectSqlToFail(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash", "statusText")
+         VALUES ('${randomUUID()}', 'long_status', 'ひとこと長すぎ', 'argon2id-placeholder', '${'あ'.repeat(101)}');`,
+      );
+      expect(output).toContain('character varying(100)');
+    });
+
     it('退会したユーザーID も再利用できない', async () => {
       // 論理削除の行が残る以上、一意制約はそのまま効く。
       // **過去のメンションが別人を指すことを防ぐ**（機能一覧 1.5）。
+      //
+      // **この it は自分の行を作る。** `beforeAll` が入れた共有の行を退会させると、
+      // その行を使う他の describe（可視性の検査）の前提が実行順で変わる。
+      // **落ちた原因がスキーマなのか実行順なのかを、失敗した人が区別できなくなる。**
       await expectSqlToSucceed(
-        `UPDATE "User" SET "deletedAt" = now() WHERE "userId" = 'stranger';`,
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash", "deletedAt")
+         VALUES ('${randomUUID()}', 'left_user', '退会した人', 'argon2id-placeholder', now());`,
       );
       const output = await expectSqlToFail(
         `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
-         VALUES ('00000000-0000-7000-8000-0000000000fe', 'stranger', '後から来た人', 'argon2id-placeholder');`,
+         VALUES ('${randomUUID()}', 'left_user', '後から来た人', 'argon2id-placeholder');`,
       );
       expect(output).toContain('User_userId_key');
     });
@@ -517,6 +532,21 @@ describe('Prisma のスキーマとマイグレーション', () => {
       const id = await createChannel('arch-a');
       const output = await expectSqlToFail(
         `UPDATE "Channel" SET "archivedAt" = now() WHERE "id" = '${id}';`,
+      );
+      expect(output).toContain('Channel_archive_naming_check');
+    });
+
+    it('改名だけはできない', async () => {
+      // 機能一覧 3.2 は「アーカイブだけ・採番だけ・改名だけ、のいずれも成立しない」と
+      // 3つを並べている。**「改名だけ」を見るのはこの it だけである。**
+      //
+      // 検査制約の `CASE` の `THEN` 側（採番が無いなら name = baseName）に
+      // **拒否する側として届く経路は、ここしかない。** 他の it は
+      // `archiveSequence` を渡すため必ず `ELSE` 側に入り、
+      // **`THEN` を `TRUE` に置き換えても1件も落ちない。**
+      const id = await createChannel('arch-rename-only');
+      const output = await expectSqlToFail(
+        `UPDATE "Channel" SET "name" = 'arch-rename-only-renamed' WHERE "id" = '${id}';`,
       );
       expect(output).toContain('Channel_archive_naming_check');
     });
