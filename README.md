@@ -170,8 +170,8 @@ docker compose version
 
 **`.env` に触る前に、いまの `POSTGRES_USER` と `POSTGRES_DB` を控える。**
 `POSTGRES_USER` / `POSTGRES_DB` を変えたあと**データを捨てずに直す**には古い名前が要る（後述）。
-**控えられるのはこの時点だけである。** `.env` を書き換えれば `.env` 側から消え、
-`docker compose down` すればコンテナからも消える（`down` はコンテナを削除するので `exec` の相手が無くなる）。
+`.env` を書き換えれば `.env` 側から消え、`docker compose down` や `up` による作り直しで
+コンテナからも消える（`down` はコンテナを削除するので `exec` の相手が無くなる）。
 
 ```
 docker compose exec db sh -c 'echo "$POSTGRES_USER"; echo "$POSTGRES_DB"'
@@ -181,10 +181,23 @@ docker compose exec db sh -c 'echo "$POSTGRES_USER"; echo "$POSTGRES_DB"'
 **パスワードは控えなくてよい**（`\password` で上書きするため）。
 `env` や `docker inspect` を丸ごと出すとパスワードまで平文で出るので、変数を名指しする。
 
-**控えそこねると、DB 側からは引けない。** 公式イメージが作るログイン可能なロールは
+**控えそこねても、コンテナがまだ残っているなら `docker inspect` から引ける。**
+`docker inspect` は compose を通らないため、**`.env` が空でも動く**
+（`.env` を空にすると `exec` は通らないが、これは通る。どちらも実行して確認した）。
+
+```
+docker inspect workspace-chat-db-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^POSTGRES_(USER|DB)='
+```
+
+**`grep` で絞るのは、丸ごと出すとパスワードまで平文で出るためである**（上と同じ理由）。
+
+**引けるのは「そのコンテナが持っている値」であり、古い値とは限らない。**
+`up` はコンテナを作り直すので、**新しい値で `up` を通したあとに叩いても新しい値しか返らない**
+（実行して確認した）。`down` と `docker rm -f` でも消える。**残っているうちに引く。**
+
+**コンテナも失ったら、DB 側からは引けない。** 公式イメージが作るログイン可能なロールは
 `POSTGRES_USER` の1つだけであり（後述）、**その名前が分からないと繋げない。**
-`.env` を空にしてしまった場合は `exec` 自体が通らない（下記）。
-**どちらの場合も、残るのは後述の「捨ててよいなら `down -v`」だけである。**
+そうなると、残るのは後述の「捨ててよいなら `down -v`」だけである。
 
 **控えたら、`.env` を作り直す前に `docker compose down` を済ませる。**
 `${VAR:?...}` が評価されるのは compose がファイルを読む時点であり、
@@ -205,6 +218,10 @@ docker compose exec db sh -c 'echo "$POSTGRES_USER"; echo "$POSTGRES_DB"'
 **`up` まで通すには、初回と同じ3つの値に戻すか、下の「後から変えたら」に従う。**
 
 `.env` を戻せない場合は、**コンテナを直接消す。脱出に要るのはこれだけである。**
+
+**消す前に、上の `docker inspect` で `POSTGRES_USER` と `POSTGRES_DB` を引いておく。**
+`.env` も失っているこの状況では、**そのコンテナが値の最後の複製である。**
+下のコマンドはそれごと消す。
 
 ```
 docker rm -f workspace-chat-db-1 workspace-chat-redis-1
