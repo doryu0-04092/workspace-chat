@@ -43,7 +43,7 @@ services:
     # このイメージではそうならない。接続を張ったまま止めても即座に終わり、
     # 次の起動でクラッシュリカバリにならないことを実際に確かめた。
     healthcheck:
-      # `docker compose up -d --wait` と depends_on が起動完了を待てるようにする。
+      # `docker compose up -d --wait` が起動完了を待てるようにする。
       # $$ は compose の変数展開ではなくコンテナ内のシェルに渡すための書き方。
       #
       # pg_isready ではなく psql で実際に問い合わせる。**pg_isready は利用者も
