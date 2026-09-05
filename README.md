@@ -235,7 +235,7 @@ docker stop workspace-chat-db-1
 > 公式イメージはエントリポイントの最後で `exec postgres` するため、
 > **db の postmaster はコンテナの中で PID 1 になる**
 > （`docker compose exec db head -1 /var/lib/postgresql/data/postmaster.pid` が `1` を返す。確認した）。
-> 上の `docker run` の単一ユーザーモードも**新しいコンテナの中で PID 1** である。
+> 下の単一ユーザーモード（`docker run --single`）も**新しいコンテナの中で PID 1** である。
 > **記録されている PID と、検査する側の PID が一致してしまう。**
 > PostgreSQL はそれを自分自身の残骸と見なしてロックを引き継ぐ。
 > **PID が見えていれば拒んでくれる、ということにはならない。**
@@ -297,11 +297,14 @@ SELECT rolname FROM pg_authid WHERE oid = 10;
 **止まったままでは繋がらない**（`service "db" is not running`。実行して確認した）。
 **どちらの状態にいるかで手が違う。**
 
-**コンテナが残っている場合**（上で `docker stop` しただけ）。
+**コンテナが残っている場合**（上で `docker stop` しただけ）。**先に `.env` を書き戻す。**
 
 ```
 docker start workspace-chat-db-1
 ```
+
+`docker start` は compose を通らないので `.env` が無くても動くが、
+**この先の `docker compose exec` は止まる**（後述）。書き戻しはここで済ませる。
 
 **コンテナを失っている場合**（`docker rm -f` を通った。この節の本来の前提）。
 `docker start` は `Error: No such container` になる。**先に `.env` を書き戻してから**作り直す。
@@ -338,6 +341,10 @@ docker compose up -d
 **`docker compose down -v` を使うのは、手元のデータも捨ててよい場合だけである。**
 
 **値を消したまま `down` も叩けなくなったら**（上の、compose がファイルを読めない状態）、
+**`down` を叩く前に、上の `docker inspect` で `POSTGRES_USER` と `POSTGRES_DB` を引いておく。**
+`down` はコンテナを消すので、**この経路も同時に失われる**（下の `docker rm -f` と同じ理由）。
+書き戻す値が古い値と違うなら、そのあと残るのは単一ユーザーモードだけになる。
+
 **`.env` に値を書き戻してから `down` を叩くのが最も短い**（データも捨てるなら `down -v`）。
 中身が正しい必要はない。compose が読めればよい。
 **ただしこれは `down` を通すための条件であって、`up` の条件ではない。**
