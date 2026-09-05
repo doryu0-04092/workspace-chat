@@ -371,6 +371,16 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   n=$((n + 1))
   mkdir -p "$work/$(dirname "$file")"
   printf '%s\n' "$body" > "$work/$file"
+  # ファイルを置けたことを先に確かめる。下の got=out は「doc_find の結果に含まれない」
+  # でしか判定しておらず、「除外された」と「そもそも置けていない」の両方で成立する。
+  # mkdir -p や printf > が失敗しても（set -e は無いので継続する）got=out になり、
+  # want=out のケースは一致し、run_check は壊れたリンクが1つも無い状態で当然通る。
+  # つまり壊れたリンクを一度も置かないまま「無視されることを確認した」と表示する。
+  # in 側は doc_find に現れることで存在も同時に保証されるが、out 側だけ保証が無い。
+  if [ ! -f "$work/$file" ]; then
+    echo "  NG: $n. $desc — ファイルを置けていない。ケースが成立していない"
+    fail=1; return
+  fi
   # 置いたファイルが想定した側にあることを先に確かめる。逆側に落ちると
   # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
   if (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF "$file"); then
