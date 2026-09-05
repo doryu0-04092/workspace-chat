@@ -417,8 +417,15 @@ expect_ok "入れ子の node_modules の中のリンク切れも無視される"
   '[壊れたリンク](./does-not-exist.md)' out
 # 外部リンクを飛ばす判断はスキームで行う。現物の文書にも https のリンクはあるが、
 # それが消えた瞬間にこの経路の確認も消える。専用のケースとして残す。
-expect_ok "外部リンク（https / mailto）は存在を確かめない" docs/probe-external-link.md \
-  '[外部の文書](https://example.invalid/does-not-exist) と [連絡先](mailto:nobody@example.invalid)' in
+#
+# case が列挙する3つのスキームは、3つとも1本ずつ置く。ここがスキーム判定の唯一の確認で
+# あるため、置かなかった枝は個別に無検査になる。http:// を置かないと、その枝を
+# 丸ごと削っても全ケースが緑で通る（https は http:// に一致しないため冗長ではない）。
+# 消えた場合の帰結は、文書に http:// のリンクが1本入った時点で
+# 「http://… が存在しない」という偽の NG が出て CI が止まることであり、
+# しかも文面は「リンク切れ」と読めるため、本来直す必要のないリンクの方を疑わせる。
+expect_ok "外部リンク（http / https / mailto）は存在を確かめない" docs/probe-external-link.md \
+  '[外部の文書](https://example.invalid/does-not-exist) と [平文の外部](http://example.invalid/x) と [連絡先](mailto:nobody@example.invalid)' in
 
 # --- 「N通り」の宣言が実数と一致すること -------------------------------------
 # check-docs.sh の3章は「合計 N 件」「全 N 件」「機能N件」「N項目」を照合するが、
