@@ -150,5 +150,5 @@ npm の版更新は止めた（[README](README.md) の「依存の版を上げ�
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
-| 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
-| 実装 | 未着手 |
+| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。**Docker に入れるのはミドルウェアだけ**。api / web はホストの Node で動かす） |
+| 実装 | 未着手（次の作業） |
