@@ -433,6 +433,42 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toContain('Channel_workspaceId_name_key');
     });
 
+    it('索引の上限すれすれの名前のチャンネルは、アーカイブできない', async () => {
+      // **アーカイブは名前を `baseName-<採番>` に変える。** 数バイト伸びるため、
+      // **INSERT は通るのにアーカイブの UPDATE だけが落ちる名前**が存在する。
+      // 改名の機能は無いため、**そのチャンネルは永久にアーカイブできない**
+      // （F-35 は Must）。これは `archiveSequence` が `MAX + 1` を却下した理由と
+      // まったく同じ形の失敗である。**採番の側は却下してテストで固定したのに、
+      // 名前の長さの側は記述だけで止まっていた。**
+      //
+      // よって**アプリ側の上限は、接尾辞を付けても索引タプルに収まる長さで
+      // 決めなければならない**（機能一覧 3.1）。
+      const workspaceForLimit = '00000000-0000-7000-8000-0000000000a2';
+
+      // **上限の数値を焼き付けない。** 索引タプルの上限は版で変わりうる。
+      // 入る最大の長さを実際に探す（乱数の16進なので圧縮は効かない）。
+      let id: string | undefined;
+      for (let length = 2800; id === undefined; length -= 2) {
+        expect(length, '索引に収まる名前が見つからない').toBeGreaterThan(0);
+        const candidate = randomBytes(length / 2).toString('hex');
+        const candidateId = randomUUID();
+        const { exitCode } = await psql(
+          `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
+           VALUES ('${candidateId}', '${workspaceForLimit}', '${candidate}', '${candidate}', 'PUBLIC');`,
+        );
+        if (exitCode === 0) id = candidateId;
+      }
+
+      // これ以上長くはできない。**接尾辞 `-1` を足す余地が無い。**
+      const output = await expectSqlToFail(
+        `UPDATE "Channel"
+         SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
+         WHERE "id" = '${id}';`,
+      );
+      expect(output).toContain('index row size');
+      expect(output).toContain('Channel_workspaceId_name_key');
+    }, 60_000);
+
     /**
      * リカバリーコードの検査は、いずれも**自分の利用者を作ってから**行う。
      *
@@ -925,6 +961,16 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe('');
     });
 
+    it('ワークスペースの外の利用者は、パブリックチャンネルの参加者一覧も取得できない', async () => {
+      // **拒否のコードは2段階で決まる**（機能一覧 3.1）。
+      // 「所属しているが非参加者」は種別で 403 / 404 に分かれるが、
+      // **ワークスペースに所属していない利用者は、種別によらず 404 である**（機能一覧 2.1）。
+      // ここを種別だけで決めると、**パブリックチャンネルの存在と
+      // `channelId` が有効であることが 403 として外部に漏れる。**
+      const output = await expectSqlToSucceed(channelMemberViewers(stranger, publicChannel));
+      expect(output).toBe('');
+    });
+
     it('パブリックチャンネルでも、参加していないメンバーは参加者一覧を取得できない', async () => {
       // **この条件は `visibility` を見ない**（機能一覧 3.1 の但し書き）。
       // 決まっていなかったことを**閉じる側に倒した**記録であり、
@@ -953,6 +999,13 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **返すものは名前までである。** メッセージ・添付は返さない。
      * 境界は `visibleChannels` と同じく「人の出入りの管理」と「会話の閲覧」の間にある。
      *
+     * **`archivedAt` で絞ってはならない。** 兄弟の `visibleChannels` には
+     * 「一覧の API はこの条件に加えて `AND c."archivedAt" IS NULL` が要る」と書いてあるが、
+     * **こちらにそれを写すと、オーナーはアーカイブ済みチャンネルの `id` を知る手段を失い、
+     * 「オーナーが復元できる」（F-35。Must）が成立しなくなる。**
+     * 一貫性のつもりで隣の注意書きを写すのが、最も起きやすい壊し方である。
+     * 下の `it` がこれを固定している。
+     *
      * **この形をそのまま写さないこと。** `workspaceId` は URL のパスパラメータ由来である。
      * 実装ではプレースホルダとして渡す（REVIEW.md 3 / CWE-89）。
      */
@@ -973,6 +1026,26 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // チャンネルの id を知る手段が無ければ行使できない。
       const output = await expectSqlToSucceed(manageableChannels(owner, workspace));
       expect(output.split('\n')).toContain('secret');
+    });
+
+    it('オーナーには、アーカイブ済みのチャンネルも管理の一覧に出る', async () => {
+      // **これが無いと F-35 の「オーナーが復元できる」が成立しない。**
+      // アーカイブすると一覧から外れる以上、管理の一覧まで `archivedAt IS NULL` で
+      // 絞ると、**復元すべきチャンネルの id を知る経路が1つも無くなる。**
+      // この it は `AND c."archivedAt" IS NULL` を足した瞬間に落ちる。
+      const id = randomUUID();
+      await expectSqlToSucceed(
+        `INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
+         VALUES ('${id}', '${workspace}', 'to-archive', 'to-archive', 'PUBLIC');`,
+      );
+      // アーカイブ・採番・改名は同時に行う（検査制約）。
+      await expectSqlToSucceed(
+        `UPDATE "Channel"
+         SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
+         WHERE "id" = '${id}';`,
+      );
+      const output = await expectSqlToSucceed(manageableChannels(owner, workspace));
+      expect(output.split('\n')).toContain('to-archive-1');
     });
 
     it('オーナーでないメンバーには、管理の一覧が1件も返らない', async () => {
