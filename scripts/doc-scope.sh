@@ -95,6 +95,10 @@ doc_excluded() { # $1=リンク先のパス。除外なら理由を出力して 
 # ファイル名だけで見た除外判定（KEEP を差し引いた DOC_PRUNE_FILES）。
 # doc_excluded と、check-docs.test.sh の「値を持つ名前が追跡されていないか」の確認が
 # 同じ規則を見るように、判定は1箇所に置く。2箇所に書くと黙ってずれる。
+#
+# **これはファイル名だけの判定であり、ディレクトリ側（DOC_PRUNE_DIRS）は含まない。**
+# 除外判定として尽きているのは doc_excluded のほうである。名前から
+# 「doc_excluded の一部」とだけ読むと、呼び出し側が「これで除外は尽きている」と誤読しうる。
 doc_excluded_name() { # $1=ファイル名（basename）。除外なら一致したパターンを出力して 0
   local base="$1" g
   for g in "${DOC_KEEP_FILES[@]}"; do

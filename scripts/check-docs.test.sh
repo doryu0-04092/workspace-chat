@@ -174,6 +174,13 @@ for p in "${gi_tracked[@]}"; do
 done
 # 追跡済みのファイルは .gitignore の影響を受けない。パターンが揃っていても値は入っている。
 # 判定は doc_excluded と同じ doc_excluded_name に寄せる（一覧を手で並べ直すと黙ってずれる）。
+#
+# doc_excluded ではなく doc_excluded_name を使う。doc_excluded はディレクトリ側
+# （DOC_PRUNE_DIRS）も見るため、.gitignore が `!.vscode/extensions.json` で
+# 意図的に追跡対象へ戻しているファイルが、置かれた時点で偽の NG になる。
+# 代償: そのぶん 0c は、.terraform/ や uploads/ の配下に追跡ファイルがあっても
+# 何も言わない。0c が保証するのは「値を持つ**ファイル名**が追跡されていないこと」だけである。
+# ディレクトリ側まで見るなら、KEEP に相当する打ち消しの一覧を別に持つことになる。
 gi_committed=()
 while IFS= read -r p; do
   doc_excluded_name "$(basename "$p")" >/dev/null && gi_committed+=("$p")
