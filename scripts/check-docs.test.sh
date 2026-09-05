@@ -455,10 +455,16 @@ expect_ok "入れ子の node_modules の中のリンク切れも無視される"
 expect_ok "外部リンク（http / https / mailto）は存在を確かめない" docs/probe-external-link.md \
   '[外部の文書](https://example.invalid/does-not-exist) と [平文の外部](http://example.invalid/x) と [連絡先](mailto:nobody@example.invalid)' in
 
-# doc_excluded の DOC_KEEP_FILES の分岐（PRUNE に一致しても除外しない）を踏む唯一のケース。
+# KEEP の分岐（PRUNE に一致しても除外しない）を、doc_excluded の委譲と
+# check-docs.sh の検査1 まで通して踏む唯一のケース。
+#
+# 0a にも KEEP の確認があるが、あちらは doc_excluded_name を単体で呼ぶだけであり、
+# doc_excluded が委譲していることも、検査1 がその結果でリンクを NG にすることも見ていない。
+# 判定関数が正しくても、委譲や呼び出しが外れれば同じ穴が開く。守備範囲が違う。
+#
 # doc-scope.sh は「.env.example は README から参照されやすいため除外から外している」と
-# 目的まで宣言している。踏まないと、KEEP のループを丸ごと消しても全ケースが緑のまま通り、
-# README が .env.example を参照した瞬間に正当なリンクが NG になる。
+# 目的まで宣言している。ここを踏まないと、README が .env.example を参照した瞬間に
+# 正当なリンクが「リンク先にできない」で NG になる。
 #
 # ケースが成立していることを先に見る。.env.example が PRUNE のパターンに一致しなければ、
 # KEEP が無くてもこのリンクは通る。つまり KEEP を何も検査していないことになる。
