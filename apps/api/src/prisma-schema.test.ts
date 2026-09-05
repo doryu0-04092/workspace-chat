@@ -249,6 +249,15 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **「一意制約違反であること」だけを見る形にはしない。** それだと
      * `id` の重複など**別の一意制約で落ちても緑になる。**
      * 見るのは「**ユーザーID の一意性に違反したこと**」までである。
+     *
+     * **同じ問題が他の it に無いことを確かめた。** 索引名を期待している他の4件は、
+     * いずれも**違反する索引が1つしかない**ため作成順に依存しない。
+     *
+     *   - 二重の参加（`Membership`）… 役割が MEMBER なので
+     *     `Membership_single_owner_per_workspace`（`role = 'OWNER'` の部分索引）に届かない
+     *   - オーナーが2人（`Membership`）… その利用者は当のワークスペースに参加がまだ無く、
+     *     `Membership_workspaceId_userId_key` に届かない
+     *   - チャンネルへの二重の参加 / 同名のチャンネル … 他に重なる一意制約が無い
      */
     function expectUserIdUniquenessViolation(output: string): void {
       expect(output).toContain('duplicate key value violates unique constraint');
