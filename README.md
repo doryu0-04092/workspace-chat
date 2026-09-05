@@ -169,11 +169,6 @@ docker compose version
 **特に `@` は別の宛先に繋ごうとする**形になり、「認証に失敗する」より原因を追いにくい。
 記号を使うなら URL エンコードが要る。
 
-**`POSTGRES_DB` に `postgres` を選ばない。** 英数字だけという条件は満たすが、
-**この名前は initdb が別に必ず作るものと衝突する。**
-下の復旧手順はどれも `-d postgres` に繋いで作業するため、
-**`POSTGRES_DB` が `postgres` だと、直したい相手と作業台が同じものになる**（後述）。
-
 
 | 操作 | コマンド |
 |---|---|
@@ -255,21 +250,16 @@ docker stop workspace-chat-db-1
 printf "SELECT rolname FROM pg_authid WHERE rolcanlogin;\nSELECT datname FROM pg_database WHERE datname NOT IN ('template0','template1');\n" \
   | docker run --rm -i -v workspace-chat_db-data:/var/lib/postgresql/data \
       --user postgres --entrypoint postgres workspace-chat-db:local \
-      --single -D /var/lib/postgresql/data postgres
+      --single -D /var/lib/postgresql/data template1
 ```
 
 出力は起動ログに混ざって `rolname = "<利用者名>"` / `datname = "<データベース名>"` の形で出る。
 
-**最後の引数の `postgres` は接続先のデータベースである。**
-`FATAL: database "postgres" does not exist` で止まったら、**`template1` に読み替える。**
-後述の「`<古い名前>` が `postgres` の場合」の改名を通っていると、この名前は無くなっている。
+**最後の引数の `template1` は接続先のデータベースである。**
+復旧手順の他の行と同じ理由でこれを使う（後述。`POSTGRES_DB` に何を選んでいても存在する）。
 
-**`postgres` はふつう出る。** initdb が `POSTGRES_DB` の値によらず作るためである
-（**初回に作られたあと改名していなければ**残っている。後述の `postgres` からの改名を
-通っていると無い）。
-**それが `POSTGRES_DB` の値だった可能性もある。**
-本書は `POSTGRES_DB` に `postgres` を選ばないことにしている（前述）が、
-**公式イメージの既定がこの名前であり、その規則を置く前に作った `.env` にはありうる。**
+**`postgres` も出力に出る。** initdb が `POSTGRES_DB` の値によらず作るためである。
+**それが `POSTGRES_DB` の値だった可能性もある**（公式イメージの既定がこの名前である）。
 **除外していないのはそのためである。** 除外すると、その設定にしていた人には
 **エラーではなく無出力**が返り、「引けなかった」と読み違えて初期化からやり直すことになる。
 
@@ -433,6 +423,17 @@ docker volume rm workspace-chat_db-data
 
 下はすべて実際に実行して確かめた結果である。
 
+**接続先はすべて `-d template1` に揃えてある。** 直す対象そのものには繋げないため、
+別のデータベースを作業台にする必要がある。`template1` を選ぶのは次の3つを同時に満たすためである。
+
+- **必ず存在する。** initdb が作り、`POSTGRES_DB` の値に左右されない
+- **名前が動かない。** 復旧の対象にならないので、手順の途中で消えたり改名されたりしない
+- **接続を許している**（`datallowconn` が真。実行して確認した）
+
+`postgres` も initdb が作るが、**`POSTGRES_DB=postgres` にしていると直す対象と同じものになり、
+`ERROR: current database cannot be renamed` で止まる**（実行して確認した）。
+`template1` に揃えておけば、`POSTGRES_DB` に何を選んでいてもこの衝突が起きない。
+
 **2つ以上ずれている場合は `POSTGRES_USER` → `POSTGRES_DB` → `POSTGRES_PASSWORD` の順に直す。
 下の表も、そのあとの手順も、この順に並べてある。上から順に叩けばよい。**
 
@@ -448,15 +449,15 @@ docker volume rm workspace-chat_db-data
 | ずれた値 | 消さずに直す方法 |
 |---|---|
 | `POSTGRES_USER` | 下記の**一時ロールを作ってから** `ALTER ROLE ... RENAME TO`（自分自身は改名できない） |
-| `POSTGRES_DB` | 下記の `ALTER DATABASE ... RENAME TO`（**その DB への接続が1本でも残っていると実行できない。** 自分は `-d postgres` で繋ぐ） |
+| `POSTGRES_DB` | 下記の `ALTER DATABASE ... RENAME TO`（**その DB への接続が1本でも残っていると実行できない。** 自分は `-d template1` で繋ぐ） |
 | `POSTGRES_PASSWORD` | 下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
 
 **利用者名**は一時ロールを作ってから改名する。
 
 ```
-docker compose exec db psql -U <古い名前> -d postgres -c 'CREATE ROLE tmp_rename SUPERUSER LOGIN;'
-docker compose exec db sh -c 'psql -U tmp_rename -d postgres -c "ALTER ROLE \"<古い名前>\" RENAME TO \"$POSTGRES_USER\";"'
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP ROLE tmp_rename;"'
+docker compose exec db psql -U <古い名前> -d template1 -c 'CREATE ROLE tmp_rename SUPERUSER LOGIN;'
+docker compose exec db sh -c 'psql -U tmp_rename -d template1 -c "ALTER ROLE \"<古い名前>\" RENAME TO \"$POSTGRES_USER\";"'
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d template1 -c "DROP ROLE tmp_rename;"'
 ```
 
 **一時ロールが要るのは、`ALTER ROLE ... RENAME TO` が
@@ -481,7 +482,7 @@ Unix ドメインソケット（`local all all trust`）を通るためである
 **この場合は、古い名前で繋いで消す。**
 
 ```
-docker compose exec db psql -U <古い名前> -d postgres -c 'DROP ROLE tmp_rename;'
+docker compose exec db psql -U <古い名前> -d template1 -c 'DROP ROLE tmp_rename;'
 ```
 
 **`-U tmp_rename` では消せない**（`ERROR: current user cannot be dropped`）。
@@ -494,7 +495,7 @@ docker compose exec db psql -U <古い名前> -d postgres -c 'DROP ROLE tmp_rena
 **最後に、残っていないことを数えて確かめる。**
 
 ```
-docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT count(*) FROM pg_roles WHERE rolname = 'tmp_rename'\""
+docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d template1 -c \"SELECT count(*) FROM pg_roles WHERE rolname = 'tmp_rename'\""
 ```
 
 （実行して確認した。`DROP ROLE` の前は 1、後は 0 になった）
@@ -516,46 +517,18 @@ CREATE ROLE / ALTER ROLE / DROP ROLE  → いずれも成功
 公開ポート経由（新しい名前とパスワード）: 繋がった
 ```
 
-**データベース名**は `-d postgres` に繋いで改名する。
+**データベース名**は `-d template1` に繋いで改名する。
 
 ```
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DATABASE \"<古い名前>\" RENAME TO \"$POSTGRES_DB\";"'
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d template1 -c "ALTER DATABASE \"<古い名前>\" RENAME TO \"$POSTGRES_DB\";"'
 ```
 
 **`-d "$POSTGRES_DB"` で繋いではいけない。** その値は**これから作ろうとしている新しい名前**であり、
-まだ存在しない。`-d postgres` を使うのは、**`POSTGRES_DB` の値によらず initdb が初回に作るデータベース**
-だからである（改名していなければ残っている）。
-改名したあとも、コンテナを作り直さずに緑に戻る（実行して確認した。表も残っていた）。
-
-**`<古い名前>` が `postgres` の場合だけは `-d postgres` が使えない。**
-改名しようとしている当の DB に繋ぐことになり、**`ERROR: current database cannot be renamed`**
-で止まる（実行して確認した）。本書は `POSTGRES_DB` に `postgres` を選ばないことにしている（前述）が、
-**その規則を置く前に作った `.env` ではありうる。その場合は `-d template1` に繋ぐ。**
-
-```
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d template1 -c "ALTER DATABASE \"postgres\" RENAME TO \"$POSTGRES_DB\";"'
-```
-
-`template1` は接続を許しているため繋げる（実行して確認した。これで改名が通った）。
-
-> **代償。** 改名すると、**`postgres` という名前のデータベースは無くなる。**
-> initdb が作るのは初回だけで、改名は作り直さない。
-> `-d postgres` を既定の接続先にしている道具は、以後そのままでは繋がらない。
->
-> **その「道具」の筆頭が本書である。**
-> **改名したら、本書のこれ以降の `-d postgres` はすべて `-d template1` と読み替える。**
-> 単一ユーザーモードの最後の引数（接続先の `postgres`）も同じである。
-> 読み替えないと `FATAL: database "postgres" does not exist` で止まる。
->
-> **接続数を数える手順は、読み替えないと 0 にならない。**
-> `<古い名前>` が `postgres` のとき、`-d postgres` で数える psql 自身が
-> その DB に繋いでいるため、**自分を1として数え続ける。**
-> `template1` から数えれば自分は含まれない。
->
-> **そもそも `POSTGRES_DB` に `postgres` を選ばなければ、この分岐ごと発生しない**（前述）。
+まだ存在しない。改名したあとも、コンテナを作り直さずに緑に戻る
+（実行して確認した。表も残っていた）。
 
 **条件はもう1つある。旧データベースに他のセッションが1本でも繋いでいると失敗する。**
-`-d postgres` で繋いだかどうかとは別の話であり、**自分が `-d postgres` を守っていても止まる。**
+`-d template1` で繋いだかどうかとは別の話であり、**自分が対象の DB を避けていても止まる。**
 別の端末で開いたままの `psql` や、止め忘れた `npm run dev -w @workspace-chat/api` が該当する。
 
 ```
@@ -566,7 +539,7 @@ DETAIL:  There is 1 other session using the database.
 **改名の前に数えて確かめる。0 でなければ、その接続を閉じてから叩く。**
 
 ```
-docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT count(*) FROM pg_stat_activity WHERE datname = '<古い名前>'\""
+docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d template1 -c \"SELECT count(*) FROM pg_stat_activity WHERE datname = '<古い名前>'\""
 ```
 
 （この行だけ `sh -c` の外側が二重引用符なのは、**SQL の中に単一引用符が要る**ためである。
