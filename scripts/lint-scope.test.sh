@@ -100,9 +100,26 @@ PROBE_BODY='const    使われない変数:any   =    1'
 printf '%s\n' "$PROBE_BODY" > "$NEG"
 printf '%s\n' "$PROBE_BODY" > "$POS"
 
-# -F を付ける。probe の名前に正規表現の意味を持たせない。
+# **パイプを使わない。** `printf '%s' "$1" | grep -qF "$2"` にすると、
+# 読み手が一致した時点で抜けたときに printf が SIGPIPE で 141 で死ぬ。
+# set -o pipefail は「非0がひとつでもあればそれを返す」ため、
+# **grep が一致していてもパイプライン全体が非0になり、判定が「一致しない」に反転する。**
+# 陰性の判定でこれが起きると、除外が壊れていても OK を出す——
+# この検査が塞ごうとしている偽の合格そのものを、判定関数が持つことになる。
+#
+# 実測（bash 5, Git Bash, 入力 20MB・一致箇所は先頭）:
+#   printf | head -c 1        → PIPESTATUS=[141 0]  ← 書き手が SIGPIPE で死ぬ
+#   printf | grep -qF <一致>  → PIPESTATUS=[0 0]    ← この grep は最後まで読んでいた
+# **この環境では反転しなかったが、成立するかは grep の実装と環境に依る。**
+# CI は ubuntu であり手元とは別物である。
+#
+# case のパターン照合なら子プロセスもパイプも無く、環境に依らない。
+# `"$2"` を引用すればグロブとして解釈されないので、grep -F の意図もそのまま保てる。
 contains() {
-  printf '%s' "$1" | grep -qF "$2"
+  case "$1" in
+    *"$2"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # 道具を1回走らせ、次の3つを判定する。
@@ -151,15 +168,25 @@ check_tool() {
 # 途中で止まらずに両方の判定が出る。
 rc=0
 
+# **npm script をそのまま呼ぶ。コマンドを複製しない。**
+# npx eslint . / npx prettier --check . と書くと、package.json の scripts と
+# 同じ内容を2箇所に持つことになる。**package.json 側に対象の絞り込みや
+# --ignore-path が足されても、この検査は古いコマンドを走らせ続ける。**
+# そのとき検査は緑のまま lint / format:check だけが落ちる——
+# この検査が塞ごうとしている経路と同じ形の穴になる。
+#
+# npm が子の終了コードをそのまま返すことに依存する（下の「終了コード 2」の判定）。
+# 実測で確かめた: `exit 2` の script → 2 / eslint.config.js を構文的に壊す →
+# npx も npm run も 2 / prettier が解析できないファイルを置く → npx も npm run も 2。
 echo "1. ESLint"
 set +e
-ESLINT_OUT="$(npx eslint . 2>&1)"
+ESLINT_OUT="$(npm run lint 2>&1)"
 ESLINT_CODE=$?
 set -e
 check_tool 'ESLint' 'eslint.config.js の ignores に .claude/** が入っているか確かめる。' \
   "$ESLINT_OUT" "$ESLINT_CODE" || rc=1
 
-# **この検査は `npm run format:check` と同じコマンドを走らせる。**
+# **この検査は `npm run format:check` そのものを走らせる。**
 # `--ignore-path .prettierignore` は付けない。付けると .gitignore の影響を切り離せる代わりに、
 # **手元と CI が実際に回すコマンドとは別物を検査することになる。**
 # この検査の目的は「format:check が .claude/ を走査しないこと」であって、
@@ -173,7 +200,7 @@ check_tool 'ESLint' 'eslint.config.js の ignores に .claude/** が入ってい
 # 依存関係そのものは #35 に書き残した。
 echo "2. Prettier"
 set +e
-PRETTIER_OUT="$(npx prettier --check . 2>&1)"
+PRETTIER_OUT="$(npm run format:check 2>&1)"
 PRETTIER_CODE=$?
 set -e
 check_tool 'Prettier' '.prettierignore（または .gitignore）に .claude/ が入っているか確かめる。' \
