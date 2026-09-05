@@ -11,7 +11,7 @@
 # 元のリポジトリは書き換えない。
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
-# 対象範囲の定義は check-docs.sh と共有する
+# 検査の対象範囲と、宣言から数を読み取る規則は check-docs.sh と共有する
 # shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh
 repo=$(pwd)
