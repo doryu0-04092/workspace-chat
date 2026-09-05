@@ -1,10 +1,17 @@
 # shellcheck shell=bash
 # このファイルは実行せず、他のスクリプトから読み込む（shebang を持たない）。
-# 検査の対象範囲。check-docs.sh と check-docs.test.sh の両方が読む。
+# check-docs.sh と check-docs.test.sh が共有する定義。2つのものを置く。
+#   1. 検査の対象範囲（DOC_PRUNE_DIRS / DOC_PRUNE_FILES / DOC_KEEP_FILES と doc_find）
+#   2. 宣言から数を読み取る規則（decls / decls_in）
 #
 # なぜ1箇所に置くか。片方だけに書くと「本物の検査が見ている範囲」と
 # 「テストが検査させる範囲」が黙ってずれる。ずれても失敗にはならず、
 # 検査がその文書を見ないだけで全ケースが緑のまま通る。
+# 読み取りの規則も同じで、2箇所に書くと片方を直したときにもう片方が古い規則で残る。
+#
+# **ここは「範囲」だけの置き場ではない。** 両方のスクリプトが同じ結論を出さなければ
+# ならない規則は、範囲であるかによらずここに置く。ファイル名は範囲だけを指すため、
+# この説明が唯一の手がかりになる。
 #
 # 除外は .gitignore から導出しない。check-docs.sh は「git の追跡状態に依存しない
 # （未コミットのファイルも検査対象にする）」方針であり、除外だけを git に委ねると
@@ -43,9 +50,11 @@ DOC_PRUNE_DIRS=(
 # 「存在と変数名までに留める」と定めている。terraform.tfstate は RDS のパスワードなどを
 # 平文で保持する。DOC_PRUNE_DIRS に .terraform を入れている以上、ディレクトリだけ
 # 除外して同じ .gitignore の秘密ファイルを残すのは非対称である。
+# `*.tfvars.json` を別に挙げるのは、`*.tfvars` が末尾一致であり
+# Terraform が読む JSON 版（terraform.tfvars.json / *.auto.tfvars.json）に一致しないため。
 DOC_PRUNE_FILES=(
   '.env' '.env.*'
-  '*.tfstate' '*.tfstate.*' '*.tfvars'
+  '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json'
 )
 
 # 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、
@@ -82,18 +91,57 @@ doc_find() { # $1... = find に渡す残りの条件（例: -name '*.md' -print�
 # リンク先にできないパスかどうかを判定する。check-docs.sh の検査1が使う。
 # ディレクトリ側だけを見ると、.env や terraform.tfstate へのリンクを見逃す。
 doc_excluded() { # $1=リンク先のパス。除外なら理由を出力して 0 を返す
-  local p="$1" base d g
-  base=$(basename "$p")
+  local p="$1" d g
   for d in "${DOC_PRUNE_DIRS[@]}"; do
     case "/$p/" in */"$d"/*) echo "対象外ディレクトリ $d の配下"; return 0 ;; esac
   done
+  # 名前の取り出しに basename は使わない。先頭が - のパスを option と解釈して
+  # 空を返す（実測: `basename "-x.tfvars"` は終了コード 1、標準出力は空）。
+  #
+  # **この経路では現に顕在化しない。** 本番の呼び出し元は check-docs.sh の検査1 だけで、
+  # そこは `$(dirname "$f")/$l` を渡す。dirname は最低でも `.` を返すため、
+  # 引数は必ず `./…` か `docs/…` で始まり、先頭が - になることはない。
+  # ここで外部コマンドをやめているのは、**名前の取り出しを呼び出し元の形に
+  # 依存させないため**の予防である（実際に壊れるのは、git ls-files の出力を
+  # そのまま流す check-docs.test.sh の gi_scan_tracked のほうである）。
+  g=$(doc_excluded_name "${p##*/}") && { echo "対象外のファイル名 $g に一致"; return 0; }
+  return 1
+}
+
+# ファイル名だけで見た除外判定（KEEP を差し引いた DOC_PRUNE_FILES）。
+# doc_excluded と、check-docs.test.sh の「値を持つ名前が追跡されていないか」の確認が
+# 同じ規則を見るように、判定は1箇所に置く。2箇所に書くと黙ってずれる。
+#
+# **これはファイル名だけの判定であり、ディレクトリ側（DOC_PRUNE_DIRS）は含まない。**
+# 除外判定として尽きているのは doc_excluded のほうである。名前から
+# 「doc_excluded の一部」とだけ読むと、呼び出し側が「これで除外は尽きている」と誤読しうる。
+doc_excluded_name() { # $1=ファイル名（basename）。除外なら一致したパターンを出力して 0
+  local base="$1" g
   for g in "${DOC_KEEP_FILES[@]}"; do
     # shellcheck disable=SC2254
     case "$base" in $g) return 1 ;; esac
   done
   for g in "${DOC_PRUNE_FILES[@]}"; do
     # shellcheck disable=SC2254
-    case "$base" in $g) echo "対象外のファイル名 $g に一致"; return 0 ;; esac
+    case "$base" in $g) echo "$g"; return 0 ;; esac
   done
   return 1
+}
+
+# 宣言に含まれる数をすべて返す。check-docs.sh の3〜4章と、check-docs.test.sh の
+# 「N通り」の突き合わせが同じ規則で読むように、読み取りの経路は1つに置く。
+# 2箇所に書くと、片方を直したときにもう片方が古い規則のまま残る
+# （このファイル冒頭の「片方だけに書くと黙ってずれる」と同じ理由）。
+#
+# head -1 で先頭1件だけを見ないことがこの関数の要点である。前方に正しい数のおとりが
+# 現れると、検査対象が黙ってそちらに移り、本命が古いまま無検査で通る。一致はすべて返す。
+# 0件のときに NG とするかは呼び出し側が決める（check-docs.sh は compare_decls、
+# check-docs.test.sh は decl_mismatches。どちらも「読み取れない」を NG にしている）。
+# 標準入力から読む版も置く。check-docs.sh の sec_decls は awk の出力をパイプで受けるため
+# ファイル名を渡せず、そのままだと同じ規則をもう1つ書き直すことになる。
+decls_in() { # $1=宣言の正規表現。標準入力から、宣言に含まれる数をすべて返す
+  grep -o "$1" | grep -o "[0-9][0-9]*"
+}
+decls() { # $1=ファイル $2=宣言の正規表現。宣言に含まれる数をすべて返す
+  decls_in "$2" < "$1"
 }

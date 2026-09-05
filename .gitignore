@@ -43,6 +43,10 @@ blob-report/
 # *.tfvars は末尾一致のため prod.tfvars.example には一致しない。
 # .env と違い、例示ファイルを打ち消す行（!*.tfvars.example）は要らない。
 *.tfvars
+# Terraform は JSON 版の変数ファイルも読む（terraform.tfvars.json / *.auto.tfvars.json）。
+# 上の *.tfvars は末尾一致のため、これらには一致しない。書かないと
+# secrets.auto.tfvars.json に置いたパスワードが無視されずコミットされうる。
+*.tfvars.json
 crash.log
 override.tf
 override.tf.json
