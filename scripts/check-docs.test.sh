@@ -413,7 +413,9 @@ decl_mismatches() { # $1=期待する数。README.md と CLAUDE.md の「N通り
       [ -n "$v" ] || continue
       found=1
       [ "$v" = "$1" ] || echo "$f の「N通り」: $v と書かれているが、実際は $1"
-    done < <(grep -o "$pat" "$repo/$f" | grep -o "[0-9][0-9]*")
+    # 数の取り出しは doc-scope.sh の decls に寄せる。ここに書き直すと、
+    # check-docs.sh 側の読み取りを直したときにテスト側だけが古い規則で残る。
+    done < <(decls "$repo/$f" "$pat")
     # 読み取れないのも NG。黙って通すと、言い回しを変えた時点で検査が落ちるのではなく消える
     # （check-docs.sh の compare_decls と同じ扱い）。
     [ "$found" = 1 ] || echo "$f の「N通り」を読み取れない（言い回しが変わった可能性）"
