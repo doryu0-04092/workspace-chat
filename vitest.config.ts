@@ -1,3 +1,4 @@
+import swc from 'unplugin-swc';
 import { defineConfig } from 'vitest/config';
 
 // テストはワークスペースごとに環境が違う。api は Node、web は DOM が要る。
@@ -14,6 +15,17 @@ export default defineConfig({
         },
       },
       {
+        // api だけ SWC で変換する。Vitest の既定の変換器（esbuild）は
+        // `emitDecoratorMetadata` を実装しておらず、Nest がコンストラクタの
+        // 依存を解決する `design:paramtypes` が出力されない。
+        // Nest は解決に失敗せず undefined を注入するため、DI の誤りが
+        // 「使う瞬間に別の場所で落ちる」形になる（#14）。
+        //
+        // 変換の設定は apps/api/tsconfig.json から読まれる。
+        // **同ファイルの `experimentalDecorators` と `emitDecoratorMetadata` を
+        // 外すと、この変換もメタデータを出さなくなる。**
+        // 外れていないことは src/dependency-injection.test.ts が見ている。
+        plugins: [swc.vite()],
         test: {
           name: 'api',
           root: './apps/api',

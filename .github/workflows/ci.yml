@@ -47,6 +47,17 @@ jobs:
       - name: lint（ESLint）
         run: npm run lint
 
+      # 上の lint が通ることと、走査範囲が正しいことは別である。
+      # .claude/ の中まで走査すると、ESLint も Prettier も手元でだけ落ちるようになり、
+      # CI は緑のまま「手元で検査を回さない」状態に倒れる。
+      #
+      # **このステップは ESLint と Prettier の両方の走査範囲を見る。**
+      # 下の「整形の検査（Prettier）」より前にあるため、.prettierignore の除外が
+      # 壊れた場合もここで落ちる。名前が ESLint だけを指していると、
+      # ログを開くまで Prettier の問題だと分からない。
+      - name: 走査範囲の確認（ESLint / Prettier）
+        run: bash scripts/lint-scope.test.sh
+
       - name: 整形の検査（Prettier）
         run: npm run format:check
 
