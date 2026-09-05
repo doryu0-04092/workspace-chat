@@ -79,8 +79,12 @@ for g in "${probe_prune_files[@]}"; do : > "$probe/${g//\*/x}"; done
 # 残るはずのもの
 for g in "${probe_keep_files[@]}"; do : > "$probe/${g//\*/x}"; done
 : > "$probe/prod.tfvars.example"   # *.tfvars は末尾一致のため、KEEP が無くても残る
+# *.tfvars.json も末尾一致であり、例示ファイルには一致しない。この対を置かないと、
+# *.tfvars.json を *.tfvars.json* のように末尾一致でない形へ崩しても
+# prod.tfvars.example は一致しないままで、0a も 0c も緑で通る。
+: > "$probe/prod.tfvars.json.example"
 : > "$probe/keep.md"
-expected=$(printf '%s\n' keep.md prod.tfvars.example "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
+expected=$(printf '%s\n' keep.md prod.tfvars.example prod.tfvars.json.example "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
 got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
 if [ "$got" = "$expected" ]; then
   echo "  OK（残るのは $expected）"
@@ -105,7 +109,7 @@ else
   fail=1
 fi
 
-# --- 前提: 値を持つファイルが .gitignore で無視されること ---------------------
+# --- 前提: 値を持つファイルが .gitignore で無視され、かつ追跡されていないこと ---
 # doc-scope.sh の除外が保証するのは「検査が読みに行かない」ことだけで、
 # 「値がコミットされない」ことは .gitignore が担う。両者は同じ穴を持ちうる
 # （*.tfvars が terraform.tfvars.json に一致しない、が実例）。片方だけ直すと
@@ -125,7 +129,15 @@ fi
 #      リポジトリの .gitignore に *.tfvars.json が無くてもこの確認が緑になる。
 #      逆に、グローバル除外が *.example を持つ手元では下の gi_tracked が偽の NG を出す。
 #      -v で一致元とパターンまで見て、.gitignore に書かれた肯定パターンだけを認める。
-echo "0c. 値を持つファイル名が .gitignore で無視されること"
+#   3. .gitignore は既に追跡されているファイルには効かない。git add -f や
+#      「.gitignore に足す前のコミット」で入ったものはパターンが揃っていても値が入っている。
+#      追跡の側からも見る。
+#
+# 代償: この確認だけが git の作業ツリーを前提にする。check-docs.sh は「git の追跡状態に
+# 依存しない」（未コミットのファイルも検査対象にする）方針だが、.gitignore が何を無視するかは
+# git にしか判定できないため、ここは例外とする。git が無い環境や作業ツリーでない場所では
+# 0c が NG になる。CI（actions/checkout）と手元はどちらも作業ツリーである。
+echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
   local line head src pat
@@ -148,7 +160,12 @@ gi_ignored=(.env .env.local terraform.tfstate terraform.tfstate.backup
 # 「除外されるはずのファイルは一覧から導出する」と同じ置換で機械的に補う。
 for g in "${probe_prune_files[@]}"; do gi_ignored+=("${g//\*/x}"); done
 # 無視されては困るもの。片側だけ見ると「全部無視する」設定でも緑になる。
-gi_tracked=(.env.example prod.tfvars.example README.md)
+gi_tracked=(.env.example prod.tfvars.example prod.tfvars.json.example README.md)
+# KEEP は .gitignore が `!` で追跡対象へ戻しているファイルを写したものである。
+# 実名の列挙だけだと、DOC_KEEP_FILES に足して .gitignore の打ち消し行を足し忘れた場合に
+# 素通りする。上の gi_ignored（DOC_PRUNE_FILES 側）と同じ置換で機械的に補う。
+# 0a は KEEP・PRUNE の両側を導出しているため、揃えないとこの非対称が 0c にだけ残る。
+for g in "${probe_keep_files[@]}"; do gi_tracked+=("${g//\*/x}"); done
 gi_ng=0
 for p in "${gi_ignored[@]}"; do
   if ! gi_ignored_by_gitignore "$p"; then
@@ -160,6 +177,23 @@ for p in "${gi_tracked[@]}"; do
     echo "  NG: $p が .gitignore で無視される（追跡対象のはず。一致: $gi_why）"; gi_ng=1
   fi
 done
+# 追跡済みのファイルは .gitignore の影響を受けない。パターンが揃っていても値は入っている。
+# 判定は doc_excluded と同じ doc_excluded_name に寄せる（一覧を手で並べ直すと黙ってずれる）。
+#
+# doc_excluded ではなく doc_excluded_name を使う。doc_excluded はディレクトリ側
+# （DOC_PRUNE_DIRS）も見るため、.gitignore が `!.vscode/extensions.json` で
+# 意図的に追跡対象へ戻しているファイルが、置かれた時点で偽の NG になる。
+# 代償: そのぶん 0c は、.terraform/ や uploads/ の配下に追跡ファイルがあっても
+# 何も言わない。0c が保証するのは「値を持つ**ファイル名**が追跡されていないこと」だけである。
+# ディレクトリ側まで見るなら、KEEP に相当する打ち消しの一覧を別に持つことになる。
+gi_committed=()
+while IFS= read -r p; do
+  doc_excluded_name "$(basename "$p")" >/dev/null && gi_committed+=("$p")
+done < <(git -C "$repo" ls-files)
+if [ ${#gi_committed[@]} -gt 0 ]; then
+  echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
+  gi_ng=1
+fi
 if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
@@ -366,14 +400,20 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   mkdir -p "$work/$(dirname "$file")"
   printf '%s\n' "$body" > "$work/$file"
   # $file と違い $extra は複製済みの木に既にありうる（.env.example がまさにその候補）。
-  # 上書きすると本物を空に切り詰めたうえで消してしまい、以降のケースが
-  # 「.env.example が消えた木」の上で黙って別物になる。expect_ng の restore と違い
-  # 元に戻らないため、作る前に検出して落とす。
+  # そのときは作らず・消さずにそのまま使う。$extra に求めているのは
+  # 「リンク先の実体が存在すること」だけで、複製されたものはそれを満たす。
+  #
+  # 既にある場合を失敗にしてはならない。.env.example は DOC_KEEP_FILES にあるため
+  # doc_find の対象に入り、冒頭の複製ループで $work に入る。つまり
+  # リポジトリに .env.example が置かれた瞬間、下のケース31 は本体まで到達せず落ちる。
+  # KEEP に .env.example を挙げている理由自体が「README から参照されやすい」であり、
+  # そのケースが想定している状況がまさに来たときに検査が落ちる、という向きになる。
+  #
+  # 上書きもしてはならない。本物を空に切り詰めたうえで消してしまい、以降のケースが
+  # 「.env.example が消えた木」の上で黙って別物になる（expect_ng の restore と違い
+  # 元に戻らない）。made に入れないことで、後片付けの対象からも外す。
   for extra in "$@"; do
-    if [ -e "$work/$extra" ]; then
-      echo "  NG: $n. $desc — $extra は既に複製の中にある（上書きするとその木が壊れる）"
-      fail=1; rm -f "${made[@]}"; return
-    fi
+    [ -e "$work/$extra" ] && continue
     mkdir -p "$work/$(dirname "$extra")"
     : > "$work/$extra"
     made+=("$work/$extra")
@@ -435,33 +475,70 @@ expect_ok "KEEP に挙げた .env.example へのリンクは「リンク先に�
 # 無いと、ケースを1件足すたびに文書の宣言が古くなり、しかもどの検査も落ちない。
 # 検査3で「tech-stack.md が漏れていたため機能34件が38件になっても放置された」のと同型。
 echo "2. 「N通り」の宣言が実数と一致すること"
+decl_files=(README.md CLAUDE.md)
+# パターンは宣言の行にしか無い後続語まで含めて一意にする（check-docs.sh の
+# compare_decls と同じ方針）。総称の [0-9][0-9]*通り で拾うと、ケース数と無関係な
+# 「起動は2通り」のような1行が入った時点で「2 と書かれているが、実際は 30」という
+# 偽の NG が出る。しかも文面は「宣言が古い」と読めるため、受け取った側は
+# 本来直す必要のない文の方を書き換えてしまう。
+# 読み取れない場合を NG にする扱いは下に入れてあるので、具体化しても
+# 「言い回しを変えたら検査が消える」ことにはならない。
+decl_pattern() { # $1=ファイル名。その文書の宣言のパターンを出力する
+  case "$1" in
+    README.md) echo 'check-docs\.test\.sh`、[0-9][0-9]*通り' ;;
+    CLAUDE.md) echo '検査そのものの検査を[0-9][0-9]*通り含む' ;;
+    *) return 1 ;;
+  esac
+}
 decl_mismatches() { # $1=期待する数。README.md と CLAUDE.md の「N通り」のうち食い違うものを返す
-  local f v found=0
-  for f in README.md CLAUDE.md; do
+  local f v pat found
+  for f in "${decl_files[@]}"; do
+    if ! pat=$(decl_pattern "$f"); then
+      echo "$f の「N通り」のパターンが定義されていない（decl_pattern に足す）"
+      continue
+    fi
+    # found は文書ごとに持つ。ループの外に置くと、片方が読めているだけで
+    # もう片方の「読み取れない」が出なくなり、その文書が黙って対象から外れる。
+    # check-docs.sh の compare_decls が宣言ごとに呼ばれているのと同じ粒度にそろえる。
+    found=0
     while IFS= read -r v; do
       [ -n "$v" ] || continue
       found=1
       [ "$v" = "$1" ] || echo "$f の「N通り」: $v と書かれているが、実際は $1"
-    done < <(grep -o "[0-9][0-9]*通り" "$repo/$f" | grep -o "[0-9][0-9]*")
+    # 数の取り出しは doc-scope.sh の decls に寄せる。ここに書き直すと、
+    # check-docs.sh 側の読み取りを直したときにテスト側だけが古い規則で残る。
+    done < <(decls "$repo/$f" "$pat")
+    # 読み取れないのも NG。黙って通すと、言い回しを変えた時点で検査が落ちるのではなく消える
+    # （check-docs.sh の compare_decls と同じ扱い）。
+    [ "$found" = 1 ] || echo "$f の「N通り」を読み取れない（言い回しが変わった可能性）"
   done
-  # 読み取れないのも NG。黙って通すと、言い回しを変えた時点で検査が落ちるのではなく消える
-  # （check-docs.sh の compare_decls と同じ扱い）。
-  [ "$found" = 1 ] || echo "README.md / CLAUDE.md の「N通り」を読み取れない（言い回しが変わった可能性）"
 }
 # 突き合わせ自体が働いていることを先に見る。わざと違う数を渡して何も出ないなら、
 # 下の確認は文書に何を書いても通る。0a・0c と同じく「ケースが成立していない」を検出する。
-if [ -z "$(decl_mismatches "$((n + 1))")" ]; then
-  echo "  NG: 「N通り」の突き合わせが働いていない（わざと違う数を渡しても食い違いが出ない）"
+# 「1件でも出たか」ではなく文書ごとに出たかを見る。合計で見ると、片方の宣言が
+# 読み取れなくなっても、もう片方の食い違いだけでこの自己確認が緑のまま通る。
+#
+# 渡す数は、宣言として現れ得ない -1 にする。n + 1 だと、宣言がたまたまその数のとき
+# （ケースを1件減らして宣言を直し忘れた場合が該当する。この検査が最も想定している変化である）
+# その文書だけ食い違いが出ず、「突き合わせが効いていない」という**原因を取り違えた NG** が出る。
+# decls が数を取り出すのは grep -o "[0-9][0-9]*" であり、負数は決して現れない。
+decl_probe=$(decl_mismatches -1)
+decl_probe_ng=0
+for f in "${decl_files[@]}"; do
+  printf '%s\n' "$decl_probe" | grep -q "^$f の" || {
+    echo "  NG: 「N通り」の突き合わせが $f に効いていない（宣言に現れ得ない数を渡しても食い違いが出ない）"
+    decl_probe_ng=1
+  }
+done
+# 自己確認が落ちた場合も本体の結果を出す。どちらが原因かを1回の実行で切り分けるため。
+decl_out=$(decl_mismatches "$n")
+if [ -n "$decl_out" ]; then
+  printf '%s\n' "$decl_out" | sed 's/^/  NG: /'
   fail=1
-else
-  decl_out=$(decl_mismatches "$n")
-  if [ -z "$decl_out" ]; then
-    echo "  OK（$n 通り）"
-  else
-    printf '%s\n' "$decl_out" | sed 's/^/  NG: /'
-    fail=1
-  fi
+elif [ "$decl_probe_ng" = 0 ]; then
+  echo "  OK（$n 通り）"
 fi
+[ "$decl_probe_ng" = 0 ] || fail=1
 
 if [ "$fail" -ne 0 ]; then echo "検査の検査に失敗しました"; exit 1; fi
 echo "$n 通りの確認をすべて通過しました"
