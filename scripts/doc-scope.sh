@@ -105,7 +105,14 @@ doc_excluded() { # $1=リンク先のパス。除外なら理由を出力して 
     case "/$p/" in */"$d"/*) echo "対象外ディレクトリ $d の配下"; return 0 ;; esac
   done
   # 名前の取り出しに basename は使わない。先頭が - のパスを option と解釈して
-  # 空を返し、除外が黙って外れる（実測: `basename "-x.tfvars"` は終了コード 1）。
+  # 空を返す（実測: `basename "-x.tfvars"` は終了コード 1、標準出力は空）。
+  #
+  # **この経路では現に顕在化しない。** 本番の呼び出し元は check-docs.sh の検査1 だけで、
+  # そこは `$(dirname "$f")/$l` を渡す。dirname は最低でも `.` を返すため、
+  # 引数は必ず `./…` か `docs/…` で始まり、先頭が - になることはない。
+  # ここで外部コマンドをやめているのは、**名前の取り出しを呼び出し元の形に
+  # 依存させないため**の予防である（実際に壊れるのは、git ls-files の出力を
+  # そのまま流す check-docs.test.sh の gi_scan_tracked のほうである）。
   g=$(doc_excluded_name "${p##*/}") && { echo "対象外のファイル名 $g に一致"; return 0; }
   return 1
 }
