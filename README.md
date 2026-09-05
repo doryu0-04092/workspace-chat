@@ -219,6 +219,16 @@ docker volume rm workspace-chat_db-data
 
 下はすべて実際に実行して確かめた結果である。
 
+**2つ以上ずれている場合は、`POSTGRES_USER` → `POSTGRES_DB` → `POSTGRES_PASSWORD` の順に直す。
+下の表はその逆順に並んでいるので、上から順に叩かない。**
+各手順は**残りが一致していることを前提に繋ぐ**ためである。`\password` は
+`-U "$POSTGRES_USER" -d "$POSTGRES_DB"` で繋ぐので利用者名と DB 名の両方が要る。
+`ALTER DATABASE` は `-U "$POSTGRES_USER"` で繋ぐので利用者名が要る。
+利用者名の改名だけが `-U <古い名前>` を直接指定するため、前提を持たない。
+
+**`.env` を `.env.example` から作り直した場合は3つとも新しい値になる**ので、この順序が要る。
+表の1行目から叩くと `FATAL: role "<新しい利用者名>" does not exist` で止まる（実行して確認した）。
+
 | ずれた値 | 消さずに直す方法 |
 |---|---|
 | `POSTGRES_PASSWORD` | 下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
@@ -270,8 +280,11 @@ DETAIL:  There is 1 other session using the database.
 **改名の前に数えて確かめる。0 でなければ、その接続を閉じてから叩く。**
 
 ```
-docker compose exec db psql -U <利用者名> -d postgres -c "SELECT count(*) FROM pg_stat_activity WHERE datname = '<古い名前>'"
+docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d postgres -c \"SELECT count(*) FROM pg_stat_activity WHERE datname = '<古い名前>'\""
 ```
+
+（この行だけ `sh -c` の外側が二重引用符なのは、**SQL の中に単一引用符が要る**ためである。
+`$POSTGRES_USER` をコンテナの中で展開させる目的は他の行と同じで、`\$` で手元のシェルから逃がす）
 
 （実行して確認した。接続を1本張ったまま叩くと上のエラーになり、閉じて 0 にしてから
 叩き直すと `ALTER DATABASE` が通った。**`psql` のプロセスを手元で切っただけでは 0 にならない**
