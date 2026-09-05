@@ -249,15 +249,24 @@ gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致し�
 }
 # 走査そのものに落ちる条件を持たせる。リポジトリに DOC_PRUNE_FILES に一致する
 # 追跡ファイルは1件も無く、実物を流すかぎり結果は常に空である。つまりこのループを
-# 丸ごと削っても、-z を外しても、basename を外しても 28通りすべてが緑で通る。
+# 丸ごと削っても、-z を外しても、basename を外しても全ケースが緑で通る
+# （ここに件数を書かない。ケースを足すたびに古くなるうえ、コメントの数は
+#   どこからも照合されない。0b の注記と同じ理由）。
 # 決め打ちの一覧を同じ関数に流し、読み取り・basename・KEEP の差し引きを同時に見る。
-#   secrets.auto.tfvars.json … ドットを複数含む現実の綴り（*.tfvars.json に一致）
-#   本番.tfvars              … 非 ASCII 名（引用されると一致しなくなる側）
-#   sub/.env                 … basename を外すと .env に一致しなくなる（区切りを踏む）
-#   .env.example / README.md … 一致してはならない側（KEEP と通常のファイル）
-gi_probe_want=$'secrets.auto.tfvars.json\n本番.tfvars\nsub/.env'
-gi_probe_got=$(printf '%s\0' secrets.auto.tfvars.json 本番.tfvars sub/.env .env.example README.md \
-  | gi_scan_tracked)
+#
+# 名前は一覧から導出する。手書きで並べると、DOC_PRUNE_FILES / DOC_KEEP_FILES を
+# 変えたときに走査は正しく動いているのに期待値だけが取り残され、
+# 「根拠を失った NG」が出る（gi_ignored / gi_tracked を導出に寄せたのと同じ理由）。
+gi_probe_pass=("${probe_real_names[@]}")
+# 非 ASCII 名。パターンの * を「本番」に置き換えて作る。
+# 既定の ls-files が引用して出す側であり、引用が残ると一致しなくなる。
+for g in "${probe_prune_files[@]}"; do gi_probe_pass+=("${g//\*/本番}"); done
+# ディレクトリを含むパス。basename を外すと、パターンが先頭から当たらず一致しなくなる。
+for f in "${probe_real_names[@]}"; do gi_probe_pass+=("sub/$f"); done
+# 一致してはならない側（KEEP に挙げたもの と、値を持たない通常のファイル）。
+gi_probe_skip=("${probe_keep_files[@]//\*/x}" README.md)
+gi_probe_want=$(printf '%s\n' "${gi_probe_pass[@]}")
+gi_probe_got=$(printf '%s\0' "${gi_probe_pass[@]}" "${gi_probe_skip[@]}" | gi_scan_tracked)
 if [ "$gi_probe_got" != "$gi_probe_want" ]; then
   echo "  NG: 追跡ファイルの走査が想定と違う（期待: ${gi_probe_want//$'\n'/ } / 実際: ${gi_probe_got//$'\n'/ }）"
   gi_ng=1
@@ -608,9 +617,11 @@ echo "2. 「N通り」の宣言が実数と一致すること"
 decl_files=(README.md CLAUDE.md)
 # パターンは宣言の行にしか無い後続語まで含めて一意にする（check-docs.sh の
 # compare_decls と同じ方針）。総称の [0-9][0-9]*通り で拾うと、ケース数と無関係な
-# 「起動は2通り」のような1行が入った時点で「2 と書かれているが、実際は 30」という
+# 「起動は2通り」のような1行が入った時点で「2 と書かれているが、実際は N」という
 # 偽の NG が出る。しかも文面は「宣言が古い」と読めるため、受け取った側は
 # 本来直す必要のない文の方を書き換えてしまう。
+# （N に具体数を書かない。ケースを足すたびに古くなるうえ、コメントの数は
+#   どこからも照合されない。0b の注記と同じ理由。）
 # 読み取れない場合を NG にする扱いは下に入れてあるので、具体化しても
 # 「言い回しを変えたら検査が消える」ことにはならない。
 decl_pattern() { # $1=ファイル名。その文書の宣言のパターンを出力する
