@@ -446,7 +446,8 @@ expect_ng "requirements.md の一覧の見出しを変えて読み取れなく�
 #     後片付けに手を入れたとき片方が黙って取り残される（doc-scope.sh 冒頭と同じ理由）。
 #     判定は doc_find -name '*.md' に統一する。検査1が見るのは Markdown だけである。
 expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対象に入る）| out（除外される）
-              # $5...=併せて空で置くファイル（リンク先にする実体）
+              # $5...=併せて置くファイル（リンク先にする実体。既に $work にあれば
+              #        作らず・消さず・空にもせず、そのまま使う。下の注記を参照）
   local desc="$1" file="$2" body="$3" want="$4" got extra
   shift 4
   local made=("$work/$file")
