@@ -349,6 +349,17 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 - **`CREATE EXTENSION pg_bigm` が RDS PostgreSQL 17 で通ること。** pg_bigm は PostgreSQL の
   バージョンごとにビルドが必要なため、最初のマイグレーションで実際に確認する。
   通らない場合は RDS PostgreSQL 18.4、または MySQL 8.4 の ngram 索引に切り替える
+- **文字符号化と照合順序が、3つの環境で揃っていること。**
+  **pg_bigm の 2-gram 分割は文字符号化に依存する。**
+  下の「実際に確認したこと」で索引が使われることを確かめたのはローカルであり、
+  **符号化が違う環境にその結果は移らない。**
+  ローカルの実測値は **`UTF8` / `en_US.utf8`**（`pg_database` を引いて確認した。2026-09-05）。
+  これはイメージの `LANG=en_US.utf8` を initdb がそのまま採ったものである。
+  **RDS と Testcontainers の既定値は未確認**（実インスタンスを持っていない）。
+  **違っていたら、揃えるか、揃えない代償を書く。**
+  `compose.yaml` は `POSTGRES_INITDB_ARGS` を渡していない。
+  **いま固定しないのは、揃える必要があるかどうかがまだ分からないためである**
+  （固定すると、RDS 側に合わせ直すときに2箇所を直すことになる）
 - **その前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
   pg_bigm は共有ライブラリの事前読み込みを必須としている（公式ドキュメント）。
   **ローカルは `compose.yaml` が `postgres -c shared_preload_libraries=pg_bigm` で渡しているが、
