@@ -5,6 +5,19 @@ coverage/
 reports/
 package-lock.json
 
+# エージェントが作る git のワークツリー。apps/ の複製がまるごと入る。
+#
+# Prettier 3 の既定の ignore-path は .gitignore と .prettierignore の**両方**である
+# （3.0 での変更。prettier 3.9.6 で実測し、.gitignore に書いた場所が走査されないことを確認した）。
+# **それでも .claude/ が走査対象に入るのは、そのどちらにも書かれていないからである。**
+# ここに書かないと作業中（整形前）のファイルまで対象に入り、
+# **手元でだけ format:check が落ちる。**
+# CI には .claude/ が無いので緑のままになり、気づけない。
+#
+# 外れていることは scripts/lint-scope.test.sh が機械で確かめる。
+# .gitignore 側にも .claude/ が無い件は #35 に分けた（別の作業が同じファイルを編集中のため）。
+.claude/
+
 # Markdown は Prettier の対象にしない。
 # Prettier は表のセルを桁揃えするため、`| F-01 | 新規登録 |` のような行に
 # 空白が入る。scripts/check-docs.sh と scripts/check-docs.test.sh は
