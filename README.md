@@ -423,8 +423,9 @@ docker volume rm workspace-chat_db-data
 
 下はすべて実際に実行して確かめた結果である。
 
-**接続先はすべて `-d template1` に揃えてある。** 直す対象そのものには繋げないため、
-別のデータベースを作業台にする必要がある。`template1` を選ぶのは次の3つを同時に満たすためである。
+**直す対象そのものに繋げない手順**——利用者名の改名とデータベース名の改名——は、
+**接続先を `-d template1` に揃えてある。** 別のデータベースを作業台にする必要があるためで、
+`template1` を選ぶのは次の3つを同時に満たすからである。
 
 - **必ず存在する。** initdb が作り、`POSTGRES_DB` の値に左右されない
 - **名前が動かない。** 復旧の対象にならないので、手順の途中で消えたり改名されたりしない
@@ -433,6 +434,11 @@ docker volume rm workspace-chat_db-data
 `postgres` も initdb が作るが、**`POSTGRES_DB=postgres` にしていると直す対象と同じものになり、
 `ERROR: current database cannot be renamed` で止まる**（実行して確認した）。
 `template1` に揃えておけば、`POSTGRES_DB` に何を選んでいてもこの衝突が起きない。
+
+**パスワードの手順だけは `template1` に寄せない。** `\password` は
+**対象のデータベースに繋いだままロールのパスワードを変えられる**ので、作業台が要らない。
+`-d "$POSTGRES_DB"` で繋ぐのはそのためであり、**下の順序が要る理由もここにある**
+（DB 名を先に直しておかないと、その名前で繋げない）。
 
 **2つ以上ずれている場合は `POSTGRES_USER` → `POSTGRES_DB` → `POSTGRES_PASSWORD` の順に直す。
 下の表も、そのあとの手順も、この順に並べてある。上から順に叩けばよい。**
@@ -500,6 +506,10 @@ docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d template1 -c \"SELE
 
 （実行して確認した。`DROP ROLE` の前は 1、後は 0 になった）
 
+（**この行と、後述の接続数を数える行の2つだけ** `sh -c` の外側が二重引用符である。
+**SQL の中に単一引用符が要る**ためで、外側も単一引用符にすると閉じてしまう。
+`$POSTGRES_USER` をコンテナの中で展開させる目的は他の行と同じで、`\$` で手元のシェルから逃がす）
+
 （すべて実行して確認した。`<古い名前>` を打ち間違えて2行目を
 `ERROR: role "..." does not exist` で落としたところ、3行目は
 `FATAL: role "<新しい名前>" does not exist` で繋がらず、`tmp_rename` が
@@ -542,8 +552,7 @@ DETAIL:  There is 1 other session using the database.
 docker compose exec db sh -c "psql -U \"\$POSTGRES_USER\" -d template1 -c \"SELECT count(*) FROM pg_stat_activity WHERE datname = '<古い名前>'\""
 ```
 
-（この行だけ `sh -c` の外側が二重引用符なのは、**SQL の中に単一引用符が要る**ためである。
-`$POSTGRES_USER` をコンテナの中で展開させる目的は他の行と同じで、`\$` で手元のシェルから逃がす）
+（外側が二重引用符なのは、上の件数を数える行と同じ理由である）
 
 （実行して確認した。接続を1本張ったまま叩くと上のエラーになり、閉じて 0 にしてから
 叩き直すと `ALTER DATABASE` が通った。**`psql` のプロセスを手元で切っただけでは 0 にならない**

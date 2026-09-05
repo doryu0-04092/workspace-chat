@@ -41,9 +41,13 @@ FROM ${POSTGRES_IMAGE} AS build
 # **ARG を手で上げるまで開発環境が立たなくなる。**
 # SHA-1 で fetch すれば、タグが動いても消えても同じ中身が取れる。
 #
-# PG_BIGM_TAG は**人が版を読むための注記**であり、取得には使わない。
-# ビルドログに出して、どの版に対応する SHA-1 かを追えるようにする。
-ARG PG_BIGM_TAG=v1.2-20250903
+# **持つのは SHA-1 だけにする。タグ名は書かない。**
+# 取得に使わなくなったタグ名をここに残すと、**何にも照合されない値**になる。
+# SHA-1 だけを上げてタグ名を上げ忘れても**ビルドは通り、注記だけが古い版を主張する。**
+# 版番号の二重管理をやめたのと同じ理由である（docs/tech-stack.md）。
+#
+# どの版かを人が知りたいときは、下の SHA-1 を上流（github.com/pgbigm/pg_bigm）で引く。
+# タグ名を書き写すより1手間かかるが、**嘘をつかない側を選ぶ。**
 ARG PG_BIGM_COMMIT=735dceba0ecdd8ac1aaaaa207226a7102b6bbd71
 
 # PG_MAJOR は postgres イメージが持つ環境変数（17）。ここで版を書き直さない。
@@ -56,7 +60,6 @@ RUN set -eux; \
       ca-certificates \
       git \
       "postgresql-server-dev-$PG_MAJOR"; \
-    echo "pg_bigm $PG_BIGM_TAG ($PG_BIGM_COMMIT)"; \
     git init /tmp/pg_bigm; \
     cd /tmp/pg_bigm; \
     git remote add origin https://github.com/pgbigm/pg_bigm.git; \

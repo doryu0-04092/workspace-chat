@@ -253,6 +253,18 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 
 ### PostgreSQL 17 に留める理由（2026-09-05）
 
+**選定は変えていない。直したのは記録した理由のほうである。**
+採る版は 2026-09-03 と同じく 17 で、`compose.yaml` も `Dockerfile` も動かしていない。
+**この PR が新たに引いた出典が、上の表に書いてあった理由（pg_bigm の対応実績）を
+成り立たなくした**ため、その理由を事実に合わせた。
+
+**Redis を #24 に切り出したのとは性質が違う。** #24 は
+「ElastiCache の Redis OSS が 7.1 で止まっているので Valkey へ移すか」という
+**採る版を変えるかどうかの判断**であり、決めれば構成が変わる。
+こちらは**版を変えない判断の、根拠の書き直し**である。
+**実際に 18 へ動かすなら、それは #24 と同じ性質の判断**であり、
+この PR ではなく別に切り出す。
+
 **上の表が挙げている「pg_bigm の対応実績」は、17 と 18 を分ける理由になっていなかった。**
 AWS の[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html)
 を確認したところ、**pg_bigm は 18 系にも同じ版が同梱されている**（確認日 2026-09-05）。
@@ -381,7 +393,10 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 取得して検索し 0 件）。ローカルは [Dockerfile](../docker/postgres/Dockerfile) でビルドしている。
 
 **pg_bigm の版番号は本書に書き写さない。** 持つのは
-[Dockerfile](../docker/postgres/Dockerfile) の `ARG PG_BIGM_TAG` と `ARG PG_BIGM_COMMIT` だけとする。
+[Dockerfile](../docker/postgres/Dockerfile) の `ARG PG_BIGM_COMMIT`（コミットの SHA-1）だけとする。
+**タグ名は Dockerfile にも置かない。** 取得も検証も SHA-1 で行うため、
+タグ名を残すと**何にも照合されない値**になり、SHA-1 だけを上げたときに黙って古くなる。
+どの版かを知りたいときは、その SHA-1 を上流で引く。
 同じ Dockerfile が「更新は手で `ARG` を上げる」と明記している以上、**書き写すと更新のたびに
 片方だけが古くなる経路ができる。** `scripts/check-docs.sh` は版番号を照合しないため、
 **ずれても CI は緑のまま本書だけが古い版を主張する。**
