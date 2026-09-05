@@ -153,7 +153,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 項目 | 採用 | バージョン | 理由 |
 |---|---|---|---|
 | DB | **PostgreSQL** | **17** | 検索以外のクエリが重いため（下記） |
-| 全文検索 | **pg_bigm**（2-gram 索引） | — | **難-5 の解決**。Amazon RDS for PostgreSQL で正式サポート（2021-04〜） |
+| 全文検索 | **pg_bigm**（2-gram 索引） | — | **難-5 の解決**。Amazon RDS for PostgreSQL が[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html)に挙げている（PostgreSQL 17 を含む。確認日 2026-09-05）。**実インスタンスでの `CREATE EXTENSION` は未確認**（下記） |
 | 主キー | **UUIDv7** | — | 連番は資源の存在を漏らすため用いない。**UUIDv7 は先頭が時刻順であるため、UUIDv4 と違って索引の局所性を損なわない。** カーソルページネーションのカーソルにも使える |
 
 > **UUIDv7 の生成は Prisma 側で行う。** `@default(uuid(7))` は **Prisma v5.18.0 以降**で
@@ -344,9 +344,18 @@ Vite 8（内部バンドラを Rolldown / Oxc に刷新）や NestJS 12（Common
 固定しない理由と代償は [Dockerfile](../docker/postgres/Dockerfile) に記した。
 
 > **RDS では話が変わる。** RDS は利用者が拡張をビルドして持ち込めない。
-> 使えるのは AWS が同梱した拡張だけであり、**pg_bigm が同梱されていることが前提**になる。
-> ローカルで通ったことは、その前提を裏付けない。**上の「未確認」を消してよいのは、
-> RDS の実インスタンスで実行したときだけである。**
+> 使えるのは AWS が同梱した拡張だけである。
+> **同梱されていること自体は確認済みである。** AWS の
+> [PostgreSQL の拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html)
+> は PostgreSQL 17 の各マイナー版に対して pg_bigm を挙げている（確認日 2026-09-05。
+> 版番号は上の方針どおり本書に書き写さない。確認した時点では
+> [Dockerfile](../docker/postgres/Dockerfile) が固定している版と一致していた）。
+>
+> **それでも上の「未確認」は消せない。** 残っているのは同梱の有無ではなく、
+> **RDS の実インスタンスで `CREATE EXTENSION pg_bigm` を叩いていない**ことと、
+> **`shared_preload_libraries` をパラメータグループで設定していない**ことである。
+> ローカルで通ったことは、そのどちらも裏付けない。
+> **消してよいのは、RDS の実インスタンスで実行したときだけである。**
 
 #### Redis の版（ローカル）
 

@@ -133,6 +133,18 @@ bash scripts/check-docs.test.sh
 cp .env.example .env    変数名だけが入っている。値を書き込む
 ```
 
+**Docker Compose v2 が要る。**
+
+```
+docker compose version
+```
+
+**v1 の `docker-compose` では動かない。** v1 は `docker-compose.yml` / `docker-compose.yaml` しか
+探さないため**このリポジトリの `compose.yaml` を読まない**うえ、`up --wait` を持たない。
+下の操作表は8行中4行が `--wait` に依存している。
+古い環境では `no configuration file provided` か `unknown flag: --wait` で止まる。
+**最低のマイナー版までは特定していない**（`up --wait` を持つ v2 が要る、とだけ言える）。
+
 **変数を1つでも空のままにすると起動が止まる。** 既定値には落とさない。
 落とすと設定の書き忘れが「動いてしまう」形で隠れる（`PORT` と同じ考え方）。
 
@@ -197,6 +209,23 @@ docker volume rm workspace-chat_db-data
 `up -d --wait` を通し直す。** これらを読むのは公式イメージの初期化処理で、
 **走るのはデータ領域が空のときだけ**である。ボリュームができたあとに `.env` を直しても、
 **DB の中の利用者名・パスワード・データベース名は初回の値のまま変わらない。3つともである。**
+
+**ただし `up` を通す前に、古い `POSTGRES_USER` と `POSTGRES_DB` を控える。**
+下の復旧手順はどれも `<古い名前>` を引数に取るが、**`up` はコンテナを作り直すため、
+旧コンテナに焼き付いていた古い値がそこで消える。**
+`.env` を `.env.example` から作り直した場合は、`.env` 側にも残っていない。
+
+```
+docker compose exec db sh -c 'echo "$POSTGRES_USER"; echo "$POSTGRES_DB"'
+```
+
+**パスワードは控えなくてよい**（`\password` で上書きするため）。
+`env` や `docker inspect` を丸ごと出すとパスワードまで平文で出るので、変数を名指しする。
+
+**控えそこねると、DB 側からは引けない。** 公式イメージが作るログイン可能なロールは
+`POSTGRES_USER` の1つだけであり（後述）、**その名前が分からないと繋げない。**
+`.env` を空にしてしまった場合は `exec` 自体が通らない（前述）。
+**どちらの場合も、残るのは下の「捨ててよいなら `down -v`」だけである。**
 
 このとき `up -d --wait` は**ヘルスチェックが通らずに失敗する**。
 **3つとも検知する**（パスワードだけずらした場合も含めて実行して確かめた）。
