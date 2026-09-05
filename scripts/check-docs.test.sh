@@ -465,6 +465,12 @@ expect_ng "requirements.md の「4経路すべてを塞いで」を3経路に" d
 expect_ng "requirements.md の「4経路のうち」を3経路に" docs/requirements.md \
   's/4経路のうち/3経路のうち/' \
   'requirements.md の「N経路のうち」: 3 と書かれているが、実際は 4'
+# 文書の外にある5箇所目の宣言。ここが古くなる帰結は、AI レビュアーが誤った経路数を
+# 最優先の観点として渡され続けることであり、文書の不整合より重い。
+expect_ng "claude_code_review.yml の「認可4経路」を3経路に" .github/workflows/claude_code_review.yml \
+  's/認可4経路を最優先/認可3経路を最優先/' \
+  'claude_code_review.yml の「認可N経路」: 3 と書かれているが、実際は 4' \
+  '認可3経路を最優先'
 expect_ng "REVIEW.md 2.1 の見出しを変えて表を読み取れなくする" REVIEW.md \
   's/^### 2\.1 認可/### 2-1 認可/' \
   'REVIEW.md 2.1 の表から経路を1件も読み取れない' '^### 2-1 認可'

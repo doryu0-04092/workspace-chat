@@ -149,13 +149,23 @@ echo "  完了（$req 項目）"
 # （PR #6 で文言は直したが、検査は入れていなかった）。
 echo "5. 「N経路」と「N種類」の宣言"
 
-# 経路の実数は REVIEW.md 2.1 の表の行数。行は「| 1 |」で始まる。
+# 経路の実体は REVIEW.md 2.1 の表である。行は「| 1 |」で始まり、2列目が経路の名前。
 # ここは awk のリテラル正規表現なのでドットをエスケープする。しないと「### 2-1 認可」でも
 # 一致してしまい、見出しが変わったのに読み取れたことになる（検査の検査が実際に踏んだ）。
-routes=$(awk '$0 ~ /^### 2\.1 / { in_sec = 1; next }
-              in_sec && /^#/ { exit }
-              in_sec && /^\| [0-9]+ \|/ { c++ }
-              END { print c+0 }' REVIEW.md)
+#
+# **読み取りは1箇所だけに置く。** 数と名前を別々の awk で取ると、節の特定（^### 2\.1 ）と
+# 行の判定（^\| [0-9]+ \|）を二重に持つことになる。上のエスケープ漏れは、実際に
+# 両方へ同じ修正を入れる必要があった（doc-scope.sh 冒頭・検査3と同じ理由）。
+#
+# 帰結は件数の不一致ではなく **NG の原因の取り違え**である。名前側だけが空になると
+# routes は正のままで下の読み取り失敗の分岐に落ちず、
+# 「表と requirements.md で経路の名前が違う（表: ）」が出る。
+# 受け取った側は、壊れていない requirements.md の列挙を疑うことになる。
+route_names=$(awk -F'|' '$0 ~ /^### 2\.1 / { in_sec = 1; next }
+                         in_sec && /^#/ { exit }
+                         in_sec && /^\| [0-9]+ \|/ {
+                           r = $3; gsub(/\*/, "", r); gsub(/^ +| +$/, "", r); print r }' REVIEW.md)
+routes=$(printf '%s\n' "$route_names" | grep -c .)
 if [ "$routes" -eq 0 ]; then
   # 以降の照合はすべてこの数を土台にしている。0 のまま進むと、
   # 宣言側が何を書いていても「実際は 0」と鳴るだけで、読み取り失敗が埋もれる。
@@ -169,14 +179,17 @@ else
   compare_decls "$(decls REVIEW.md          '経路は[0-9][0-9]*つある')"           "$routes" "REVIEW.md の「経路はNつある」"
   compare_decls "$(decls docs/requirements.md '[0-9][0-9]*経路\**すべてを塞いで')" "$routes" "requirements.md の「N経路すべてを塞いで」"
   compare_decls "$(decls docs/requirements.md '[0-9][0-9]*経路のうち')"            "$routes" "requirements.md の「N経路のうち」"
+  # 同じ数はレビュー用ワークフローの prompt にも直書きされている。文書ではないが、
+  # ここだけ配線しないと帰結が文書の不整合より重い。経路が増減したとき、
+  # **AI レビュアーが誤った経路数を最優先の観点として渡され続ける**（REVIEW.md 2.1 そのもの）。
+  # .github 配下でも doc_find の除外には当たらず、検査の検査の複製ループにも入る。
+  compare_decls "$(decls .github/workflows/claude_code_review.yml '認可[0-9][0-9]*経路を最優先')" \
+    "$routes" "claude_code_review.yml の「認可N経路」"
 
   # 数だけでは足りない。4のまま1つが別物に差し替わっても気づけない。
   # REVIEW.md 2.1 は本ファイルが最優先と定めた箇所であり、経路が差し替わることは
   # 欠けることと影響が同じである（塞ぐ対象の合意がずれる）。イベント表と同じく中身で見る。
-  route_names=$(awk -F'|' '$0 ~ /^### 2\.1 / { in_sec = 1; next }
-                           in_sec && /^#/ { exit }
-                           in_sec && /^\| [0-9]+ \|/ {
-                             r = $3; gsub(/\*/, "", r); gsub(/^ +| +$/, "", r); print r }' REVIEW.md)
+  #
   # requirements.md 側は1行に4つ並ぶ。行を特定し、「/」で分割して集合として突き合わせる。
   #
   # 包含（grep -qF）で見てはいけない。「検索」は「全文検索」に含まれるため、
