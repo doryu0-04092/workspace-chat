@@ -16,7 +16,8 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | AI コードレビューの設定 | **完了**（[claude_code_review.yml](.github/workflows/claude_code_review.yml)） |
 | ドキュメント検査の CI | **完了**（[docs.yml](.github/workflows/docs.yml)） |
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
-| 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml) と [dependabot.yml](.github/dependabot.yml)） |
+| 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
+| 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | 未着手（次の作業） |
 | 実装 | 未着手 |
@@ -154,6 +155,15 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 `moderate` 以下では失敗しない。かつては「Dependabot の PR で追う」としていたが、
 **その経路は無くなった。** 代わりに、audit.yml の「全件表示」ステップの出力を
 定期実行のログで人が読む。**読む先は1箇所に定めてある。**
+
+**4. 60日間リポジトリに活動が無いと、GitHub が週次実行を自動で無効化する。**
+パブリックリポジトリの `schedule` ワークフローの仕様である。
+**そして無効化されるのは、この方針が守ろうとした状況そのものである** —
+「コードが動かない期間に公表された脆弱性を拾う」ために定期実行を置いたのに、
+**コードが動かない期間が続くと、その定期実行が止まる。**
+
+> 止まっても通知は来ない。**Actions の画面から手動で再有効化する。**
+> 実装が長く止まる見込みなら、活動に依存しない経路を別途考える。
 
 **検知そのものは [audit.yml](.github/workflows/audit.yml) が毎週続ける。**
 `high` 以上なら落ちる。落ちたら、そのとき直す版を人が選ぶ。
