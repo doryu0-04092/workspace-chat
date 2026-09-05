@@ -222,7 +222,7 @@ docker volume rm workspace-chat_db-data
 | ずれた値 | 消さずに直す方法 |
 |---|---|
 | `POSTGRES_PASSWORD` | 下記の `\password`（`ALTER ROLE ... PASSWORD '<平文>'` は使わない） |
-| `POSTGRES_DB` | 下記の `ALTER DATABASE ... RENAME TO`（**その DB に接続したままでは実行できない**ので `-d postgres` で繋ぐ） |
+| `POSTGRES_DB` | 下記の `ALTER DATABASE ... RENAME TO`（**その DB への接続が1本でも残っていると実行できない。** 自分は `-d postgres` で繋ぐ） |
 | `POSTGRES_USER` | 下記の**一時ロールを作ってから** `ALTER ROLE ... RENAME TO`（自分自身は改名できない） |
 
 **パスワード**は `psql` に入って `\password` で変える。
@@ -257,6 +257,25 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "ALTER DAT
 **`-d "$POSTGRES_DB"` で繋いではいけない。** その値は**これから作ろうとしている新しい名前**であり、
 まだ存在しない。`-d postgres` を使うのは、**`POSTGRES_DB` の値によらず initdb が必ず作るデータベース**
 だからである。改名したあとも、コンテナを作り直さずに緑に戻る（実行して確認した。表も残っていた）。
+
+**条件はもう1つある。旧データベースに他のセッションが1本でも繋いでいると失敗する。**
+`-d postgres` で繋いだかどうかとは別の話であり、**自分が `-d postgres` を守っていても止まる。**
+別の端末で開いたままの `psql` や、止め忘れた `npm run dev -w @workspace-chat/api` が該当する。
+
+```
+ERROR:  database "<古い名前>" is being accessed by other users
+DETAIL:  There is 1 other session using the database.
+```
+
+**改名の前に数えて確かめる。0 でなければ、その接続を閉じてから叩く。**
+
+```
+docker compose exec db psql -U <利用者名> -d postgres -c "SELECT count(*) FROM pg_stat_activity WHERE datname = '<古い名前>'"
+```
+
+（実行して確認した。接続を1本張ったまま叩くと上のエラーになり、閉じて 0 にしてから
+叩き直すと `ALTER DATABASE` が通った。**`psql` のプロセスを手元で切っただけでは 0 にならない**
+場合がある。数えるのはサーバー側の接続であり、こちらが確実である）
 
 **利用者名**は一時ロールを作ってから改名する。
 
