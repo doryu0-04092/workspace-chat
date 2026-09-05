@@ -141,8 +141,9 @@ docker compose version
 
 **v1 の `docker-compose` では動かない。** v1 は `docker-compose.yml` / `docker-compose.yaml` しか
 探さないため**このリポジトリの `compose.yaml` を読まない**うえ、`up --wait` を持たない。
-下の操作表は8行中4行が `--wait` に依存している。
-古い環境では `no configuration file provided` か `unknown flag: --wait` で止まる。
+**このリポジトリでは、下の操作表の行はどれも v1 では動かない。**
+`--wait` を持たない行も同じで、`compose.yaml` を読めない時点で止まる。
+古い環境で出るのは `no configuration file provided` である。
 **最低のマイナー版までは特定していない**（`up --wait` を持つ v2 が要る、とだけ言える）。
 
 **変数を1つでも空のままにすると起動が止まる。** 既定値には落とさない。
@@ -308,6 +309,25 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "DROP ROLE
 **一時ロールにパスワードを設けないのは、`docker compose exec` からの接続が
 Unix ドメインソケット（`local all all trust`）を通るためである。**
 公開ポート経由では入れない。使い終わったら `DROP ROLE` する。
+
+**2行目が失敗したら、3行目も必ず失敗する。** 3行目は `-U "$POSTGRES_USER"`（**新しい**名前）で
+繋ぐが、改名が済んでいないその名前はまだ存在しないためである。
+**パスワードを持たない `SUPERUSER` ロール `tmp_rename` が残る。**
+そのまま1行目から叩き直すと `ERROR: role "tmp_rename" already exists` で落ちる。
+
+**この場合は、古い名前で繋いで消す。**
+
+```
+docker compose exec db psql -U <古い名前> -d postgres -c 'DROP ROLE tmp_rename;'
+```
+
+**`-U tmp_rename` では消せない**（`ERROR: current user cannot be dropped`）。
+消してから1行目に戻る。
+
+（すべて実行して確認した。`<古い名前>` を打ち間違えて2行目を
+`ERROR: role "..." does not exist` で落としたところ、3行目は
+`FATAL: role "<新しい名前>" does not exist` で繋がらず、`tmp_rename` が
+`rolsuper = t` / `rolcanlogin = t` のまま残った。上の1行で消えた）
 
 **実行して確かめた結果**は次のとおりである。
 
