@@ -20,7 +20,10 @@
 # ■ 制約: 次のどちらかに当たるファイルを、Markdown のリンク先にしてはならない。
 #     1. DOC_PRUNE_DIRS 配下のファイル
 #     2. DOC_KEEP_FILES を除く DOC_PRUNE_FILES に一致する名前のファイル（.env など）
-#   KEEP に挙げたもの（.env.example）だけは、下のとおり除外から外してあるためリンク先にできる。
+#   KEEP に挙げたもの（.env.example）は **2 の対象から外れる**ためリンク先にできる。
+#   ただし 1 は KEEP を見ない。doc_excluded はディレクトリ側で先に返すため、
+#   .terraform/.env.example のような置き方は KEEP に挙がっていてもリンク先にできない。
+#   DOC_KEEP_FILES が差し引くのは DOC_PRUNE_FILES だけである。
 #   check-docs.sh の検査1が呼ぶ doc_excluded は、ディレクトリ側とファイル名側の両方を見る。
 #
 # doc_find は2つの用途を兼ねている。
@@ -102,7 +105,14 @@ doc_excluded() { # $1=リンク先のパス。除外なら理由を出力して 
     case "/$p/" in */"$d"/*) echo "対象外ディレクトリ $d の配下"; return 0 ;; esac
   done
   # 名前の取り出しに basename は使わない。先頭が - のパスを option と解釈して
-  # 空を返し、除外が黙って外れる（実測: `basename "-x.tfvars"` は終了コード 1）。
+  # 空を返す（実測: `basename "-x.tfvars"` は終了コード 1、標準出力は空）。
+  #
+  # **この経路では現に顕在化しない。** 本番の呼び出し元は check-docs.sh の検査1 だけで、
+  # そこは `$(dirname "$f")/$l` を渡す。dirname は最低でも `.` を返すため、
+  # 引数は必ず `./…` か `docs/…` で始まり、先頭が - になることはない。
+  # ここで外部コマンドをやめているのは、**名前の取り出しを呼び出し元の形に
+  # 依存させないため**の予防である（実際に壊れるのは、git ls-files の出力を
+  # そのまま流す check-docs.test.sh の gi_scan_tracked のほうである）。
   g=$(doc_excluded_name "${p##*/}") && { echo "対象外のファイル名 $g に一致"; return 0; }
   return 1
 }
