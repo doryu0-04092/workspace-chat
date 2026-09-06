@@ -19,7 +19,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
-| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Redis） |
+| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Valkey。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
 | Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#42） |
 | 実装 | 未着手（次の作業） |
 
@@ -188,6 +188,11 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 
 **Docker で動かすのはミドルウェアだけである。** api と web はホストの Node で動かす
 （[compose.yaml](compose.yaml)）。ホットリロードとデバッグのしやすさを優先した。
+
+**`redis` サービスのイメージは Valkey である**（`valkey/valkey:8-alpine`。#24）。
+ElastiCache for Redis から ElastiCache for Valkey へ移す決定を受けたもので、
+**サービス名・環境変数名（`REDIS_PORT`）はこの決定の範囲外とし、変えていない。**
+理由・価格の根拠・代償は [技術スタック](docs/tech-stack.md)「Valkey の版（ローカル）」に記す。
 
 > **代償。** ローカルとデプロイ先（ECS Fargate）で Node の動作環境が揃わない。
 > 「手元では動くが ECS で動かない」がありうる。**CI（ubuntu / Node 24）がその差を先に踏む。**
