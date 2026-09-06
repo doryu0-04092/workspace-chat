@@ -404,6 +404,7 @@ if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 echo "0c-2. .claude/ が .gitignore で無視され、行を消すと無視されなくなること"
 gi_claude_probe='.claude/worktrees/probe-gitignore-scope/x.md'
 gi_claude_repo=$(mktemp -d)
+gi_claude_repo_ok=0
 if ! git init -q "$gi_claude_repo"; then
   # git init 自体が失敗した場合、以下のすべての判定が「一時リポジトリが
   # 無いから無視されない／追跡されない」という別の理由で NG になりうる。
@@ -411,6 +412,7 @@ if ! git init -q "$gi_claude_repo"; then
   echo "  NG: .claude/ 用の一時リポジトリを作れなかった（$gi_claude_repo）"
   fail=1
 else
+  gi_claude_repo_ok=1
   cp "$repo/.gitignore" "$gi_claude_repo/.gitignore"
   if ! gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
     echo "  NG: .claude/ 配下のパスが .gitignore で無視されない（一致: $gi_why）"
@@ -432,32 +434,50 @@ else
       echo "  OK"
     fi
   fi
+fi
 
-  # --- 前提: .claude/ 配下が追跡されていないこと -----------------------------
-  # .gitignore は「今後 add されても無視される」ことしか保証しない。
-  # **既に追跡されてしまっているファイルには効かない**（0c の代償3・
-  # gi_committed と同じ理由）。.claude/ については、まだ誰もこれを見ていない。
-  #
-  # git ls-files は実物の $repo に対して読むだけであり、書き換えない。
-  # 壊す確認のほうは専用の一時リポジトリで git add -f して行う。
+# --- 前提: .claude/ 配下が追跡されていないこと -------------------------------
+# .gitignore は「今後 add されても無視される」ことしか保証しない。
+# **既に追跡されてしまっているファイルには効かない**（0c の代償3・
+# gi_committed と同じ理由）。.claude/ については、まだ誰もこれを見ていない。
+#
+# **本体（実物の $repo を問う判定）は git init の成否と切り離す。**
+# 一時リポジトリが無くても「.claude/ が追跡されていないか」自体は問える。
+# git init の成否の内側に本体を置くと、一時リポジトリが作れないだけで
+# 「.claude/ が追跡されていないか」を一切確かめない状態になる。
+#
+# 読み取りは関数に切り出し、本体と壊す確認の両方がそこを通るようにする
+# （gi_ignored_by_gitignore・gi_scan_tracked と同じ理由）。2箇所に別々に
+# 書くと、本体側の pathspec や -z を壊しても壊す確認の呼び出しは無事なままで、
+# 壊れたことに気づけない。
+gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されているパスを NUL 区切りで返す
+  git -C "$1" ls-files -z -- .claude
+}
+echo "0c-2b. .claude/ 配下が追跡されていないこと"
+mapfile -d '' -t gi_claude_tracked < <(gi_claude_tracked_in "$repo")
+if [ "${#gi_claude_tracked[@]}" -gt 0 ]; then
+  echo "  NG: .claude/ 配下が追跡されている: ${gi_claude_tracked[*]}"
+  fail=1
+elif [ "$gi_claude_repo_ok" -eq 0 ]; then
+  # 壊す確認には一時リポジトリが要る。0c-2 で既に NG を出しているため、
+  # ここでも重ねて名指しする（本体は緑でも、壊す確認ができていない
+  # ことまで緑と表示しては誤解を招く）。
+  echo "  NG: 一時リポジトリが無く、壊す確認ができない（$gi_claude_repo）"
+  fail=1
+else
+  # 壊す確認: 専用の一時リポジトリに .claude/ 配下のファイルを作って
+  # git add -f し、gi_claude_tracked_in が追跡済みとして拾うことを確かめる。
   # **実物の $repo に git add -f することはしない**——それ自体が、
   # この検査で防ぎたい「.claude/ が追跡される」状態を本当に作ってしまう。
-  echo "0c-2b. .claude/ 配下が追跡されていないこと"
-  mapfile -d '' -t gi_claude_tracked < <(git -C "$repo" ls-files -z -- .claude)
-  if [ "${#gi_claude_tracked[@]}" -gt 0 ]; then
-    echo "  NG: .claude/ 配下が追跡されている: ${gi_claude_tracked[*]}"
+  mkdir -p "$gi_claude_repo/.claude/worktrees/probe"
+  : > "$gi_claude_repo/.claude/worktrees/probe/x.md"
+  (cd "$gi_claude_repo" && git add -f .claude >/dev/null 2>&1)
+  mapfile -d '' -t gi_claude_track_probe < <(gi_claude_tracked_in "$gi_claude_repo")
+  if [ "${#gi_claude_track_probe[@]}" -eq 0 ]; then
+    echo "  NG: 壊す確認が効いていない（一時リポジトリで git add -f しても ls-files に出てこない）"
     fail=1
   else
-    mkdir -p "$gi_claude_repo/.claude/worktrees/probe"
-    : > "$gi_claude_repo/.claude/worktrees/probe/x.md"
-    (cd "$gi_claude_repo" && git add -f .claude >/dev/null 2>&1)
-    mapfile -d '' -t gi_claude_track_probe < <(git -C "$gi_claude_repo" ls-files -z -- .claude)
-    if [ "${#gi_claude_track_probe[@]}" -eq 0 ]; then
-      echo "  NG: 壊す確認が効いていない（一時リポジトリで git add -f しても ls-files に出てこない）"
-      fail=1
-    else
-      echo "  OK"
-    fi
+    echo "  OK"
   fi
 fi
 
