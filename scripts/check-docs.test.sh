@@ -404,26 +404,60 @@ if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 echo "0c-2. .claude/ が .gitignore で無視され、行を消すと無視されなくなること"
 gi_claude_probe='.claude/worktrees/probe-gitignore-scope/x.md'
 gi_claude_repo=$(mktemp -d)
-git init -q "$gi_claude_repo"
-cp "$repo/.gitignore" "$gi_claude_repo/.gitignore"
-if ! gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
-  echo "  NG: .claude/ 配下のパスが .gitignore で無視されない（一致: $gi_why）"
+if ! git init -q "$gi_claude_repo"; then
+  # git init 自体が失敗した場合、以下のすべての判定が「一時リポジトリが
+  # 無いから無視されない／追跡されない」という別の理由で NG になりうる。
+  # 原因を取り違えさせないよう、ここで名指しして止める。
+  echo "  NG: .claude/ 用の一時リポジトリを作れなかった（$gi_claude_repo）"
   fail=1
 else
-  # 置換が実際に効いたことを grep -c の件数（変更前1件 → 変更後0件）で確かめる。
-  # 書き換える先は複製（$gi_claude_repo/.gitignore）であり、実物の
-  # $repo/.gitignore ではない。
-  gi_claude_before=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
-  sed -i '/^\.claude\/$/d' "$gi_claude_repo/.gitignore"
-  gi_claude_after=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
-  if [ "$gi_claude_before" -ne 1 ] || [ "$gi_claude_after" -ne 0 ]; then
-    echo "  NG: sed が想定どおり複製の .gitignore の .claude/ 行を消せていない（変更前 $gi_claude_before 件 / 変更後 $gi_claude_after 件）"
-    fail=1
-  elif gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
-    echo "  NG: 複製の .gitignore から .claude/ を消しても無視され続けている（一致: $gi_why）"
+  cp "$repo/.gitignore" "$gi_claude_repo/.gitignore"
+  if ! gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
+    echo "  NG: .claude/ 配下のパスが .gitignore で無視されない（一致: $gi_why）"
     fail=1
   else
-    echo "  OK"
+    # 置換が実際に効いたことを grep -c の件数（変更前1件 → 変更後0件）で確かめる。
+    # 書き換える先は複製（$gi_claude_repo/.gitignore）であり、実物の
+    # $repo/.gitignore ではない。
+    gi_claude_before=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
+    sed -i '/^\.claude\/$/d' "$gi_claude_repo/.gitignore"
+    gi_claude_after=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
+    if [ "$gi_claude_before" -ne 1 ] || [ "$gi_claude_after" -ne 0 ]; then
+      echo "  NG: sed が想定どおり複製の .gitignore の .claude/ 行を消せていない（変更前 $gi_claude_before 件 / 変更後 $gi_claude_after 件）"
+      fail=1
+    elif gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
+      echo "  NG: 複製の .gitignore から .claude/ を消しても無視され続けている（一致: $gi_why）"
+      fail=1
+    else
+      echo "  OK"
+    fi
+  fi
+
+  # --- 前提: .claude/ 配下が追跡されていないこと -----------------------------
+  # .gitignore は「今後 add されても無視される」ことしか保証しない。
+  # **既に追跡されてしまっているファイルには効かない**（0c の代償3・
+  # gi_committed と同じ理由）。.claude/ については、まだ誰もこれを見ていない。
+  #
+  # git ls-files は実物の $repo に対して読むだけであり、書き換えない。
+  # 壊す確認のほうは専用の一時リポジトリで git add -f して行う。
+  # **実物の $repo に git add -f することはしない**——それ自体が、
+  # この検査で防ぎたい「.claude/ が追跡される」状態を本当に作ってしまう。
+  echo "0c-2b. .claude/ 配下が追跡されていないこと"
+  mapfile -d '' -t gi_claude_tracked < <(git -C "$repo" ls-files -z -- .claude)
+  if [ "${#gi_claude_tracked[@]}" -gt 0 ]; then
+    echo "  NG: .claude/ 配下が追跡されている: ${gi_claude_tracked[*]}"
+    fail=1
+  else
+    mkdir -p "$gi_claude_repo/.claude/worktrees/probe"
+    : > "$gi_claude_repo/.claude/worktrees/probe/x.md"
+    (cd "$gi_claude_repo" && git add -f .claude >/dev/null 2>&1)
+    mapfile -d '' -t gi_claude_track_probe < <(git -C "$gi_claude_repo" ls-files -z -- .claude)
+    if [ "${#gi_claude_track_probe[@]}" -eq 0 ]; then
+      echo "  NG: 壊す確認が効いていない（一時リポジトリで git add -f しても ls-files に出てこない）"
+      fail=1
+    else
+      echo "  OK"
+    fi
   fi
 fi
 
