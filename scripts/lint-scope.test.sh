@@ -322,8 +322,14 @@ echo "3. react-hooks のルール"
 # ESLint の stylish フォーマットは `<行:列>  <重大度>  <メッセージ>  <ルール ID>` を
 # 1行に持つ。重大度とルール ID が同じ行に現れることを頼りに、grep -E で
 # 「行頭が行:列、その次が error、行末がそのルール ID」の並びを確認する。
+#
+# **パイプを使わない。** `printf ... | grep -qE ...` にすると、grep -q が
+# 一致した時点で読むのをやめ、書き手（printf）が SIGPIPE で死にうる
+# （上の contains の直上に実測とともに書いた理由と同じ）。ヒアストリング
+# （`<<<`）はシェルが用意した入力を渡すだけで、間に生きたパイプが無いため
+# この経路自体が起こらない。
 hooks_rule_is_error() { # $1=出力 $2=ルール ID
-  printf '%s\n' "$1" | grep -qE "^ *[0-9]+:[0-9]+ +error .*${2}\$"
+  grep -qE "^ *[0-9]+:[0-9]+ +error .*${2}\$" <<< "$1"
 }
 
 # 1. の ESLint 実行（$ESLINT_OUT・$ESLINT_CODE）をそのまま使う。probe は
@@ -334,13 +340,13 @@ hooks_rule_is_error() { # $1=出力 $2=ルール ID
 # 保っている）。
 if [ "$ESLINT_CODE" -ne 0 ] && [ "$ESLINT_CODE" -ne 1 ]; then
   echo "  NG: ESLint が動かなかった（終了コード $ESLINT_CODE）。この検査は何も判定できない" >&2
-  printf '%s\n' "$ESLINT_OUT" | head -10 >&2
+  head -10 <<< "$ESLINT_OUT" >&2
   rc=1
 elif ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/rules-of-hooks' ||
      ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/exhaustive-deps'; then
   echo "  NG: react-hooks/rules-of-hooks と react-hooks/exhaustive-deps が両方とも error で検出されていない" >&2
   echo "      probe の内容と、両方のルールの重大度が 'error' であることを確かめる。" >&2
-  printf '%s\n' "$ESLINT_OUT" | head -20 >&2
+  head -20 <<< "$ESLINT_OUT" >&2
   rc=1
 else
   # 壊す確認: exhaustive-deps を 'warn' に戻した設定を一時ファイルに書き、
@@ -374,7 +380,16 @@ else
     set -e
     if [ "$HOOKS_BROKEN_CODE" -ne 0 ] && [ "$HOOKS_BROKEN_CODE" -ne 1 ]; then
       echo "  NG: 壊した設定で ESLint が動かなかった（終了コード $HOOKS_BROKEN_CODE）。この検査は何も判定できない" >&2
-      printf '%s\n' "$HOOKS_BROKEN_OUT" | head -10 >&2
+      head -10 <<< "$HOOKS_BROKEN_OUT" >&2
+      rc=1
+    elif ! hooks_rule_is_error "$HOOKS_BROKEN_OUT" 'react-hooks/rules-of-hooks'; then
+      # rules-of-hooks は今回書き換えていない。ここが error で出ていなければ、
+      # 「exhaustive-deps が warn に下がった」のではなく「probe 自体が
+      # lint されていない」（--config の指し先を誤った、ファイルが対象外に
+      # なった等）可能性がある。exhaustive-deps 側の判定だけでは
+      # この2つを区別できないため、rules-of-hooks の陽性対照を別に見る。
+      echo "  NG: 壊した設定で probe が lint されていない（react-hooks/rules-of-hooks も検出されなかった）" >&2
+      head -20 <<< "$HOOKS_BROKEN_OUT" >&2
       rc=1
     elif hooks_rule_is_error "$HOOKS_BROKEN_OUT" 'react-hooks/exhaustive-deps'; then
       echo "  NG: exhaustive-deps を 'warn' に戻しても error のまま検出された（壊す確認が効いていない）" >&2
