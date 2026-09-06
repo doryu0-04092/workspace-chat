@@ -139,8 +139,13 @@ for f in "${probe_dash_names[@]}"; do
 done
 
 # --- 前提: 検査対象が1件も無いときに落ちること -------------------------------
-# この分岐だけが番号付きのケースのどれからも踏まれない。踏まないまま置くと、
+# この分岐だけが、以降のどのケースからも踏まれない。踏まないまま置くと、
 # 検査が何も見ていない状態を「合格」と表示するようになっても気づけない。
+#
+# ここに「ケース1〜N」と数を書かない。ケースを足すたびに古くなるうえ、
+# この数はどこからも照合されない（2章が照合するのは README / CLAUDE の「N通り」だけ）。
+# 宣言と実数の食い違いを機械で捕まえるのがこのファイルの目的である以上、
+# 捕まらない宣言をコメントに増やすのは同じ穴を1つ作ることになる。
 echo "0b. Markdown が1件も無いときに落ちること"
 bare=$(mktemp -d)
 mkdir -p "$bare/scripts"
@@ -518,6 +523,96 @@ expect_ng "features.md の機能IDの接頭辞を F- から G- に変える" doc
 expect_ng "requirements.md の一覧の見出しを変えて読み取れなくする" docs/requirements.md \
   's/^#### 必ずテストを書く箇所$/#### 必ずテストを書く項目/' \
   'requirements.md から一覧を読み取れない'
+
+# --- 検査5: 「N経路」（実体は REVIEW.md 2.1 の表）
+# 経路が1つ欠けたまま実装されると認可の穴になる。表と宣言の両側から壊す。
+expect_ng "REVIEW.md 2.1 の表から経路を1行消す" REVIEW.md \
+  '/^| 2 | \*\*検索\*\* |/d' \
+  'REVIEW.md の「N経路すべてを塞ぐ」: 4 と書かれているが、実際は 3'
+expect_ng "REVIEW.md の見出しの「4経路」を3経路に" REVIEW.md \
+  's/4経路すべてを塞ぐ/3経路すべてを塞ぐ/' \
+  'REVIEW.md の「N経路すべてを塞ぐ」: 3 と書かれているが、実際は 4'
+expect_ng "REVIEW.md の「経路は4つある」を3つに" REVIEW.md \
+  's/経路は4つある/経路は3つある/' \
+  'REVIEW.md の「経路はNつある」: 3 と書かれているが、実際は 4'
+expect_ng "requirements.md の「4経路すべてを塞いで」を3経路に" docs/requirements.md \
+  's/の4経路\*\*すべてを塞いで/の3経路**すべてを塞いで/' \
+  'requirements.md の「N経路すべてを塞いで」: 3 と書かれているが、実際は 4'
+# 同じ文書の「残る2経路」は4のうち2という別の数である。ここが NG にならないことは
+# 上のケースが通ること自体が示している（まとめて拾う実装なら 2 で落ちる）。
+expect_ng "requirements.md の「4経路のうち」を3経路に" docs/requirements.md \
+  's/4経路のうち/3経路のうち/' \
+  'requirements.md の「N経路のうち」: 3 と書かれているが、実際は 4'
+# 文書の外にある5箇所目の宣言。ここが古くなる帰結は、AI レビュアーが誤った経路数を
+# 最優先の観点として渡され続けることであり、文書の不整合より重い。
+expect_ng "claude_code_review.yml の「認可4経路」を3経路に" .github/workflows/claude_code_review.yml \
+  's/認可4経路を最優先/認可3経路を最優先/' \
+  'claude_code_review.yml の「認可N経路」: 3 と書かれているが、実際は 4' \
+  '認可3経路を最優先'
+expect_ng "REVIEW.md 2.1 の見出しを変えて表を読み取れなくする" REVIEW.md \
+  's/^### 2\.1 認可/### 2-1 認可/' \
+  'REVIEW.md 2.1 の表から経路を1件も読み取れない' '^### 2-1 認可'
+# 経路は数だけでなく名前も突き合わせる。数が動かない壊し方を、表側と宣言側の両方から踏む。
+# 「検索 → 全文検索」を選んでいるのは意図的である。包含（grep -qF）で見る実装だと
+# 「検索」が「全文検索」に含まれるため素通りする。集合で見ていることをこの2件が確かめる。
+expect_ng "REVIEW.md 2.1 の表の経路名を1つ書き換える（4行のまま動かない）" REVIEW.md \
+  's/^| 2 | \*\*検索\*\* |/| 2 | **全文検索** |/' \
+  'REVIEW.md 2.1 の表と requirements.md で経路の名前が違う' '\*\*全文検索\*\*'
+expect_ng "requirements.md の列挙の経路名を1つ書き換える（4経路のまま動かない）" docs/requirements.md \
+  's|一覧・取得 API / 検索 /|一覧・取得 API / 全文検索 /|' \
+  'REVIEW.md 2.1 の表と requirements.md で経路の名前が違う' '/ 全文検索 /'
+expect_ng "requirements.md の列挙の言い回しを変えて行を読み取れなくする" docs/requirements.md \
+  's/の4経路\*\*すべてを塞いで/の4つの経路**すべてを塞いで/' \
+  'requirements.md の経路を列挙している行を読み取れない' '4つの経路'
+# 前方に正しい4名を並べたおとりの列挙行を置き、本命の名前だけを差し替える。
+# 先頭1件しか見ていないと、検査対象がおとりに移って本命が無検査で通る
+# （検査3・4のおとりのケースと同型）。
+expect_ng "requirements.md の前方におとりの列挙行を置き、本命の名前だけ差し替える" docs/requirements.md \
+  's|^> \*\*派-3 と 派-8 は同じ性質の問題である。\*\*|> **一覧・取得 API / 検索 / 添付ファイルの配信 / WebSocket の配信の4経路**すべてを塞いで初めて成立する。（検査の検査が置いたおとり）\n>\n> **派-3 と 派-8 は同じ性質の問題である。**|; s|一覧・取得 API / 検索 / 添付ファイルの配信 / WebSocket の配信の4経路\*\*すべてを塞いで$|一覧・取得 API / 全文検索 / 添付ファイルの配信 / WebSocket の配信の4経路**すべてを塞いで|' \
+  'REVIEW.md 2.1 の表と requirements.md で経路の名前が違う' \
+  '検査の検査が置いたおとり' '/ 全文検索 /'
+
+# --- 検査5: 「N種類」（実体は requirements.md と features.md のイベント表）
+# イベント名は表の中でバッククォートに囲まれている。sed 式に直接書くと
+# SC2016（単一引用符の中では展開されない）を shellcheck が出すため、文字を変数に逃がす。
+# \140 は8進数のバッククォート。
+bt=$'\140'
+expect_ng "features.md のイベント名を1つ書き換える（7行のまま動かない）" docs/features.md \
+  "s/^| ${bt}presence:changed${bt} |/| ${bt}presence:updated${bt} |/" \
+  'requirements.md と features.md でイベント表の内容が違う' "${bt}presence:updated${bt}"
+expect_ng "requirements.md のイベント表から1行消す" docs/requirements.md \
+  "/^| ${bt}unread:updated${bt} |/d" \
+  'CLAUDE.md の「イベント定義（N種類）」: 7 と書かれているが、実際は 6'
+# 宣言は6箇所にあり、場所ごとに別のパターンで拾う。1箇所ずつ壊して、
+# その箇所の compare_decls が本当に配線されていることを見る。
+# まとめて拾う実装に戻すと、無関係な「N種類」で偽の NG が出る側に戻る。
+expect_ng "CLAUDE.md の「7種類」を6種類に" CLAUDE.md \
+  's/イベント定義（7種類）/イベント定義（6種類）/' \
+  'CLAUDE.md の「イベント定義（N種類）」: 6 と書かれているが、実際は 7'
+expect_ng "requirements.md の「4.1 の7種類」を6種類に" docs/requirements.md \
+  's/（4.1 の7種類）/（4.1 の6種類）/' \
+  'requirements.md の「4.1 のN種類」: 6 と書かれているが、実際は 7'
+expect_ng "features.md の「7種類のイベントを配信」を6種類に" docs/features.md \
+  's/7種類のイベントを配信/6種類のイベントを配信/' \
+  'features.md の「N種類のイベントを配信」: 6 と書かれているが、実際は 7'
+expect_ng "features.md の「この7種類以外」を6種類に" docs/features.md \
+  's/この7種類以外/この6種類以外/' \
+  'features.md の「このN種類以外」: 6 と書かれているが、実際は 7'
+expect_ng "tech-stack.md の「7種類の WebSocket イベント」を6種類に" docs/tech-stack.md \
+  's/7種類の WebSocket イベント/6種類の WebSocket イベント/' \
+  'tech-stack.md の「N種類の WebSocket イベント」: 6 と書かれているが、実際は 7'
+expect_ng "tech-stack.md の「7種類のイベント定義」を6種類に" docs/tech-stack.md \
+  's/7種類のイベント定義/6種類のイベント定義/' \
+  'tech-stack.md の「N種類のイベント定義」: 6 と書かれているが、実際は 7'
+expect_ng "requirements.md のイベント表の見出しを変えて読み取れなくする" docs/requirements.md \
+  's/^#### リアルタイム配信の対象イベント$/#### 配信するイベント/' \
+  'requirements.md からイベント表を読み取れない' '^#### 配信するイベント'
+# 読み取り失敗は両側で踏む。features.md 側の分岐が無いと、ここを壊したときに出る NG が
+# 「イベント表の内容が違う」だけになり、受け取った側は表の中身を突き合わせに行く
+# （実際に違うのは見出しである）。
+expect_ng "features.md のイベント表の見出しを変えて読み取れなくする" docs/features.md \
+  's/^### 5\.1 配信するイベント$/### 5.1 リアルタイムで配信するイベント/' \
+  'features.md からイベント表を読み取れない' '^### 5\.1 リアルタイムで配信するイベント'
 
 # --- 落ちてはならないこと。$4 で、置いたファイルが検査の対象に入るはず（in）か
 #     除外されるはず（out）かを切り替える。関数を2つに分けると、失敗時の出力や
