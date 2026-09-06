@@ -1173,8 +1173,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 読み取り側にも条件を置いて二重にする。
      *
      * **メンション（機能一覧 9.1）はこの問い合わせを使わない。**
-     * `mentionTargetByLoginId`（投稿時の宛先解決）は `deletedAt` を条件にしない
-     * （`ChannelMember` が実質の条件であるため）。表示時の参照先解決（経路2。
+     * `mentionTargetByLoginId`（投稿時の宛先解決）は**対象側の** `deletedAt` を
+     * 条件にしない（`ChannelMember` が実質の条件であるため。要求する側は
+     * `viewer."deletedAt" IS NULL` を条件に持つ）。表示時の参照先解決（経路2。
      * 現時点に参照実装は無い。#78）も、この照合とは別の問い合わせになる。
      * **経路ごとに書き分けること。**
      *
@@ -1421,8 +1422,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `;
     }
 
-    it('Membership / ChannelMember の消し込みを取りこぼしていても、投稿時の宛先解決は deletedAt の有無で挙動を変えない', async () => {
-      // **`ChannelMember` が残っている限り、`deletedAt` の有無で結果を変えない。**
+    it('Membership / ChannelMember の消し込みを取りこぼしていても、対象側の deletedAt の有無で挙動を変えない', async () => {
+      // **対象側は、`ChannelMember` が残っている限り、`deletedAt` の有無で結果を変えない。**
       // 正しく退会した利用者（ChannelMember が連鎖削除された状態）は、この問い合わせでは
       // そもそも解決できない（ChannelMember を内部結合しているため）。
       const userId = randomUUID();

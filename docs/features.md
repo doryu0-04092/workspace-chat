@@ -280,7 +280,8 @@
 > **決定・現状: 可視性を判定する個々の問い合わせに、要求する側の `deletedAt IS NULL` を含める。**
 > [prisma-schema.test.ts](../apps/api/src/prisma-schema.test.ts) の参照実装
 > （`visibleChannels` / `channelMemberViewers` / `manageableChannels` / `channelMemberList` /
-> `workspaceMemberList`）は、いずれも要求する側の `Membership` の結合に
+> `workspaceMemberList` / `mentionTargetByLoginId`）は、いずれも要求する側の所属
+> （`Membership` または `ChannelMember`）の結合に
 > `JOIN "User" viewer ON viewer."id" = ... AND viewer."deletedAt" IS NULL` を持つ
 > （コメント「要求する側が退会していないこと」）。
 > **API を実装する際は、この形（要求する側の `deletedAt` を条件に含める）を踏襲すること。**
@@ -825,7 +826,9 @@
      **この経路の参照実装は現時点に無い**（`mentionTargetByLoginId` は経路1のものであり、
      経路2には使えない）
 
-  **経路1の参照実装（`mentionTargetByLoginId`）は、要求する側の条件を持つ（#82）。**
+  **経路1の参照実装（`mentionTargetByLoginId`）は、要求する側の条件を持つ**
+  （**派生**。#82。これが無いと、非参加者が `@ユーザーID` を1件ずつ試して
+  プライベートチャンネルの参加者を探れ、3.1 の隠蔽が成立しない）。
   兄弟の `channelMemberList` / `workspaceMemberList` と同じく引数に要求者
   （`viewerId`）を取り、**要求する側がそのチャンネルの参加者であること**
   （`ChannelMember` の結合）と、**要求する側の `deletedAt IS NULL`**（1.4 が可視性を
