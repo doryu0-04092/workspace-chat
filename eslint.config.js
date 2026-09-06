@@ -1,5 +1,6 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
+import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
   // 検査しない場所。生成物と、追跡していない作業用のディレクトリ。
@@ -28,4 +29,23 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  // apps/web だけに React hooks のルールを入れる（#18）。
+  //
+  // eslint-plugin-react-hooks@7 の `configs.recommended` は、rules-of-hooks /
+  // exhaustive-deps に加えて React Compiler 向けの静的解析ルール（purity・refs・
+  // static-components など10件超）を丸ごと束ねている。#18 が挙げている問題は
+  // 「hooks の呼び出し規則の違反」と「useEffect の依存配列の漏れ」の2つだけであり、
+  // eslint-plugin-react（JSX 全般）を入れるかどうかも別途判断するとしている。
+  // 挙動を変えるルールを、issue が求めていない範囲まで一括で足さないよう、
+  // 使うルールをこの2つに絞って明示する。
+  {
+    files: ['apps/web/**/*.{ts,tsx}'],
+    plugins: {
+      'react-hooks': reactHooks,
+    },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+    },
+  },
 );
