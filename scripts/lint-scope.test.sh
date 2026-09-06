@@ -54,6 +54,29 @@ NEG="$NEG_DIR/probe.ts"
 POS_ROOT='__lint_scope_probe_positive__'
 POS="$POS_ROOT/probe.ts"
 
+# react-hooks のルール（#18）が実際に効いているかを見る置き場所。
+#
+# 上の NEG/POS は「.claude/ を走査しないこと」だけを見ており、eslint.config.js に
+# 足した react-hooks/rules-of-hooks・react-hooks/exhaustive-deps が実際に
+# 配線されているかは別懸念として見ていない。files のパターンが壊れても、
+# NEG/POS の判定（any・未使用変数・整形崩れ）は他のルールで変わらず検出されるため、
+# ここだけを見ていては気づけない。
+#
+# 置き場所は apps/web 配下でなければならない。react-hooks のルールは
+# `apps/web/**/*.{ts,tsx}` にしか適用されないため、.claude/ 配下や apps/api に
+# 置くと最初から対象外になり、判定にならない。
+#
+# 名前は NEG_NAME の部分文字列にしない。含むと上の陰性判定
+# （contains "$out" "$NEG_NAME"）がこの probe にも反応し、
+# 「.claude/ を走査している」という無関係な NG に化ける。
+HOOKS_ROOT='apps/web/src/__lint_scope_hooks_probe__'
+HOOKS_PROBE="$HOOKS_ROOT/Probe.tsx"
+
+# react-hooks のルールを一時的に無効化して壊す確認をするための、
+# eslint.config.js のバックアップ先。空文字列の間はまだ用意していないという意味で
+# 扱う（trap 発火時に set -u で落ちないよう、変数だけは先に宣言しておく）。
+ESLINT_CONFIG_BACKUP=''
+
 # 後片付け。途中で落ちても消す。
 #
 # rm -rf は使わない（CLAUDE.md の禁止事項）。置いたファイルを消し、
@@ -64,13 +87,20 @@ POS="$POS_ROOT/probe.ts"
 # 畳む範囲の終端は NEG_STOP（下で mkdir の直前に求める）。
 # **「自分がこれから作る分」から導く。深さで決め打ちしない。**
 cleanup() {
-  rm -f "$NEG" "$POS"
+  rm -f "$NEG" "$POS" "$HOOKS_PROBE"
   d="$NEG_DIR"
   while [ "$d" != "$NEG_STOP" ] && [ "$d" != '.' ] && [ "$d" != '/' ]; do
     rmdir "$d" 2>/dev/null || true
     d="$(dirname "$d")"
   done
   rmdir "$POS_ROOT" 2>/dev/null || true
+  rmdir "$HOOKS_ROOT" 2>/dev/null || true
+  # eslint.config.js を壊す確認のために書き換えていたら、必ず元に戻す。
+  # ここを忘れると、途中で落ちたときに react-hooks のルールが無効なまま残る。
+  if [ -n "$ESLINT_CONFIG_BACKUP" ] && [ -f "$ESLINT_CONFIG_BACKUP" ]; then
+    cp "$ESLINT_CONFIG_BACKUP" eslint.config.js
+    rm -f "$ESLINT_CONFIG_BACKUP"
+  fi
 }
 
 # 既存物があれば、何もせずに止まる。
@@ -78,7 +108,7 @@ cleanup() {
 # **この確認は trap を仕掛ける前に行う。** 後に置くと、ここで exit したときに
 # EXIT トラップが発火し、cleanup の rm -f が「触らないと決めたはずの既存ファイル」を
 # 消してしまう。rmdir は空でないディレクトリを消せないが、rm -f はその保護を受けない。
-for existing in "$NEG_ROOT" "$POS_ROOT"; do
+for existing in "$NEG_ROOT" "$POS_ROOT" "$HOOKS_ROOT"; do
   if [ -e "$existing" ]; then
     echo "NG: 検査用の場所に何かが既にある: $existing" >&2
     exit 1
@@ -110,7 +140,7 @@ NEG_STOP="$(dirname "$NEG_TOP")"
 # ここから先は自分が置いたものしか無い。後片付けを仕掛けてよい。
 trap cleanup EXIT
 
-mkdir -p "$NEG_DIR" "$POS_ROOT"
+mkdir -p "$NEG_DIR" "$POS_ROOT" "$HOOKS_ROOT"
 
 # **わざと ESLint と Prettier の両方に引っかかる内容にする。**
 # - any と未使用の変数 → ESLint が指摘する
@@ -121,6 +151,26 @@ mkdir -p "$NEG_DIR" "$POS_ROOT"
 PROBE_BODY='const    使われない変数:any   =    1'
 printf '%s\n' "$PROBE_BODY" > "$NEG"
 printf '%s\n' "$PROBE_BODY" > "$POS"
+
+# **わざと rules-of-hooks と exhaustive-deps の両方に引っかかる内容にする。**
+# - 条件分岐の中の useState 呼び出し → react-hooks/rules-of-hooks
+# - useEffect の依存配列に id が抜けている → react-hooks/exhaustive-deps
+# 2つとも入れるのは、どちらか一方だけが壊れても気づけるようにするため。
+cat > "$HOOKS_PROBE" <<'EOF'
+import { useEffect, useState } from 'react';
+
+export function LintScopeHooksProbe({ cond, id }: { cond: boolean; id: number }) {
+  if (cond) {
+    const [value] = useState(0);
+    return <div>{value}</div>;
+  }
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    setCount(id);
+  }, []);
+  return <div>{count}</div>;
+}
+EOF
 
 # **パイプを使わない。** `printf '%s' "$1" | grep -qF "$2"` にすると、
 # 読み手が一致した時点で抜けたときに printf が SIGPIPE で 141 で死ぬ。
@@ -251,6 +301,77 @@ set -e
 check_tool 'Prettier' '.prettierignore（または .gitignore）に .claude/ が入っているか確かめる。' \
   "$PRETTIER_OUT" "$PRETTIER_CODE" || rc=1
 
+# --- 3. react-hooks のルールが実際に効いていること -------------------------------
+#
+# 1./2. は .claude/ の走査範囲だけを見ており、eslint.config.js に足した
+# react-hooks/rules-of-hooks・react-hooks/exhaustive-deps が実際に配線されて
+# いるかは見ていない。誰かが files のパターンを壊しても、NEG/POS の判定は
+# 他のルール（any・未使用変数）で変わらず緑のまま通る。
+echo "3. react-hooks のルール"
+set +e
+HOOKS_OUT="$(npm run lint 2>&1)"
+HOOKS_CODE=$?
+set -e
+
+# 両方のルール ID を見る。片方だけだと、もう一方が壊れても気づけない。
+hooks_detected() {
+  contains "$1" 'react-hooks/rules-of-hooks' && contains "$1" 'react-hooks/exhaustive-deps'
+}
+
+if [ "$HOOKS_CODE" -ne 0 ] && [ "$HOOKS_CODE" -ne 1 ]; then
+  echo "  NG: ESLint が動かなかった（終了コード $HOOKS_CODE）。この検査は何も判定できない" >&2
+  printf '%s\n' "$HOOKS_OUT" | head -10 >&2
+  rc=1
+elif ! hooks_detected "$HOOKS_OUT"; then
+  echo "  NG: react-hooks/rules-of-hooks と react-hooks/exhaustive-deps の両方は検出されなかった" >&2
+  echo "      probe の内容を、両方のルールが必ず指摘するものに直す。" >&2
+  printf '%s\n' "$HOOKS_OUT" | head -20 >&2
+  rc=1
+else
+  # 壊す確認: files のパターンを実在しない場所に差し替え、react-hooks の
+  # ルールがどのファイルにも適用されなくなることを確かめる。
+  # import と config オブジェクトを複数行にわたって sed で削るより、
+  # 効果を無効化する1行の書き換えのほうが取り違えにくい。
+  #
+  # 置換が実際に効いたことは grep -c の件数（変更前1件 → 変更後0件）で確かめる。
+  ESLINT_CONFIG_BACKUP="$(mktemp)"
+  cp eslint.config.js "$ESLINT_CONFIG_BACKUP"
+  # grep -c は一致が0件のとき終了コード1を返す。set -e の下でそのまま代入に使うと、
+  # 「一致0件」を確かめたい後半（sed の後）で毎回スクリプトごと落ちる
+  # （実際に一度この形で落とし、原因を確かめた）。`|| true` で終了コードを
+  # 潰し、件数の判定は次の行の -ne 比較にすべて委ねる。
+  hooks_files_before=$(grep -cF "files: ['apps/web/**/*.{ts,tsx}']" eslint.config.js || true)
+  sed -i "s#files: \['apps/web/\*\*/\*\.{ts,tsx}'\]#files: ['apps/__lint_scope_no_such_dir__/**/*.{ts,tsx}']#" eslint.config.js
+  hooks_files_after=$(grep -cF "files: ['apps/web/**/*.{ts,tsx}']" eslint.config.js || true)
+
+  if [ "$hooks_files_before" -ne 1 ] || [ "$hooks_files_after" -ne 0 ]; then
+    echo "  NG: sed が想定どおりに files のパターンを書き換えられていない（変更前 $hooks_files_before 件 / 変更後 $hooks_files_after 件）" >&2
+    rc=1
+  else
+    set +e
+    HOOKS_BROKEN_OUT="$(npm run lint 2>&1)"
+    HOOKS_BROKEN_CODE=$?
+    set -e
+    if [ "$HOOKS_BROKEN_CODE" -ne 0 ] && [ "$HOOKS_BROKEN_CODE" -ne 1 ]; then
+      echo "  NG: 壊した状態で ESLint が動かなかった（終了コード $HOOKS_BROKEN_CODE）。この検査は何も判定できない" >&2
+      printf '%s\n' "$HOOKS_BROKEN_OUT" | head -10 >&2
+      rc=1
+    elif hooks_detected "$HOOKS_BROKEN_OUT"; then
+      echo "  NG: files のパターンを崩しても react-hooks のルールが検出された（壊す確認が効いていない）" >&2
+      rc=1
+    else
+      echo "  OK: 陽性対照は検出され、files のパターンを崩すと検出されなくなることも確認した"
+    fi
+  fi
+
+  # 壊した eslint.config.js を元に戻す。cleanup にも同じ復元を置いているが、
+  # ここで戻しておかないと、以降の巡回でこの検査自身が「壊れたまま」を見てしまう
+  # （この関数は今のところ1回しか呼ばれないが、途中で戻さない理由が無い）。
+  cp "$ESLINT_CONFIG_BACKUP" eslint.config.js
+  rm -f "$ESLINT_CONFIG_BACKUP"
+  ESLINT_CONFIG_BACKUP=''
+fi
+
 if [ "$rc" -ne 0 ]; then
   echo >&2
   echo "走査範囲の確認に失敗しました" >&2
@@ -258,4 +379,4 @@ if [ "$rc" -ne 0 ]; then
 fi
 
 echo
-echo "走査範囲の確認を 2 通りすべて通過しました"
+echo "走査範囲の確認を 3 通りすべて通過しました"
