@@ -1196,16 +1196,36 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **退会処理が1件でも取りこぼせば、退会した利用者が参加者一覧に居座る。**
      * 復旧・ログイン・招待と同じく2段構えにする。
      *
+     * **要求する側の条件も、この問い合わせ自身が持つ。**
+     * 取得してよいのは**そのチャンネルの参加者、またはそのワークスペースのオーナー**である
+     * （機能一覧 3.1。`channelMemberViewers` と同じ境界）。
+     * **引数に要求者を取らない形にしてはならない。** 呼ぶ側の確認に委ねると、
+     * **写した実装が、非参加者にプライベートチャンネルの参加者一覧を返す。**
+     *
+     * **オーナーの例外を壊さないこと。** オーナーは参加していなくても
+     * 参加者一覧を取得できる。**見せないのはメッセージと添付だけである。**
+     *
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
      * （REVIEW.md 3 / CWE-89）。
      */
-    function channelMemberList(channelId: string): string {
+    function channelMemberList(viewerId: string, channelId: string): string {
       return `
         SELECT u."userId"
         FROM "ChannelMember" cm
+        JOIN "Channel" c ON c."id" = cm."channelId"
         JOIN "User" u ON u."id" = cm."userId"
+        -- 要求する側が、そのワークスペースに参加していて、かつ退会していないこと。
+        JOIN "Membership" vm
+          ON vm."workspaceId" = c."workspaceId" AND vm."userId" = '${viewerId}'
+        JOIN "User" viewer
+          ON viewer."id" = vm."userId" AND viewer."deletedAt" IS NULL
+        -- 要求する側が、そのチャンネルの参加者であること。
+        LEFT JOIN "ChannelMember" vcm
+          ON vcm."channelId" = c."id" AND vcm."userId" = '${viewerId}'
         WHERE cm."channelId" = '${channelId}'
           AND u."deletedAt" IS NULL
+          -- 参加者、**または**そのワークスペースのオーナー。
+          AND (vcm."userId" IS NOT NULL OR vm."role" = 'OWNER')
         ORDER BY u."userId";
       `;
     }
@@ -1292,36 +1312,140 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `);
 
       // 退会させる前は出ること。**肯定側が無いと、常に空を返す実装でも緑になる。**
-      const before = await expectSqlToSucceed(channelMemberList(channelId));
+      // `insider` は `general` の参加者である。
+      const viewer = '00000000-0000-7000-8000-000000000002';
+      const before = await expectSqlToSucceed(channelMemberList(viewer, channelId));
       expect(before.split('\n')).toContain(loginId);
 
       // 退会（論理削除）。**`Membership` はあえて残したままにする。**
       await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';`);
-      const after = await expectSqlToSucceed(channelMemberList(channelId));
+      const after = await expectSqlToSucceed(channelMemberList(viewer, channelId));
       expect(after.split('\n')).not.toContain(loginId);
+    });
+
+    it('参加していない利用者は、参加者一覧そのものを取得できない', async () => {
+      // **`channelMemberViewers` で可否を判定しても、一覧を返す問い合わせ自身が
+      // 素通しなら意味がない。** 呼ぶ側の確認に委ねた実装を写すと、
+      // 非参加者にプライベートチャンネルの参加者一覧が返る。
+      // `outsider` は同じワークスペースのメンバーだが `secret` に参加していない。
+      const output = await expectSqlToSucceed(
+        channelMemberList(
+          '00000000-0000-7000-8000-000000000003',
+          '00000000-0000-7000-8000-0000000000c2',
+        ),
+      );
+      expect(output).toBe('');
+    });
+
+    it('参加していないオーナーは、参加者一覧を取得できる', async () => {
+      // **オーナーの例外を壊さないこと**（機能一覧 3.1）。
+      // 見せないのはメッセージと添付だけである。
+      const output = await expectSqlToSucceed(
+        channelMemberList(
+          '00000000-0000-7000-8000-000000000001',
+          '00000000-0000-7000-8000-0000000000c2',
+        ),
+      );
+      expect(output.split('\n')).toContain('insider');
+    });
+
+    it('ワークスペースの外の利用者は、参加者一覧を取得できない', async () => {
+      const output = await expectSqlToSucceed(
+        channelMemberList(
+          '00000000-0000-7000-8000-000000000004',
+          '00000000-0000-7000-8000-0000000000c2',
+        ),
+      );
+      expect(output).toBe('');
+    });
+
+    it('退会した利用者は、参加者一覧そのものを取得できない', async () => {
+      const { userId: ghost } = await createDeletedUserKeepingMembership();
+      const output = await expectSqlToSucceed(
+        channelMemberList(ghost, '00000000-0000-7000-8000-0000000000c2'),
+      );
+      expect(output).toBe('');
     });
 
     /**
      * メンションの参照先を引く問い合わせ。
      *
-     * **踏むと壊れる条件: ここには `deletedAt IS NULL` を書いてはならない。**
+     * **条件は2つあり、向きが逆である。両方を守ること。**
+     *
+     * **1. 踏むと壊れる条件: ここには `deletedAt IS NULL` を書いてはならない。**
      * 隣の `activeUserByLoginId` は付けているが、**メンションだけは退会済みにも当てる。**
      * 付けると、過去のメンションの参照先を解決できなくなり、
      * 機能一覧 1.5 が定めた「削除済みの利用者として表示する」が出せない。
+     *
+     * **2. そのチャンネルの参加者に限ること**（機能一覧 9.1
+     * 「そのチャンネルに参加していない利用者はメンションできない」）。
+     * 落とすと、**参加していない利用者を宛先にできる。**
+     * プライベートチャンネルなら、**参加していない相手に通知が飛び、
+     * そのチャンネルの存在が伝わる。**
+     *
+     * **1 だけを見て「条件を足すな」と読まないこと。**
+     * 外すのは `deletedAt` であって、参加の条件ではない。
      */
-    function mentionTargetByLoginId(loginId: string): string {
-      return `SELECT "id" FROM "User" WHERE lower("userId") = lower('${loginId}');`;
+    function mentionTargetByLoginId(loginId: string, channelId: string): string {
+      return `
+        SELECT u."id"
+        FROM "User" u
+        JOIN "ChannelMember" cm
+          ON cm."userId" = u."id" AND cm."channelId" = '${channelId}'
+        WHERE lower(u."userId") = lower('${loginId}');
+      `;
     }
 
-    it('退会した利用者も、メンションの参照先としては引ける', async () => {
+    it('退会した利用者も、参加していればメンションの参照先として引ける', async () => {
+      // **退会済みを引ける非対称は維持する**（過去のメンションを解決するため）。
       const userId = randomUUID();
       const loginId = `mentioned_${randomUUID().slice(0, 8)}`;
-      await expectSqlToSucceed(
-        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash", "deletedAt")
-         VALUES ('${userId}', '${loginId}', '退会した人', 'argon2id-placeholder', now());`,
-      );
-      const output = await expectSqlToSucceed(mentionTargetByLoginId(loginId));
+      const channelId = '00000000-0000-7000-8000-0000000000c2';
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${userId}', '${loginId}', '退会した人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${userId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '${channelId}', '${ws}', '${userId}');
+        UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';
+      `);
+      const output = await expectSqlToSucceed(mentionTargetByLoginId(loginId, channelId));
       expect(output).toBe(userId);
+    });
+
+    it('そのチャンネルに参加していない利用者は、メンションの参照先にできない', async () => {
+      // 機能一覧 9.1。**プライベートチャンネルなら、参加していない相手に通知が飛び、
+      // そのチャンネルの存在が伝わる。**
+      //
+      // **「どのチャンネルにも参加していない利用者」で試してはならない。**
+      // それだと結合が常に空になり、**チャンネルの条件を落としても落ちない。**
+      // 別のチャンネルには参加している利用者を作る。
+      const userId = randomUUID();
+      const loginId = `elsewhere_${randomUUID().slice(0, 8)}`;
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${userId}', '${loginId}', '別のチャンネルの人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${userId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000c1', '${ws}', '${userId}');
+      `);
+      // `general`(c1) には参加しているが、`secret`(c2) には参加していない。
+      const output = await expectSqlToSucceed(
+        mentionTargetByLoginId(loginId, '00000000-0000-7000-8000-0000000000c2'),
+      );
+      expect(output).toBe('');
+    });
+
+    it('参加している利用者は、メンションの参照先にできる', async () => {
+      // **否定側だけだと、常に空を返す実装でも緑になる。**
+      const output = await expectSqlToSucceed(
+        mentionTargetByLoginId('insider', '00000000-0000-7000-8000-0000000000c2'),
+      );
+      expect(output).toBe('00000000-0000-7000-8000-000000000002');
     });
 
     it('現役の利用者は、ユーザーID から引ける', async () => {
