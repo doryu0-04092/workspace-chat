@@ -103,13 +103,16 @@ fi
 # doc_excluded_name の KEEP 分岐を、判定関数を直接呼んで踏む。
 #
 # 上の doc_find は配列から find の式を組み立てる別経路であり、doc_excluded_name を
-# 通らない。0c の gi_committed は通るが、リポジトリに .env* が1つも無いため
-# KEEP に一致する入力がそもそも流れない。**この2つだけでは KEEP 分岐に
-# 落ちる条件が無い。**
+# 通らない。0c の gi_committed は、origin/main が .env.example を追跡対象として
+# 置いたため KEEP 分岐を実物でも踏むようになった（それ以前は .env* が1つも無く、
+# KEEP に一致する入力がそもそも流れなかった）。
 #
-# 壊れたときの帰結は、0c が「値を持つ名前のファイルが追跡されている」と偽の NG を出して
-# CI を止めることであり（.env.example は .gitignore が `!` で追跡対象へ戻している）、
-# 落ちる条件を持たせておく必要がある。名前は一覧から導出する（足したら自動で増える）。
+# それでもここを残す。gi_committed 側が KEEP の破れを表に出すときの文言は
+# 「値を持つ名前のファイルが追跡されている」であり、**原因を取り違えさせる。**
+# 受け取った側は .gitignore と追跡状態を疑うが、実際に壊れているのは判定関数である。
+# ここは KEEP 分岐そのものを名指しで落とす。
+#
+# 名前は一覧から導出する（足したら自動で増える）。
 #
 # ここが見るのは doc_excluded_name の単体である。doc_excluded の委譲と
 # check-docs.sh の検査1 まで通した経路は、この確認では踏まない。
@@ -174,8 +177,9 @@ fi
 #   2. check-ignore は .git/info/exclude と core.excludesFile にも一致する。
 #      GitHub 公式の Terraform.gitignore をグローバル除外に置いている手元では、
 #      リポジトリの .gitignore に *.tfvars.json が無くてもこの確認が緑になる。
-#      逆に、グローバル除外が *.example を持つ手元では下の gi_tracked が偽の NG を出す。
 #      -v で一致元とパターンまで見て、.gitignore に書かれた肯定パターンだけを認める。
+#      （-v を入れる前は、グローバル除外が *.example を持つ手元で gi_tracked が
+#       偽の NG を出した。いまは一致元を見るため、その形では落ちない。下の代償 2 を参照）
 #   3. .gitignore は既に追跡されているファイルには効かない。git add -f や
 #      「.gitignore に足す前のコミット」で入ったものはパターンが揃っていても値が入っている。
 #      追跡の側からも見る。
@@ -195,8 +199,9 @@ fi
 # 代償 3: 下の gi_probe_* が落ちる条件を与えているのは **gi_scan_tracked の中身**
 # （読み取り・名前の取り出し・KEEP の差し引き）だけである。
 # **実物を流す呼び出し（git ls-files -z | gi_scan_tracked）そのものには、
-# 落ちる条件が1つも無い。** リポジトリに DOC_PRUNE_FILES に一致する追跡ファイルが
-# 1件も無く結果が常に空であるため、次のどれも全ケースが緑で通る。
+# 落ちる条件が1つも無い。** doc_excluded_name が除外と判定する追跡ファイルが
+# 1件も無く（.env.example は DOC_PRUNE_FILES の .env.* に一致するが、KEEP が差し引く）、
+# 結果が常に空であるため、次のどれも全ケースが緑で通る。
 #
 #   - git ls-files から -z を外す
 #   - 呼び出しの数行を丸ごと削る（確認そのものが消えても緑）
@@ -244,10 +249,17 @@ gi_tracked=(README.md "${probe_real_keeps[@]}")
 # 素通りする。上の gi_ignored（DOC_PRUNE_FILES 側）と同じ置換で機械的に補う。
 # 0a は KEEP・PRUNE の両側を導出しているため、揃えないとこの非対称が 0c にだけ残る。
 for g in "${probe_keep_files[@]}"; do gi_tracked+=("${g//\*/x}"); done
-# 直下だけでなく配下のパスも問う。ディレクトリ名は「直下ではない」ことだけが要件であり、
-# どこでもよい（Terraform の置き場を模した名前にしてある）。
+# 直下だけでなく配下のパスも問う。
+#
+# **踏むと壊れる: この名前のディレクトリに .gitignore を置くと 0c が偽の NG を出す。**
+# gi_ignored_by_gitignore は git check-ignore -v の一致元がちょうど .gitignore で
+# あることを求めており、配下の .gitignore に一致すると一致元が
+# <この名前>/.gitignore になって「無視されない」と判定するためである。
+# 実在しうる置き場（infra/terraform など）を選ぶと、その運用を始めた時点で落ちる。
+# 検査用だと分かる名前にしてある。要件は「直下ではない」ことだけで、実在は要らない。
+#
 # 反復中に同じ配列へ足さない。展開の時点で確定するとはいえ、読む側に紛れる。
-gi_subdir=infra/terraform
+gi_subdir='probe-not-root/nested'
 gi_sub=()
 for f in "${gi_ignored[@]}"; do gi_sub+=("$gi_subdir/$f"); done
 gi_ignored+=("${gi_sub[@]}")
@@ -295,8 +307,8 @@ gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致し�
     doc_excluded_name "${p##*/}" >/dev/null && printf '%s\0' "$p"
   done
 }
-# 関数の中身に落ちる条件を持たせる。リポジトリに DOC_PRUNE_FILES に一致する
-# 追跡ファイルは1件も無く、実物を流すかぎり結果は常に空である。つまり、この確認を
+# 関数の中身に落ちる条件を持たせる。doc_excluded_name が除外と判定する追跡ファイルは
+# 1件も無く（.env.example は KEEP が差し引く）、実物を流すかぎり結果は常に空である。つまり、この確認を
 # 置くまでは、上のループを丸ごと削っても、-z を外しても、名前の取り出しを外しても
 # 全ケースが緑で通った
 # （ここに件数を書かない。ケースを足すたびに古くなるうえ、コメントの数は
@@ -670,8 +682,11 @@ expect_ok "外部リンク（http / https / mailto）は存在を確かめない
 # 目的まで宣言している。ここを踏まないと、README が .env.example を参照した瞬間に
 # 正当なリンクが「リンク先にできない」で NG になる。
 #
-# ケースが成立していることを先に見る。.env.example が PRUNE のパターンに一致しなければ、
+# ケースが成立していることを先に見る。対象が PRUNE のパターンに一致しなければ、
 # KEEP が無くてもこのリンクは通る。つまり KEEP を何も検査していないことになる。
+#
+# 名前は1箇所に置く。成立判定・説明文・リンク本文・$extra に別々に書くと、
+# 成立判定だけがケースの触っていない名前を見ることになり、落ちる条件が消える。
 keep_pruned=0
 keep_target=.env.example   # case の対象を変数にする（定数を直接書くと shellcheck SC2194）
 for g in "${DOC_PRUNE_FILES[@]}"; do
@@ -679,11 +694,11 @@ for g in "${DOC_PRUNE_FILES[@]}"; do
   case "$keep_target" in $g) keep_pruned=1 ;; esac
 done
 if [ "$keep_pruned" = 0 ]; then
-  echo "  NG: .env.example が DOC_PRUNE_FILES のどれにも一致しない。KEEP を踏むケースが成立していない"
+  echo "  NG: $keep_target が DOC_PRUNE_FILES のどれにも一致しない。KEEP を踏むケースが成立していない"
   fail=1
 fi
-expect_ok "KEEP に挙げた .env.example へのリンクは「リンク先にできない」にならない" \
-  probe-env-example-link.md '[環境変数の例](.env.example)' in .env.example
+expect_ok "KEEP に挙げた $keep_target へのリンクは「リンク先にできない」にならない" \
+  probe-env-example-link.md "[環境変数の例]($keep_target)" in "$keep_target"
 
 # $extra の「既にあればそのまま使う」分岐に落ちる条件を持たせる。
 #
@@ -698,6 +713,23 @@ expect_ok "既に複製にある実体をリンク先にしても、その実体
   probe-existing-target.md "[ルートの $existing_target]($existing_target)" in "$existing_target"
 if ! cmp -s "$repo/$existing_target" "$work/$existing_target"; then
   echo "  NG: 既に \$work にあった $existing_target が壊れた（\$extra を上書き・削除している）"
+  fail=1
+fi
+
+# $extra の「作る側」に落ちる条件を持たせる。
+#
+# 上の2つの $extra は複製ループが $work に入れるため、どちらも `[ -e ] && continue` を通る。
+# mkdir -p / `: >` / made+= の3行は一度も実行されない。**丸ごと削っても、
+# made+= だけを落としても、全ケースが緑で通る。** made+= が落ちた形は特に静かで、
+# 作った $extra が $work に残り続け、以降のケースが前のケースの置き土産の上で回る。
+#
+# 複製ループが拾わない名前を渡す。リポジトリに実在せず、
+# DOC_PRUNE_DIRS にも DOC_PRUNE_FILES にも当たらない綴りである。
+fresh_target='probe-fresh-target.txt'
+expect_ok "複製に無い実体をリンク先にすると、置かれて、後片付けされる" \
+  probe-fresh-target.md "[新しく置く実体]($fresh_target)" in "$fresh_target"
+if [ -e "$work/$fresh_target" ]; then
+  echo "  NG: $fresh_target が \$work に残っている（made に入れていない）"
   fail=1
 fi
 
