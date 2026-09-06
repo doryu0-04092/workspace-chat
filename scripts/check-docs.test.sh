@@ -239,6 +239,16 @@ gi_tracked=(README.md "${probe_real_keeps[@]}")
 # 素通りする。上の gi_ignored（DOC_PRUNE_FILES 側）と同じ置換で機械的に補う。
 # 0a は KEEP・PRUNE の両側を導出しているため、揃えないとこの非対称が 0c にだけ残る。
 for g in "${probe_keep_files[@]}"; do gi_tracked+=("${g//\*/x}"); done
+# 直下だけでなく配下のパスも問う。ディレクトリ名は「直下ではない」ことだけが要件であり、
+# どこでもよい（Terraform の置き場を模した名前にしてある）。
+# 反復中に同じ配列へ足さない。展開の時点で確定するとはいえ、読む側に紛れる。
+gi_subdir=infra/terraform
+gi_sub=()
+for f in "${gi_ignored[@]}"; do gi_sub+=("$gi_subdir/$f"); done
+gi_ignored+=("${gi_sub[@]}")
+gi_sub=()
+for f in "${gi_tracked[@]}"; do gi_sub+=("$gi_subdir/$f"); done
+gi_tracked+=("${gi_sub[@]}")
 gi_ng=0
 for p in "${gi_ignored[@]}"; do
   if ! gi_ignored_by_gitignore "$p"; then
