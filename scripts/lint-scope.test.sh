@@ -319,11 +319,33 @@ echo "3. react-hooks のルール"
 # 「hooks 違反で npm run lint が赤になること」であり、ルール ID を含む行の
 # 重大度（error であること）まで見る。
 #
-# ESLint の stylish フォーマットは `<行:列>  <重大度>  <メッセージ>  <ルール ID>` を
-# 1行に持つ。重大度とルール ID が同じ行に現れることを頼りに、grep -E で
-# 「行頭が行:列、その次が error、行末がそのルール ID」の並びを確認する。
+# ESLint の stylish フォーマットは、ファイルパスを行頭（インデント無し）に
+# 見出しとして置き、そのファイルの違反を `<行:列>  <重大度>  <メッセージ>
+# <ルール ID>` の形でインデントして並べる。見出しが次に現れるまでが
+# そのファイルの違反である。
+#
+# **場所まで見る。** ルール ID と重大度が一致するだけでは足りない。
+# 出力全体から探すと、$HOOKS_PROBE 以外のファイルが同じルールで error を
+# 出した場合にも一致してしまい、$HOOKS_PROBE 自体が lint されていなくても
+# 陽性対照を通過しうる（check_tool が NEG_NAME を「.claude/ の中の」という
+# 場所ごと確かめているのと同じ理由で、ここも「$HOOKS_PROBE の中の」という
+# 場所まで確かめる）。見出し行が今の probe のものかどうかで in_file を
+# 切り替え、その区間の行だけを対象にする。
+#
+# ファイルパスの文字列そのものは比べない。ESLint は Windows で絶対パス・
+# 区切りが `\`、それ以外では相対パス・区切りが `/` を出すため
+# （NEG_NAME の直上に書いた理由と同じ）、一意な名前（$HOOKS_ROOT の
+# 末尾のディレクトリ名）の部分一致で見出し行を判定する。
+#
+# **パイプを使わない。** ヒアストリング（`<<<`）で awk に渡す。
+# `printf ... | grep -qE ...` のようにパイプにすると、読み手が先に終了して
+# 書き手が SIGPIPE で死にうる（contains の直上に実測とともに書いた理由と同じ）。
 hooks_rule_is_error() { # $1=出力 $2=ルール ID
-  printf '%s\n' "$1" | grep -qE "^ *[0-9]+:[0-9]+ +error .*${2}\$"
+  awk -v probe_name="${HOOKS_ROOT##*/}" -v rule="$2" '
+    /^[^ ]/ { in_probe = (index($0, probe_name) > 0); next }
+    in_probe && $0 ~ ("^ *[0-9]+:[0-9]+ +error .*" rule "$") { found = 1 }
+    END { exit !found }
+  ' <<< "$1"
 }
 
 # 1. の ESLint 実行（$ESLINT_OUT・$ESLINT_CODE）をそのまま使う。probe は
@@ -334,13 +356,13 @@ hooks_rule_is_error() { # $1=出力 $2=ルール ID
 # 保っている）。
 if [ "$ESLINT_CODE" -ne 0 ] && [ "$ESLINT_CODE" -ne 1 ]; then
   echo "  NG: ESLint が動かなかった（終了コード $ESLINT_CODE）。この検査は何も判定できない" >&2
-  printf '%s\n' "$ESLINT_OUT" | head -10 >&2
+  head -10 <<< "$ESLINT_OUT" >&2
   rc=1
 elif ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/rules-of-hooks' ||
      ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/exhaustive-deps'; then
   echo "  NG: react-hooks/rules-of-hooks と react-hooks/exhaustive-deps が両方とも error で検出されていない" >&2
   echo "      probe の内容と、両方のルールの重大度が 'error' であることを確かめる。" >&2
-  printf '%s\n' "$ESLINT_OUT" | head -20 >&2
+  head -20 <<< "$ESLINT_OUT" >&2
   rc=1
 else
   # 壊す確認: exhaustive-deps を 'warn' に戻した設定を一時ファイルに書き、
@@ -374,7 +396,16 @@ else
     set -e
     if [ "$HOOKS_BROKEN_CODE" -ne 0 ] && [ "$HOOKS_BROKEN_CODE" -ne 1 ]; then
       echo "  NG: 壊した設定で ESLint が動かなかった（終了コード $HOOKS_BROKEN_CODE）。この検査は何も判定できない" >&2
-      printf '%s\n' "$HOOKS_BROKEN_OUT" | head -10 >&2
+      head -10 <<< "$HOOKS_BROKEN_OUT" >&2
+      rc=1
+    elif ! hooks_rule_is_error "$HOOKS_BROKEN_OUT" 'react-hooks/rules-of-hooks'; then
+      # rules-of-hooks は今回書き換えていない。ここが error で出ていなければ、
+      # 「exhaustive-deps が warn に下がった」のではなく「probe 自体が
+      # lint されていない」（--config の指し先を誤った、ファイルが対象外に
+      # なった等）可能性がある。exhaustive-deps 側の判定だけでは
+      # この2つを区別できないため、rules-of-hooks の陽性対照を別に見る。
+      echo "  NG: 壊した設定で probe が lint されていない（react-hooks/rules-of-hooks も検出されなかった）" >&2
+      head -20 <<< "$HOOKS_BROKEN_OUT" >&2
       rc=1
     elif hooks_rule_is_error "$HOOKS_BROKEN_OUT" 'react-hooks/exhaustive-deps'; then
       echo "  NG: exhaustive-deps を 'warn' に戻しても error のまま検出された（壊す確認が効いていない）" >&2
