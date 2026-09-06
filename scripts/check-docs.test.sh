@@ -653,7 +653,11 @@ fi
 #
 # 複製ループが拾わない名前を渡す。リポジトリに実在せず、
 # DOC_PRUNE_DIRS にも DOC_PRUNE_FILES にも当たらない綴りである。
-fresh_target='probe-fresh-target.txt'
+#
+# **階層を1つ持たせる。** ルート直下の名前だと dirname が `.` を返し、
+# mkdir -p が `$work/.`（既にある）になって何もしないため、その1行だけを削っても
+# このケースが緑で通る。階層があれば、削った時点で `: >` が失敗して落ちる。
+fresh_target='probe-fresh-dir/target.txt'
 expect_ok "複製に無い実体をリンク先にすると、置かれて、後片付けされる" \
   probe-fresh-target.md "[新しく置く実体]($fresh_target)" in "$fresh_target"
 if [ -e "$work/$fresh_target" ]; then
