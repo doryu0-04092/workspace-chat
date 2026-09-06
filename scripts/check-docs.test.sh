@@ -383,6 +383,59 @@ if [ ${#gi_committed[@]} -gt 0 ]; then
 fi
 if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
+# --- 前提: .claude/ が .gitignore で無視され、行を消すと無視されなくなること ---
+# 上の gi_ignored / gi_tracked は DOC_PRUNE_FILES・DOC_KEEP_FILES というファイル名の
+# 一覧を問うもので、.claude/ のような**ディレクトリ**の除外は見ていない
+# （doc_excluded_name がファイル名だけの判定であるのと同じ理由）。#35 で
+# .gitignore に .claude/ を足したこと自体は、ここでしか確かめられない。
+#
+# .gitignore は実物しか git check-ignore が読まない。$work の複製を書き換えても
+# 何も確かめたことにならないため、ここだけ実物の .gitignore を一時的に書き換え、
+# 必ず元に戻す。この検査ファイルの他の壊す確認はすべて $work（複製）の中で完結
+# しており、実物を書き換えるのはここが唯一である。
+echo "0c-2. .claude/ が .gitignore で無視され、行を消すと無視されなくなること"
+gi_claude_probe='.claude/worktrees/probe-gitignore-scope/x.md'
+if ! gi_ignored_by_gitignore "$gi_claude_probe"; then
+  echo "  NG: .claude/ 配下のパスが .gitignore で無視されない（一致: $gi_why）"
+  fail=1
+else
+  # 置換が実際に効いたことを grep -c の件数（変更前1件 → 変更後0件）で確かめる。
+  gi_claude_before=$(grep -c '^\.claude/$' "$repo/.gitignore")
+  gitignore_backup="$(mktemp)"
+  cp "$repo/.gitignore" "$gitignore_backup"
+  # 途中で落ちても実物の .gitignore を戻す。この関数がこのファイルで唯一、
+  # 複製ではなく実物を書き換えるため、途中終了時の後始末を trap で保証する。
+  restore_gitignore() {
+    cp "$gitignore_backup" "$repo/.gitignore"
+    rm -f "$gitignore_backup"
+  }
+  trap restore_gitignore EXIT
+  sed -i '/^\.claude\/$/d' "$repo/.gitignore"
+  gi_claude_after=$(grep -c '^\.claude/$' "$repo/.gitignore")
+  if [ "$gi_claude_before" -ne 1 ] || [ "$gi_claude_after" -ne 0 ]; then
+    echo "  NG: sed が想定どおりに .gitignore の .claude/ 行を消せていない（変更前 $gi_claude_before 件 / 変更後 $gi_claude_after 件）"
+    fail=1
+  elif gi_ignored_by_gitignore "$gi_claude_probe"; then
+    echo "  NG: .gitignore から .claude/ を消しても無視され続けている（一致: $gi_why）"
+    fail=1
+  else
+    echo "  OK"
+  fi
+  restore_gitignore
+  trap - EXIT
+fi
+
+# --- 前提: 壊す前は通ること -------------------------------------------------
+# これが通らないと、以降の「落ちた」は壊したせいではなく複製の不備によるものになる。
+echo "0. 複製した状態で検査が通ること"
+if run_check; then
+  echo "  OK"
+else
+  echo "  NG: 壊す前から検査が落ちている。この結果は信用できない"
+  (cd "$work" && bash scripts/check-docs.sh 2>&1 | sed 's/^/      /')
+  exit 1
+fi
+
 # --- 前提: .claude/ の除外が、DOC_PRUNE_DIRS から消すと壊れること（#35） ------
 # 「検査を足したら、それを壊す確認も足す」というこのリポジトリの決まりに従う。
 # 上の 0a は probe_dirs と DOC_PRUNE_DIRS が一致することしか見ておらず、
@@ -390,6 +443,12 @@ if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 # ここでは本物の check-docs.sh を通し、.claude/ 配下に置いた壊れたリンクが
 # 「除外されている間は検出されず、DOC_PRUNE_DIRS から .claude を消すと検出される」
 # ことを確かめる。
+#
+# **この節は「0. 複製した状態で検査が通ること」より後ろに置く。** 前に置くと、
+# $work 自体に .claude/ と無関係な不備があった場合でも、この節の
+# 「前提が崩れている」という NG が「.claude/ の除外が効いていない」ことだと
+# 誤解させる。$work が素の状態で通ることを先に確かめてから、
+# .claude/ 固有の壊す確認に進む。
 #
 # $n は増やさない。README.md と CLAUDE.md の「check-docs.test.sh、N通り」は
 # 下の expect_ng / expect_ok の呼び出し件数を宣言しており、この節はその外側の
@@ -433,17 +492,6 @@ rm -f "$work/$claude_probe"
 rmdir "$work/.claude/worktrees/probe-claude-scope" 2>/dev/null || true
 rmdir "$work/.claude/worktrees" 2>/dev/null || true
 rmdir "$work/.claude" 2>/dev/null || true
-
-# --- 前提: 壊す前は通ること -------------------------------------------------
-# これが通らないと、以降の「落ちた」は壊したせいではなく複製の不備によるものになる。
-echo "0. 複製した状態で検査が通ること"
-if run_check; then
-  echo "  OK"
-else
-  echo "  NG: 壊す前から検査が落ちている。この結果は信用できない"
-  (cd "$work" && bash scripts/check-docs.sh 2>&1 | sed 's/^/      /')
-  exit 1
-fi
 
 # --- 壊したら落ちること -----------------------------------------------------
 # 終了コードだけを見ると足りない。壊し方によっては、検査が「正しい理由」で落ちたのか
