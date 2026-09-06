@@ -117,6 +117,30 @@ describe('Prisma のスキーマとマイグレーション', () => {
     return output;
   }
 
+  /**
+   * `Membership` と `ChannelMember` を残したまま退会した利用者を作る。
+   *
+   * **退会処理がこれらを消すのはアプリ側の規約であり、DB は止めない。**
+   * その規約が破れた状態を再現して、読み取り側が塞いでいることを確かめるために使う。
+   */
+  async function createDeletedUserKeepingMembership(): Promise<{
+    userId: string;
+    loginId: string;
+  }> {
+    const userId = randomUUID();
+    const loginId = `ghost_${randomUUID().slice(0, 8)}`;
+    await expectSqlToSucceed(`
+      INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+        VALUES ('${userId}', '${loginId}', '退会する人', 'argon2id-placeholder');
+      INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+        VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000a1', '${userId}', 'MEMBER');
+      INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+        VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', '${userId}');
+      UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';
+    `);
+    return { userId, loginId };
+  }
+
   beforeAll(async () => {
     container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
     // 空の DB にマイグレーションを適用する。ここが落ちるなら、
@@ -847,6 +871,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
         -- ワークスペースに参加していること自体を条件にする。
         -- ここを外すと、退出・キックされた利用者にチャンネルが見え続ける。
         JOIN "Membership" m
+          -- **要求する側が退会していないこと。** Membership が残っていても通さない。
+          JOIN "User" viewer ON viewer."id" = m."userId" AND viewer."deletedAt" IS NULL
           ON m."workspaceId" = c."workspaceId" AND m."userId" = '${userId}'
         LEFT JOIN "ChannelMember" cm
           ON cm."channelId" = c."id" AND cm."userId" = '${userId}'
@@ -924,6 +950,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
         -- ワークスペースに参加していること自体を条件にする。
         -- 外すと、退出・キックされた利用者に参加者一覧が見え続ける。
         JOIN "Membership" m
+          -- **要求する側が退会していないこと。** Membership が残っていても通さない。
+          JOIN "User" viewer ON viewer."id" = m."userId" AND viewer."deletedAt" IS NULL
           ON m."workspaceId" = c."workspaceId" AND m."userId" = '${userId}'
         LEFT JOIN "ChannelMember" cm
           ON cm."channelId" = c."id" AND cm."userId" = '${userId}'
@@ -1014,6 +1042,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
         SELECT c."name"
         FROM "Channel" c
         JOIN "Membership" m
+          -- **要求する側が退会していないこと。** Membership が残っていても通さない。
+          JOIN "User" viewer ON viewer."id" = m."userId" AND viewer."deletedAt" IS NULL
           ON m."workspaceId" = c."workspaceId" AND m."userId" = '${userId}'
         WHERE c."workspaceId" = '${workspaceId}'
           AND m."role" = 'OWNER'
@@ -1084,6 +1114,38 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe('');
     });
 
+    it('退会した利用者は、参加していたプライベートチャンネルを引けない', async () => {
+      // **要求する側の経路。** `ChannelMember` が残っていても通さない。
+      const { userId } = await createDeletedUserKeepingMembership();
+      const output = await expectSqlToSucceed(visibleChannels(userId, workspace));
+      expect(output).toBe('');
+    });
+
+    it('退会した利用者は、参加者一覧を取得できない', async () => {
+      const { userId } = await createDeletedUserKeepingMembership();
+      const output = await expectSqlToSucceed(channelMemberViewers(userId, secretChannel));
+      expect(output).toBe('');
+    });
+
+    it('退会したオーナーは、管理用の一覧を引けない', async () => {
+      // **専用のワークスペースを作る。** 既存のワークスペースには既にオーナーがおり、
+      // `Membership_single_owner_per_workspace` が2人目を拒否する。
+      const userId = randomUUID();
+      const ownWorkspace = randomUUID();
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash", "deletedAt")
+          VALUES ('${userId}', 'gone_owner', '退会したオーナー', 'argon2id-placeholder', now());
+        INSERT INTO "Workspace" ("id", "name")
+          VALUES ('${ownWorkspace}', '退会したオーナーのワークスペース');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ownWorkspace}', '${userId}', 'OWNER');
+        INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
+          VALUES ('${randomUUID()}', '${ownWorkspace}', 'theirs', 'theirs', 'PRIVATE');
+      `);
+      const output = await expectSqlToSucceed(manageableChannels(userId, ownWorkspace));
+      expect(output).toBe('');
+    });
+
     it('別のワークスペースのオーナーには、チャンネルが1つも見えない', async () => {
       // `visibleChannels` 側も同じ形の書き間違いを起こしうる。
       // **パブリックチャンネルまで見えてしまう**ため、こちらも押さえる。
@@ -1145,6 +1207,28 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `;
     }
 
+    /** ワークスペースの参加者一覧（F-07）。ここでも退会済みは出さない。 */
+    function workspaceMemberList(workspaceId: string): string {
+      return `
+        SELECT u."userId"
+        FROM "Membership" m
+        JOIN "User" u ON u."id" = m."userId"
+        WHERE m."workspaceId" = '${workspaceId}'
+          AND u."deletedAt" IS NULL
+        ORDER BY u."userId";
+      `;
+    }
+
+    it('退会した利用者は、ワークスペースの参加者一覧にも出ない', async () => {
+      const { loginId } = await createDeletedUserKeepingMembership();
+      const output = await expectSqlToSucceed(
+        workspaceMemberList('00000000-0000-7000-8000-0000000000a1'),
+      );
+      expect(output.split('\n')).not.toContain(loginId);
+      // 現役の利用者は出ること。**否定側だけだと、常に空でも緑になる。**
+      expect(output.split('\n')).toContain('owner');
+    });
+
     it('退会した利用者は、参加者一覧に出ない', async () => {
       // **`Membership` の行が残っていても出さない。**
       // これが無いと、`u."deletedAt" IS NULL` を落としても1件も落ちない。
@@ -1169,6 +1253,29 @@ describe('Prisma のスキーマとマイグレーション', () => {
       await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';`);
       const after = await expectSqlToSucceed(channelMemberList(channelId));
       expect(after.split('\n')).not.toContain(loginId);
+    });
+
+    /**
+     * メンションの参照先を引く問い合わせ。
+     *
+     * **踏むと壊れる条件: ここには `deletedAt IS NULL` を書いてはならない。**
+     * 隣の `activeUserByLoginId` は付けているが、**メンションだけは退会済みにも当てる。**
+     * 付けると、過去のメンションの参照先を解決できなくなり、
+     * 機能一覧 1.5 が定めた「削除済みの利用者として表示する」が出せない。
+     */
+    function mentionTargetByLoginId(loginId: string): string {
+      return `SELECT "id" FROM "User" WHERE lower("userId") = lower('${loginId}');`;
+    }
+
+    it('退会した利用者も、メンションの参照先としては引ける', async () => {
+      const userId = randomUUID();
+      const loginId = `mentioned_${randomUUID().slice(0, 8)}`;
+      await expectSqlToSucceed(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash", "deletedAt")
+         VALUES ('${userId}', '${loginId}', '退会した人', 'argon2id-placeholder', now());`,
+      );
+      const output = await expectSqlToSucceed(mentionTargetByLoginId(loginId));
+      expect(output).toBe(userId);
     });
 
     it('現役の利用者は、ユーザーID から引ける', async () => {
