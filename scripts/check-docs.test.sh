@@ -587,8 +587,11 @@ expect_ok "外部リンク（http / https / mailto）は存在を確かめない
 # 目的まで宣言している。ここを踏まないと、README が .env.example を参照した瞬間に
 # 正当なリンクが「リンク先にできない」で NG になる。
 #
-# ケースが成立していることを先に見る。.env.example が PRUNE のパターンに一致しなければ、
+# ケースが成立していることを先に見る。対象が PRUNE のパターンに一致しなければ、
 # KEEP が無くてもこのリンクは通る。つまり KEEP を何も検査していないことになる。
+#
+# 名前は1箇所に置く。成立判定・説明文・リンク本文・$extra に別々に書くと、
+# 成立判定だけがケースの触っていない名前を見ることになり、落ちる条件が消える。
 keep_pruned=0
 keep_target=.env.example   # case の対象を変数にする（定数を直接書くと shellcheck SC2194）
 for g in "${DOC_PRUNE_FILES[@]}"; do
@@ -596,11 +599,11 @@ for g in "${DOC_PRUNE_FILES[@]}"; do
   case "$keep_target" in $g) keep_pruned=1 ;; esac
 done
 if [ "$keep_pruned" = 0 ]; then
-  echo "  NG: .env.example が DOC_PRUNE_FILES のどれにも一致しない。KEEP を踏むケースが成立していない"
+  echo "  NG: $keep_target が DOC_PRUNE_FILES のどれにも一致しない。KEEP を踏むケースが成立していない"
   fail=1
 fi
-expect_ok "KEEP に挙げた .env.example へのリンクは「リンク先にできない」にならない" \
-  probe-env-example-link.md '[環境変数の例](.env.example)' in .env.example
+expect_ok "KEEP に挙げた $keep_target へのリンクは「リンク先にできない」にならない" \
+  probe-env-example-link.md "[環境変数の例]($keep_target)" in "$keep_target"
 
 # $extra の「既にあればそのまま使う」分岐に落ちる条件を持たせる。
 #
@@ -615,6 +618,23 @@ expect_ok "既に複製にある実体をリンク先にしても、その実体
   probe-existing-target.md "[ルートの $existing_target]($existing_target)" in "$existing_target"
 if ! cmp -s "$repo/$existing_target" "$work/$existing_target"; then
   echo "  NG: 既に \$work にあった $existing_target が壊れた（\$extra を上書き・削除している）"
+  fail=1
+fi
+
+# $extra の「作る側」に落ちる条件を持たせる。
+#
+# 上の2つの $extra は複製ループが $work に入れるため、どちらも `[ -e ] && continue` を通る。
+# mkdir -p / `: >` / made+= の3行は一度も実行されない。**丸ごと削っても、
+# made+= だけを落としても、全ケースが緑で通る。** made+= が落ちた形は特に静かで、
+# 作った $extra が $work に残り続け、以降のケースが前のケースの置き土産の上で回る。
+#
+# 複製ループが拾わない名前を渡す。リポジトリに実在せず、
+# DOC_PRUNE_DIRS にも DOC_PRUNE_FILES にも当たらない綴りである。
+fresh_target='probe-fresh-target.txt'
+expect_ok "複製に無い実体をリンク先にすると、置かれて、後片付けされる" \
+  probe-fresh-target.md "[新しく置く実体]($fresh_target)" in "$fresh_target"
+if [ -e "$work/$fresh_target" ]; then
+  echo "  NG: $fresh_target が \$work に残っている（made に入れていない）"
   fail=1
 fi
 
