@@ -737,6 +737,23 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CRE
 `docker compose exec db psql -U "$POSTGRES_USER"` と書くと、
 **手元のシェルが空文字に展開してから** `docker` に渡す。
 
+#### DATABASE_URL（Prisma。#42）
+
+**`prisma generate` を除くすべての `prisma` コマンド**（`migrate dev` / `migrate deploy` /
+`migrate diff` / `db execute` 等）に、環境変数 `DATABASE_URL` が要る。
+
+読むのは docker compose ではなく、根の [prisma.config.ts](prisma.config.ts) が
+`process.loadEnvFile()` で直接読む。**`.env.example` にも値は書かない**（`.env.example` の
+「Prisma」節を参照）。値は、上の `POSTGRES_*` から次の形で組み立てる。
+
+```
+postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@127.0.0.1:<POSTGRES_PORT>/<POSTGRES_DB>
+```
+
+コピーした先の `.env` の `DATABASE_URL` に書き込む。**根で `prisma` の CLI を実行すること**
+（`prisma.config.ts` が `.env` をこのファイルの位置から解決するため、`apps/api` など
+根以外を作業ディレクトリにして実行すると読まれない）。
+
 ### 動かす
 
 **先に `npm run build` を1度通す。** `packages/shared` は `dist/` を公開しており、

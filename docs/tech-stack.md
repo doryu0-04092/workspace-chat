@@ -302,6 +302,28 @@ AWS の[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/Postgre
 | **unplugin-swc** | **1.5.11** | 1.5.11 | 最新。**テストの実行にのみ使う。** 下記「テストの変換に SWC を使う理由」を参照 |
 | **@swc/core** | **1.16.1** | 1.16.1 | 最新。`unplugin-swc` が呼ぶ変換器の本体 |
 
+#### 追加で確認した項目 — PR #40（2026-09-06。#42）
+
+PR #40（Prisma のスキーマとマイグレーション）で追加した依存と `overrides` の判断を記す。
+**PR の説明はリポジトリに残らない。** 特に `overrides` の2件は、なぜ固定したのか・
+いつ外せるのかが分からなくなるため、ここに記録する。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **prisma** | **^7.10.0** | `latest` タグは `8.0.0-rc.12`（リリース候補）を指す。そのまま入れると `@prisma/composer-cli` 経由で `hono` の high 8件を持ち込み、[audit.yml](../.github/workflows/audit.yml) が落ちる。本書の方針（最新安定版を優先する）に従い 7.10.0 を選んだ |
+| **@testcontainers/postgresql** | **^12.1.0** | 実 PostgreSQL に対する検証に使う。上表バックエンドの「テスト」欄がすでに「Vitest + Testcontainers」と定めている |
+| **overrides: deepmerge-ts** | **8.0.2（完全固定）** | `prisma` → `@prisma/config` の推移依存。7.1.5 は GHSA-ggr8-5vv4-36mx（high）を持つ。**影響範囲は `<8.0.0` であり、7 系に修正版は無い**ため、8 系へ上げるほかない。`@prisma/config@7.10.0` は `deepmerge-ts` を `"7.1.5"` と完全固定で要求しており、**この override は上流の完全固定をメジャーを跨いで置き換えている。** `^8.0.2` ではなく完全固定にしたのは、将来の 8.x へ人の判断を経ずに動くのを避けるためである。**外せる条件: `@prisma/config` が `deepmerge-ts` の8系を要求するようになったら外す** |
+| **overrides: mysql2** | **^3.24.3** | `prisma` の推移依存。3.15.3 は GHSA-3f6p-5ww8-9rcr / GHSA-rgwj-5xj2-c3m3（high）を持つ。このプロジェクトは MySQL を使わないが、`prisma` が依存として引く。**外せる条件: `prisma` が修正版を引くようになったら外す** |
+
+> **`@prisma/config` は `prisma.config.ts` を読み込む当事者である。壊れると `prisma` のコマンドが
+> 全滅する。** CI が踏むのは `generate` / `migrate deploy` / `migrate diff` の3経路だけであり、
+> **`prisma migrate dev` は CI では一度も実行されない**（PR #40 で手元で確認した。空の DB に
+> 適用して exit 0）。
+>
+> **`DATABASE_URL` の変数名は README と `.env.example` に記載した**（値は書かない。
+> CLAUDE.md 禁止事項）。現時点でこの変数名が出てくるのは `prisma.config.ts` と
+> [prisma-schema.test.ts](../apps/api/src/prisma-schema.test.ts) だけである。
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。
