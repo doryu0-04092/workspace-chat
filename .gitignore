@@ -58,6 +58,12 @@ override.tf.json
 *.swp
 *.swo
 
+# エージェントが作る git のワークツリー。apps/ の複製がまるごと入る。
+# eslint.config.js と .prettierignore は既にここを除外している（PR #33）。
+# 追跡していないだけでは無視はされないため、`git add .` を打つとワークツリーの
+# 複製がまるごとステージされうる（#35）。
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

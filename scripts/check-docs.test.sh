@@ -45,7 +45,7 @@ probe=$(mktemp -d)
 # 木からも消え、検証が素通りする。ここに直接書く。
 # ただし直接書くだけでは「足したのに効いていない」（綴り間違い等）を検出できないため、
 # 木を作る前に集合として一致することを確かめる。
-probe_dirs=(.git node_modules .pnp dist build .vite coverage .nyc_output
+probe_dirs=(.git .claude node_modules .pnp dist build .vite coverage .nyc_output
             playwright-report test-results blob-report reports generated uploads tmp
             .terraform .vscode .idea)
 probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json')
@@ -382,6 +382,57 @@ if [ ${#gi_committed[@]} -gt 0 ]; then
   gi_ng=1
 fi
 if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
+
+# --- 前提: .claude/ の除外が、DOC_PRUNE_DIRS から消すと壊れること（#35） ------
+# 「検査を足したら、それを壊す確認も足す」というこのリポジトリの決まりに従う。
+# 上の 0a は probe_dirs と DOC_PRUNE_DIRS が一致することしか見ておらず、
+# .claude が両方から丸ごと抜けている場合（一致はしたまま）は検出できない。
+# ここでは本物の check-docs.sh を通し、.claude/ 配下に置いた壊れたリンクが
+# 「除外されている間は検出されず、DOC_PRUNE_DIRS から .claude を消すと検出される」
+# ことを確かめる。
+#
+# $n は増やさない。README.md と CLAUDE.md の「check-docs.test.sh、N通り」は
+# 下の expect_ng / expect_ok の呼び出し件数を宣言しており、この節はその外側の
+# 前提確認である（0a・0b・0c と同じ扱い）。
+echo "0d. .claude/ 配下の Markdown が、DOC_PRUNE_DIRS の .claude を消すと検出されること"
+claude_probe='.claude/worktrees/probe-claude-scope/README.md'
+mkdir -p "$work/$(dirname "$claude_probe")"
+printf '%s\n' '[壊れたリンク](./does-not-exist.md)' > "$work/$claude_probe"
+
+if ! run_check; then
+  echo "  NG: 前提が崩れている（.claude/ 配下にリンク切れを置いただけで検査が落ちた。除外が効いていない）"
+  (cd "$work" && bash scripts/check-docs.sh 2>&1 | sed 's/^/        実際: /')
+  fail=1
+else
+  # 消す行は DOC_PRUNE_DIRS の要素のうちこの1行だけに一致する。
+  # 置換が実際に効いたことを、cmp ではなく grep の件数で確かめる
+  # （消した行が完全に無くなったことを見たいため、差分の有無だけでは足りない）。
+  before=$(grep -c '^  \.claude$' "$work/scripts/doc-scope.sh")
+  sed -i '/^  \.claude$/d' "$work/scripts/doc-scope.sh"
+  after=$(grep -c '^  \.claude$' "$work/scripts/doc-scope.sh")
+  if [ "$before" -ne 1 ] || [ "$after" -ne 0 ]; then
+    echo "  NG: sed が想定どおりに .claude の行を消せていない（変更前 $before 件 / 変更後 $after 件）"
+    fail=1
+  else
+    out=$(cd "$work" && bash scripts/check-docs.sh 2>&1); rc=$?
+    expect="$claude_probe -> ./does-not-exist.md が存在しない"
+    if [ "$rc" -eq 0 ]; then
+      echo "  NG: DOC_PRUNE_DIRS から .claude を消しても検査が通ってしまった"
+      fail=1
+    elif ! printf '%s\n' "$out" | grep -qF "$expect"; then
+      echo "  NG: 落ちたが、期待した指摘「$expect」が出ていない"
+      printf '%s\n' "$out" | grep '^  NG' | sed 's/^/        実際: /'
+      fail=1
+    else
+      echo "  OK"
+    fi
+  fi
+fi
+restore scripts/doc-scope.sh
+rm -f "$work/$claude_probe"
+rmdir "$work/.claude/worktrees/probe-claude-scope" 2>/dev/null || true
+rmdir "$work/.claude/worktrees" 2>/dev/null || true
+rmdir "$work/.claude" 2>/dev/null || true
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
 # これが通らないと、以降の「落ちた」は壊したせいではなく複製の不備によるものになる。
