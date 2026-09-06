@@ -20,11 +20,14 @@ package-lock.json
 # （3.0 での変更。prettier 3.9.6 で実測し、.gitignore に書いた場所が走査されないことを確認した）。
 # .gitignore にも .claude/ を書いている（#35）。ここでも書いているのは、
 # **どちらか一方の行が消えても、もう一方だけで除外が保たれる**ようにするためである。
-# ここが無いと作業中（整形前）のファイルまで対象に入り、
+# **どちらも消えれば**作業中（整形前）のファイルまで対象に入り、
 # **手元でだけ format:check が落ちる。**
 # CI には .claude/ が無いので緑のままになり、気づけない。
 #
-# 外れていることは scripts/lint-scope.test.sh が機械で確かめる。
+# 外れていること自体は scripts/lint-scope.test.sh が機械で確かめる。
+# ただし見ているのは「.prettierignore と .gitignore のどちらかに .claude/ が
+# 入っているか」であり、この行**だけ**を見ているわけではない
+# （.gitignore 側が残っていれば、この行が消えても検査は緑のまま通る）。
 .claude/
 
 # Markdown は Prettier の対象にしない。

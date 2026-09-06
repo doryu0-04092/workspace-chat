@@ -217,10 +217,17 @@ fi
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_pat=""   # 一致したパターン。.gitignore 以外が一致元だったときは空
-gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
+# $1=問う先の git リポジトリ $2=パス。そのリポジトリの .gitignore が
+# 無視していれば 0。一致内容は gi_why。
+#
+# リポジトリを引数にしているのは、0c-2 が実物の $repo ではなく専用の
+# 複製（git init した一時ディレクトリ）を問うためである。ここを固定で
+# $repo と書くと、0c-2 が同じ判定をもう1つ書き直すことになり、
+# 出力形式の読み取りが2箇所でずれうる。
+gi_ignored_by_gitignore() {
   local line head src pat
   # 出力は <一致元>:<行番号>:<パターン><TAB><パス>。一致が無ければ空。
-  line=$(git -C "$repo" check-ignore -v --no-index "$1")
+  line=$(git -C "$1" check-ignore -v --no-index "$2")
   gi_why=${line:-一致なし}
   gi_pat=""
   [ -n "$line" ] || return 1
@@ -277,12 +284,12 @@ for f in "${gi_tracked[@]}"; do gi_sub+=("$gi_subdir/$f"); done
 gi_tracked+=("${gi_sub[@]}")
 gi_ng=0
 for p in "${gi_ignored[@]}"; do
-  if ! gi_ignored_by_gitignore "$p"; then
+  if ! gi_ignored_by_gitignore "$repo" "$p"; then
     echo "  NG: $p が .gitignore で無視されない（値がコミットされうる。一致: $gi_why）"; gi_ng=1
   fi
 done
 for p in "${gi_tracked[@]}"; do
-  if gi_ignored_by_gitignore "$p"; then
+  if gi_ignored_by_gitignore "$repo" "$p"; then
     echo "  NG: $p が .gitignore で無視される（追跡対象のはず。一致: $gi_why）"; gi_ng=1
   fi
 done
@@ -294,7 +301,7 @@ done
 # 上の2つのループは「無視されない」を期待する側なので、それでも緑のまま通る。
 for g in "${probe_keep_files[@]}"; do
   gi_keep=${g//\*/x}
-  gi_ignored_by_gitignore "$gi_keep"
+  gi_ignored_by_gitignore "$repo" "$gi_keep"
   case "$gi_pat" in
     '!'*) ;;
     *) echo "  NG: $gi_keep が .gitignore の打ち消し（!）に一致しない（一致: $gi_why）"; gi_ng=1 ;;
@@ -389,40 +396,35 @@ if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 # （doc_excluded_name がファイル名だけの判定であるのと同じ理由）。#35 で
 # .gitignore に .claude/ を足したこと自体は、ここでしか確かめられない。
 #
-# .gitignore は実物しか git check-ignore が読まない。$work の複製を書き換えても
-# 何も確かめたことにならないため、ここだけ実物の .gitignore を一時的に書き換え、
-# 必ず元に戻す。この検査ファイルの他の壊す確認はすべて $work（複製）の中で完結
-# しており、実物を書き換えるのはここが唯一である。
+# **元のリポジトリは書き換えない**（冒頭の方針）。git check-ignore は
+# .gitignore の中身だけでなく「git のリポジトリであること」も要るため、
+# 専用の一時ディレクトリに git init し、.gitignore だけを複製して問う。
+# 壊す確認もこの複製の .gitignore を書き換えて行い、$repo には一切触れない
+# （trap での復元も、途中で落ちたときに実物が壊れて残るおそれも無い）。
 echo "0c-2. .claude/ が .gitignore で無視され、行を消すと無視されなくなること"
 gi_claude_probe='.claude/worktrees/probe-gitignore-scope/x.md'
-if ! gi_ignored_by_gitignore "$gi_claude_probe"; then
+gi_claude_repo=$(mktemp -d)
+git init -q "$gi_claude_repo"
+cp "$repo/.gitignore" "$gi_claude_repo/.gitignore"
+if ! gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
   echo "  NG: .claude/ 配下のパスが .gitignore で無視されない（一致: $gi_why）"
   fail=1
 else
   # 置換が実際に効いたことを grep -c の件数（変更前1件 → 変更後0件）で確かめる。
-  gi_claude_before=$(grep -c '^\.claude/$' "$repo/.gitignore")
-  gitignore_backup="$(mktemp)"
-  cp "$repo/.gitignore" "$gitignore_backup"
-  # 途中で落ちても実物の .gitignore を戻す。この関数がこのファイルで唯一、
-  # 複製ではなく実物を書き換えるため、途中終了時の後始末を trap で保証する。
-  restore_gitignore() {
-    cp "$gitignore_backup" "$repo/.gitignore"
-    rm -f "$gitignore_backup"
-  }
-  trap restore_gitignore EXIT
-  sed -i '/^\.claude\/$/d' "$repo/.gitignore"
-  gi_claude_after=$(grep -c '^\.claude/$' "$repo/.gitignore")
+  # 書き換える先は複製（$gi_claude_repo/.gitignore）であり、実物の
+  # $repo/.gitignore ではない。
+  gi_claude_before=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
+  sed -i '/^\.claude\/$/d' "$gi_claude_repo/.gitignore"
+  gi_claude_after=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
   if [ "$gi_claude_before" -ne 1 ] || [ "$gi_claude_after" -ne 0 ]; then
-    echo "  NG: sed が想定どおりに .gitignore の .claude/ 行を消せていない（変更前 $gi_claude_before 件 / 変更後 $gi_claude_after 件）"
+    echo "  NG: sed が想定どおり複製の .gitignore の .claude/ 行を消せていない（変更前 $gi_claude_before 件 / 変更後 $gi_claude_after 件）"
     fail=1
-  elif gi_ignored_by_gitignore "$gi_claude_probe"; then
-    echo "  NG: .gitignore から .claude/ を消しても無視され続けている（一致: $gi_why）"
+  elif gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
+    echo "  NG: 複製の .gitignore から .claude/ を消しても無視され続けている（一致: $gi_why）"
     fail=1
   else
     echo "  OK"
   fi
-  restore_gitignore
-  trap - EXIT
 fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
