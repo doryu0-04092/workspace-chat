@@ -166,9 +166,12 @@ fi
 #
 #   1. 既定の check-ignore はインデックスを見て、追跡済みのパスを「無視されない」と報告する。
 #      --no-index を付けないと、追跡済みの README.md に対する下の確認は .gitignore を
-#      どう壊しても緑のままになり、落ちる条件を持たなくなる。
+#      どう壊しても緑のままになる。
 #      （手元で確認: 一時の除外ファイルに README.md を書いて実行すると、
 #       既定は終了コード 1、--no-index 付きは 0 になった。）
+#      **この指定自体に落ちる条件を持たせてある。** KEEP の名前が .gitignore の
+#      打ち消し（!）に一致することを下で見ており、--no-index を外すと
+#      追跡済みの .env.example に一致が返らなくなって落ちる。
 #   2. check-ignore は .git/info/exclude と core.excludesFile にも一致する。
 #      GitHub 公式の Terraform.gitignore をグローバル除外に置いている手元では、
 #      リポジトリの .gitignore に *.tfvars.json が無くてもこの確認が緑になる。
@@ -208,16 +211,19 @@ fi
 # **守れているのは関数の中身までである、と読むこと。**
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
+gi_pat=""   # 一致したパターン。.gitignore 以外が一致元だったときは空
 gi_ignored_by_gitignore() { # $1=パス。リポジトリの .gitignore が無視していれば 0。一致内容は gi_why
   local line head src pat
   # 出力は <一致元>:<行番号>:<パターン><TAB><パス>。一致が無ければ空。
   line=$(git -C "$repo" check-ignore -v --no-index "$1")
   gi_why=${line:-一致なし}
+  gi_pat=""
   [ -n "$line" ] || return 1
   head=${line%%$'\t'*}
   src=${head%%:*}
   pat=${head#*:}; pat=${pat#*:}
   [ "$src" = .gitignore ] || return 1
+  gi_pat=$pat
   # 打ち消しパターン（!）に一致したものは無視されない。
   case "$pat" in '!'*) return 1 ;; esac
   return 0
@@ -246,7 +252,10 @@ gi_tracked=(README.md "${probe_real_keeps[@]}")
 for g in "${probe_keep_files[@]}"; do gi_tracked+=("${g//\*/x}"); done
 # 直下だけでなく配下のパスも問う。
 #
-# **踏むと壊れる: この名前のディレクトリに .gitignore を置くと 0c が偽の NG を出す。**
+# **踏むと壊れる: この名前の *いずれかの階層* に .gitignore を置くと 0c が偽の NG を出す。**
+# git は祖先のどの階層の .gitignore も評価するため、1段目でも2段目でも同じ壊れ方をする
+# （実測: probe-not-root/.gitignore に *.tfvars を置くと、一致元が
+#  probe-not-root/.gitignore になって「無視されない」で落ちた）。
 # gi_ignored_by_gitignore は git check-ignore -v の一致元がちょうど .gitignore で
 # あることを求めており、配下の .gitignore に一致すると一致元が
 # <この名前>/.gitignore になって「無視されない」と判定するためである。
@@ -271,6 +280,20 @@ for p in "${gi_tracked[@]}"; do
   if gi_ignored_by_gitignore "$p"; then
     echo "  NG: $p が .gitignore で無視される（追跡対象のはず。一致: $gi_why）"; gi_ng=1
   fi
+done
+# KEEP の名前は、.gitignore が打ち消し（!）で追跡対象へ戻しているものの写しである。
+# 「無視されない」だけでなく、**打ち消しに一致していること**まで見る。
+#
+# ここが --no-index の落ちる条件である。--no-index を外すと、check-ignore は
+# インデックスを見て追跡済みのパスに一致を返さなくなる（一致なしになる）。
+# 上の2つのループは「無視されない」を期待する側なので、それでも緑のまま通る。
+for g in "${probe_keep_files[@]}"; do
+  gi_keep=${g//\*/x}
+  gi_ignored_by_gitignore "$gi_keep"
+  case "$gi_pat" in
+    '!'*) ;;
+    *) echo "  NG: $gi_keep が .gitignore の打ち消し（!）に一致しない（一致: $gi_why）"; gi_ng=1 ;;
+  esac
 done
 # 追跡済みのファイルは .gitignore の影響を受けない。パターンが揃っていても値は入っている。
 # 判定は doc_excluded と同じ doc_excluded_name に寄せる（一覧を手で並べ直すと黙ってずれる）。
