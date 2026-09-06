@@ -107,7 +107,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 言語 | **TypeScript** | 5.x | **難-3 の解決** |
 | フレームワーク | **NestJS** | **11** | WebSocket Gateway が一級市民として組み込まれている。Guard による認可を REST と WebSocket で共通化できる |
 | **リアルタイム** | **Socket.IO** + `@socket.io/redis-adapter` | 4.x | 下記の理由により実質これ一択 |
-| DB アクセス | **Prisma** | 最新安定版 | 下記「Prisma を選んだ理由と代償」を参照 |
+| DB アクセス | **Prisma** | 最新安定版 | 下記「Prisma を選んだ理由と代償」を参照。**固定した版と理由**は下記「追加で確認した項目 — PR #40」を参照 |
 | 検証 | **Zod** | 3.x/4.x | リクエストと WebSocket イベントを同じスキーマで検証する |
 | パスワード | **Argon2id** | — | 現在の推奨 |
 | 認証 | JWT（アクセス・短命）+ opaque リフレッシュトークン | — | |
