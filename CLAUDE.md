@@ -234,7 +234,7 @@ npm の版更新は止めた（[README](README.md) の「依存の版を上げ�
 | 要件定義 | **完了**（2026-09-04。総点検の指摘22件への対応を反映済み） |
 | **AI コードレビューの観点** | **完了**（[REVIEW.md](REVIEW.md)） |
 | **AI コードレビューの設定** | **完了**（[claude_code_review.yml](.github/workflows/claude_code_review.yml)。導入手順と制約は [README](README.md)） |
-| **ドキュメント検査の CI** | **完了**（[docs.yml](.github/workflows/docs.yml)。検査そのものの検査を28通り含む） |
+| **ドキュメント検査の CI** | **完了**（[docs.yml](.github/workflows/docs.yml)。検査そのものの検査を30通り含む） |
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |

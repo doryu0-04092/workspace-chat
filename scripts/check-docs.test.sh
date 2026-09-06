@@ -11,7 +11,7 @@
 # 元のリポジトリは書き換えない。
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
-# 対象範囲の定義は check-docs.sh と共有する
+# 検査の対象範囲と、宣言から数を読み取る規則は check-docs.sh と共有する
 # shellcheck source=scripts/doc-scope.sh
 . scripts/doc-scope.sh
 repo=$(pwd)
@@ -442,6 +442,12 @@ expect_ng "README のリンク先を除外ディレクトリの配下にする" 
 expect_ng "README のリンク先を除外ファイル名（.env）にする" README.md \
   's|(docs/requirements.md)|(.env)|' \
   'は検査の対象外のファイル名 .env に一致'
+# h で始まる相対リンク。旧実装は http を外すために先頭1文字を [^)h] で弾いており、
+# handbook/... のような相対リンクまで黙って対象外にしていた。
+# 「見たと表示しながら見ていない範囲がある」状態は、それ自体では検出できない。
+expect_ng "README のリンク先を h で始まる存在しない相対パスに" README.md \
+  's|(docs/requirements.md)|(handbook/hooks.md)|' \
+  'README.md -> handbook/hooks.md が存在しない'
 
 # --- 検査2: 機能IDの連番と重複
 expect_ng "features.md から F-20 の行を削除して欠番を作る" docs/features.md \
@@ -513,30 +519,135 @@ expect_ng "requirements.md の一覧の見出しを変えて読み取れなく�
   's/^#### 必ずテストを書く箇所$/#### 必ずテストを書く項目/' \
   'requirements.md から一覧を読み取れない'
 
-# --- 除外されたディレクトリの中の Markdown は検査対象にならないこと。
-#     ここが効かないと、依存パッケージの README のリンク切れで CI が落ちる。
-expect_ok() { # $1=説明 $2=作るファイル $3=中身
+# --- 落ちてはならないこと。$4 で、置いたファイルが検査の対象に入るはず（in）か
+#     除外されるはず（out）かを切り替える。関数を2つに分けると、失敗時の出力や
+#     後片付けに手を入れたとき片方が黙って取り残される（doc-scope.sh 冒頭と同じ理由）。
+#     判定は doc_find -name '*.md' に統一する。検査1が見るのは Markdown だけである。
+expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対象に入る）| out（除外される）
+  local desc="$1" file="$2" body="$3" want="$4" got
   n=$((n + 1))
-  mkdir -p "$work/$(dirname "$2")"
-  printf '%s\n' "$3" > "$work/$2"
-  # 置いたファイルが実際に除外されていることを先に確かめる。除外の外に置いてしまうと
+  mkdir -p "$work/$(dirname "$file")"
+  printf '%s\n' "$body" > "$work/$file"
+  # ファイルを置けたことを先に確かめる。下の got=out は「doc_find の結果に含まれない」
+  # でしか判定しておらず、「除外された」と「そもそも置けていない」の両方で成立する。
+  # mkdir -p や printf > が失敗しても（set -e は無いので継続する）got=out になり、
+  # want=out のケースは一致し、run_check は壊れたリンクが1つも無い状態で当然通る。
+  # つまり壊れたリンクを一度も置かないまま「無視されることを確認した」と表示する。
+  # in 側は doc_find に現れることで存在も同時に保証されるが、out 側だけ保証が無い。
+  if [ ! -f "$work/$file" ]; then
+    echo "  NG: $n. $desc — ファイルを置けていない。ケースが成立していない"
+    fail=1; return
+  fi
+  # 置いたファイルが想定した側にあることを先に確かめる。逆側に落ちると
   # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
-  if (cd "$work" && doc_find -type f -print | sed 's|^\./||' | grep -qxF "$2"); then
-    echo "  NG: $n. $1 — 置いたファイルが除外されていない。ケースが成立していない"
-    fail=1; rm -f "$work/$2"; return
+  if (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF "$file"); then
+    got=in
+  else
+    got=out
+  fi
+  if [ "$got" != "$want" ]; then
+    echo "  NG: $n. $desc — 置いたファイルが $want ではなく $got の側にある。ケースが成立していない"
+    fail=1; rm -f "$work/$file"; return
   fi
   if run_check; then
-    echo "  OK: $n. $1"
+    echo "  OK: $n. $desc"
   else
-    echo "  NG: $n. $1 — 除外されるはずのファイルで検査が落ちた"
+    echo "  NG: $n. $desc — 落ちてはならないのに検査が落ちた"
     (cd "$work" && bash scripts/check-docs.sh 2>&1 | grep '^  NG' | sed 's/^/        実際: /')
     fail=1
   fi
-  rm -f "$work/$2"
+  rm -f "$work/$file"
 }
+# 除外されたディレクトリの中の Markdown は検査対象にならないこと。
+# ここが効かないと、依存パッケージの README のリンク切れで CI が落ちる。
 expect_ok "node_modules の中のリンク切れは無視される" node_modules/pkg/README.md \
-  '[壊れたリンク](./does-not-exist.md)'
+  '[壊れたリンク](./does-not-exist.md)' out
 expect_ok "入れ子の node_modules の中のリンク切れも無視される" apps/api/node_modules/pkg/README.md \
-  '[壊れたリンク](./does-not-exist.md)'
+  '[壊れたリンク](./does-not-exist.md)' out
+# 外部リンクを飛ばす判断はスキームで行う。現物の文書にも https のリンクはあるが、
+# それが消えた瞬間にこの経路の確認も消える。専用のケースとして残す。
+#
+# case が列挙する3つのスキームは、3つとも1本ずつ置く。ここがスキーム判定の唯一の確認で
+# あるため、置かなかった枝は個別に無検査になる。http:// を置かないと、その枝を
+# 丸ごと削っても全ケースが緑で通る（https は http:// に一致しないため冗長ではない）。
+# 消えた場合の帰結は、文書に http:// のリンクが1本入った時点で
+# 「http://… が存在しない」という偽の NG が出て CI が止まることであり、
+# しかも文面は「リンク切れ」と読めるため、本来直す必要のないリンクの方を疑わせる。
+expect_ok "外部リンク（http / https / mailto）は存在を確かめない" docs/probe-external-link.md \
+  '[外部の文書](https://example.invalid/does-not-exist) と [平文の外部](http://example.invalid/x) と [連絡先](mailto:nobody@example.invalid)' in
+
+# --- 「N通り」の宣言が実数と一致すること -------------------------------------
+# check-docs.sh の3章は「合計 N 件」「全 N 件」「機能N件」「N項目」を照合するが、
+# 「N通り」は見ていない。実数 $n はテストを走らせて初めて確定するため、ここで突き合わせる。
+# 無いと、ケースを1件足すたびに文書の宣言が古くなり、しかもどの検査も落ちない。
+# 検査3で「tech-stack.md が漏れていたため機能34件が38件になっても放置された」のと同型。
+echo "2. 「N通り」の宣言が実数と一致すること"
+decl_files=(README.md CLAUDE.md)
+# パターンは宣言の行にしか無い後続語まで含めて一意にする（check-docs.sh の
+# compare_decls と同じ方針）。総称の [0-9][0-9]*通り で拾うと、ケース数と無関係な
+# 「起動は2通り」のような1行が入った時点で「2 と書かれているが、実際は N」という
+# 偽の NG が出る。しかも文面は「宣言が古い」と読めるため、受け取った側は
+# 本来直す必要のない文の方を書き換えてしまう。
+# （N に具体数を書かない。ケースを足すたびに古くなるうえ、コメントの数は
+#   どこからも照合されない。0b の注記と同じ理由。）
+# 読み取れない場合を NG にする扱いは下に入れてあるので、具体化しても
+# 「言い回しを変えたら検査が消える」ことにはならない。
+decl_pattern() { # $1=ファイル名。その文書の宣言のパターンを出力する
+  case "$1" in
+    README.md) echo 'check-docs\.test\.sh`、[0-9][0-9]*通り' ;;
+    CLAUDE.md) echo '検査そのものの検査を[0-9][0-9]*通り含む' ;;
+    *) return 1 ;;
+  esac
+}
+decl_mismatches() { # $1=期待する数。README.md と CLAUDE.md の「N通り」のうち食い違うものを返す
+  local f v pat found
+  for f in "${decl_files[@]}"; do
+    if ! pat=$(decl_pattern "$f"); then
+      echo "$f の「N通り」のパターンが定義されていない（decl_pattern に足す）"
+      continue
+    fi
+    # found は文書ごとに持つ。ループの外に置くと、片方が読めているだけで
+    # もう片方の「読み取れない」が出なくなり、その文書が黙って対象から外れる。
+    # check-docs.sh の compare_decls が宣言ごとに呼ばれているのと同じ粒度にそろえる。
+    found=0
+    while IFS= read -r v; do
+      [ -n "$v" ] || continue
+      found=1
+      [ "$v" = "$1" ] || echo "$f の「N通り」: $v と書かれているが、実際は $1"
+    # 数の取り出しは doc-scope.sh の decls に寄せる。ここに書き直すと、
+    # check-docs.sh 側の読み取りを直したときにテスト側だけが古い規則で残る。
+    done < <(decls "$repo/$f" "$pat")
+    # 読み取れないのも NG。黙って通すと、言い回しを変えた時点で検査が落ちるのではなく消える
+    # （check-docs.sh の compare_decls と同じ扱い）。
+    [ "$found" = 1 ] || echo "$f の「N通り」を読み取れない（言い回しが変わった可能性）"
+  done
+}
+# 突き合わせ自体が働いていることを先に見る。わざと違う数を渡して何も出ないなら、
+# 下の確認は文書に何を書いても通る。0a・0c と同じく「ケースが成立していない」を検出する。
+# 「1件でも出たか」ではなく文書ごとに出たかを見る。合計で見ると、片方の宣言が
+# 読み取れなくなっても、もう片方の食い違いだけでこの自己確認が緑のまま通る。
+#
+# 渡す数は、宣言として現れ得ない -1 にする。n + 1 だと、宣言がたまたまその数のとき
+# （ケースを1件減らして宣言を直し忘れた場合が該当する。この検査が最も想定している変化である）
+# その文書だけ食い違いが出ず、「突き合わせが効いていない」という**原因を取り違えた NG** が出る。
+# decls が数を取り出すのは grep -o "[0-9][0-9]*" であり、負数は決して現れない。
+decl_probe=$(decl_mismatches -1)
+decl_probe_ng=0
+for f in "${decl_files[@]}"; do
+  printf '%s\n' "$decl_probe" | grep -q "^$f の" || {
+    echo "  NG: 「N通り」の突き合わせが $f に効いていない（宣言に現れ得ない数を渡しても食い違いが出ない）"
+    decl_probe_ng=1
+  }
+done
+# 自己確認が落ちた場合も本体の結果を出す。どちらが原因かを1回の実行で切り分けるため。
+decl_out=$(decl_mismatches "$n")
+if [ -n "$decl_out" ]; then
+  printf '%s\n' "$decl_out" | sed 's/^/  NG: /'
+  fail=1
+elif [ "$decl_probe_ng" = 0 ]; then
+  echo "  OK（$n 通り）"
+fi
+[ "$decl_probe_ng" = 0 ] || fail=1
+
 if [ "$fail" -ne 0 ]; then echo "検査の検査に失敗しました"; exit 1; fi
 echo "$n 通りの確認をすべて通過しました"
