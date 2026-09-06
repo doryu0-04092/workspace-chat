@@ -19,7 +19,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
-| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Redis） |
+| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Valkey。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
 | 実装 | 未着手（次の作業） |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する
