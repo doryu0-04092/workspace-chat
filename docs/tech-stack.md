@@ -34,7 +34,7 @@
 | 難所 | 対応 |
 |---|---|
 | 難-1 | `react-virtuoso` の `firstItemIndex` |
-| 難-2 | `@socket.io/redis-adapter` ＋ ElastiCache for Redis |
+| 難-2 | `@socket.io/redis-adapter` ＋ ElastiCache for Valkey |
 | 難-3 | フロント・バックとも TypeScript とし、イベント型を共有する |
 | 難-4 | `react-markdown`（HTML 文字列を生成しない構造） |
 | 難-5 | PostgreSQL ＋ pg_bigm（2-gram 索引） |
@@ -48,7 +48,7 @@
    CloudFront + S3          ├─ [NestJS]  ── [PostgreSQL 17 + pg_bigm]
              ── WebSocket ──┘   ECS Fargate    RDS
                                    │
-                                   ├─ [Redis]  ElastiCache（配信の共有）
+                                   ├─ [Valkey] ElastiCache（配信の共有）
                                    └─ [S3]     添付ファイル
                                                 └ CloudFront 経由で配信
                                                   （チャンネル単位の署名付き Cookie）
@@ -107,7 +107,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 言語 | **TypeScript** | 5.x | **難-3 の解決** |
 | フレームワーク | **NestJS** | **11** | WebSocket Gateway が一級市民として組み込まれている。Guard による認可を REST と WebSocket で共通化できる |
 | **リアルタイム** | **Socket.IO** + `@socket.io/redis-adapter` | 4.x | 下記の理由により実質これ一択 |
-| DB アクセス | **Prisma** | 最新安定版 | 下記「Prisma を選んだ理由と代償」を参照 |
+| DB アクセス | **Prisma** | 最新安定版 | 下記「Prisma を選んだ理由と代償」を参照。**固定した版と理由**は下記「追加で確認した項目 — PR #40」を参照 |
 | 検証 | **Zod** | 3.x/4.x | リクエストと WebSocket イベントを同じスキーマで検証する |
 | パスワード | **Argon2id** | — | 現在の推奨 |
 | 認証 | JWT（アクセス・短命）+ opaque リフレッシュトークン | — | |
@@ -181,7 +181,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。TLS 終端。**ブラウザ通知に必要な HTTPS を提供する** |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
-| **配信の共有** | **ElastiCache for Redis** | **難-2 の解決**。Socket.IO の Redis アダプタが使う |
+| **配信の共有** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
 | 添付ファイル | **S3 + CloudFront の署名付き Cookie** | パブリックアクセスは全面遮断。**S3 への直接アクセスは行わず、CloudFront 経由のみ**とする。署名付き URL を採らない理由は [要件定義書](requirements.md) 4.3 |
 
 #### WebSocket と複数インスタンスの問題
@@ -194,7 +194,7 @@ A が投稿 → タスク1 のメモリ上の接続にしか配信できない �
 ```
 
 ALB のスティッキーセッションでは解決しない。**接続先が違えば配信経路が存在しない**ためである。
-ElastiCache for Redis の Pub/Sub を介して全タスクが配信を共有することで、構造的に解消する。
+ElastiCache for Valkey の Pub/Sub を介して全タスクが配信を共有することで、構造的に解消する。
 
 タスク数を1に絞る運用でも動作するが、**設計としては複数インスタンスを前提とする。**
 
@@ -212,7 +212,7 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 |---|---|---|
 | **ECS Fargate** | **0.25 vCPU / 0.5 GB × 2 タスク** | **タスク数を 2 にするのは、複数インスタンス構成が実際に動くことを検証するためである。** 1 タスクでは ElastiCache を介した配信共有（難-2）が机上の設計に留まり、**本番で初めて壊れる**。同時接続 50 は Node.js の 1 プロセスで十分に扱える規模であり、vCPU は最小で足りる |
 | **RDS PostgreSQL 17** | **db.t4g.micro（2 vCPU / 1 GB）/ gp3 20 GB / Single-AZ** | メッセージ 100,000 件は本文込みでも数十 MB 規模であり、pg_bigm の索引を含めてもストレージ 20 GB に収まる。**Single-AZ は学習用途としての割り切り**（[要件定義書](requirements.md) 4.2） |
-| **ElastiCache for Redis** | **cache.t4g.micro（0.5 GB）× 1 ノード** | 用途は Pub/Sub による配信共有と在席状態の保持のみで、データを蓄積しない。**レプリカは置かない**（停止すると複数タスク間の配信が止まる。これも割り切りである） |
+| **ElastiCache for Valkey** | **cache.t4g.micro（0.5 GB）× 1 ノード** | 用途は Pub/Sub による配信共有と在席状態の保持のみで、データを蓄積しない。**レプリカは置かない**（停止すると複数タスク間の配信が止まる。これも割り切りである） |
 | **ALB** | 1 台 | TLS 終端と WebSocket の維持 |
 | **S3** | 上限を設けない（実測で監視） | 添付は画像 10 MB / 動画 100 MB / 文書・圧縮 25 MB を上限とする（[要件定義書](requirements.md) 4.3） |
 | **CloudFront** | 1 ディストリビューション / **ビヘイビアを2つに分ける** | フロントの静的配信と添付ファイルの配信を兼ねるが、**署名を要求するのは添付のパス（`/files/*`）のみ**とする。ディストリビューション全体に署名を要求すると、**署名付き Cookie を持たない未ログインの利用者がログイン画面すら開けなくなる** |
@@ -228,9 +228,9 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | ECS Fargate（0.25 vCPU / 0.5 GB × **2**） | 約 $18 |
 | ALB | 約 $16 |
 | RDS db.t4g.micro（Single-AZ） | 約 $13 |
-| ElastiCache cache.t4g.micro | 約 $11 |
+| ElastiCache for Valkey cache.t4g.micro（価格の根拠は「Valkey の版（ローカル）」） | 約 $9 |
 | S3 + CloudFront | 数ドル |
-| **合計** | **約 $60〜70 / 月** |
+| **合計** | **約 $55〜65 / 月** |
 
 **デモ後は `terraform destroy` する運用**を前提とし、実費を数ドルに抑える。
 
@@ -260,9 +260,9 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 
 **Redis を #24 に切り出したのとは性質が違う。** #24 は
 「ElastiCache の Redis OSS が 7.1 で止まっているので Valkey へ移すか」という
-**採る版を変えるかどうかの判断**であり、決めれば構成が変わる。
-こちらは**版を変えない判断の、根拠の書き直し**である。
-**実際に 18 へ動かすなら、それは #24 と同じ性質の判断**であり、
+**採る版を変えるかどうかの判断**であり、**実際に Valkey へ移す決定をし、構成を変えた**
+（下記「Valkey の版（ローカル）」）。こちらは**版を変えない判断の、根拠の書き直し**である。
+**実際に 18 へ動かすなら、それは #24 と同じ性質（採る版を変える判断）**であり、
 この PR ではなく別に切り出す。
 
 **上の表が挙げている「pg_bigm の対応実績」は、17 と 18 を分ける理由になっていなかった。**
@@ -301,6 +301,29 @@ AWS の[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/Postgre
 | **typescript-eslint** | **8.69.0** | 8.69.0 | 最新。ESLint 10 と TypeScript 5.9 の両方を受け入れる |
 | **unplugin-swc** | **1.5.11** | 1.5.11 | 最新。**テストの実行にのみ使う。** 下記「テストの変換に SWC を使う理由」を参照 |
 | **@swc/core** | **1.16.1** | 1.16.1 | 最新。`unplugin-swc` が呼ぶ変換器の本体 |
+
+#### 追加で確認した項目 — PR #40（2026-09-06。#42）
+
+PR #40（Prisma のスキーマとマイグレーション）で追加した依存と `overrides` の判断を記す。
+**PR の説明はリポジトリに残らない。** 特に `overrides` の2件は、なぜ固定したのか・
+いつ外せるのかが分からなくなるため、ここに記録する。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **prisma** | **^7.10.0** | `latest` タグは `8.0.0-rc.12`（リリース候補）を指す。そのまま入れると `@prisma/composer-cli` 経由で `hono` の high 8件を持ち込み、[audit.yml](../.github/workflows/audit.yml) が落ちる。本書の方針（最新安定版を優先する）に従い 7.10.0 を選んだ |
+| **@testcontainers/postgresql** | **^12.1.0** | 実 PostgreSQL に対する検証に使う。上表バックエンドの「テスト」欄がすでに「Vitest + Testcontainers」と定めている |
+| **overrides: deepmerge-ts** | **8.0.2（完全固定）** | `prisma` → `@prisma/config` の推移依存。7.1.5 は GHSA-ggr8-5vv4-36mx（high）を持つ。**影響範囲は `<8.0.0` であり、7 系に修正版は無い**ため、8 系へ上げるほかない。`@prisma/config@7.10.0` は `deepmerge-ts` を `"7.1.5"` と完全固定で要求しており、**この override は上流の完全固定をメジャーを跨いで置き換えている。** `^8.0.2` ではなく完全固定にしたのは、将来の 8.x へ人の判断を経ずに動くのを避けるためである。**外せる条件: `@prisma/config` が `deepmerge-ts` の8系を要求するようになったら外す** |
+| **overrides: mysql2** | **^3.24.3** | `prisma` の推移依存。3.15.3 は GHSA-3f6p-5ww8-9rcr / GHSA-rgwj-5xj2-c3m3（high）を持つ。このプロジェクトは MySQL を使わないが、`prisma` が依存として引く。**外せる条件: `prisma` が修正版を引くようになったら外す** |
+
+> **`@prisma/config` は `prisma.config.ts` を読み込む当事者である。壊れると `prisma` のコマンドが
+> 全滅する。** CI が踏むのは `generate` / `migrate deploy` / `migrate diff` の3経路だけであり、
+> **`prisma migrate dev` は CI では一度も実行されない**（PR #40 で手元で確認した。空の DB に
+> 適用して exit 0）。
+>
+> **`DATABASE_URL` の変数名は README と `.env.example` に記載した**（値は書かない。
+> CLAUDE.md 禁止事項）。**コードの中で**この変数名を参照しているのは、
+> 現時点では `prisma.config.ts` と
+> [prisma-schema.test.ts](../apps/api/src/prisma-schema.test.ts) である。
 
 #### TypeScript 7 を採らない理由
 
@@ -384,8 +407,8 @@ NestJS のコンストラクタインジェクションは、この指定が出�
   **環境は「ローカル・RDS」の2つではなく、テストを含めて3つある**
 - **ElastiCache で AUTH トークンと転送時暗号化（`rediss://`）を使うかを決め、
   `@socket.io/redis-adapter` がその接続で動くことを確認する。**
-  **ローカルの Redis は無認証の `redis://` であり、この経路を一度も通らない**
-  （下記「ローカルの Redis に認証を掛けない」）
+  **ローカルの Valkey は無認証の `redis://` であり、この経路を一度も通らない**
+  （下記「ローカルの Valkey に認証を掛けない」）
 
 > **代償を明記する。** **テストの実行環境の項目**は**まだ決めていない**。Testcontainers に
 > ビルド済みのイメージをどう渡すか（毎回ビルドするか、名前で参照するか）を
@@ -440,43 +463,46 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 > ローカルで通ったことは、そのどちらも裏付けない。
 > **消してよいのは、RDS の実インスタンスで実行したときだけである。**
 
-#### Redis の版（ローカル）
+#### Valkey の版（ローカル）——#24: Redis OSS から Valkey への移行（2026-09-04 承認）
 
-ローカルは `redis:7.2-alpine` とする。**ElastiCache の Redis OSS は 7.1 が上限であり、
-7.2 以降は Valkey としてのみ提供される**（2026-09-04 に確認）。本番と同系統に寄せた暫定である。
+**ElastiCache for Redis を、ElastiCache for Valkey に切り替える（#24）。**
 
-**版を 7.1 に揃えることはできない。** upstream の Redis に 7.1 は存在せず、
-7.0 の次が 7.2 である（Docker Hub のタグを検索し、`7.1` が0件・`7.0` と `7.2` が存在することを確認した）。
-ElastiCache の「7.1」は AWS 側の版番号であり、upstream の版番号と1対1に対応しない。
+**理由。** Amazon ElastiCache が提供する Redis OSS のエンジン版は **7.1 が上限**であり、
+**7.2 以降は Valkey としてのみ提供される。** AWS は新規の構築に Valkey を推奨している。
+`@socket.io/redis-adapter`（Pub/Sub と在席状態）の用途は Redis 7.x の範囲に収まるため、
+**現時点で動かないものは無い。** それでも移す理由は、Redis OSS 7.x が AWS 側で新機能の
+開発対象から外れていること、および価格である。
 
-> **代償を2つ明記する。**
->
-> 1. **ローカルだけが本番の上限より新しい。** `redis:7.2` は ElastiCache の Redis OSS 7.1 より後の版であり、
->    **7.2 で入った機能や挙動に依存すると、手元では通って ElastiCache で落ちる。**
->    露見するのは Terraform で環境を作ったあと、つまり最も遅い段階である。
->    本書がローカルと本番の差を潰してきた方針と、ここだけ逆向きになっている。
->    **緩和は「使う機能を絞る」ことしかない。** 用途は Socket.IO の Redis アダプタ
->    （Pub/Sub）と在席状態の保持だけであり、いずれも 7.0 の範囲に収まる。
->    **7.2 固有の機能を使いたくなったら、その時点で ElastiCache 側の版を確認する。**
-> 2. Redis OSS 7.x は AWS 側で新機能の開発対象から外れている。
->    Valkey へ移すかどうかは決めていない。**決めるまで、本書の「ElastiCache for Redis」は
->    上限 7.1 の意味で読む必要がある。**
+**価格の根拠**（AWS の価格表で確認。2026-09-06）**: Valkey は Redis 比で、ノード型構成が約20%、
+サーバーレス構成が約33%安い。最小課金データ量も 1GB から 100MB に下がる。**
 
-#### ローカルの Redis に認証を掛けない
+ローカルは `valkey/valkey:8-alpine` とする。**本番と同系統に寄せた暫定である**
+（`redis-server` / `redis-cli` 等の Redis 互換コマンド名がそのまま使えることを実行して確認した。
+`compose.yaml` の `command` とヘルスチェックはこれまでの記述を変えていない）。
+**ElastiCache for Valkey が実際にどの版を提供するかは未確認**であり、Terraform で環境を作る段階で確認する。
 
-`compose.yaml` の redis は `requirepass` を設けず、`redis://` で繋ぐ。
+> **代償を明記する。** **Valkey は Redis のフォークである。** 現時点では Redis 互換の機能
+> （Pub/Sub と在席状態の保持）しか使っておらず問題は無いが、**Redis 8 以降で入る、
+> Valkey に取り込まれない独自機能が必要になった場合、ElastiCache 上では Redis 側へ戻れない。**
+> ElastiCache の Redis OSS は 7.1 が上限のままであり、Valkey を選んだ時点で
+> それ以降の Redis の機能へのアクセスは手放している。
+
+#### ローカルの Valkey に認証を掛けない
+
+`compose.yaml` の redis（サービス名は変えていない。「Valkey の版（ローカル）」を参照）は
+`requirepass` を設けず、`redis://` で繋ぐ。
 **127.0.0.1 にだけ束縛しており、ローカルでは守るものが無い**ためである。
 
 > **代償を明記する。** 本番の ElastiCache は **AUTH トークン**と**転送時暗号化**（`rediss://`）を持つ。
 > ローカルが無認証の `redis://` だと、**アプリの Redis クライアント設定に認証と TLS の経路が
 > 一度も現れない。** PostgreSQL 側はパスワードのずれをヘルスチェックが検知するところまで
-> 作ってあるが、**Redis にはそれに対応するものが無く、作りようもない**（掛ける認証が無いため）。
+> 作ってあるが、**Valkey にはそれに対応するものが無く、作りようもない**（掛ける認証が無いため）。
 > 露見するのは Terraform で環境を作ったあと、**版差と同じく最も遅い段階**である。
 >
 > **ローカルにも `requirepass` を掛ける案は採らなかった。** 掛けても TLS は再現できず、
 > 「本番に近づけた」という誤った安心だけが残る。**近くない、と書くほうを選ぶ。**
 
-#### ローカルの Redis に永続化を持たせない
+#### ローカルの Valkey に永続化を持たせない
 
 `compose.yaml` の redis は `--save '' --appendonly no` で RDB・AOF の両方を切り、
 `/data` に `tmpfs` を当てる。用途は Pub/Sub による配信共有と在席状態の保持だけで、
@@ -488,11 +514,16 @@ ElastiCache の「7.1」は AWS 側の版番号であり、upstream の版番号
 `docker compose down`（`-v` 無し）は匿名ボリュームを消さないため、
 `down` → `up` を繰り返すだけで積み上がる（実際に増えることを確認した）。
 
-> **代償を明記する。** **再起動で在席状態が消える。** 上の「ElastiCache for Redis」の行は
+> **代償を明記する。** **再起動で在席状態が消える。** 上の「ElastiCache for Valkey」の行は
 > 用途を「Pub/Sub による配信共有と**在席状態の保持**」と書いているが、
 > **ローカルではその保持が再起動をまたがない。** 在席は接続から作り直せる情報であり、
-> 再接続で復元されるため許容する。**メッセージのように作り直せない情報を Redis に置いたら、
+> 再接続で復元されるため許容する。**メッセージのように作り直せない情報を Valkey に置いたら、
 > この判断は成り立たなくなる。** 置く先は PostgreSQL である。
+
+> **サービス名・環境変数名は変えていない。** `compose.yaml` の `redis` サービス、
+> `.env.example` の `REDIS_PORT`、README.md の操作手順（`docker compose pull redis` 等）は
+> いずれも従来のまま「redis」を使う。**中身のイメージだけを Valkey に差し替える判断であり、
+> ローカル環境のサービス名・変数名・コンテナ名の変更は、この決定の範囲外とする。**
 
 #### ローカルの PostgreSQL の `/dev/shm` を広げない
 
@@ -529,7 +560,7 @@ PostgreSQL の動的共有メモリはここを使う（`dynamic_shared_memory_t
 | Phoenix が持っているもの | 意味 |
 |---|---|
 | Phoenix Channels | チャットのために設計された WebSocket 抽象 |
-| **Phoenix PubSub** | **Redis 不要**で複数ノード間の配信が成立する（Erlang 分散が担う） |
+| **Phoenix PubSub** | **Redis / Valkey 相当のミドルウェアが不要**で複数ノード間の配信が成立する（Erlang 分散が担う） |
 | **Phoenix Presence** | **在席管理が標準機能**。分散環境で自動的に整合する |
 
 **難-2 と在席管理が、追加インフラゼロで解決する。** ElastiCache も不要になる。

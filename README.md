@@ -19,7 +19,8 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
-| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Redis） |
+| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Valkey。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
+| Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#42） |
 | 実装 | 未着手（次の作業） |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する
@@ -187,6 +188,11 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 
 **Docker で動かすのはミドルウェアだけである。** api と web はホストの Node で動かす
 （[compose.yaml](compose.yaml)）。ホットリロードとデバッグのしやすさを優先した。
+
+**`redis` サービスのイメージは Valkey である**（`valkey/valkey:8-alpine`。#24）。
+ElastiCache for Redis から ElastiCache for Valkey へ移す決定を受けたもので、
+**サービス名・環境変数名（`REDIS_PORT`）はこの決定の範囲外とし、変えていない。**
+理由・価格の根拠・代償は [技術スタック](docs/tech-stack.md)「Valkey の版（ローカル）」に記す。
 
 > **代償。** ローカルとデプロイ先（ECS Fargate）で Node の動作環境が揃わない。
 > 「手元では動くが ECS で動かない」がありうる。**CI（ubuntu / Node 24）がその差を先に踏む。**
@@ -682,7 +688,8 @@ Docker は同じ名前のイメージが手元にあればレジストリを見�
 redis は既製のイメージをそのまま使う。**`docker compose pull redis` が要る。**
 これを叩かない限り、**最初に `up` した日の 7.2.x のまま動き続ける。**
 
-接続先は `.env` に書いた値から組み立てる。
+**接続先の組み立て方**（`DATABASE_URL` を含め、以後この形式を「接続先の組み立て方」として参照する）。
+`.env` に書いた値から組み立てる。
 
 ```
 postgresql://<POSTGRES_USER>:<POSTGRES_PASSWORD>@127.0.0.1:<POSTGRES_PORT>/<POSTGRES_DB>
@@ -736,6 +743,23 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CRE
 `.env` を読むのは compose であって手元のシェルではない。
 `docker compose exec db psql -U "$POSTGRES_USER"` と書くと、
 **手元のシェルが空文字に展開してから** `docker` に渡す。
+
+#### DATABASE_URL（Prisma。#42）
+
+**`prisma generate` を除くすべての `prisma` コマンド**（`migrate dev` / `migrate deploy` /
+`migrate diff` / `db execute` 等）に、環境変数 `DATABASE_URL` が要る。
+
+読むのは docker compose ではなく、根の [prisma.config.ts](prisma.config.ts) が
+`process.loadEnvFile()` で直接読む。**`.env.example` にも値は書かない**（`.env.example` の
+「Prisma」節を参照）。値は「接続先の組み立て方」と同じ形（`postgresql://` の URL）で
+`POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_PORT` / `POSTGRES_DB` から組み立てる
+（`127.0.0.1` に固定し `localhost` と書かない理由も「接続先の組み立て方」を参照）。
+
+コピーした先の `.env` の `DATABASE_URL` に書き込む。**根で `prisma` の CLI を実行すること**
+（[prisma.config.ts](prisma.config.ts) を根に置いているのは `prisma` をルートの開発依存として
+入れているためであり、根で実行すれば `--schema` を毎回渡さずに済む。**`.env` の読み込み自体は
+`prisma.config.ts` の位置から解決するため cwd には依存しない**が、CLI 自体の呼び出しは
+根で行う前提の構成である）。
 
 ### 動かす
 
