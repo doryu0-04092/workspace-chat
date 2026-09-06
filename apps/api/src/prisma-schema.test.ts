@@ -1373,46 +1373,50 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 投稿時の宛先解決 — 新しいメンションの対象を `@ユーザーID` から引く問い合わせ
      * （機能一覧 9.1「投稿時の宛先解決」）。
      *
-     * **条件は2つあり、向きが逆である。両方を守ること。**
+     * **条件は3つある。**
      *
-     * **1. 現時点の決定であり、#78 で見直す: ここには `deletedAt IS NULL` を書いていない。**
-     * 隣の `activeUserByLoginId` は付けているが、この問い合わせは
-     * `deletedAt` の有無で挙動を変えない。**理由は、退会済みを積極的に解決可能に
-     * するためではない。** `Membership` / `ChannelMember` の消し込み（機能一覧 1.5。
-     * 削除と同一トランザクションで連鎖削除する）を取りこぼした状態
+     * **1. 現時点の決定であり、#78 で見直す: 対象側には `deletedAt IS NULL` を
+     * 書いていない。** 隣の `activeUserByLoginId` は付けているが、この問い合わせは
+     * 対象側の `deletedAt` の有無で挙動を変えない。**理由は、退会済みを積極的に
+     * 解決可能にするためではない。** `Membership` / `ChannelMember` の消し込み
+     * （機能一覧 1.5。削除と同一トランザクションで連鎖削除する）を取りこぼした状態
      * （1.5 が「読み取り側にも条件を置いて二重にする」としている対象そのもの）でも、
      * この経路が `deletedAt` の有無で挙動を変えないための備えである。
      *
      * **正しく退会した利用者（`Membership` が消え、`ChannelMember` が連鎖削除された
-     * 状態）は、この問い合わせでは解決できない。** `ChannelMember` を内部結合しており、
-     * 行が無ければ何も返さないためである。過去のメンションを「削除済みの利用者」として
-     * 表示する経路（機能一覧 9.1「表示時の参照先解決」）はこの問い合わせとは別であり、
-     * `userId` から `User` を直接引いて `ChannelMember` を問わない
-     * （参照実装は現時点のコードに無い）。
+     * 状態）は、対象としてこの問い合わせでは解決できない。** `ChannelMember` を
+     * 内部結合しており、行が無ければ何も返さないためである。過去のメンションを
+     * 「削除済みの利用者」として表示する経路（機能一覧 9.1「表示時の参照先解決」）は
+     * この問い合わせとは別であり、`User."id"`（UUID）を直接引いて `ChannelMember` を
+     * 問わない（参照実装は現時点のコードに無い）。
      *
-     * **2. そのチャンネルの参加者に限ること**（機能一覧 9.1
+     * **2. 対象がそのチャンネルの参加者に限ること**（機能一覧 9.1
      * 「そのチャンネルに参加していない利用者はメンションできない」）。
      * 落とすと、**参加していない利用者を宛先にできる。**
      * プライベートチャンネルなら、**参加していない相手に通知が飛び、
      * そのチャンネルの存在が伝わる。**
      *
-     * **未完: 要求する側（メンションを投稿しようとしている利用者自身）の条件を持たない。**
-     * 兄弟の `channelMemberList` / `workspaceMemberList` と同じく
-     * **引数に要求者を取らない形にしてはならない。** 呼ぶ側の確認に委ねると、
+     * **3. 要求する側（メンションを投稿しようとしている利用者自身）が、そのチャンネルの
+     * 参加者であり、かつ退会していないこと。** 兄弟の `channelMemberList` /
+     * `workspaceMemberList` と同じく**引数に要求者を取る。** これを欠くと、
      * 非参加者が `@ユーザーID` を1件ずつ試すことで、そのプライベートチャンネルに
      * 誰が参加しているかを探れてしまう（存在の探索）。
-     * **この関数は現時点で参照実装として未完であり、要求者の引数とその参加判定を
-     * 持たない**（#78 に追記）。
      *
      * **1 だけを見て「条件を足すな」と読まないこと。**
-     * 外すのは `deletedAt` であって、参加の条件ではない。
+     * 外すのは対象側の `deletedAt` であって、参加の条件ではない。
      */
-    function mentionTargetByLoginId(loginId: string, channelId: string): string {
+    function mentionTargetByLoginId(loginId: string, channelId: string, viewerId: string): string {
       return `
         SELECT u."id"
         FROM "User" u
         JOIN "ChannelMember" cm
           ON cm."userId" = u."id" AND cm."channelId" = '${channelId}'
+        -- 要求する側が、そのチャンネルの参加者であること。
+        JOIN "ChannelMember" vcm
+          ON vcm."channelId" = '${channelId}' AND vcm."userId" = '${viewerId}'
+        -- 要求する側が退会していないこと。
+        JOIN "User" viewer
+          ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
         WHERE lower(u."userId") = lower('${loginId}');
       `;
     }
@@ -1434,7 +1438,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
           VALUES ('${randomUUID()}', '${channelId}', '${ws}', '${userId}');
         UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';
       `);
-      const output = await expectSqlToSucceed(mentionTargetByLoginId(loginId, channelId));
+      // 要求する側は `insider`（secret の正規の参加者）で固定し、対象側だけを見る。
+      const output = await expectSqlToSucceed(
+        mentionTargetByLoginId(loginId, channelId, '00000000-0000-7000-8000-000000000002'),
+      );
       expect(output).toBe(userId);
     });
 
@@ -1457,18 +1464,64 @@ describe('Prisma のスキーマとマイグレーション', () => {
           VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000c1', '${ws}', '${userId}');
       `);
       // `general`(c1) には参加しているが、`secret`(c2) には参加していない。
+      // 要求する側は `insider`（secret の正規の参加者）で固定し、対象側だけを見る。
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId(loginId, '00000000-0000-7000-8000-0000000000c2'),
+        mentionTargetByLoginId(
+          loginId,
+          '00000000-0000-7000-8000-0000000000c2',
+          '00000000-0000-7000-8000-000000000002',
+        ),
       );
       expect(output).toBe('');
     });
 
     it('参加している利用者は、メンションの参照先にできる', async () => {
       // **否定側だけだと、常に空を返す実装でも緑になる。**
+      // 要求する側・対象側ともに `insider`（secret の参加者）。自分自身への
+      // メンションが解決できることも兼ねて確認する。
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId('insider', '00000000-0000-7000-8000-0000000000c2'),
+        mentionTargetByLoginId(
+          'insider',
+          '00000000-0000-7000-8000-0000000000c2',
+          '00000000-0000-7000-8000-000000000002',
+        ),
       );
       expect(output).toBe('00000000-0000-7000-8000-000000000002');
+    });
+
+    it('参加していない要求する側は、メンションの宛先解決を求められない', async () => {
+      // **要求する側の条件を書き漏らすと、非参加者が `@ユーザーID` を1件ずつ試すことで
+      // プライベートチャンネルの参加者を探れてしまう（存在の探索）。**
+      //
+      // **「どのチャンネルにも参加していない要求者」で試してはならない。**
+      // それだと結合が常に空になり、**チャンネルの条件を落としても落ちない。**
+      // secret(c2) ではなく general(c1) には参加している要求者を作る。
+      const viewerId = randomUUID();
+      const viewerLoginId = `requester_elsewhere_${randomUUID().slice(0, 8)}`;
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${viewerId}', '${viewerLoginId}', '要求側・別チャンネルの人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${viewerId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000c1', '${ws}', '${viewerId}');
+      `);
+      const output = await expectSqlToSucceed(
+        mentionTargetByLoginId('insider', '00000000-0000-7000-8000-0000000000c2', viewerId),
+      );
+      expect(output).toBe('');
+    });
+
+    it('退会した要求する側は、メンションの宛先解決を求められない', async () => {
+      // `createDeletedUserKeepingMembership` は secret(c2) の ChannelMember を
+      // 残したまま deletedAt を立てる（消し込みの取りこぼしと同じ状態）。
+      // **要求する側がこの状態でも、宛先解決を求められてはならない。**
+      const { userId: ghostViewerId } = await createDeletedUserKeepingMembership();
+      const output = await expectSqlToSucceed(
+        mentionTargetByLoginId('insider', '00000000-0000-7000-8000-0000000000c2', ghostViewerId),
+      );
+      expect(output).toBe('');
     });
 
     it('現役の利用者は、ユーザーID から引ける', async () => {
