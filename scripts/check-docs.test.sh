@@ -524,7 +524,11 @@ expect_ng "requirements.md の一覧の見出しを変えて読み取れなく�
 #     後片付けに手を入れたとき片方が黙って取り残される（doc-scope.sh 冒頭と同じ理由）。
 #     判定は doc_find -name '*.md' に統一する。検査1が見るのは Markdown だけである。
 expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対象に入る）| out（除外される）
-  local desc="$1" file="$2" body="$3" want="$4" got
+              # $5...=併せて置くファイル（リンク先にする実体。既に $work にあれば
+              #        作らず・消さず・空にもせず、そのまま使う。下の注記を参照）
+  local desc="$1" file="$2" body="$3" want="$4" got extra
+  shift 4
+  local made=("$work/$file")
   n=$((n + 1))
   mkdir -p "$work/$(dirname "$file")"
   printf '%s\n' "$body" > "$work/$file"
@@ -538,6 +542,25 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
     echo "  NG: $n. $desc — ファイルを置けていない。ケースが成立していない"
     fail=1; return
   fi
+  # $file と違い $extra は複製済みの木に既にありうる（.env.example がまさにその候補）。
+  # そのときは作らず・消さずにそのまま使う。$extra に求めているのは
+  # 「リンク先の実体が存在すること」だけで、複製されたものはそれを満たす。
+  #
+  # 既にある場合を失敗にしてはならない。.env.example は DOC_KEEP_FILES にあるため
+  # doc_find の対象に入り、冒頭の複製ループで $work に入る。つまり
+  # リポジトリに .env.example が置かれた瞬間、下のケース31 は本体まで到達せず落ちる。
+  # KEEP に .env.example を挙げている理由自体が「README から参照されやすい」であり、
+  # そのケースが想定している状況がまさに来たときに検査が落ちる、という向きになる。
+  #
+  # 上書きもしてはならない。本物を空に切り詰めたうえで消してしまい、以降のケースが
+  # 「.env.example が消えた木」の上で黙って別物になる（expect_ng の restore と違い
+  # 元に戻らない）。made に入れないことで、後片付けの対象からも外す。
+  for extra in "$@"; do
+    [ -e "$work/$extra" ] && continue
+    mkdir -p "$work/$(dirname "$extra")"
+    : > "$work/$extra"
+    made+=("$work/$extra")
+  done
   # 置いたファイルが想定した側にあることを先に確かめる。逆側に落ちると
   # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
   if (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF "$file"); then
@@ -547,7 +570,7 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   fi
   if [ "$got" != "$want" ]; then
     echo "  NG: $n. $desc — 置いたファイルが $want ではなく $got の側にある。ケースが成立していない"
-    fail=1; rm -f "$work/$file"; return
+    fail=1; rm -f "${made[@]}"; return
   fi
   if run_check; then
     echo "  OK: $n. $desc"
@@ -556,7 +579,7 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
     (cd "$work" && bash scripts/check-docs.sh 2>&1 | grep '^  NG' | sed 's/^/        実際: /')
     fail=1
   fi
-  rm -f "$work/$file"
+  rm -f "${made[@]}"
 }
 # 除外されたディレクトリの中の Markdown は検査対象にならないこと。
 # ここが効かないと、依存パッケージの README のリンク切れで CI が落ちる。
@@ -575,6 +598,72 @@ expect_ok "入れ子の node_modules の中のリンク切れも無視される"
 # しかも文面は「リンク切れ」と読めるため、本来直す必要のないリンクの方を疑わせる。
 expect_ok "外部リンク（http / https / mailto）は存在を確かめない" docs/probe-external-link.md \
   '[外部の文書](https://example.invalid/does-not-exist) と [平文の外部](http://example.invalid/x) と [連絡先](mailto:nobody@example.invalid)' in
+
+# KEEP の分岐（PRUNE に一致しても除外しない）を、doc_excluded の委譲と
+# check-docs.sh の検査1 まで通して踏む唯一のケース。
+#
+# 0a にも KEEP の確認があるが、あちらは doc_excluded_name を単体で呼ぶだけであり、
+# doc_excluded が委譲していることも、検査1 がその結果でリンクを NG にすることも見ていない。
+# 判定関数が正しくても、委譲や呼び出しが外れれば同じ穴が開く。守備範囲が違う。
+#
+# doc-scope.sh は「.env.example は README から参照されやすいため除外から外している」と
+# 目的まで宣言している。ここを踏まないと、README が .env.example を参照した瞬間に
+# 正当なリンクが「リンク先にできない」で NG になる。
+#
+# ケースが成立していることを先に見る。対象が PRUNE のパターンに一致しなければ、
+# KEEP が無くてもこのリンクは通る。つまり KEEP を何も検査していないことになる。
+#
+# 名前は1箇所に置く。成立判定・説明文・リンク本文・$extra に別々に書くと、
+# 成立判定だけがケースの触っていない名前を見ることになり、落ちる条件が消える。
+keep_pruned=0
+keep_target=.env.example   # case の対象を変数にする（定数を直接書くと shellcheck SC2194）
+for g in "${DOC_PRUNE_FILES[@]}"; do
+  # shellcheck disable=SC2254
+  case "$keep_target" in $g) keep_pruned=1 ;; esac
+done
+if [ "$keep_pruned" = 0 ]; then
+  echo "  NG: $keep_target が DOC_PRUNE_FILES のどれにも一致しない。KEEP を踏むケースが成立していない"
+  fail=1
+fi
+expect_ok "KEEP に挙げた $keep_target へのリンクは「リンク先にできない」にならない" \
+  probe-env-example-link.md "[環境変数の例]($keep_target)" in "$keep_target"
+
+# $extra の「既にあればそのまま使う」分岐に落ちる条件を持たせる。
+#
+# 分岐が外れると `: >` で空に切り詰めたうえ made 経由で消される。
+# 上のケースはリンク先が存在しさえすれば通るため、切り詰めても消されても緑のままである。
+# 実体が元のままであることを見るのは、ここだけである。
+#
+# 名前は1箇所に置く。呼び出しと cmp に別々に書くと、片方だけ差し替えたときに
+# cmp がケースの触っていないファイルを比べ、落ちる条件が消える。
+existing_target=package.json   # DOC_PRUNE_DIRS にも DOC_PRUNE_FILES にも当たらず、複製ループで必ず $work に入る
+expect_ok "既に複製にある実体をリンク先にしても、その実体を壊さない" \
+  probe-existing-target.md "[ルートの $existing_target]($existing_target)" in "$existing_target"
+if ! cmp -s "$repo/$existing_target" "$work/$existing_target"; then
+  echo "  NG: 既に \$work にあった $existing_target が壊れた（\$extra を上書き・削除している）"
+  fail=1
+fi
+
+# $extra の「作る側」に落ちる条件を持たせる。
+#
+# 上の2つの $extra は複製ループが $work に入れるため、どちらも `[ -e ] && continue` を通る。
+# mkdir -p / `: >` / made+= の3行は一度も実行されない。**丸ごと削っても、
+# made+= だけを落としても、全ケースが緑で通る。** made+= が落ちた形は特に静かで、
+# 作った $extra が $work に残り続け、以降のケースが前のケースの置き土産の上で回る。
+#
+# 複製ループが拾わない名前を渡す。リポジトリに実在せず、
+# DOC_PRUNE_DIRS にも DOC_PRUNE_FILES にも当たらない綴りである。
+#
+# **階層を1つ持たせる。** ルート直下の名前だと dirname が `.` を返し、
+# mkdir -p が `$work/.`（既にある）になって何もしないため、その1行だけを削っても
+# このケースが緑で通る。階層があれば、削った時点で `: >` が失敗して落ちる。
+fresh_target='probe-fresh-dir/target.txt'
+expect_ok "複製に無い実体をリンク先にすると、置かれて、後片付けされる" \
+  probe-fresh-target.md "[新しく置く実体]($fresh_target)" in "$fresh_target"
+if [ -e "$work/$fresh_target" ]; then
+  echo "  NG: $fresh_target が \$work に残っている（made に入れていない）"
+  fail=1
+fi
 
 # --- 「N通り」の宣言が実数と一致すること -------------------------------------
 # check-docs.sh の3章は「合計 N 件」「全 N 件」「機能N件」「N項目」を照合するが、
