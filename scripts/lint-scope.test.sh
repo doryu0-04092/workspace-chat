@@ -72,10 +72,15 @@ POS="$POS_ROOT/probe.ts"
 HOOKS_ROOT='apps/web/src/__lint_scope_hooks_probe__'
 HOOKS_PROBE="$HOOKS_ROOT/Probe.tsx"
 
-# react-hooks のルールを一時的に無効化して壊す確認をするための、
-# eslint.config.js のバックアップ先。空文字列の間はまだ用意していないという意味で
-# 扱う（trap 発火時に set -u で落ちないよう、変数だけは先に宣言しておく）。
-ESLINT_CONFIG_BACKUP=''
+# 壊す確認用に一時的に書く、exhaustive-deps を 'warn' に戻した eslint.config.js の
+# 写し。空文字列の間はまだ用意していないという意味で扱う（trap 発火時に set -u で
+# 落ちないよう、変数だけは先に宣言しておく）。
+#
+# **追跡下の eslint.config.js 自体は書き換えない。** リポジトリ直下に置くのは、
+# ESM の import（`import js from '@eslint/js'`）が node_modules を探すのに
+# ディレクトリ階層を辿るためで、リポジトリの外の一時ディレクトリに置くと
+# `ERR_MODULE_NOT_FOUND` になる（実測）。
+HOOKS_BROKEN_CONFIG=''
 
 # 後片付け。途中で落ちても消す。
 #
@@ -95,12 +100,9 @@ cleanup() {
   done
   rmdir "$POS_ROOT" 2>/dev/null || true
   rmdir "$HOOKS_ROOT" 2>/dev/null || true
-  # eslint.config.js を壊す確認のために書き換えていたら、必ず元に戻す。
-  # ここを忘れると、途中で落ちたときに react-hooks のルールが無効なまま残る。
-  if [ -n "$ESLINT_CONFIG_BACKUP" ] && [ -f "$ESLINT_CONFIG_BACKUP" ]; then
-    cp "$ESLINT_CONFIG_BACKUP" eslint.config.js
-    rm -f "$ESLINT_CONFIG_BACKUP"
-  fi
+  # 壊す確認用に書いた一時ファイルを消す。リポジトリ直下に置いているため、
+  # 消し忘れると未追跡ファイルとして残り続ける。
+  rm -f "$HOOKS_BROKEN_CONFIG"
 }
 
 # 既存物があれば、何もせずに止まる。
@@ -308,68 +310,82 @@ check_tool 'Prettier' '.prettierignore（または .gitignore）に .claude/ が
 # いるかは見ていない。誰かが files のパターンを壊しても、NEG/POS の判定は
 # 他のルール（any・未使用変数）で変わらず緑のまま通る。
 echo "3. react-hooks のルール"
-set +e
-HOOKS_OUT="$(npm run lint 2>&1)"
-HOOKS_CODE=$?
-set -e
 
-# 両方のルール ID を見る。片方だけだと、もう一方が壊れても気づけない。
-hooks_detected() {
-  contains "$1" 'react-hooks/rules-of-hooks' && contains "$1" 'react-hooks/exhaustive-deps'
+# ルール ID が出力に含まれるだけでは足りない。probe は rules-of-hooks と
+# exhaustive-deps の両方に引っかかるようにしてあり、rules-of-hooks は常に
+# error で検出される。exhaustive-deps だけを誤って 'warn' に戻しても、
+# rules-of-hooks の error のおかげで npm run lint の終了コードは 1 のままであり、
+# ルール ID の有無だけを見る判定は「検出された」と誤判定する。守るべき性質は
+# 「hooks 違反で npm run lint が赤になること」であり、ルール ID を含む行の
+# 重大度（error であること）まで見る。
+#
+# ESLint の stylish フォーマットは `<行:列>  <重大度>  <メッセージ>  <ルール ID>` を
+# 1行に持つ。重大度とルール ID が同じ行に現れることを頼りに、grep -E で
+# 「行頭が行:列、その次が error、行末がそのルール ID」の並びを確認する。
+hooks_rule_is_error() { # $1=出力 $2=ルール ID
+  printf '%s\n' "$1" | grep -qE "^ *[0-9]+:[0-9]+ +error .*${2}\$"
 }
 
-if [ "$HOOKS_CODE" -ne 0 ] && [ "$HOOKS_CODE" -ne 1 ]; then
-  echo "  NG: ESLint が動かなかった（終了コード $HOOKS_CODE）。この検査は何も判定できない" >&2
-  printf '%s\n' "$HOOKS_OUT" | head -10 >&2
+# 1. の ESLint 実行（$ESLINT_OUT・$ESLINT_CODE）をそのまま使う。probe は
+# NEG/POS と同じタイミング（1. より前）で置いているため、$ESLINT_OUT には
+# 既に probe の結果が含まれている。npm script をもう一度走らせない
+# （package.json 側のコマンドが変わっても検査が古いままにならないという
+# 「1. ESLint」の直上に書いた理由は、ここでも npm run lint を経由することで
+# 保っている）。
+if [ "$ESLINT_CODE" -ne 0 ] && [ "$ESLINT_CODE" -ne 1 ]; then
+  echo "  NG: ESLint が動かなかった（終了コード $ESLINT_CODE）。この検査は何も判定できない" >&2
+  printf '%s\n' "$ESLINT_OUT" | head -10 >&2
   rc=1
-elif ! hooks_detected "$HOOKS_OUT"; then
-  echo "  NG: react-hooks/rules-of-hooks と react-hooks/exhaustive-deps の両方は検出されなかった" >&2
-  echo "      probe の内容を、両方のルールが必ず指摘するものに直す。" >&2
-  printf '%s\n' "$HOOKS_OUT" | head -20 >&2
+elif ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/rules-of-hooks' ||
+     ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/exhaustive-deps'; then
+  echo "  NG: react-hooks/rules-of-hooks と react-hooks/exhaustive-deps が両方とも error で検出されていない" >&2
+  echo "      probe の内容と、両方のルールの重大度が 'error' であることを確かめる。" >&2
+  printf '%s\n' "$ESLINT_OUT" | head -20 >&2
   rc=1
 else
-  # 壊す確認: files のパターンを実在しない場所に差し替え、react-hooks の
-  # ルールがどのファイルにも適用されなくなることを確かめる。
-  # import と config オブジェクトを複数行にわたって sed で削るより、
-  # 効果を無効化する1行の書き換えのほうが取り違えにくい。
+  # 壊す確認: exhaustive-deps を 'warn' に戻した設定を一時ファイルに書き、
+  # --config でそこだけを明示的に指す。**追跡下の eslint.config.js 自体は
+  # 書き換えない。** check-docs.test.sh が複製（$work）だけを壊すのと同じ型で、
+  # 実物を書き換えないぶん、バックアップ・trap での復元・空振りしたときに
+  # 壊れたまま残るおそれが丸ごと無い。
   #
-  # 置換が実際に効いたことは grep -c の件数（変更前1件 → 変更後0件）で確かめる。
-  ESLINT_CONFIG_BACKUP="$(mktemp)"
-  cp eslint.config.js "$ESLINT_CONFIG_BACKUP"
-  # grep -c は一致が0件のとき終了コード1を返す。set -e の下でそのまま代入に使うと、
-  # 「一致0件」を確かめたい後半（sed の後）で毎回スクリプトごと落ちる
-  # （実際に一度この形で落とし、原因を確かめた）。`|| true` で終了コードを
-  # 潰し、件数の判定は次の行の -ne 比較にすべて委ねる。
-  hooks_files_before=$(grep -cF "files: ['apps/web/**/*.{ts,tsx}']" eslint.config.js || true)
-  sed -i "s#files: \['apps/web/\*\*/\*\.{ts,tsx}'\]#files: ['apps/__lint_scope_no_such_dir__/**/*.{ts,tsx}']#" eslint.config.js
-  hooks_files_after=$(grep -cF "files: ['apps/web/**/*.{ts,tsx}']" eslint.config.js || true)
+  # 一時ファイルはリポジトリ直下に置く（.js のまま）。eslint.config.js は
+  # `import js from '@eslint/js'` のような ESM import を持ち、node は
+  # import 元のディレクトリから親へ node_modules を辿って解決する。
+  # リポジトリの外の一時ディレクトリ（例: /tmp）に置くと、辿った先に
+  # node_modules が無く ERR_MODULE_NOT_FOUND で ESLint 自体が起動しない
+  # （実測）。cleanup がここで作る一時ファイルを消す。
+  HOOKS_BROKEN_CONFIG="$(mktemp --suffix=.eslint-broken.js -p .)"
+  sed "s/'react-hooks\/exhaustive-deps': 'error'/'react-hooks\/exhaustive-deps': 'warn'/" \
+    eslint.config.js > "$HOOKS_BROKEN_CONFIG"
 
-  if [ "$hooks_files_before" -ne 1 ] || [ "$hooks_files_after" -ne 0 ]; then
-    echo "  NG: sed が想定どおりに files のパターンを書き換えられていない（変更前 $hooks_files_before 件 / 変更後 $hooks_files_after 件）" >&2
+  # 置換が実際に効いたことを grep -c の件数で確かめる
+  # （元の eslint.config.js に 'error' が1件、書き換えた側に 'warn' が1件）。
+  hooks_broken_before=$(grep -cF "'react-hooks/exhaustive-deps': 'error'" eslint.config.js || true)
+  hooks_broken_after=$(grep -cF "'react-hooks/exhaustive-deps': 'warn'" "$HOOKS_BROKEN_CONFIG" || true)
+
+  if [ "$hooks_broken_before" -ne 1 ] || [ "$hooks_broken_after" -ne 1 ]; then
+    echo "  NG: sed が想定どおりに exhaustive-deps を 'warn' に書き換えられていない（変更前 error $hooks_broken_before 件 / 変更後 warn $hooks_broken_after 件）" >&2
     rc=1
   else
     set +e
-    HOOKS_BROKEN_OUT="$(npm run lint 2>&1)"
+    HOOKS_BROKEN_OUT="$(npx eslint . --config "$HOOKS_BROKEN_CONFIG" 2>&1)"
     HOOKS_BROKEN_CODE=$?
     set -e
     if [ "$HOOKS_BROKEN_CODE" -ne 0 ] && [ "$HOOKS_BROKEN_CODE" -ne 1 ]; then
-      echo "  NG: 壊した状態で ESLint が動かなかった（終了コード $HOOKS_BROKEN_CODE）。この検査は何も判定できない" >&2
+      echo "  NG: 壊した設定で ESLint が動かなかった（終了コード $HOOKS_BROKEN_CODE）。この検査は何も判定できない" >&2
       printf '%s\n' "$HOOKS_BROKEN_OUT" | head -10 >&2
       rc=1
-    elif hooks_detected "$HOOKS_BROKEN_OUT"; then
-      echo "  NG: files のパターンを崩しても react-hooks のルールが検出された（壊す確認が効いていない）" >&2
+    elif hooks_rule_is_error "$HOOKS_BROKEN_OUT" 'react-hooks/exhaustive-deps'; then
+      echo "  NG: exhaustive-deps を 'warn' に戻しても error のまま検出された（壊す確認が効いていない）" >&2
       rc=1
     else
-      echo "  OK: 陽性対照は検出され、files のパターンを崩すと検出されなくなることも確認した"
+      echo "  OK: 陽性対照は error で検出され、exhaustive-deps を 'warn' に戻すと error では検出されなくなることも確認した"
     fi
   fi
 
-  # 壊した eslint.config.js を元に戻す。cleanup にも同じ復元を置いているが、
-  # ここで戻しておかないと、以降の巡回でこの検査自身が「壊れたまま」を見てしまう
-  # （この関数は今のところ1回しか呼ばれないが、途中で戻さない理由が無い）。
-  cp "$ESLINT_CONFIG_BACKUP" eslint.config.js
-  rm -f "$ESLINT_CONFIG_BACKUP"
-  ESLINT_CONFIG_BACKUP=''
+  rm -f "$HOOKS_BROKEN_CONFIG"
+  HOOKS_BROKEN_CONFIG=''
 fi
 
 if [ "$rc" -ne 0 ]; then
