@@ -480,7 +480,7 @@ expect_ng "features.md の前方におとりを置き、本命の内訳だけ18�
   'features.md の内訳「要求」: 18 と書かれているが、実際は 19' '検査の検査が置いたおとり' '内訳: 要求 18 件'
 expect_ng "README.md の内訳を「要求 18」に" README.md \
   's/（要求 19 \/ 派生 10/（要求 18 \/ 派生 10/' 'README.md の内訳「要求」: 18 と書かれているが、実際は 19'
-expect_ng "F-01 の区分を 要求→派生 に（合計は 38 のまま動かない）" docs/features.md \
+expect_ng "F-01 の区分を 要求→派生 に（合計は 39 のまま動かない）" docs/features.md \
   's/^\(| F-01 |[^|]*|[^|]*\)| 要求 |/\1| **派生** |/' 'features.md の内訳「要求」: 19 と書かれているが、実際は 18'
 expect_ng "requirements.md 3.1 の「全19件」を18件に" docs/requirements.md \
   's/課題文に明記された機能。全19件。/課題文に明記された機能。全18件。/' 'requirements.md の「要求」の節の「全N件」: 18 と書かれているが、実際は 19'
