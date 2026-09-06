@@ -321,8 +321,9 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 > 適用して exit 0）。
 >
 > **`DATABASE_URL` の変数名は README と `.env.example` に記載した**（値は書かない。
-> CLAUDE.md 禁止事項）。現時点でこの変数名が出てくるのは `prisma.config.ts` と
-> [prisma-schema.test.ts](../apps/api/src/prisma-schema.test.ts) だけである。
+> CLAUDE.md 禁止事項）。**コードの中で**この変数名を参照しているのは、
+> 現時点では `prisma.config.ts` と
+> [prisma-schema.test.ts](../apps/api/src/prisma-schema.test.ts) である。
 
 #### TypeScript 7 を採らない理由
 
