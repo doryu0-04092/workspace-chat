@@ -284,8 +284,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 見るのは「**ユーザーID の一意性に違反したこと**」までである。
      *
      * **同じ問題が他の it に無いことを確かめた。**
-     * 一意索引の名前を期待しているのは、この関数を使う2件を除くと**9件**である。
-     * **9件とも、違反しうる一意索引が1つしかない**ため、作成順に依存しない。
+     * 一意索引の名前を期待しているのは、この関数を使う2件を除くと**10件**である。
+     * **10件とも、違反しうる一意索引が1つしかない**ため、作成順に依存しない。
      *
      *   1. 大文字小文字だけが違うユーザーID … 綴りが一致しないので
      *      `User_userId_key`（既定の照合順序）には届かない
@@ -296,11 +296,14 @@ describe('Prisma のスキーマとマイグレーション', () => {
      *      `Membership_workspaceId_userId_key` に届かない
      *   5. チャンネルへの二重の参加 … 他に重なる一意索引が無い
      *   6. 同じワークスペースに同じ名前のチャンネル … 同上（`id` は新しい値を使う）
-     *   7. チャンネル名が長すぎる … 大きさで落ちるのは `name` を含む索引だけである。
+     *   7. チャンネル名が長すぎる（**INSERT の側**）… 大きさで落ちるのは
+     *      `name` を含む索引だけである。
      *      `Channel_id_workspaceId_key` は uuid 2つで、大きさの上限に届かない
-     *   8. 未使用のリカバリーコードが2つ … 他に重なる一意索引が無い
-     *   9. 同じ基底名に同じ採番を二度 … 落ちるのは名前の重複であり、
-     *      **採番そのものには一意索引を置いていない**
+     *   8. 索引の上限すれすれの名前のチャンネルをアーカイブする（**UPDATE の側**）…
+     *      7 と同じ理由。落ちるのは `Channel_workspaceId_name_key` だけである
+     *   9. 未使用のリカバリーコードが2つ … 他に重なる一意索引が無い
+     *   10. 同じ基底名に同じ採番を二度 … 落ちるのは名前の重複であり、
+     *       **採番そのものには一意索引を置いていない**
      *
      * **外部キー（2件）と検査制約（4件）は、この問題の対象外である。**
      * 索引ではなく、名前が1つに定まる。
@@ -1207,12 +1210,32 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `;
     }
 
-    /** ワークスペースの参加者一覧（F-07）。ここでも退会済みは出さない。 */
-    function workspaceMemberList(workspaceId: string): string {
+    /**
+     * ワークスペースの参加者一覧（F-07）。
+     *
+     * **要求する側の所属を、この問い合わせ自身が確かめる。**
+     * 機能一覧 2.1 の「所属していないワークスペースの情報は取得できない（404）」は
+     * **この土台の上に乗っている。** 3.1 が定めた拒否コードの1段目
+     * （所属していなければ種別によらず 404）も同じである。
+     *
+     * **引数に要求者を取らない形にしてはならない。** 呼ぶ側の確認に委ねると、
+     * **写した実装が、所属していない利用者に在籍者のユーザーID の一覧を返す。**
+     *
+     * 退会済みは、**引かれる側も要求する側も**出さない / 通さない。
+     *
+     * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
+     * （REVIEW.md 3 / CWE-89）。
+     */
+    function workspaceMemberList(viewerId: string, workspaceId: string): string {
       return `
         SELECT u."userId"
         FROM "Membership" m
         JOIN "User" u ON u."id" = m."userId"
+        -- 要求する側が、そのワークスペースに参加していて、かつ退会していないこと。
+        JOIN "Membership" vm
+          ON vm."workspaceId" = m."workspaceId" AND vm."userId" = '${viewerId}'
+        JOIN "User" viewer
+          ON viewer."id" = vm."userId" AND viewer."deletedAt" IS NULL
         WHERE m."workspaceId" = '${workspaceId}'
           AND u."deletedAt" IS NULL
         ORDER BY u."userId";
@@ -1222,11 +1245,34 @@ describe('Prisma のスキーマとマイグレーション', () => {
     it('退会した利用者は、ワークスペースの参加者一覧にも出ない', async () => {
       const { loginId } = await createDeletedUserKeepingMembership();
       const output = await expectSqlToSucceed(
-        workspaceMemberList('00000000-0000-7000-8000-0000000000a1'),
+        workspaceMemberList(
+          '00000000-0000-7000-8000-000000000001',
+          '00000000-0000-7000-8000-0000000000a1',
+        ),
       );
       expect(output.split('\n')).not.toContain(loginId);
       // 現役の利用者は出ること。**否定側だけだと、常に空でも緑になる。**
       expect(output.split('\n')).toContain('owner');
+    });
+
+    it('所属していない利用者は、ワークスペースの参加者一覧を取得できない', async () => {
+      // 機能一覧 2.1。**3.1 の拒否コードの1段目が乗っている土台である。**
+      // これが無いと、要求する側の条件を書き漏らした実装でも1件も落ちない。
+      const output = await expectSqlToSucceed(
+        workspaceMemberList(
+          '00000000-0000-7000-8000-000000000004',
+          '00000000-0000-7000-8000-0000000000a1',
+        ),
+      );
+      expect(output).toBe('');
+    });
+
+    it('退会した利用者は、ワークスペースの参加者一覧を取得できない', async () => {
+      const { userId } = await createDeletedUserKeepingMembership();
+      const output = await expectSqlToSucceed(
+        workspaceMemberList(userId, '00000000-0000-7000-8000-0000000000a1'),
+      );
+      expect(output).toBe('');
     });
 
     it('退会した利用者は、参加者一覧に出ない', async () => {
