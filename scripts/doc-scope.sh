@@ -43,9 +43,11 @@ DOC_PRUNE_DIRS=(
 # 「存在と変数名までに留める」と定めている。terraform.tfstate は RDS のパスワードなどを
 # 平文で保持する。DOC_PRUNE_DIRS に .terraform を入れている以上、ディレクトリだけ
 # 除外して同じ .gitignore の秘密ファイルを残すのは非対称である。
+# `*.tfvars.json` を別に挙げるのは、`*.tfvars` が末尾一致であり
+# Terraform が読む JSON 版（terraform.tfvars.json / *.auto.tfvars.json）に一致しないため。
 DOC_PRUNE_FILES=(
   '.env' '.env.*'
-  '*.tfstate' '*.tfstate.*' '*.tfvars'
+  '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json'
 )
 
 # 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、
@@ -82,18 +84,39 @@ doc_find() { # $1... = find に渡す残りの条件（例: -name '*.md' -print�
 # リンク先にできないパスかどうかを判定する。check-docs.sh の検査1が使う。
 # ディレクトリ側だけを見ると、.env や terraform.tfstate へのリンクを見逃す。
 doc_excluded() { # $1=リンク先のパス。除外なら理由を出力して 0 を返す
-  local p="$1" base d g
-  base=$(basename "$p")
+  local p="$1" d g
   for d in "${DOC_PRUNE_DIRS[@]}"; do
     case "/$p/" in */"$d"/*) echo "対象外ディレクトリ $d の配下"; return 0 ;; esac
   done
+  # 名前の取り出しに basename は使わない。先頭が - のパスを option と解釈して
+  # 空を返す（実測: `basename "-x.tfvars"` は終了コード 1、標準出力は空）。
+  #
+  # **この経路では現に顕在化しない。** 本番の呼び出し元は check-docs.sh の検査1 だけで、
+  # そこは `$(dirname "$f")/$l` を渡す。dirname は最低でも `.` を返すため、
+  # 引数は必ず `./…` か `docs/…` で始まり、先頭が - になることはない。
+  # ここで外部コマンドをやめているのは、**名前の取り出しを呼び出し元の形に
+  # 依存させないため**の予防である（実際に壊れるのは、git ls-files の出力を
+  # そのまま流す check-docs.test.sh の gi_scan_tracked のほうである）。
+  g=$(doc_excluded_name "${p##*/}") && { echo "対象外のファイル名 $g に一致"; return 0; }
+  return 1
+}
+
+# ファイル名だけで見た除外判定（KEEP を差し引いた DOC_PRUNE_FILES）。
+# doc_excluded と、check-docs.test.sh の「値を持つ名前が追跡されていないか」の確認が
+# 同じ規則を見るように、判定は1箇所に置く。2箇所に書くと黙ってずれる。
+#
+# **これはファイル名だけの判定であり、ディレクトリ側（DOC_PRUNE_DIRS）は含まない。**
+# 除外判定として尽きているのは doc_excluded のほうである。名前から
+# 「doc_excluded の一部」とだけ読むと、呼び出し側が「これで除外は尽きている」と誤読しうる。
+doc_excluded_name() { # $1=ファイル名（basename）。除外なら一致したパターンを出力して 0
+  local base="$1" g
   for g in "${DOC_KEEP_FILES[@]}"; do
     # shellcheck disable=SC2254
     case "$base" in $g) return 1 ;; esac
   done
   for g in "${DOC_PRUNE_FILES[@]}"; do
     # shellcheck disable=SC2254
-    case "$base" in $g) echo "対象外のファイル名 $g に一致"; return 0 ;; esac
+    case "$base" in $g) echo "$g"; return 0 ;; esac
   done
   return 1
 }
