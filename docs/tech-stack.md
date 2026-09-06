@@ -228,7 +228,7 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | ECS Fargate（0.25 vCPU / 0.5 GB × **2**） | 約 $18 |
 | ALB | 約 $16 |
 | RDS db.t4g.micro（Single-AZ） | 約 $13 |
-| ElastiCache for Valkey cache.t4g.micro（Redis 比ノード型で約20%安。下記「Valkey の版（ローカル）」） | 約 $9 |
+| ElastiCache for Valkey cache.t4g.micro（価格の根拠は「Valkey の版（ローカル）」） | 約 $9 |
 | S3 + CloudFront | 数ドル |
 | **合計** | **約 $55〜65 / 月** |
 
@@ -466,7 +466,8 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 
 #### ローカルの Valkey に認証を掛けない
 
-`compose.yaml` の redis（サービス名は変えていない。下記）は `requirepass` を設けず、`redis://` で繋ぐ。
+`compose.yaml` の redis（サービス名は変えていない。「Valkey の版（ローカル）」を参照）は
+`requirepass` を設けず、`redis://` で繋ぐ。
 **127.0.0.1 にだけ束縛しており、ローカルでは守るものが無い**ためである。
 
 > **代償を明記する。** 本番の ElastiCache は **AUTH トークン**と**転送時暗号化**（`rediss://`）を持つ。
@@ -498,7 +499,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 
 > **サービス名・環境変数名は変えていない。** `compose.yaml` の `redis` サービス、
 > `.env.example` の `REDIS_PORT`、README.md の操作手順（`docker compose pull redis` 等）は
-> いずれも従来のまま「redis」を使う。**中身の画像だけを Valkey に差し替える判断であり、
+> いずれも従来のまま「redis」を使う。**中身のイメージだけを Valkey に差し替える判断であり、
 > ローカル環境のサービス名・変数名・コンテナ名の変更は、この決定の範囲外とする。**
 
 #### ローカルの PostgreSQL の `/dev/shm` を広げない

@@ -188,6 +188,11 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 **Docker で動かすのはミドルウェアだけである。** api と web はホストの Node で動かす
 （[compose.yaml](compose.yaml)）。ホットリロードとデバッグのしやすさを優先した。
 
+**`redis` サービスのイメージは Valkey である**（`valkey/valkey:8-alpine`。#24）。
+ElastiCache for Redis から ElastiCache for Valkey へ移す決定を受けたもので、
+**サービス名・環境変数名（`REDIS_PORT`）はこの決定の範囲外とし、変えていない。**
+理由・価格の根拠・代償は [技術スタック](docs/tech-stack.md)「Valkey の版（ローカル）」に記す。
+
 > **代償。** ローカルとデプロイ先（ECS Fargate）で Node の動作環境が揃わない。
 > 「手元では動くが ECS で動かない」がありうる。**CI（ubuntu / Node 24）がその差を先に踏む。**
 
