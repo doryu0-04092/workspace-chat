@@ -55,7 +55,12 @@ jobs:
       # 下の「整形の検査（Prettier）」より前にあるため、.prettierignore の除外が
       # 壊れた場合もここで落ちる。名前が ESLint だけを指していると、
       # ログを開くまで Prettier の問題だと分からない。
-      - name: 走査範囲の確認（ESLint / Prettier）
+      #
+      # **走査範囲だけではない。react-hooks のルールが配線されており、重大度が
+      # error であることもここで見る**（scripts/lint-scope.test.sh の「3. react-hooks
+      # のルール」）。名前に入れていないと、hooks の配線が外れて落ちたときに、
+      # 上と同じ理由で——ログを開くまで走査範囲とは無関係の失敗だと分からない。
+      - name: lint 設定の確認（走査範囲 / react-hooks）
         run: bash scripts/lint-scope.test.sh
 
       - name: 整形の検査（Prettier）

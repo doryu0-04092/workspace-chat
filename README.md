@@ -103,8 +103,10 @@ bash scripts/check-docs.test.sh
 （`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
 この1行だけ飛ばす）
 
-`scripts/lint-scope.test.sh` は、ESLint と Prettier が `.claude/`（エージェントが作る
-git のワークツリーが入る）を走査しないことを確かめる。
+`scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる。
+
+**1. 走査範囲** — ESLint と Prettier が `.claude/`（エージェントが作る git のワークツリーが
+入る）を走査しないこと。
 
 `.claude/` は CI のチェックアウトに無い。そのため除外が消えても、
 **`npm run lint` と `npm run format:check` は CI では緑のまま**で、手元でだけ落ちる。
@@ -112,6 +114,19 @@ git のワークツリーが入る）を走査しないことを確かめる。
 **CI でも欠落を検出できる**（だから [ci.yml](.github/workflows/ci.yml) で回している）。
 手元で回す意味は、**症状（自分の環境で lint が落ちる）が出るより先に、
 原因（除外が消えた）に気づけること**にある。
+
+**2. react-hooks のルールが実際に効いていること** — `react-hooks/rules-of-hooks` と
+`react-hooks/exhaustive-deps` が配線されており、**重大度が `error` であること**。
+
+`eslint.config.js` の `files` のパターンが壊れても、走査範囲の判定は他のルール
+（`any`・未使用変数）で変わらず緑のまま通る。**そのため、hooks の配線が外れたときに
+落ちるのは `npm run lint` ではなくこの検査である。** 重大度まで見るのは、
+`exhaustive-deps` だけを `warn` に戻しても `rules-of-hooks` の error で
+`npm run lint` の終了コードが 1 のままになり、ルール ID の有無だけでは
+区別できないためである。
+
+**この2つ目があるため、このスクリプトが落ちた原因は走査範囲とは限らない。**
+出力の見出し（`1. ESLint` / `2. Prettier` / `3. react-hooks のルール`）で切り分ける。
 
 このほかに CI は次を回す。
 
