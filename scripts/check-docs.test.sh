@@ -492,7 +492,14 @@ gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されて
 gi_claude_read=()
 gi_claude_read_into() { # $1=リポジトリ
   local out
-  out=$(mktemp)
+  # mktemp の失敗も名指しする。ここを見ないと out が空文字になり、
+  # リダイレクトが開けずに gi_claude_tracked_in は**一度も実行されないまま**
+  # 非ゼロで返る。呼び出し側の NG は「git ls-files が失敗した」になり、
+  # **git は動いていないのに git を名指しする。**
+  if ! out=$(mktemp); then
+    echo "  NG: 読み取り用の一時ファイルを作れなかった（TMPDIR を確かめる）"
+    return 1
+  fi
   if ! gi_claude_tracked_in "$1" > "$out"; then
     rm -f "$out"
     return 1
@@ -513,7 +520,13 @@ echo "0c-2b. .claude/ 配下が追跡されていないこと"
 # 出てくる NG が「壊す確認が効いていない」になり、読む側は
 # gi_claude_tracked_in の pathspec や -z を疑うことになる。実際の原因
 # （一時ディレクトリに書けない等）にたどり着かない。上の git init と同じく、
-# 失敗したらそれと名指しして以降の判定に進まない。
+# 失敗したらそれと名指しする。
+#
+# **止まるのは以降の「壊す確認」だけである。本体は止まらない。**
+# 本体（実物の $repo を問う判定）は上のとおり git init の成否と切り離してあり、
+# 準備が失敗しても実行される。**ここを「以降の判定に進まない」と読んで
+# 切り離しを戻さないこと**——戻すと、一時リポジトリが作れないだけで
+# 「.claude/ が追跡されていないか」を一切確かめない状態に逆戻りする。
 gi_claude_probe_rel='.claude/worktrees/probe/日本語の名前.md'
 gi_claude_probe_ok=0
 if [ "$gi_claude_repo_ok" -eq 0 ]; then
