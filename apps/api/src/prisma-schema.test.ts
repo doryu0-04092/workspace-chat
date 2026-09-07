@@ -1525,6 +1525,25 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe('');
     });
 
+    it('大文字小文字が違っても、メンションの宛先は解決される', async () => {
+      // **この it が無いと、`lower(u."userId") = lower(...)` を素の等値比較に
+      // 書き換えても1件も落ちない。** この関数を使う他のテストは、渡す
+      // ユーザーID がすべて小文字だけであるため、素の等値比較でも同じ結果になる。
+      //
+      // 落とすと壊れるのは 9.1 の受け入れ条件「`@owner` と `@Owner` が同じ利用者に
+      // 解決される」である。**素の等値比較で実装すると、メンションが誰にも
+      // 当たらないまま静かに落ちる**（例外も型エラーも出ない）。
+      // 隣の `activeUserByLoginId` には同等のものが2件ある。
+      const output = await expectSqlToSucceed(
+        mentionTargetByLoginId(
+          'INSIDER',
+          '00000000-0000-7000-8000-0000000000c2',
+          '00000000-0000-7000-8000-000000000002',
+        ),
+      );
+      expect(output).toBe('00000000-0000-7000-8000-000000000002');
+    });
+
     it('退会した要求する側は、メンションの宛先解決を求められない', async () => {
       // `createDeletedUserKeepingMembership` は secret(c2) の ChannelMember を
       // 残したまま deletedAt を立てる（消し込みの取りこぼしと同じ状態）。
