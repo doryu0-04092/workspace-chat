@@ -211,9 +211,16 @@ fi
 #   - pathspec を足して走査範囲を狭める（例: -- docs/）
 #   - -C "$repo" の指し先を変える
 #
-# 落ちる条件を持たせるには、値を持つ名前の追跡ファイルをリポジトリに置くことになる。
-# 0c が塞ごうとしている状態そのものを作ることになるため採らない。
-# **守れているのは関数の中身までである、と読むこと。**
+# **「塞げない」ではない。塞いでいないだけである。**
+# 実物に値を持つ追跡ファイルを置くのは、0c が塞ごうとしている状態そのものを
+# 作ることになるため採らない。**しかしその手は他にもある。**
+# 下の 0c-2b が実際に採っているのが、それである——専用の一時リポジトリを
+# git init し、そこに git add -f して、リポジトリを引数で受ける関数
+# （gi_claude_tracked_in）を本体と壊す確認で共有する。実物には何も置かずに、
+# -z・pathspec・呼び出しの有無・指し先に落ちる条件を与えられる。
+# **同じ形をこの gi_committed の呼び出しにも適用できる。**
+# 適用していないのはこの PR の範囲外だからであり、**塞げないからではない。**
+# 現状で守れているのは関数の中身までである。
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_pat=""   # 一致したパターン。.gitignore 以外が一致元だったときは空
@@ -413,8 +420,18 @@ if ! git init -q "$gi_claude_repo"; then
   fail=1
 else
   gi_claude_repo_ok=1
-  cp "$repo/.gitignore" "$gi_claude_repo/.gitignore"
-  if ! gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
+  # 複製に失敗すると、一時リポジトリに .gitignore が無いまま下の判定に進み、
+  # 出る NG は「.claude/ 配下のパスが .gitignore で無視されない（一致: 一致なし）」に
+  # なる。**受け取った側は実物の .gitignore から .claude/ の行が消えたと読み、
+  # そちらを直しに行く。** 壊れているのは複製のほうである。
+  # git init・mkdir・git add -f と同じく、失敗したら名指しして先に進まない。
+  if ! cp "$repo/.gitignore" "$gi_claude_repo/.gitignore"; then
+    echo "  NG: .gitignore を一時リポジトリに複製できなかった（$gi_claude_repo/.gitignore）"
+    fail=1
+    # gi_claude_repo_ok は 1 のままにする。0c-2b の壊す確認は .gitignore を使わず
+    # git add -f だけで成り立つため、複製の失敗を理由にあちらまで止めると、
+    # こんどは 0c-2b が原因を取り違えた NG を出すことになる。
+  elif ! gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
     echo "  NG: .claude/ 配下のパスが .gitignore で無視されない（一致: $gi_why）"
     fail=1
   else
@@ -456,13 +473,69 @@ fi
 # 下の壊す確認は件数ではなく**パスの一致**を見る。-z を外すと区切りが
 # NUL から改行に変わって末尾の改行が要素に残り、さらに非 ASCII の名前は
 # クォートされる（core.quotePath の既定）ため、どちらでも一致しなくなる。
+#
+# **読み取りの終了コードを見る。** プロセス置換（`< <(...)`）で受けると
+# 終了コードが失われ、git が失敗して出力が空でも「追跡されていない」と同じ
+# 0 件になり、**緑のまま通る。** git init・cp・mkdir・git add -f を名指しで
+# 止めているのと同じ理由で、ここも握り潰さない。
+#
+# **順序に意味がある。壊す確認の probe を先に一時リポジトリへ足してから、
+# 本体を読む。** 逆にすると、本体の指し先を一時リポジトリに取り違えても、
+# その時点では索引が空なので 0 件で緑になり、**実物の .claude/ を一度も
+# 見ないまま全ケースが緑で通る。** 先に足しておけば、取り違えた本体は probe を
+# 拾って「追跡されている」で落ちる。0c の代償3 が「-C の指し先を変えても
+# 落ちない」と書いている限界は、ここでは塞いである。
 gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されているパスを NUL 区切りで返す
   git -C "$1" ls-files -z -- .claude
 }
+# 読み取り結果は gi_claude_read に入れる。読めなければ 1 を返す。
+gi_claude_read=()
+gi_claude_read_into() { # $1=リポジトリ
+  local out
+  out=$(mktemp)
+  if ! gi_claude_tracked_in "$1" > "$out"; then
+    rm -f "$out"
+    return 1
+  fi
+  mapfile -d '' -t gi_claude_read < "$out"
+  rm -f "$out"
+}
 echo "0c-2b. .claude/ 配下が追跡されていないこと"
-mapfile -d '' -t gi_claude_tracked < <(gi_claude_tracked_in "$repo")
-if [ "${#gi_claude_tracked[@]}" -gt 0 ]; then
-  echo "  NG: .claude/ 配下が追跡されている: ${gi_claude_tracked[*]}"
+
+# 壊す確認の準備。**本体より先に行う**（上の「順序に意味がある」）。
+# 専用の一時リポジトリに .claude/ 配下のファイルを作って git add -f する。
+# **実物の $repo に git add -f することはしない**——それ自体が、
+# この検査で防ぎたい「.claude/ が追跡される」状態を本当に作ってしまう。
+#
+# 名前に非 ASCII を含めるのは、-z が守っているものそのものだからである。
+#
+# 準備（mkdir / ファイル作成 / git add -f）の失敗は握り潰さない。握り潰すと、
+# 出てくる NG が「壊す確認が効いていない」になり、読む側は
+# gi_claude_tracked_in の pathspec や -z を疑うことになる。実際の原因
+# （一時ディレクトリに書けない等）にたどり着かない。上の git init と同じく、
+# 失敗したらそれと名指しして以降の判定に進まない。
+gi_claude_probe_rel='.claude/worktrees/probe/日本語の名前.md'
+gi_claude_probe_ok=0
+if [ "$gi_claude_repo_ok" -eq 0 ]; then
+  : # 一時リポジトリが無い。下の判定で名指しする
+elif ! mkdir -p "$gi_claude_repo/.claude/worktrees/probe"; then
+  echo "  NG: 壊す確認の準備に失敗した（ディレクトリを作れない: $gi_claude_repo/.claude/worktrees/probe）"
+  fail=1
+elif ! : > "$gi_claude_repo/$gi_claude_probe_rel"; then
+  echo "  NG: 壊す確認の準備に失敗した（ファイルを作れない: $gi_claude_repo/$gi_claude_probe_rel）"
+  fail=1
+elif ! (cd "$gi_claude_repo" && git add -f -- "$gi_claude_probe_rel" >/dev/null); then
+  echo "  NG: 壊す確認の準備に失敗した（git add -f が失敗: $gi_claude_probe_rel）"
+  fail=1
+else
+  gi_claude_probe_ok=1
+fi
+
+if ! gi_claude_read_into "$repo"; then
+  echo "  NG: .claude/ 配下の追跡状況を読み取れなかった（git ls-files が失敗した: $repo）"
+  fail=1
+elif [ "${#gi_claude_read[@]}" -gt 0 ]; then
+  echo "  NG: .claude/ 配下が追跡されている: ${gi_claude_read[*]}"
   fail=1
 elif [ "$gi_claude_repo_ok" -eq 0 ]; then
   # 壊す確認には一時リポジトリが要る。0c-2 で既に NG を出しているため、
@@ -470,39 +543,17 @@ elif [ "$gi_claude_repo_ok" -eq 0 ]; then
   # ことまで緑と表示しては誤解を招く）。
   echo "  NG: 一時リポジトリが無く、壊す確認ができない（$gi_claude_repo）"
   fail=1
+elif [ "$gi_claude_probe_ok" -eq 0 ]; then
+  : # 準備の失敗は上で名指ししている
+elif ! gi_claude_read_into "$gi_claude_repo"; then
+  echo "  NG: 壊す確認の読み取りに失敗した（git ls-files が失敗した: $gi_claude_repo）"
+  fail=1
+elif [ "${#gi_claude_read[@]}" -ne 1 ] ||
+     [ "${gi_claude_read[0]}" != "$gi_claude_probe_rel" ]; then
+  echo "  NG: 壊す確認が効いていない（期待 1 件「$gi_claude_probe_rel」/ 実際 ${#gi_claude_read[@]} 件「${gi_claude_read[*]}」）"
+  fail=1
 else
-  # 壊す確認: 専用の一時リポジトリに .claude/ 配下のファイルを作って
-  # git add -f し、gi_claude_tracked_in が追跡済みとして拾うことを確かめる。
-  # **実物の $repo に git add -f することはしない**——それ自体が、
-  # この検査で防ぎたい「.claude/ が追跡される」状態を本当に作ってしまう。
-  #
-  # 名前に非 ASCII を含めるのは、-z が守っているものそのものだからである。
-  #
-  # 準備（mkdir / ファイル作成 / git add -f）の失敗は握り潰さない。握り潰すと、
-  # 出てくる NG が「壊す確認が効いていない」になり、読む側は
-  # gi_claude_tracked_in の pathspec や -z を疑うことになる。実際の原因
-  # （一時ディレクトリに書けない等）にたどり着かない。上の git init と同じく、
-  # 失敗したらそれと名指しして以降の判定に進まない。
-  gi_claude_probe_rel='.claude/worktrees/probe/日本語の名前.md'
-  if ! mkdir -p "$gi_claude_repo/.claude/worktrees/probe"; then
-    echo "  NG: 壊す確認の準備に失敗した（ディレクトリを作れない: $gi_claude_repo/.claude/worktrees/probe）"
-    fail=1
-  elif ! : > "$gi_claude_repo/$gi_claude_probe_rel"; then
-    echo "  NG: 壊す確認の準備に失敗した（ファイルを作れない: $gi_claude_repo/$gi_claude_probe_rel）"
-    fail=1
-  elif ! (cd "$gi_claude_repo" && git add -f -- "$gi_claude_probe_rel" >/dev/null); then
-    echo "  NG: 壊す確認の準備に失敗した（git add -f が失敗: $gi_claude_probe_rel）"
-    fail=1
-  else
-    mapfile -d '' -t gi_claude_track_probe < <(gi_claude_tracked_in "$gi_claude_repo")
-    if [ "${#gi_claude_track_probe[@]}" -ne 1 ] ||
-       [ "${gi_claude_track_probe[0]}" != "$gi_claude_probe_rel" ]; then
-      echo "  NG: 壊す確認が効いていない（期待 1 件「$gi_claude_probe_rel」/ 実際 ${#gi_claude_track_probe[@]} 件「${gi_claude_track_probe[*]}」）"
-      fail=1
-    else
-      echo "  OK"
-    fi
-  fi
+  echo "  OK"
 fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
