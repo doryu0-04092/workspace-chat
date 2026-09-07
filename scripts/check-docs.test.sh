@@ -217,7 +217,11 @@ fi
 # 下の 0c-2b が実際に採っているのが、それである——専用の一時リポジトリを
 # git init し、そこに git add -f して、リポジトリを引数で受ける関数
 # （gi_claude_tracked_in）を本体と壊す確認で共有する。実物には何も置かずに、
-# -z・pathspec・呼び出しの有無・指し先に落ちる条件を与えられる。
+# **-z・pathspec・指し先の3つ**に落ちる条件を与えられる。
+#
+# **「呼び出しの数行を丸ごと削る」だけは、0c-2b でも塞げていない。**
+# 本体を削っても、残った壊す確認は一時リポジトリだけを見て OK を出す。
+# 上の4つのうち、同じ形を適用して塞がるのは3つである、と読むこと。
 # **同じ形をこの gi_committed の呼び出しにも適用できる。**
 # 適用していないのはこの PR の範囲外だからであり、**塞げないからではない。**
 # 現状で守れているのは関数の中身までである。
@@ -410,9 +414,19 @@ if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 # （trap での復元も、途中で落ちたときに実物が壊れて残るおそれも無い）。
 echo "0c-2. .claude/ が .gitignore で無視され、行を消すと無視されなくなること"
 gi_claude_probe='.claude/worktrees/probe-gitignore-scope/x.md'
-gi_claude_repo=$(mktemp -d)
+# mktemp -d の失敗も名指しする。見ないと gi_claude_repo が空文字になり、
+# 次の git init -q "" が走って、出る NG は括弧の中が空のものになる
+# （「一時リポジトリを作れなかった（）」）。**パスが空になった理由がどこにも出ない。**
+# 加えて、空文字を実行時のカレント（＝実物のリポジトリ）と解釈する git があれば、
+# このファイルが冒頭で宣言している「元のリポジトリは書き換えない」に触れる。
+# **先にここで止めれば、その挙動に依存しない。**
+gi_claude_repo='<mktemp -d が失敗したため未作成>'
 gi_claude_repo_ok=0
-if ! git init -q "$gi_claude_repo"; then
+if ! gi_claude_repo=$(mktemp -d); then
+  gi_claude_repo='<mktemp -d が失敗したため未作成>'
+  echo "  NG: .claude/ 用の一時ディレクトリを作れなかった（TMPDIR を確かめる）"
+  fail=1
+elif ! git init -q "$gi_claude_repo"; then
   # git init 自体が失敗した場合、以下のすべての判定が「一時リポジトリが
   # 無いから無視されない／追跡されない」という別の理由で NG になりうる。
   # 原因を取り違えさせないよう、ここで名指しして止める。
@@ -488,19 +502,25 @@ fi
 gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されているパスを NUL 区切りで返す
   git -C "$1" ls-files -z -- .claude
 }
-# 読み取り結果は gi_claude_read に入れる。読めなければ 1 を返す。
+# 読み取り結果は gi_claude_read に入れる。読めなければ 1 を返し、
+# **失敗の理由を gi_claude_read_err に入れる。**
+#
+# **名指しの経路を1つにする。** 関数の中で NG を出して呼び出し側も出すと、
+# 2行が並んで**後から出るほう（git）を先に疑うことになる。** mktemp が失敗した
+# 場合、out が空文字になってリダイレクトが開けず、gi_claude_tracked_in は
+# **一度も実行されないまま**非ゼロで返る。それを「git ls-files が失敗した」と
+# 呼ぶと、読む側は pathspec や -z を見に行き、実際の原因（TMPDIR）に届かない。
 gi_claude_read=()
+gi_claude_read_err=''
 gi_claude_read_into() { # $1=リポジトリ
   local out
-  # mktemp の失敗も名指しする。ここを見ないと out が空文字になり、
-  # リダイレクトが開けずに gi_claude_tracked_in は**一度も実行されないまま**
-  # 非ゼロで返る。呼び出し側の NG は「git ls-files が失敗した」になり、
-  # **git は動いていないのに git を名指しする。**
+  gi_claude_read_err=''
   if ! out=$(mktemp); then
-    echo "  NG: 読み取り用の一時ファイルを作れなかった（TMPDIR を確かめる）"
+    gi_claude_read_err='読み取り用の一時ファイルを作れなかった。TMPDIR を確かめる'
     return 1
   fi
   if ! gi_claude_tracked_in "$1" > "$out"; then
+    gi_claude_read_err="git ls-files が失敗した: $1"
     rm -f "$out"
     return 1
   fi
@@ -545,7 +565,7 @@ else
 fi
 
 if ! gi_claude_read_into "$repo"; then
-  echo "  NG: .claude/ 配下の追跡状況を読み取れなかった（git ls-files が失敗した: $repo）"
+  echo "  NG: .claude/ 配下の追跡状況を読み取れなかった（$gi_claude_read_err）"
   fail=1
 elif [ "${#gi_claude_read[@]}" -gt 0 ]; then
   echo "  NG: .claude/ 配下が追跡されている: ${gi_claude_read[*]}"
@@ -559,7 +579,7 @@ elif [ "$gi_claude_repo_ok" -eq 0 ]; then
 elif [ "$gi_claude_probe_ok" -eq 0 ]; then
   : # 準備の失敗は上で名指ししている
 elif ! gi_claude_read_into "$gi_claude_repo"; then
-  echo "  NG: 壊す確認の読み取りに失敗した（git ls-files が失敗した: $gi_claude_repo）"
+  echo "  NG: 壊す確認の読み取りに失敗した（$gi_claude_read_err）"
   fail=1
 elif [ "${#gi_claude_read[@]}" -ne 1 ] ||
      [ "${gi_claude_read[0]}" != "$gi_claude_probe_rel" ]; then
