@@ -19,7 +19,8 @@
 # 道具が起動に失敗した場合も、probe がどのルールにも当たらなくなった場合も緑になる。
 # **検査が何も見ていない状態と、正しく除外されている状態が区別できない。**
 # そのため、道具1つにつき次の**3種類の判定**を、**陰性 → 終了コード → 陽性対照**の
-# 順で併せて確かめる（**順序そのものに意味がある。**理由は check_tool の直上に書いた）。
+# 順で併せて確かめる（**順序そのものに意味がある。**理由は check_tool の中、
+# 陰性を最初に見る分岐のところに書いた）。
 #
 # **この「3種類の判定」は、末尾の総括が数えている検査の数とは別のものである。**
 # あちらは begin_check が数える**検査の数**（ESLint / Prettier / react-hooks）を指す。
@@ -38,9 +39,13 @@
 #   - **設定を壊した写しで走らせ、検出が消えること**を見る（追跡下の
 #     eslint.config.js は書き換えない。壊す確認の直上を参照）
 #
-# **「検査が何も見ていない状態」と区別しているのは、この2つではない。**
-# 担い手は次の2つであり、**どちらも消してはならない。**
+# **「検査が何も見ていない状態」と区別している担い手は、次の3つである。
+# どれも消してはならない。**
 #
+#   - **両方のルールが error で検出されること。** probe の `useEffect` から依存漏れが
+#     失われると（誰かが probe を書き換えると）、`exhaustive-deps` は**そもそも一度も
+#     発火しない。** そのとき壊す確認の側は「error では検出されない」を満たしてしまうため、
+#     **この判定だけがその経路を見ている**（設定から行ごと消す壊し方は件数の判定が拾う）
 #   - **終了コード**（0/1 以外なら「ESLint が動かなかった。この検査は何も判定できない」）。
 #     check_tool の 2 と同じ役割を、react-hooks の側でも別に持っている
 #   - **壊した写しでの rules-of-hooks の再判定。** 書き換えていない側が error で
@@ -404,8 +409,18 @@ if [ "$ESLINT_CODE" -ne 0 ] && [ "$ESLINT_CODE" -ne 1 ]; then
   rc=1
 elif ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/rules-of-hooks' ||
      ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/exhaustive-deps'; then
-  echo "  NG: react-hooks/rules-of-hooks と react-hooks/exhaustive-deps が両方とも error で検出されていない" >&2
-  echo "      probe の内容と、両方のルールの重大度が 'error' であることを確かめる。" >&2
+  # **どちらが欠けたかを出す。** 判定は「どちらか一方でも欠ければ」発火するのに
+  # 「両方とも検出されていない」と断定すると、片方だけが warn に下がった場合——
+  # **この検査が作られた動機そのものの事象**——にも同じ文言が出る。読む側は
+  # 「両方とも」を手掛かりに、両方が同時に落ちる原因（プラグインの読み込み、files の
+  # 範囲）を先に疑うことになる。2回別々に呼んでいるので、どちらが欠けたかは分かる。
+  hooks_missing=''
+  hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/rules-of-hooks' || hooks_missing='react-hooks/rules-of-hooks'
+  if ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/exhaustive-deps'; then
+    hooks_missing="${hooks_missing:+$hooks_missing と }react-hooks/exhaustive-deps"
+  fi
+  echo "  NG: $hooks_missing が error で検出されていない" >&2
+  echo "      probe の内容と、そのルールの重大度が 'error' であることを確かめる。" >&2
   # **files も案内する。** probe の内容と重大度が正しくても、eslint.config.js の
   # files が probe の置き場所（$HOOKS_ROOT）を含まなくなればここに落ちる。
   # 案内が2つの疑い先しか出さないと、原因から遠いところを探すことになる。
