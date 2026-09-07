@@ -17,7 +17,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | ドキュメント検査の CI | **完了**（[docs.yml](.github/workflows/docs.yml)） |
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
-| **秘密の値の検査** | **完了**（[audit.yml](.github/workflows/audit.yml) の gitleaks。**中身を見るのはこれだけである**——`scripts/check-docs.sh` の 0c はファイル名しか見ない） |
+| **秘密の値の検査** | **完了**（[audit.yml](.github/workflows/audit.yml) の gitleaks。**中身を見るのはこれだけである**——`scripts/check-docs.test.sh` の 0c はファイル名しか見ない） |
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Valkey。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
@@ -134,7 +134,7 @@ bash scripts/check-docs.test.sh
 | ワークフロー | 内容 |
 |---|---|
 | [docs.yml](.github/workflows/docs.yml) | ドキュメントの検査（`scripts/check-docs.sh`）と、**その検査自身が壊れたら落ちることの確認**（`scripts/check-docs.test.sh`、56通り） |
-| [audit.yml](.github/workflows/audit.yml) | 依存の脆弱性検査と、**秘密の値がソースに書かれていないかの検査**（gitleaks）。PR・push に加えて**毎週月曜に定期実行する**（要件定義書 4.3 の「継続的に」） |
+| [audit.yml](.github/workflows/audit.yml) | 依存の脆弱性検査と、**秘密の値がソースに書かれていないかの検査**（gitleaks）。PR・push に加えて**毎週月曜に定期実行する**（**gitleaks が全履歴を見るのは、この定期実行と手動実行だけである。PR と push では差分しか見ない**）（要件定義書 4.3 の「継続的に」） |
 | [claude_code_review.yml](.github/workflows/claude_code_review.yml) | AI コードレビュー（下記） |
 
 ### 依存の版を上げない方針（2026-09-04 決定）
