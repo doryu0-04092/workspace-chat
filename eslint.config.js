@@ -48,13 +48,23 @@ export default tseslint.config(
   // 同じ理由で、**この注記に重大度付きの行をそのまま書き写してもならない**
   // （件数が2件になって同じ落ち方をする。実測）。
   //
-  // **rules-of-hooks の行は違う。** あちらは ESLint の**出力**にルール ID と
-  // error が現れるかで見ており（hooks_rule_is_error）、この設定ファイルの
-  // 書き方には依存しない。配列形式に変えても検査は緑のまま通る。
+  // **rules-of-hooks の行は、重大度の書き方だけは違う。** あちらは ESLint の
+  // **出力**にルール ID と error が現れるかで見ており（hooks_rule_is_error）、
+  // この行を配列形式に変えても検査は緑のまま通る。
+  // **ただし「依存しない」のはその書き方までである。** 検出そのものは下の files に
+  // 依存している（次の注記）。
   // 形を変えるときは、あちらの置換と件数の判定も併せて直すこと
   // （上の ignores と .prettierignore が「外れていることは
   // scripts/lint-scope.test.sh が機械で確かめる」と書いているのと同じ関係である）。
   {
+    // **踏むと壊れる: この files の範囲に、scripts/lint-scope.test.sh が置く probe が
+    // 入っていること。** あちらは probe の置き場所を apps/web/src の下に固定している。
+    // ここを `apps/web/src/components/**` のように絞る、あるいは web を別の場所へ
+    // 移すと、**probe がルールの適用対象から外れる。** そのとき
+    // **npm run lint は緑のまま**（probe は他のルールにも当たらない位置にある）で、
+    // あの検査の「react-hooks のルール」だけが「両方とも error で検出されていない」で
+    // 落ちる。NG の案内は probe の内容と重大度を疑わせるため、**この行に思い至らない。**
+    // 範囲を変えるときは、あちらの置き場所も併せて動かすこと。
     files: ['apps/web/**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': reactHooks,
