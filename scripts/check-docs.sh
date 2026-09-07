@@ -270,17 +270,39 @@ events() { # $1=ファイル $2=見出しの正規表現。イベント表の1�
                        in_sec && /^#/ { exit }
                        in_sec && /^\| `/ { e = $2; gsub(/^ +| +$/, "", e); print e }' "$1"
 }
-req_events=$(events docs/requirements.md '^#+ リアルタイム配信の対象イベント')
+# **見出しは1箇所に置く。** events() と下の行数の数え上げが別々に持つと、
+# 見出しを変えたとき片方だけが直り、**行数の数え上げが 0 になって新しい検査が黙って死ぬ**
+# （2.1 の経路の読み取りで同じことを禁じている。この上の注記を参照）。
+req_head='^#+ リアルタイム配信の対象イベント'
+fea_head='^#+ 5.1 配信するイベント'
+
+# 節の中の表の行を数える。events() が「コード書式で始まる行」しか拾わないのに対し、
+# こちらは**表の行すべて**を数える。差が出れば、読み飛ばされた行がある。
+table_lines() { # $1=ファイル $2=見出しの正規表現。節の中の「| で始まる行」の数を返す
+  awk -v h="$2" '$0 ~ h { in_sec = 1; next }
+                 in_sec && /^#/ { exit }
+                 in_sec && /^\|/ { n++ }
+                 END { print n+0 }' "$1"
+}
+req_events=$(events docs/requirements.md "$req_head")
 kinds=$(printf '%s\n' "$req_events" | grep -c .)
+# **部分的に読めない行を捕まえる。** events() はコード書式（`…`）で始まる行だけを拾うため、
+# **書式を付け忘れた行は黙って読み飛ばされる。** 行が1つ増えても kinds は変わらず、
+# 各文書の「N種類」の宣言とも一致してしまうため、**表と宣言と型定義が、すべて緑のままずれる。**
+# 全滅（kinds が 0）は下の分岐が捕まえるが、**半分しか読めない場合はそこを通らない。**
+req_table_lines=$(table_lines docs/requirements.md "$req_head")
+# ヘッダ行と区切り行の2行を除いた本文の数が、読み取れた数と一致するはず。
+if [ "$req_table_lines" -gt 2 ] && [ "$((req_table_lines - 2))" -ne "$kinds" ]; then
+  note "requirements.md のイベント表に読み取れない行がある（本文 $((req_table_lines - 2)) 行 / 読み取り $kinds 行）。イベント名はコード書式で書くこと"
+fi
 # **features.md に表が戻っていないことも見る。** 戻ると、この検査は requirements.md 側だけを
 # 数え続け、2つの表が食い違っても緑のまま通る。#9 で消した重複が、黙って復活する経路である。
-# **見出しが見つからないこと自体を NG にする。** events() は見出しに一致しなければ何も返さず、
-# それは「表が無い」と区別できない。見出しを改名した時点で、下のガードは
+# **見出しが見つからないこと自体を NG にする。** 見出しを改名した時点で、下のガードは
 # **NG を出さずに、以後どんな表が置かれても検知しなくなる**（偽の緑）。
-fea_head='^#+ 5.1 配信するイベント'
 grep -qE "$fea_head" docs/features.md || note "features.md の「5.1 配信するイベント」の節が見つからない（見出しを変えると、表が戻ったことを検知できなくなる）"
-fea_events=$(events docs/features.md "$fea_head")
-[ -z "$fea_events" ] || note "features.md 5.1 にイベント表が戻っている（表は requirements.md 4.1 の1つだけである。#9）"
+# **行の数で見る。events() の結果で見ない。** events() はコード書式で始まる行しか拾わないため、
+# **書式の無い表が戻された場合に空を返し、「戻っている」の NG が出ない。**
+[ "$(table_lines docs/features.md "$fea_head")" -eq 0 ] || note "features.md 5.1 にイベント表が戻っている（表は requirements.md 4.1 の1つだけである。#9）"
 if [ "$kinds" -eq 0 ]; then
   note "requirements.md からイベント表を読み取れない"
 else
