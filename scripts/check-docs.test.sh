@@ -413,6 +413,13 @@ if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 # 壊す確認もこの複製の .gitignore を書き換えて行い、$repo には一切触れない
 # （trap での復元も、途中で落ちたときに実物が壊れて残るおそれも無い）。
 echo "0c-2. .claude/ が .gitignore で無視され、行を消すと無視されなくなること"
+# **踏むと壊れる: この一時リポジトリの索引に .claude/ 配下を足すと、0c-2b が偽の NG を出す。**
+# 下の 0c-2b は同じ一時リポジトリを使い、壊す確認で索引に**ちょうど1件**あることを
+# 期待している。いまの 0c-2 は git check-ignore --no-index しか使わないため索引に
+# 入らないが、ここに「.gitignore は追跡済みには効かない」を見る確認を足して
+# git add -f した瞬間、0c-2b は2件を読んで落ちる。**出る NG は
+# 「壊す確認が効いていない」であり、pathspec や -z を疑わせる**——実際の原因
+# （0c-2 が索引に足したこと）には届かない。足すなら 0c-2b 側の期待も併せて直すこと。
 gi_claude_probe='.claude/worktrees/probe-gitignore-scope/x.md'
 # mktemp -d の失敗も名指しする。見ないと gi_claude_repo が空文字になり、
 # 次の git init -q "" が走って、出る NG は括弧の中が空のものになる
@@ -506,10 +513,16 @@ gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されて
 # **失敗の理由を gi_claude_read_err に入れる。**
 #
 # **名指しの経路を1つにする。** 関数の中で NG を出して呼び出し側も出すと、
-# 2行が並んで**後から出るほう（git）を先に疑うことになる。** mktemp が失敗した
-# 場合、out が空文字になってリダイレクトが開けず、gi_claude_tracked_in は
-# **一度も実行されないまま**非ゼロで返る。それを「git ls-files が失敗した」と
-# 呼ぶと、読む側は pathspec や -z を見に行き、実際の原因（TMPDIR）に届かない。
+# 2行が並んで**後から出るほう（git）を先に疑うことになる。**
+#
+# **mktemp の明示的な判定を外さないこと。** 外すと out が空文字になって
+# リダイレクトが開けず、gi_claude_tracked_in は**一度も実行されないまま**
+# 非ゼロで返る。理由は `git ls-files が失敗した` になり、読む側は pathspec や
+# -z を見に行って、実際の原因（TMPDIR）に届かない。
+#
+# **成功経路では明示的に 0 を返す。** 最後の rm -f の終了コードが漏れると、
+# 読み取りは成功しているのに呼び出し側が偽の NG を出す（しかも
+# gi_claude_read_err は空のままなので、括弧の中が空になる）。
 gi_claude_read=()
 gi_claude_read_err=''
 gi_claude_read_into() { # $1=リポジトリ
@@ -526,6 +539,7 @@ gi_claude_read_into() { # $1=リポジトリ
   fi
   mapfile -d '' -t gi_claude_read < "$out"
   rm -f "$out"
+  return 0
 }
 echo "0c-2b. .claude/ 配下が追跡されていないこと"
 
