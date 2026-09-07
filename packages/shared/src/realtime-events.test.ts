@@ -69,8 +69,11 @@ function readEventRows(): string[][] {
     rows.push([...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]!));
   }
   // ヘッダ行と区切り行の2行を除いた本文の数が、読み取れた数と一致するはず。
+  // **表が丸ごと無い場合は、ここでは判定しない。** tableLines が 0 だと bodyLines が -2 になり、
+  // 「本文 -2 行」という原因を取り違えさせる失敗になって、下の「1行も読み取れない」に到達しない。
+  // scripts/check-docs.sh も同じ形でガードしている（2つの実装が同じ入力に同じ振る舞いをする）。
   const bodyLines = tableLines - 2;
-  if (bodyLines !== rows.length) {
+  if (tableLines > 2 && bodyLines !== rows.length) {
     throw new Error(
       `要件定義書のイベント表に読み取れない行がある（本文 ${bodyLines} 行 / 読み取り ${rows.length} 行）。` +
         'イベント名はコード書式（`…`）で書くこと',
