@@ -1217,9 +1217,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
         FROM "ChannelMember" cm
         JOIN "Channel" c ON c."id" = cm."channelId"
         JOIN "User" u ON u."id" = cm."userId"
-        -- 要求する側が、そのワークスペースに参加していて、かつ退会していないこと。
+        -- 要求する側が、そのワークスペースに参加していること。
         JOIN "Membership" vm
           ON vm."workspaceId" = c."workspaceId" AND vm."userId" = '${viewerId}'
+        -- 要求する側が退会していないこと。
         JOIN "User" viewer
           ON viewer."id" = vm."userId" AND viewer."deletedAt" IS NULL
         -- 要求する側が、そのチャンネルの参加者であること。
@@ -1254,9 +1255,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
         SELECT u."userId"
         FROM "Membership" m
         JOIN "User" u ON u."id" = m."userId"
-        -- 要求する側が、そのワークスペースに参加していて、かつ退会していないこと。
+        -- 要求する側が、そのワークスペースに参加していること。
         JOIN "Membership" vm
           ON vm."workspaceId" = m."workspaceId" AND vm."userId" = '${viewerId}'
+        -- 要求する側が退会していないこと。
         JOIN "User" viewer
           ON viewer."id" = vm."userId" AND viewer."deletedAt" IS NULL
         WHERE m."workspaceId" = '${workspaceId}'
