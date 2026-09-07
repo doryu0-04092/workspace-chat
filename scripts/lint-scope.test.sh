@@ -21,14 +21,26 @@
 # そのため、道具1つにつき次の**3種類の判定**を、**陰性 → 終了コード → 陽性対照**の
 # 順で併せて確かめる（**順序そのものに意味がある。**理由は check_tool の直上に書いた）。
 #
-# **この「3種類の判定」は、末尾の総括が数えている「3 通り」とは別のものである。**
-# あちらは ESLint / Prettier / react-hooks という**検査の数**を指す。
+# **この「3種類の判定」は、末尾の総括が数えている検査の数とは別のものである。**
+# あちらは begin_check が数える**検査の数**（ESLint / Prettier / react-hooks）を指す。
 #
 #   1. 陰性 — .claude/ の中に置いた probe の名前が出力に**現れないこと**。
 #      現れたら、**終了コードに関わらず**「走査している」と判定する
 #   2. 終了コード — **0 と 1 以外は「道具が動かなかった」を意味する。**
 #      NG とする（0 は「指摘なし」、1 は「指摘があった」で正常）
 #   3. 陽性対照 — 走査対象**である**場所に置いた同じ probe が出力に**現れること**
+#
+# **この3種類は check_tool の形であり、走査範囲を見る検査（ESLint / Prettier）だけの
+# 方法である。** react-hooks の検査は形が違う。陰性に当たるものが無く、代わりに
+#
+#   - probe に hooks 違反を書き、**両方のルールが error で検出されること**を見る
+#     （ルール ID の有無では足りない。理由は「react-hooks のルール」の節に書いた）
+#   - **設定を壊した写しで走らせ、検出が消えること**を見る（追跡下の
+#     eslint.config.js は書き換えない。壊す確認の直上を参照）
+#
+# という2つで、「検査が何も見ていない状態」と区別している。
+# **役割だけでなく方法もここに書く。** 方法が書かれていないと、読む人は
+# その節に来て初めて別の形だと知ることになる。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -99,7 +111,7 @@ hooks_broken_seed=''
 # **rmdir は中身のあるディレクトリを消せない**ため、
 # 取り違えても実体のあるものを壊しようがない。
 #
-# 畳む範囲の終端は NEG_STOP（下で mkdir の直前に求める）。
+# 畳む範囲の終端は NEG_STOP である（求めている場所は、その変数名で辿れる）。
 # **「自分がこれから作る分」から導く。深さで決め打ちしない。**
 cleanup() {
   rm -f "$NEG" "$POS" "$HOOKS_PROBE"
@@ -275,6 +287,19 @@ check_tool() {
 # 途中で止まらずに両方の判定が出る。
 rc=0
 
+# 検査の見出しを出し、**同時に数える。**
+#
+# 総括が出す件数を手で書かない（REVIEW.md 4「件数は実数から導くか、機械が照合できる
+# 形にする」）。このスクリプトの件数を照合している道具は無く、check-docs.sh も
+# check-docs.test.sh も lint-scope を見ていない。**手で書くと、4つ目の検査を足した
+# 時点で黙ってずれ、動作は壊れないので誰も気づかない。**
+# 見出しの番号も同じ数から出すため、番号と総括が食い違いようがない。
+checks_total=0
+begin_check() {
+  checks_total=$((checks_total + 1))
+  echo "$checks_total. $1"
+}
+
 # **npm script をそのまま呼ぶ。コマンドを複製しない。**
 # npx eslint . / npx prettier --check . と書くと、package.json の scripts と
 # 同じ内容を2箇所に持つことになる。**package.json 側に対象の絞り込みや
@@ -285,7 +310,7 @@ rc=0
 # npm が子の終了コードをそのまま返すことに依存する（check_tool の「0/1 以外」の判定）。
 # 実測で確かめた: `exit 2` の script → 2 / eslint.config.js を構文的に壊す →
 # npx も npm run も 2 / prettier が解析できないファイルを置く → npx も npm run も 2。
-echo "1. ESLint"
+begin_check ESLint
 set +e
 ESLINT_OUT="$(npm run lint 2>&1)"
 ESLINT_CODE=$?
@@ -305,7 +330,7 @@ check_tool 'ESLint' 'eslint.config.js の ignores に .claude/** が入ってい
 # 「Prettier が .claude/ を走査しない」という守るべき性質は保たれているからである。
 # どちらからも消えれば、この検査は変わらず NG を出す。
 # 依存関係そのものは #35 に書き残した。
-echo "2. Prettier"
+begin_check Prettier
 set +e
 PRETTIER_OUT="$(npm run format:check 2>&1)"
 PRETTIER_CODE=$?
@@ -319,7 +344,7 @@ check_tool 'Prettier' '.prettierignore（または .gitignore）に .claude/ が
 # react-hooks/rules-of-hooks・react-hooks/exhaustive-deps が実際に配線されて
 # いるかは見ていない。誰かが files のパターンを壊しても、NEG/POS の判定は
 # 他のルール（any・未使用変数）で変わらず緑のまま通る。
-echo "3. react-hooks のルール"
+begin_check "react-hooks のルール"
 
 # ルール ID が出力に含まれるだけでは足りない。probe は rules-of-hooks と
 # exhaustive-deps の両方に引っかかるようにしてあり、rules-of-hooks は常に
@@ -452,9 +477,9 @@ fi
 
 if [ "$rc" -ne 0 ]; then
   echo >&2
-  echo "走査範囲の確認に失敗しました" >&2
+  echo "lint 設定の確認に失敗しました（走査範囲 / react-hooks）" >&2
   exit 1
 fi
 
 echo
-echo "走査範囲の確認を 3 通りすべて通過しました"
+echo "lint 設定の確認（走査範囲 / react-hooks）を $checks_total 通りすべて通過しました"
