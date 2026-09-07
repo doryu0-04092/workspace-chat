@@ -43,7 +43,7 @@ const EVENT_TABLE_HEADING = '#### リアルタイム配信の対象イベント'
  * 表の1列目を、行ごとにイベント名の配列として返す。
  *
  * 1行が複数の名前を持つことがある（`typing:start` / `typing:stop`）。
- * **行が「種類」、名前が「イベント名」である。** 文書が「7種類」と数えているのは行のほう。
+ * **行が「種類」、名前が「イベント名」である。** 文書が「N種類」と数えているのは行のほう。
  */
 function readEventRows(): string[][] {
   const lines = readFileSync(docPath, 'utf8').split('\n');
@@ -71,7 +71,9 @@ function readEventRows(): string[][] {
   // ヘッダ行と区切り行の2行を除いた本文の数が、読み取れた数と一致するはず。
   // **表が丸ごと無い場合は、ここでは判定しない。** tableLines が 0 だと bodyLines が -2 になり、
   // 「本文 -2 行」という原因を取り違えさせる失敗になって、下の「1行も読み取れない」に到達しない。
-  // scripts/check-docs.sh も同じ形でガードしている（2つの実装が同じ入力に同じ振る舞いをする）。
+  // scripts/check-docs.sh も、表が無い場合を同じ形でガードしている。
+  // **同じなのはここだけである**——見出しの一致条件は違う（あちらは `^#+ ` で見出しレベルを問わず、
+  // こちらは行全体の完全一致）。見出しレベルを変えると、あちらは通りこちらだけが落ちる。
   const bodyLines = tableLines - 2;
   if (tableLines > 2 && bodyLines !== rows.length) {
     throw new Error(
@@ -107,7 +109,7 @@ describe('リアルタイム配信のイベント定義', () => {
     expect([...REALTIME_EVENT_NAMES]).toEqual(rows.flat());
   });
 
-  // 文書は「7種類」と宣言している。その数がこの表の行数と一致することは
+  // 文書は「N種類」と宣言している。その数がこの表の行数と一致することは
   // scripts/check-docs.sh の検査5 が見ている。ここでは型定義との一致だけを見る。
   it('種類の数が、表の行数と一致する', () => {
     expect(REALTIME_EVENT_KINDS).toHaveLength(rows.length);
