@@ -85,7 +85,8 @@ POS="$POS_ROOT/probe.ts"
 # `apps/web/**/*.{ts,tsx}` にしか適用されないため、.claude/ 配下や apps/api に
 # 置くと最初から対象外になり、判定にならない。
 #
-# 名前は NEG_NAME の部分文字列にしない。含むと上の陰性判定
+# 名前に NEG_NAME を含めない（向きに注意。**NEG_NAME がこの名前の部分文字列に
+# なってはならない**、という関係である）。含むと上の陰性判定
 # （contains "$out" "$NEG_NAME"）がこの probe にも反応し、
 # 「.claude/ を走査している」という無関係な NG に化ける。
 HOOKS_ROOT='apps/web/src/__lint_scope_hooks_probe__'
