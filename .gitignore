@@ -58,6 +58,16 @@ override.tf.json
 *.swp
 *.swo
 
+# エージェントが作る git のワークツリー。apps/ の複製がまるごと入る。
+# eslint.config.js と .prettierignore は既にここを除外している（PR #33）。
+# 追跡していないだけでは無視はされない。ワークツリーは中に .git を持つため、
+# `git add .claude` を打つと、複製された apps/ 一式ではなく
+# **埋め込みリポジトリ（gitlink）1エントリとして誤って登録されうる**
+# （実測: `git add --dry-run .claude` で
+# `warning: adding embedded git repository: .claude/worktrees/agent-...` が出た）
+# （#35）。
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

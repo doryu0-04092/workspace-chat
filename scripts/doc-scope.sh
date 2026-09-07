@@ -45,8 +45,14 @@
 
 # 除外するディレクトリ名。.gitignore が無視するもののうち、Markdown が置かれうるものを挙げる。
 # 実装に着手すると、これらが無いと検査が依存パッケージの README まで読みに行く。
+#
+# .claude はエージェントが作る git のワークツリー（.claude/worktrees/）を含む。
+# apps/ の複製がまるごと入るため、除外しないと未整形・未検証の Markdown まで
+# 検査対象に入る。eslint.config.js と .prettierignore は既にここを除外している
+# （PR #33）。.gitignore とこの一覧だけに .claude が抜けていた（#35）。
 DOC_PRUNE_DIRS=(
   .git
+  .claude
   node_modules .pnp
   dist build .vite
   coverage .nyc_output playwright-report test-results blob-report reports
