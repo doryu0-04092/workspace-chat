@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# ESLint と Prettier の走査範囲を検証する。
+# ESLint と Prettier の**走査範囲**と、**react-hooks のルールの配線**を検証する。
+#
+# **この2つ目を、名前も冒頭の宣言も長らく含んでいなかった。** ファイルを頭から
+# 読んだ人が「3. react-hooks のルール」に来て初めて役割の広がりを知る状態だったため、
+# ここに書く。走査範囲が正しくても hooks の配線が外れていれば、このスクリプトは落ちる。
 #
 # エージェントが作る git のワークツリーが .claude/worktrees/ に置かれる。
 # そこには apps/api などの複製がまるごと入るため、道具が走査すると
@@ -14,8 +18,11 @@
 # **一方向の確認では足りない。** 「出力に probe の名前が現れないこと」だけを見ると、
 # 道具が起動に失敗した場合も、probe がどのルールにも当たらなくなった場合も緑になる。
 # **検査が何も見ていない状態と、正しく除外されている状態が区別できない。**
-# そのため次の3つを、**陰性 → 終了コード → 陽性対照**の順で併せて確かめる
-# （**順序そのものに意味がある。**理由は check_tool の直上に書いた）。
+# そのため、道具1つにつき次の**3種類の判定**を、**陰性 → 終了コード → 陽性対照**の
+# 順で併せて確かめる（**順序そのものに意味がある。**理由は check_tool の直上に書いた）。
+#
+# **この「3種類の判定」は、末尾の総括が数えている「3 通り」とは別のものである。**
+# あちらは ESLint / Prettier / react-hooks という**検査の数**を指す。
 #
 #   1. 陰性 — .claude/ の中に置いた probe の名前が出力に**現れないこと**。
 #      現れたら、**終了コードに関わらず**「走査している」と判定する
@@ -81,6 +88,9 @@ HOOKS_PROBE="$HOOKS_ROOT/Probe.tsx"
 # ディレクトリ階層を辿るためで、リポジトリの外の一時ディレクトリに置くと
 # `ERR_MODULE_NOT_FOUND` になる（実測）。
 HOOKS_BROKEN_CONFIG=''
+# mktemp が最初に作る、拡張子の付く前の名前。改名の前後どちらで落ちても
+# 消えるように、これも別の変数で持つ（改名後は空にする）。
+hooks_broken_seed=''
 
 # 後片付け。途中で落ちても消す。
 #
@@ -102,7 +112,7 @@ cleanup() {
   rmdir "$HOOKS_ROOT" 2>/dev/null || true
   # 壊す確認用に書いた一時ファイルを消す。リポジトリ直下に置いているため、
   # 消し忘れると未追跡ファイルとして残り続ける。
-  rm -f "$HOOKS_BROKEN_CONFIG"
+  rm -f "$HOOKS_BROKEN_CONFIG" "$hooks_broken_seed"
 }
 
 # 既存物があれば、何もせずに止まる。
@@ -377,7 +387,18 @@ else
   # リポジトリの外の一時ディレクトリ（例: /tmp）に置くと、辿った先に
   # node_modules が無く ERR_MODULE_NOT_FOUND で ESLint 自体が起動しない
   # （実測）。cleanup がここで作る一時ファイルを消す。
-  HOOKS_BROKEN_CONFIG="$(mktemp --suffix=.eslint-broken.js -p .)"
+  #
+  # **mktemp の --suffix と -p は GNU coreutils の拡張であり、macOS（BSD）には無い。**
+  # 使うと不正なオプションで終了し、set -e によって NG の説明が1行も出ないまま
+  # スクリプトが止まる。README は「CI が回すのと同じ検査を手元で通す」手順として
+  # これを案内しているため、環境で動かないと案内自体が成り立たない。
+  # **末尾に X が並ぶテンプレートを渡す形は GNU と BSD の両方にある**ので、
+  # そちらで作ってから .js を付けて改名する（拡張子が要るのは、node が
+  # 拡張子でモジュールの種類を決めるためである）。
+  hooks_broken_seed="$(mktemp ./eslint-broken.XXXXXX)"
+  HOOKS_BROKEN_CONFIG="$hooks_broken_seed.js"
+  mv "$hooks_broken_seed" "$HOOKS_BROKEN_CONFIG"
+  hooks_broken_seed=''
   sed "s/'react-hooks\/exhaustive-deps': 'error'/'react-hooks\/exhaustive-deps': 'warn'/" \
     eslint.config.js > "$HOOKS_BROKEN_CONFIG"
 
@@ -390,6 +411,16 @@ else
     echo "  NG: sed が想定どおりに exhaustive-deps を 'warn' に書き換えられていない（変更前 error $hooks_broken_before 件 / 変更後 warn $hooks_broken_after 件）" >&2
     rc=1
   else
+    # **ここだけは「npm script をそのまま呼ぶ。コマンドを複製しない」の例外である。**
+    # 壊した設定を指すには --config を渡すほかなく、package.json の lint は
+    # それを受け取れない（npm run lint -- --config は npm のバージョンによって
+    # 引数の渡り方が変わり、依存を1つ増やすことになる）。
+    #
+    # **例外の代償は残る。** package.json の lint に対象の絞り込みや追加のフラグが
+    # 足されると、**この壊す確認だけが古いコマンドを走らせ続ける。**
+    # 上の「1. ESLint」の直上が塞ごうとした穴が、ここには開いたままである。
+    # 判定側（陰性・陽性対照・重大度）は $ESLINT_OUT を使っており npm run lint を
+    # 経由しているため、**穴が残るのは「壊すと落ちるか」の確認だけである。**
     set +e
     HOOKS_BROKEN_OUT="$(npx eslint . --config "$HOOKS_BROKEN_CONFIG" 2>&1)"
     HOOKS_BROKEN_CODE=$?
