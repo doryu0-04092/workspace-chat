@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   REALTIME_EVENT_KINDS,
@@ -5,28 +7,98 @@ import {
   type RealtimeEventName,
 } from './realtime-events';
 
+/**
+ * **文書を実際に読む。** 以前はテストの中にリテラルで写した並びと比べていたが、
+ * それでは「コード内の写しどうし」を比べているだけで、
+ * **文書と型定義が両方そろってずれても緑のまま通った**（#65）。
+ *
+ * 出所は要件定義書 4.1「リアルタイム配信の対象イベント」。
+ * **表はここ1つだけである**（#9 で機能一覧 5.1 の重複を消した）。
+ */
+/**
+ * リポジトリのルートからの相対パスで、実体を探す。
+ *
+ * **`import.meta.url` は使えない。** このパッケージは CommonJS で型検査しており
+ * （`packages/shared/tsconfig.json` の `module`）、TS1343 で落ちる。
+ * **`process.cwd()` を直に使うのも避ける**——リポジトリのルートから実行するか
+ * `packages/shared` から実行するかで変わる。上へ辿って、**見つからなければ落とす。**
+ */
+function findRepoFile(relative: string): string {
+  let dir = process.cwd();
+  for (;;) {
+    const candidate = join(dir, relative);
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) {
+      throw new Error(`${relative} が見つからない（探索の起点: ${process.cwd()}）`);
+    }
+    dir = parent;
+  }
+}
+
+const docPath = findRepoFile('docs/requirements.md');
+const EVENT_TABLE_HEADING = '#### リアルタイム配信の対象イベント';
+
+/**
+ * 表の1列目を、行ごとにイベント名の配列として返す。
+ *
+ * 1行が複数の名前を持つことがある（`typing:start` / `typing:stop`）。
+ * **行が「種類」、名前が「イベント名」である。** 文書が「7種類」と数えているのは行のほう。
+ */
+function readEventRows(): string[][] {
+  const lines = readFileSync(docPath, 'utf8').split('\n');
+  const start = lines.indexOf(EVENT_TABLE_HEADING);
+  // **見つからないことを失敗にする。** 空を返すと「表が無い」と「見出しが変わった」が
+  // 区別できず、下の比較が空配列どうしで通りかねない（偽の緑）。
+  if (start < 0) {
+    throw new Error(
+      `要件定義書に見出し「${EVENT_TABLE_HEADING}」が無い。` +
+        '見出しを変えたなら、この定数も併せて直すこと',
+    );
+  }
+  const rows: string[][] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith('#')) break; // 次の見出しで打ち切る
+    if (!line.startsWith('| `')) continue; // 表の本文行だけを拾う（見出し行と区切り行を除く）
+    const cell = line.split('|')[1]!.trim();
+    rows.push([...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]!));
+  }
+  if (rows.length === 0) {
+    throw new Error('要件定義書のイベント表から1行も読み取れない（表の書式が変わった可能性）');
+  }
+  return rows;
+}
+
+/** 1行から種類を導く。名前が1つならそれ自体、複数なら `:` の前が種類である。 */
+function kindOf(names: string[]): string {
+  if (names.length === 1) return names[0]!;
+  const prefixes = new Set(names.map((n) => n.split(':')[0]!));
+  expect(prefixes.size, `1行に複数の名前があるのに前半が揃っていない: ${names.join(' / ')}`).toBe(
+    1,
+  );
+  return [...prefixes][0]!;
+}
+
 describe('リアルタイム配信のイベント定義', () => {
-  // 文書（要件定義書 4.1 / 機能一覧 5.1）が「7種類」と宣言している。
-  // ここが黙って増減すると、その宣言と実装がずれる。
-  it('種類は文書のとおり7つである', () => {
-    expect(REALTIME_EVENT_KINDS).toHaveLength(7);
+  const rows = readEventRows();
+
+  // **文書の表と突き合わせる。** テストの中に並びを写さない。
+  it('種類の並びが、要件定義書 4.1 の表と一致する', () => {
+    expect([...REALTIME_EVENT_KINDS]).toEqual(rows.map(kindOf));
   });
 
-  it('種類の並びが文書の表と一致する', () => {
-    expect([...REALTIME_EVENT_KINDS]).toEqual([
-      'message:new',
-      'message:updated',
-      'message:deleted',
-      'reaction:changed',
-      'unread:updated',
-      'typing',
-      'presence:changed',
-    ]);
+  it('イベント名の並びが、要件定義書 4.1 の表と一致する', () => {
+    expect([...REALTIME_EVENT_NAMES]).toEqual(rows.flat());
   });
 
-  // 入力中インジケータだけが start / stop の2つに分かれるため、名前は8つになる。
-  it('イベント名は8つで、typing だけが2つに分かれる', () => {
-    expect(REALTIME_EVENT_NAMES).toHaveLength(8);
+  // 文書は「7種類」と宣言している。その数がこの表の行数と一致することは
+  // scripts/check-docs.sh の検査5 が見ている。ここでは型定義との一致だけを見る。
+  it('種類の数が、表の行数と一致する', () => {
+    expect(REALTIME_EVENT_KINDS).toHaveLength(rows.length);
+  });
+
+  // 入力中インジケータだけが start / stop の2つに分かれるため、名前は種類より多くなる。
+  it('typing だけが2つに分かれる', () => {
     expect(REALTIME_EVENT_NAMES.filter((n) => n.startsWith('typing:'))).toEqual([
       'typing:start',
       'typing:stop',
@@ -34,8 +106,7 @@ describe('リアルタイム配信のイベント定義', () => {
   });
 
   it('typing 以外の種類は、そのままイベント名になっている', () => {
-    const namesFromKinds = REALTIME_EVENT_KINDS.filter((k) => k !== 'typing');
-    for (const kind of namesFromKinds) {
+    for (const kind of REALTIME_EVENT_KINDS.filter((k) => k !== 'typing')) {
       expect(REALTIME_EVENT_NAMES).toContain(kind as RealtimeEventName);
     }
   });
