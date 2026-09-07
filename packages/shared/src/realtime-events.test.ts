@@ -57,11 +57,24 @@ function readEventRows(): string[][] {
     );
   }
   const rows: string[][] = [];
+  // **表の本文行を、別に数える。** 下の読み取りはコード書式（`…`）で始まる行だけを拾うため、
+  // **書式を付け忘れた行は黙って読み飛ばされる。** 行が1つ増えても rows は変わらず、
+  // 文書の「N種類」の宣言とも一致してしまうため、**表と型定義と宣言がすべて緑のままずれる。**
+  let tableLines = 0;
   for (const line of lines.slice(start + 1)) {
     if (line.startsWith('#')) break; // 次の見出しで打ち切る
+    if (line.startsWith('|')) tableLines += 1;
     if (!line.startsWith('| `')) continue; // 表の本文行だけを拾う（見出し行と区切り行を除く）
     const cell = line.split('|')[1]!.trim();
     rows.push([...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]!));
+  }
+  // ヘッダ行と区切り行の2行を除いた本文の数が、読み取れた数と一致するはず。
+  const bodyLines = tableLines - 2;
+  if (bodyLines !== rows.length) {
+    throw new Error(
+      `要件定義書のイベント表に読み取れない行がある（本文 ${bodyLines} 行 / 読み取り ${rows.length} 行）。` +
+        'イベント名はコード書式（`…`）で書くこと',
+    );
   }
   if (rows.length === 0) {
     throw new Error('要件定義書のイベント表から1行も読み取れない（表の書式が変わった可能性）');

@@ -896,6 +896,14 @@ bt=$'\140'
 expect_ng "features.md 5.1 にイベント表を戻す" docs/features.md \
   "s/^\*\*この7種類以外の変化は即時反映されない。\*\*$/| イベント | 内容 |\n|---|---|\n| ${bt}message:new${bt} | メッセージの新規投稿 |\n\n**この7種類以外の変化は即時反映されない。**/" \
   'features.md 5.1 にイベント表が戻っている' "| ${bt}message:new${bt} |"
+# **書式を付け忘れた行が、黙って読み飛ばされないこと。**
+# events() はコード書式（`…`）で始まる行だけを拾う。付け忘れた行は rows に入らず、
+# **kinds は変わらないため各文書の「N種類」の宣言とも一致し、すべて緑のままずれる。**
+# 全滅（kinds が 0）は「読み取れない」の分岐が捕まえるが、**半分しか読めない場合はそこを通らない。**
+expect_ng "requirements.md のイベント表に、コード書式の無い行を1つ足す" docs/requirements.md \
+  "/^| ${bt}presence:changed${bt} |/a\| notification:new | 通知（コード書式の付け忘れ） |" \
+  'requirements.md のイベント表に読み取れない行がある' \
+  '| notification:new |'
 expect_ng "requirements.md のイベント表から1行消す" docs/requirements.md \
   "/^| ${bt}unread:updated${bt} |/d" \
   'CLAUDE.md の「イベント定義（N種類）」: 7 と書かれているが、実際は 6'

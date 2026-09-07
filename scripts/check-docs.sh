@@ -272,6 +272,18 @@ events() { # $1=ファイル $2=見出しの正規表現。イベント表の1�
 }
 req_events=$(events docs/requirements.md '^#+ リアルタイム配信の対象イベント')
 kinds=$(printf '%s\n' "$req_events" | grep -c .)
+# **部分的に読めない行を捕まえる。** 上の events() はコード書式（`…`）で始まる行だけを拾うため、
+# **書式を付け忘れた行は黙って読み飛ばされる。** 行が1つ増えても kinds は変わらず、
+# 各文書の「N種類」の宣言とも一致してしまうため、**表と宣言と型定義が、すべて緑のままずれる。**
+# 全滅（kinds が 0）は下の分岐が捕まえるが、**半分しか読めない場合はそこを通らない。**
+req_table_lines=$(awk '/^#+ リアルタイム配信の対象イベント/ { in_sec = 1; next }
+                       in_sec && /^#/ { exit }
+                       in_sec && /^\|/ { n++ }
+                       END { print n+0 }' docs/requirements.md)
+# ヘッダ行と区切り行の2行を除いた本文の数が、読み取れた数と一致するはず。
+if [ "$req_table_lines" -gt 2 ] && [ "$((req_table_lines - 2))" -ne "$kinds" ]; then
+  note "requirements.md のイベント表に読み取れない行がある（本文 $((req_table_lines - 2)) 行 / 読み取り $kinds 行）。イベント名はコード書式で書くこと"
+fi
 # **features.md に表が戻っていないことも見る。** 戻ると、この検査は requirements.md 側だけを
 # 数え続け、2つの表が食い違っても緑のまま通る。#9 で消した重複が、黙って復活する経路である。
 # **見出しが見つからないこと自体を NG にする。** events() は見出しに一致しなければ何も返さず、
