@@ -450,6 +450,12 @@ fi
 # （gi_ignored_by_gitignore・gi_scan_tracked と同じ理由）。2箇所に別々に
 # 書くと、本体側の pathspec や -z を壊しても壊す確認の呼び出しは無事なままで、
 # 壊れたことに気づけない。
+#
+# **共有するだけでは -z は守れない。** 壊す確認が件数だけを見ていると、
+# -z を外しても出力全体が1要素として読まれて 1 件になり、素通りする。
+# 下の壊す確認は件数ではなく**パスの一致**を見る。-z を外すと区切りが
+# NUL から改行に変わって末尾の改行が要素に残り、さらに非 ASCII の名前は
+# クォートされる（core.quotePath の既定）ため、どちらでも一致しなくなる。
 gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されているパスを NUL 区切りで返す
   git -C "$1" ls-files -z -- .claude
 }
@@ -469,15 +475,33 @@ else
   # git add -f し、gi_claude_tracked_in が追跡済みとして拾うことを確かめる。
   # **実物の $repo に git add -f することはしない**——それ自体が、
   # この検査で防ぎたい「.claude/ が追跡される」状態を本当に作ってしまう。
-  mkdir -p "$gi_claude_repo/.claude/worktrees/probe"
-  : > "$gi_claude_repo/.claude/worktrees/probe/x.md"
-  (cd "$gi_claude_repo" && git add -f .claude >/dev/null 2>&1)
-  mapfile -d '' -t gi_claude_track_probe < <(gi_claude_tracked_in "$gi_claude_repo")
-  if [ "${#gi_claude_track_probe[@]}" -eq 0 ]; then
-    echo "  NG: 壊す確認が効いていない（一時リポジトリで git add -f しても ls-files に出てこない）"
+  #
+  # 名前に非 ASCII を含めるのは、-z が守っているものそのものだからである。
+  #
+  # 準備（mkdir / ファイル作成 / git add -f）の失敗は握り潰さない。握り潰すと、
+  # 出てくる NG が「壊す確認が効いていない」になり、読む側は
+  # gi_claude_tracked_in の pathspec や -z を疑うことになる。実際の原因
+  # （一時ディレクトリに書けない等）にたどり着かない。上の git init と同じく、
+  # 失敗したらそれと名指しして以降の判定に進まない。
+  gi_claude_probe_rel='.claude/worktrees/probe/日本語の名前.md'
+  if ! mkdir -p "$gi_claude_repo/.claude/worktrees/probe"; then
+    echo "  NG: 壊す確認の準備に失敗した（ディレクトリを作れない: $gi_claude_repo/.claude/worktrees/probe）"
+    fail=1
+  elif ! : > "$gi_claude_repo/$gi_claude_probe_rel"; then
+    echo "  NG: 壊す確認の準備に失敗した（ファイルを作れない: $gi_claude_repo/$gi_claude_probe_rel）"
+    fail=1
+  elif ! (cd "$gi_claude_repo" && git add -f -- "$gi_claude_probe_rel" >/dev/null); then
+    echo "  NG: 壊す確認の準備に失敗した（git add -f が失敗: $gi_claude_probe_rel）"
     fail=1
   else
-    echo "  OK"
+    mapfile -d '' -t gi_claude_track_probe < <(gi_claude_tracked_in "$gi_claude_repo")
+    if [ "${#gi_claude_track_probe[@]}" -ne 1 ] ||
+       [ "${gi_claude_track_probe[0]}" != "$gi_claude_probe_rel" ]; then
+      echo "  NG: 壊す確認が効いていない（期待 1 件「$gi_claude_probe_rel」/ 実際 ${#gi_claude_track_probe[@]} 件「${gi_claude_track_probe[*]}」）"
+      fail=1
+    else
+      echo "  OK"
+    fi
   fi
 fi
 
