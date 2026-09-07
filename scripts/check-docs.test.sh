@@ -527,6 +527,9 @@ gi_claude_read=()
 gi_claude_read_err=''
 gi_claude_read_into() { # $1=リポジトリ
   local out
+  # **入口で配列を戻す。** mapfile が失敗すると代入が起きず、前回の呼び出しの値が
+  # そのまま残る。この関数は本体と壊す確認の2回呼ばれるため、残った値で判定しうる。
+  gi_claude_read=()
   gi_claude_read_err=''
   if ! out=$(mktemp); then
     gi_claude_read_err='読み取り用の一時ファイルを作れなかった。TMPDIR を確かめる'
@@ -537,14 +540,29 @@ gi_claude_read_into() { # $1=リポジトリ
     rm -f "$out"
     return 1
   fi
-  mapfile -d '' -t gi_claude_read < "$out"
+  # mapfile の失敗も名指しする。ここを見ないと配列が空のまま return 0 に達し、
+  # **本体は「一度も読めていないのに追跡されていない」で緑**、壊す確認は
+  # 「壊す確認が効いていない（実際 0 件）」で pathspec や -z を疑わせる。
+  # どちらもこのファイルが他の手順について潰してきたものと同じ形である。
+  if ! mapfile -d '' -t gi_claude_read < "$out"; then
+    gi_claude_read_err='読み取り結果を配列に取り込めなかった（mapfile が失敗した）'
+    rm -f "$out"
+    return 1
+  fi
   rm -f "$out"
   return 0
 }
 echo "0c-2b. .claude/ 配下が追跡されていないこと"
 
 # 壊す確認の準備。**本体より先に行う**（上の「順序に意味がある」）。
-# 専用の一時リポジトリに .claude/ 配下のファイルを作って git add -f する。
+# 一時リポジトリに .claude/ 配下のファイルを作って git add -f する。
+#
+# **この一時リポジトリは 0c-2 が作ったものであり、ここ専用ではない。**
+# しかも 0c-2 は壊す確認のために、複製した .gitignore から .claude/ の行を
+# sed で消したまま次へ進む。**ここに .gitignore に依存する確認（-f 無しでは
+# add されないこと等）を足さないこと。** その .gitignore には既に .claude/ が
+# 無いため、素通りするか根拠の無い NG が出る。出る NG は 0c-2b の中を疑わせ、
+# 実際の原因（0c-2 の sed）には届かない。0c-2 側に書いた警告と対になっている。
 # **実物の $repo に git add -f することはしない**——それ自体が、
 # この検査で防ぎたい「.claude/ が追跡される」状態を本当に作ってしまう。
 #
@@ -571,7 +589,11 @@ elif ! mkdir -p "$gi_claude_repo/.claude/worktrees/probe"; then
 elif ! : > "$gi_claude_repo/$gi_claude_probe_rel"; then
   echo "  NG: 壊す確認の準備に失敗した（ファイルを作れない: $gi_claude_repo/$gi_claude_probe_rel）"
   fail=1
-elif ! (cd "$gi_claude_repo" && git add -f -- "$gi_claude_probe_rel" >/dev/null); then
+# git -C を使う。サブシェルで cd してから git を呼ぶと、cd が落ちた場合も
+# 「git add -f が失敗」と名指しすることになり、**git は一度も走っていないのに
+# git を名指しする**（mktemp を「git ls-files が失敗した」と出していたのと同じ形）。
+# git -C なら判定と名指しが1対1になる。
+elif ! git -C "$gi_claude_repo" add -f -- "$gi_claude_probe_rel" >/dev/null; then
   echo "  NG: 壊す確認の準備に失敗した（git add -f が失敗: $gi_claude_probe_rel）"
   fail=1
 else
