@@ -885,14 +885,17 @@ expect_ng "requirements.md の前方におとりの列挙行を置き、本命�
   'REVIEW.md 2.1 の表と requirements.md で経路の名前が違う' \
   '検査の検査が置いたおとり' '/ 全文検索 /'
 
-# --- 検査5: 「N種類」（実体は requirements.md と features.md のイベント表）
+# --- 検査5: 「N種類」（実体は requirements.md 4.1 のイベント表。#9 で1つに寄せた）
 # イベント名は表の中でバッククォートに囲まれている。sed 式に直接書くと
 # SC2016（単一引用符の中では展開されない）を shellcheck が出すため、文字を変数に逃がす。
 # \140 は8進数のバッククォート。
 bt=$'\140'
-expect_ng "features.md のイベント名を1つ書き換える（7行のまま動かない）" docs/features.md \
-  "s/^| ${bt}presence:changed${bt} |/| ${bt}presence:updated${bt} |/" \
-  'requirements.md と features.md でイベント表の内容が違う' "${bt}presence:updated${bt}"
+# **表が features.md に戻ったことを見る。** 戻ると検査は requirements.md 側だけを数え続け、
+# 2つが食い違っても緑で通る。#9 で消した重複が黙って復活する経路であり、
+# 復活そのものを検知しないと、以前の壊れ方（説明と注記の食い違い）がそのまま戻る。
+expect_ng "features.md 5.1 にイベント表を戻す" docs/features.md \
+  "s/^\*\*この7種類以外の変化は即時反映されない。\*\*$/| イベント | 内容 |\n|---|---|\n| ${bt}message:new${bt} | メッセージの新規投稿 |\n\n**この7種類以外の変化は即時反映されない。**/" \
+  'features.md 5.1 にイベント表が戻っている' "| ${bt}message:new${bt} |"
 expect_ng "requirements.md のイベント表から1行消す" docs/requirements.md \
   "/^| ${bt}unread:updated${bt} |/d" \
   'CLAUDE.md の「イベント定義（N種類）」: 7 と書かれているが、実際は 6'
@@ -920,12 +923,6 @@ expect_ng "tech-stack.md の「7種類のイベント定義」を6種類に" doc
 expect_ng "requirements.md のイベント表の見出しを変えて読み取れなくする" docs/requirements.md \
   's/^#### リアルタイム配信の対象イベント$/#### 配信するイベント/' \
   'requirements.md からイベント表を読み取れない' '^#### 配信するイベント'
-# 読み取り失敗は両側で踏む。features.md 側の分岐が無いと、ここを壊したときに出る NG が
-# 「イベント表の内容が違う」だけになり、受け取った側は表の中身を突き合わせに行く
-# （実際に違うのは見出しである）。
-expect_ng "features.md のイベント表の見出しを変えて読み取れなくする" docs/features.md \
-  's/^### 5\.1 配信するイベント$/### 5.1 リアルタイムで配信するイベント/' \
-  'features.md からイベント表を読み取れない' '^### 5\.1 リアルタイムで配信するイベント'
 
 # --- 落ちてはならないこと。$4 で、置いたファイルが検査の対象に入るはず（in）か
 #     除外されるはず（out）かを切り替える。関数を2つに分けると、失敗時の出力や
