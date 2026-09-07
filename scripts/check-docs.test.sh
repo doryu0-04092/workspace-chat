@@ -211,9 +211,20 @@ fi
 #   - pathspec を足して走査範囲を狭める（例: -- docs/）
 #   - -C "$repo" の指し先を変える
 #
-# 落ちる条件を持たせるには、値を持つ名前の追跡ファイルをリポジトリに置くことになる。
-# 0c が塞ごうとしている状態そのものを作ることになるため採らない。
-# **守れているのは関数の中身までである、と読むこと。**
+# **「塞げない」ではない。塞いでいないだけである。**
+# 実物に値を持つ追跡ファイルを置くのは、0c が塞ごうとしている状態そのものを
+# 作ることになるため採らない。**しかしその手は他にもある。**
+# 下の 0c-2b が実際に採っているのが、それである——専用の一時リポジトリを
+# git init し、そこに git add -f して、リポジトリを引数で受ける関数
+# （gi_claude_tracked_in）を本体と壊す確認で共有する。実物には何も置かずに、
+# **-z・pathspec・指し先の3つ**に落ちる条件を与えられる。
+#
+# **「呼び出しの数行を丸ごと削る」だけは、0c-2b でも塞げていない。**
+# 本体を削っても、残った壊す確認は一時リポジトリだけを見て OK を出す。
+# 上の4つのうち、同じ形を適用して塞がるのは3つである、と読むこと。
+# **同じ形をこの gi_committed の呼び出しにも適用できる。**
+# 適用していないのはこの PR の範囲外だからであり、**塞げないからではない。**
+# 現状で守れているのは関数の中身までである。
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_pat=""   # 一致したパターン。.gitignore 以外が一致元だったときは空
@@ -402,29 +413,216 @@ if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 # 壊す確認もこの複製の .gitignore を書き換えて行い、$repo には一切触れない
 # （trap での復元も、途中で落ちたときに実物が壊れて残るおそれも無い）。
 echo "0c-2. .claude/ が .gitignore で無視され、行を消すと無視されなくなること"
+# **踏むと壊れる: この一時リポジトリの索引に .claude/ 配下を足すと、0c-2b が偽の NG を出す。**
+# 下の 0c-2b は同じ一時リポジトリを使い、壊す確認で索引に**ちょうど1件**あることを
+# 期待している。いまの 0c-2 は git check-ignore --no-index しか使わないため索引に
+# 入らないが、ここに「.gitignore は追跡済みには効かない」を見る確認を足して
+# git add -f した瞬間、0c-2b は2件を読んで落ちる。**出る NG は
+# 「壊す確認が効いていない」であり、pathspec や -z を疑わせる**——実際の原因
+# （0c-2 が索引に足したこと）には届かない。足すなら 0c-2b 側の期待も併せて直すこと。
 gi_claude_probe='.claude/worktrees/probe-gitignore-scope/x.md'
-gi_claude_repo=$(mktemp -d)
-git init -q "$gi_claude_repo"
-cp "$repo/.gitignore" "$gi_claude_repo/.gitignore"
-if ! gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
-  echo "  NG: .claude/ 配下のパスが .gitignore で無視されない（一致: $gi_why）"
+# mktemp -d の失敗も名指しする。見ないと gi_claude_repo が空文字になり、
+# 次の git init -q "" が走って、出る NG は括弧の中が空のものになる
+# （「一時リポジトリを作れなかった（）」）。**パスが空になった理由がどこにも出ない。**
+# 加えて、空文字を実行時のカレント（＝実物のリポジトリ）と解釈する git があれば、
+# このファイルが冒頭で宣言している「元のリポジトリは書き換えない」に触れる。
+# **先にここで止めれば、その挙動に依存しない。**
+gi_claude_repo='<mktemp -d が失敗したため未作成>'
+gi_claude_repo_ok=0
+if ! gi_claude_repo=$(mktemp -d); then
+  gi_claude_repo='<mktemp -d が失敗したため未作成>'
+  echo "  NG: .claude/ 用の一時ディレクトリを作れなかった（TMPDIR を確かめる）"
+  fail=1
+elif ! git init -q "$gi_claude_repo"; then
+  # git init 自体が失敗した場合、以下のすべての判定が「一時リポジトリが
+  # 無いから無視されない／追跡されない」という別の理由で NG になりうる。
+  # 原因を取り違えさせないよう、ここで名指しして止める。
+  echo "  NG: .claude/ 用の一時リポジトリを作れなかった（$gi_claude_repo）"
   fail=1
 else
-  # 置換が実際に効いたことを grep -c の件数（変更前1件 → 変更後0件）で確かめる。
-  # 書き換える先は複製（$gi_claude_repo/.gitignore）であり、実物の
-  # $repo/.gitignore ではない。
-  gi_claude_before=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
-  sed -i '/^\.claude\/$/d' "$gi_claude_repo/.gitignore"
-  gi_claude_after=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
-  if [ "$gi_claude_before" -ne 1 ] || [ "$gi_claude_after" -ne 0 ]; then
-    echo "  NG: sed が想定どおり複製の .gitignore の .claude/ 行を消せていない（変更前 $gi_claude_before 件 / 変更後 $gi_claude_after 件）"
+  gi_claude_repo_ok=1
+  # 複製に失敗すると、一時リポジトリに .gitignore が無いまま下の判定に進み、
+  # 出る NG は「.claude/ 配下のパスが .gitignore で無視されない（一致: 一致なし）」に
+  # なる。**受け取った側は実物の .gitignore から .claude/ の行が消えたと読み、
+  # そちらを直しに行く。** 壊れているのは複製のほうである。
+  # git init・mkdir・git add -f と同じく、失敗したら名指しして先に進まない。
+  if ! cp "$repo/.gitignore" "$gi_claude_repo/.gitignore"; then
+    echo "  NG: .gitignore を一時リポジトリに複製できなかった（$gi_claude_repo/.gitignore）"
     fail=1
-  elif gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
-    echo "  NG: 複製の .gitignore から .claude/ を消しても無視され続けている（一致: $gi_why）"
+    # gi_claude_repo_ok は 1 のままにする。0c-2b の壊す確認は .gitignore を使わず
+    # git add -f だけで成り立つため、複製の失敗を理由にあちらまで止めると、
+    # こんどは 0c-2b が原因を取り違えた NG を出すことになる。
+  elif ! gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
+    echo "  NG: .claude/ 配下のパスが .gitignore で無視されない（一致: $gi_why）"
     fail=1
   else
-    echo "  OK"
+    # 置換が実際に効いたことを grep -c の件数（変更前1件 → 変更後0件）で確かめる。
+    # 書き換える先は複製（$gi_claude_repo/.gitignore）であり、実物の
+    # $repo/.gitignore ではない。
+    gi_claude_before=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
+    sed -i '/^\.claude\/$/d' "$gi_claude_repo/.gitignore"
+    gi_claude_after=$(grep -c '^\.claude/$' "$gi_claude_repo/.gitignore")
+    if [ "$gi_claude_before" -ne 1 ] || [ "$gi_claude_after" -ne 0 ]; then
+      echo "  NG: sed が想定どおり複製の .gitignore の .claude/ 行を消せていない（変更前 $gi_claude_before 件 / 変更後 $gi_claude_after 件）"
+      fail=1
+    elif gi_ignored_by_gitignore "$gi_claude_repo" "$gi_claude_probe"; then
+      echo "  NG: 複製の .gitignore から .claude/ を消しても無視され続けている（一致: $gi_why）"
+      fail=1
+    else
+      echo "  OK"
+    fi
   fi
+fi
+
+# --- 前提: .claude/ 配下が追跡されていないこと -------------------------------
+# .gitignore は「今後 add されても無視される」ことしか保証しない。
+# **既に追跡されてしまっているファイルには効かない**（0c の代償3・
+# gi_committed と同じ理由）。.claude/ については、まだ誰もこれを見ていない。
+#
+# **本体（実物の $repo を問う判定）は git init の成否と切り離す。**
+# 一時リポジトリが無くても「.claude/ が追跡されていないか」自体は問える。
+# git init の成否の内側に本体を置くと、一時リポジトリが作れないだけで
+# 「.claude/ が追跡されていないか」を一切確かめない状態になる。
+#
+# 読み取りは関数に切り出し、本体と壊す確認の両方がそこを通るようにする
+# （gi_ignored_by_gitignore・gi_scan_tracked と同じ理由）。2箇所に別々に
+# 書くと、本体側の pathspec や -z を壊しても壊す確認の呼び出しは無事なままで、
+# 壊れたことに気づけない。
+#
+# **共有するだけでは -z は守れない。** 壊す確認が件数だけを見ていると、
+# -z を外しても出力全体が1要素として読まれて 1 件になり、素通りする。
+# 下の壊す確認は件数ではなく**パスの一致**を見る。-z を外すと区切りが
+# NUL から改行に変わって末尾の改行が要素に残り、さらに非 ASCII の名前は
+# クォートされる（core.quotePath の既定）ため、どちらでも一致しなくなる。
+#
+# **読み取りの終了コードを見る。** プロセス置換（`< <(...)`）で受けると
+# 終了コードが失われ、git が失敗して出力が空でも「追跡されていない」と同じ
+# 0 件になり、**緑のまま通る。** git init・cp・mkdir・git add -f を名指しで
+# 止めているのと同じ理由で、ここも握り潰さない。
+#
+# **順序に意味がある。壊す確認の probe を先に一時リポジトリへ足してから、
+# 本体を読む。** 逆にすると、本体の指し先を一時リポジトリに取り違えても、
+# その時点では索引が空なので 0 件で緑になり、**実物の .claude/ を一度も
+# 見ないまま全ケースが緑で通る。** 先に足しておけば、取り違えた本体は probe を
+# 拾って「追跡されている」で落ちる。0c の代償3 が「-C の指し先を変えても
+# 落ちない」と書いている限界は、ここでは塞いである。
+gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されているパスを NUL 区切りで返す
+  git -C "$1" ls-files -z -- .claude
+}
+# 読み取り結果は gi_claude_read に入れる。読めなければ 1 を返し、
+# **失敗の理由を gi_claude_read_err に入れる。**
+#
+# **名指しの経路を1つにする。** 関数の中で NG を出して呼び出し側も出すと、
+# 2行が並んで**後から出るほう（git）を先に疑うことになる。**
+#
+# **mktemp の明示的な判定を外さないこと。** 外すと out が空文字になって
+# リダイレクトが開けず、gi_claude_tracked_in は**一度も実行されないまま**
+# 非ゼロで返る。理由は `git ls-files が失敗した` になり、読む側は pathspec や
+# -z を見に行って、実際の原因（TMPDIR）に届かない。
+#
+# **成功経路では明示的に 0 を返す。** 最後の rm -f の終了コードが漏れると、
+# 読み取りは成功しているのに呼び出し側が偽の NG を出す（しかも
+# gi_claude_read_err は空のままなので、括弧の中が空になる）。
+gi_claude_read=()
+gi_claude_read_err=''
+gi_claude_read_into() { # $1=リポジトリ
+  local out
+  # **入口で配列を戻す。** mapfile が失敗すると代入が起きず、前回の呼び出しの値が
+  # そのまま残る。この関数は本体と壊す確認の2回呼ばれるため、残った値で判定しうる。
+  gi_claude_read=()
+  gi_claude_read_err=''
+  if ! out=$(mktemp); then
+    gi_claude_read_err='読み取り用の一時ファイルを作れなかった。TMPDIR を確かめる'
+    return 1
+  fi
+  if ! gi_claude_tracked_in "$1" > "$out"; then
+    gi_claude_read_err="git ls-files が失敗した: $1"
+    rm -f "$out"
+    return 1
+  fi
+  # mapfile の失敗も名指しする。ここを見ないと配列が空のまま return 0 に達し、
+  # **本体は「一度も読めていないのに追跡されていない」で緑**、壊す確認は
+  # 「壊す確認が効いていない（実際 0 件）」で pathspec や -z を疑わせる。
+  # どちらもこのファイルが他の手順について潰してきたものと同じ形である。
+  if ! mapfile -d '' -t gi_claude_read < "$out"; then
+    gi_claude_read_err='読み取り結果を配列に取り込めなかった（mapfile が失敗した）'
+    rm -f "$out"
+    return 1
+  fi
+  rm -f "$out"
+  return 0
+}
+echo "0c-2b. .claude/ 配下が追跡されていないこと"
+
+# 壊す確認の準備。**本体より先に行う**（上の「順序に意味がある」）。
+# 一時リポジトリに .claude/ 配下のファイルを作って git add -f する。
+#
+# **この一時リポジトリは 0c-2 が作ったものであり、ここ専用ではない。**
+# しかも 0c-2 は壊す確認のために、複製した .gitignore から .claude/ の行を
+# sed で消したまま次へ進む。**ここに .gitignore に依存する確認（-f 無しでは
+# add されないこと等）を足さないこと。** その .gitignore には既に .claude/ が
+# 無いため、素通りするか根拠の無い NG が出る。出る NG は 0c-2b の中を疑わせ、
+# 実際の原因（0c-2 の sed）には届かない。0c-2 側に書いた警告と対になっている。
+# **実物の $repo に git add -f することはしない**——それ自体が、
+# この検査で防ぎたい「.claude/ が追跡される」状態を本当に作ってしまう。
+#
+# 名前に非 ASCII を含めるのは、-z が守っているものそのものだからである。
+#
+# 準備（mkdir / ファイル作成 / git add -f）の失敗は握り潰さない。握り潰すと、
+# 出てくる NG が「壊す確認が効いていない」になり、読む側は
+# gi_claude_tracked_in の pathspec や -z を疑うことになる。実際の原因
+# （一時ディレクトリに書けない等）にたどり着かない。上の git init と同じく、
+# 失敗したらそれと名指しする。
+#
+# **止まるのは以降の「壊す確認」だけである。本体は止まらない。**
+# 本体（実物の $repo を問う判定）は上のとおり git init の成否と切り離してあり、
+# 準備が失敗しても実行される。**ここを「以降の判定に進まない」と読んで
+# 切り離しを戻さないこと**——戻すと、一時リポジトリが作れないだけで
+# 「.claude/ が追跡されていないか」を一切確かめない状態に逆戻りする。
+gi_claude_probe_rel='.claude/worktrees/probe/日本語の名前.md'
+gi_claude_probe_ok=0
+if [ "$gi_claude_repo_ok" -eq 0 ]; then
+  : # 一時リポジトリが無い。下の判定で名指しする
+elif ! mkdir -p "$gi_claude_repo/.claude/worktrees/probe"; then
+  echo "  NG: 壊す確認の準備に失敗した（ディレクトリを作れない: $gi_claude_repo/.claude/worktrees/probe）"
+  fail=1
+elif ! : > "$gi_claude_repo/$gi_claude_probe_rel"; then
+  echo "  NG: 壊す確認の準備に失敗した（ファイルを作れない: $gi_claude_repo/$gi_claude_probe_rel）"
+  fail=1
+# git -C を使う。サブシェルで cd してから git を呼ぶと、cd が落ちた場合も
+# 「git add -f が失敗」と名指しすることになり、**git は一度も走っていないのに
+# git を名指しする**（mktemp を「git ls-files が失敗した」と出していたのと同じ形）。
+# git -C なら判定と名指しが1対1になる。
+elif ! git -C "$gi_claude_repo" add -f -- "$gi_claude_probe_rel" >/dev/null; then
+  echo "  NG: 壊す確認の準備に失敗した（git add -f が失敗: $gi_claude_probe_rel）"
+  fail=1
+else
+  gi_claude_probe_ok=1
+fi
+
+if ! gi_claude_read_into "$repo"; then
+  echo "  NG: .claude/ 配下の追跡状況を読み取れなかった（$gi_claude_read_err）"
+  fail=1
+elif [ "${#gi_claude_read[@]}" -gt 0 ]; then
+  echo "  NG: .claude/ 配下が追跡されている: ${gi_claude_read[*]}"
+  fail=1
+elif [ "$gi_claude_repo_ok" -eq 0 ]; then
+  # 壊す確認には一時リポジトリが要る。0c-2 で既に NG を出しているため、
+  # ここでも重ねて名指しする（本体は緑でも、壊す確認ができていない
+  # ことまで緑と表示しては誤解を招く）。
+  echo "  NG: 一時リポジトリが無く、壊す確認ができない（$gi_claude_repo）"
+  fail=1
+elif [ "$gi_claude_probe_ok" -eq 0 ]; then
+  : # 準備の失敗は上で名指ししている
+elif ! gi_claude_read_into "$gi_claude_repo"; then
+  echo "  NG: 壊す確認の読み取りに失敗した（$gi_claude_read_err）"
+  fail=1
+elif [ "${#gi_claude_read[@]}" -ne 1 ] ||
+     [ "${gi_claude_read[0]}" != "$gi_claude_probe_rel" ]; then
+  echo "  NG: 壊す確認が効いていない（期待 1 件「$gi_claude_probe_rel」/ 実際 ${#gi_claude_read[@]} 件「${gi_claude_read[*]}」）"
+  fail=1
+else
+  echo "  OK"
 fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
