@@ -398,6 +398,11 @@ elif ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/rules-of-hooks' ||
      ! hooks_rule_is_error "$ESLINT_OUT" 'react-hooks/exhaustive-deps'; then
   echo "  NG: react-hooks/rules-of-hooks と react-hooks/exhaustive-deps が両方とも error で検出されていない" >&2
   echo "      probe の内容と、両方のルールの重大度が 'error' であることを確かめる。" >&2
+  # **files も案内する。** probe の内容と重大度が正しくても、eslint.config.js の
+  # files が probe の置き場所（$HOOKS_ROOT）を含まなくなればここに落ちる。
+  # 案内が2つの疑い先しか出さないと、原因から遠いところを探すことになる。
+  # check_tool が ignore_hint で被参照側（ignores / .prettierignore）を名指しするのと同じ形。
+  echo "      eslint.config.js の files が $HOOKS_ROOT を含んでいることも確かめる。" >&2
   head -20 <<< "$ESLINT_OUT" >&2
   rc=1
 else
