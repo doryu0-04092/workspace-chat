@@ -1413,9 +1413,17 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
      * （REVIEW.md 3 / CWE-89）。**埋め込んでいる値の素性は、この一群の中で最も悪い。**
      * `loginId` は**メッセージ本文の `@` に続く文字列**であり、パスパラメータですらない
-     * 自由入力である（`channelId` / `viewerId` もリクエスト由来）。しかも機能一覧 9.1 は
-     * 「大文字小文字を区別しない解決は Prisma のクライアントの等値比較では満たせないため
-     * `$queryRaw` で書く」と定めており、**この経路は生 SQL で書くことが確定している。**
+     * 自由入力である（`channelId` もリクエスト由来）。
+     *
+     * **`viewerId` だけは違う。リクエストから受け取ってはならない。**
+     * トークンから導出する値である（機能一覧 1.4「要求する側（トークンの持ち主）」/
+     * REVIEW.md 2.2「クライアントから送られた `userId` や `role` を信用しない」）。
+     * **リクエスト由来にすると、他人の UUID を入れるだけで、この問い合わせが塞いだ
+     * 存在の探索がそのまま復活する。**
+     *
+     * しかも機能一覧 9.1 が「**これは Prisma のクライアントの等値比較では満たせない**」
+     * （理由は `schema.prisma` の `loginId` にある）として `$queryRaw` で書くと定めており、
+     * **この経路は生 SQL で書くことが確定している。**
      */
     function mentionTargetByLoginId(loginId: string, channelId: string, viewerId: string): string {
       return `
@@ -1525,23 +1533,47 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe('');
     });
 
-    it('大文字小文字が違っても、メンションの宛先は解決される', async () => {
+    it('大文字を含む綴りで登録した利用者も、違う綴りのメンションで解決される', async () => {
       // **この it が無いと、`lower(u."userId") = lower(...)` を素の等値比較に
       // 書き換えても1件も落ちない。** この関数を使う他のテストは、渡す
       // ユーザーID がすべて小文字だけであるため、素の等値比較でも同じ結果になる。
       //
+      // **大文字を含む綴りで登録する側も要る。** 引数側だけを大文字にして
+      // `mentionTargetByLoginId('INSIDER', …)` と書くと、**列側の `lower()` だけを
+      // 落とす改変**（`u."userId" = lower(<引数>)`）で落ちない。
+      // このファイルに登録されるユーザーID はすべて小文字であり、
+      // 引数側の `lower()` が `INSIDER` を `insider` に潰してしまうためである。
+      // 登録側に大文字を含め、引かれる側を小文字で渡すと、どちらを落としても落ちる。
+      //
       // 落とすと壊れるのは 9.1 の受け入れ条件「`@owner` と `@Owner` が同じ利用者に
       // 解決される」である。**素の等値比較で実装すると、メンションが誰にも
       // 当たらないまま静かに落ちる**（例外も型エラーも出ない）。
-      // 隣の `activeUserByLoginId` には同等のものが2件ある。
+      // `User_userId_lower_key`（`lower("userId")` の式索引）も使われなくなる。
+      const userId = randomUUID();
+      const loginId = `Mixed_${randomUUID().slice(0, 8)}`;
+      const channelId = '00000000-0000-7000-8000-0000000000c2';
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${userId}', '${loginId}', '大文字を含む綴りの人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${userId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '${channelId}', '${ws}', '${userId}');
+      `);
+      // 要求する側は `insider`（secret の正規の参加者）で固定する。
       const output = await expectSqlToSucceed(
         mentionTargetByLoginId(
-          'INSIDER',
-          '00000000-0000-7000-8000-0000000000c2',
+          // **登録した綴りとも、その小文字とも違う綴りで引く。**
+          // 小文字で引くと、引数側の `lower()` を落とす改変（`lower(u."userId") = <引数>`）
+          // が素通りする（登録が `Mixed_…`、引数が `mixed_…` のとき、列側だけを
+          // 小文字化しても一致してしまう。実測）。**大文字にすると両側が要る。**
+          loginId.toUpperCase(),
+          channelId,
           '00000000-0000-7000-8000-000000000002',
         ),
       );
-      expect(output).toBe('00000000-0000-7000-8000-000000000002');
+      expect(output).toBe(userId);
     });
 
     it('退会した要求する側は、メンションの宛先解決を求められない', async () => {
