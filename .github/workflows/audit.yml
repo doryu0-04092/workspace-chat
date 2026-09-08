@@ -18,6 +18,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # 手で起こせるようにしておく。**gitleaks の走査範囲はイベントで変わり、
+  # PR と push では差分しか見ない。** 全履歴を見る経路（定期実行）が本当に効いているかを
+  # 週を待たずに確かめられないと、「見ているつもり」のまま置かれる。
+  workflow_dispatch:
   schedule:
     # 毎週月曜 09:00 JST（UTC 00:00）
     - cron: '0 0 * * 1'
@@ -34,7 +38,18 @@ jobs:
     permissions:
       contents: read
     steps:
+      # **gitleaks の走査範囲は、起動したイベントで変わる。**
+      # PR と push では**その差分のコミットだけ**、定期実行と手動起動では**全履歴**を見る
+      # （アクション側が範囲を決めており、全履歴を強制する設定は無い）。
+      #
+      # **実測（2026-09-08。このワークフローのログ）**:
+      #   PR での実行 → `gitleaks detect … --first-parent <sha>^..<sha>` / 1 commits scanned（3.5 KB）
+      #   手動起動     → `gitleaks detect`（範囲指定なし）        / 214 commits scanned（1.75 MB）
+      # 全履歴の側を成り立たせるために、浅い取得をやめる。
+      # **depth 1 のままだと、定期実行でも過去のコミットを1件も見ない。**
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -73,3 +88,46 @@ jobs:
       - name: 依存の脆弱性の全件表示（合否には影響しない）
         if: success() || failure()
         run: npm audit || true
+
+      # 秘密の値がソースに書かれていないかの検査。
+      #
+      # **これが無いと、秘密の露出を見る経路はファイル名の検査だけになる。**
+      # `scripts/check-docs.test.sh` の 0c は「値を持つファイル名が .gitignore で無視され、
+      # 追跡されていないか」を見るだけで（**対象は `scripts/doc-scope.sh` の `DOC_PRUNE_FILES`。
+      # ここに写さない**——写すと、あちらに1行足したときこちらが静かに古くなる）、
+      # **ファイルの中身は誰も見ていない。** ソースやワークフローに
+      # トークン・鍵・パスワードが直接書かれても、CI は緑のまま通る。
+      # AI レビューも差分しか読まないため、過去のコミットに残った秘密は拾わない。
+      #
+      # **PR ではその差分しか見ない。過去に残った秘密を見るのは、毎週の定期実行である。**
+      # つまり「この PR が緑」は「この差分に秘密が無い」であって、
+      # **「リポジトリに秘密が無い」ではない。**
+      #
+      # **踏むと壊れる: その週次実行は、60日間リポジトリに活動が無いと GitHub が自動で無効化する**
+      # （パブリックリポジトリの schedule の仕様。README の「依存の版を上げない方針」に既出）。
+      # **止まっても通知は来ず、CI は緑のまま**であり、
+      # **過去に残った秘密を見る経路がこれだけである以上、止まったことを誰も検出できない。**
+      # **再有効化は Actions の画面から行う。** 上の workflow_dispatch は
+      # **その場で1回走らせるためのものであり、週次を戻すものではない**（README の代償4 と同じ手順）。
+      #
+      # **v3 を使う。** v2 は Node 20 で動いており、2026-09-16 に GitHub のランナーから
+      # Node 20 が消えて動かなくなる（gitleaks-action の README）。
+      #
+      # **ライセンス鍵は要らない。** 必要なのは Organization が所有するリポジトリのみで、
+      # ここは個人アカウントの公開リポジトリである。
+      #
+      # **コメントを止めているのは、permissions を contents: read のままに保つためである。**
+      # 失敗はジョブのログに出る。PR へのコメントには pull-requests: write が要る。
+      #
+      # **if を付けているのは、npm audit が落ちた巡回でも走らせるためである。**
+      # 付けないと、依存の脆弱性が未修正のあいだ秘密の検査が一度も走らない。
+      # always() は使わない（上の concurrency で打ち切った実行まで走るため。上のステップと同じ理由）。
+      #
+      # 代償: **誤検知が出ると、全 PR のマージ経路が塞がる。** その場合は .gitleaks.toml の
+      # allowlist に**理由を書いて**除外する。理由なしに除外しない（npm audit の閾値と同じ扱い）。
+      - name: 秘密の値がソースに書かれていないかの検査
+        if: success() || failure()
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false

@@ -737,6 +737,20 @@ expect_ng() { # $1=説明 $2=対象ファイル $3=sed 式 $4=NG に含まれる
 
 echo "1. 壊したときに落ちること"
 
+
+# --- 検査0: 整形の検知
+# 桁揃えは「起きたか / 起きていないか」で判定できる。壊す側は1行で足りる。
+#
+# **経路の読み取り（検査5）とは別に確かめる。** 桁揃えが入ると検査5 も落ちるが、
+# その NG は「2.1 の表から経路を1件も読み取れない」であり、**表の中身を疑わせる。**
+# 検査0 の NG が同時に出ることまで確かめないと、原因の取り違えが残る。
+expect_ng "REVIEW.md の表の行を桁揃えする" REVIEW.md \
+  '0,/^| 1 | \*\*一覧・取得 API\*\*/s//| 1   | **一覧・取得 API**/' \
+  'REVIEW.md の表のセルが桁揃えされている' \
+  '| 1   | \*\*一覧・取得 API\*\*'
+# **誤検知の側は expect_ok の節で確かめる**（「セルの途中の連続空白では落ちない」）。
+# 検知の範囲が「セルの終端」に限られていることは、この検査に固有の境界である。
+# 対象ファイルを走査する for ループ自体は、他の検査と共有しているため個別には見ない。
 # --- 検査1: 相対リンク
 expect_ng "README のリンク先を存在しないファイルに" README.md \
   's|(docs/requirements.md)|(docs/nonexistent.md)|' 'README.md -> docs/nonexistent.md が存在しない'
@@ -871,14 +885,32 @@ expect_ng "requirements.md の前方におとりの列挙行を置き、本命�
   'REVIEW.md 2.1 の表と requirements.md で経路の名前が違う' \
   '検査の検査が置いたおとり' '/ 全文検索 /'
 
-# --- 検査5: 「N種類」（実体は requirements.md と features.md のイベント表）
+# --- 検査5: 「N種類」（実体は requirements.md 4.1 のイベント表。#9 で1つに寄せた）
 # イベント名は表の中でバッククォートに囲まれている。sed 式に直接書くと
 # SC2016（単一引用符の中では展開されない）を shellcheck が出すため、文字を変数に逃がす。
 # \140 は8進数のバッククォート。
 bt=$'\140'
-expect_ng "features.md のイベント名を1つ書き換える（7行のまま動かない）" docs/features.md \
-  "s/^| ${bt}presence:changed${bt} |/| ${bt}presence:updated${bt} |/" \
-  'requirements.md と features.md でイベント表の内容が違う' "${bt}presence:updated${bt}"
+# **表が features.md に戻ったことを見る。** 戻ると検査は requirements.md 側だけを数え続け、
+# 2つが食い違っても緑で通る。#9 で消した重複が黙って復活する経路であり、
+# 復活そのものを検知しないと、以前の壊れ方（説明と注記の食い違い）がそのまま戻る。
+# **書式の無い表が features.md に戻された場合も検知すること。**
+# 以前は events() の結果が空かどうかで見ていたため、**コード書式で書かれていない表は
+# 空を返し、「戻っている」の NG が出なかった。** 行の数で見る形に変えた。
+expect_ng "features.md 5.1 に、コード書式の無いイベント表を戻す" docs/features.md \
+  's/^\*\*この7種類以外の変化は即時反映されない。\*\*$/| イベント | 内容 |\n|---|---|\n| message:new | メッセージの新規投稿 |\n\n**この7種類以外の変化は即時反映されない。**/' \
+  'features.md 5.1 にイベント表が戻っている' \
+  '| message:new | メッセージの新規投稿 |'
+expect_ng "features.md 5.1 にイベント表を戻す" docs/features.md \
+  "s/^\*\*この7種類以外の変化は即時反映されない。\*\*$/| イベント | 内容 |\n|---|---|\n| ${bt}message:new${bt} | メッセージの新規投稿 |\n\n**この7種類以外の変化は即時反映されない。**/" \
+  'features.md 5.1 にイベント表が戻っている' "| ${bt}message:new${bt} |"
+# **書式を付け忘れた行が、黙って読み飛ばされないこと。**
+# events() はコード書式（`…`）で始まる行だけを拾う。付け忘れた行は rows に入らず、
+# **kinds は変わらないため各文書の「N種類」の宣言とも一致し、すべて緑のままずれる。**
+# 全滅（kinds が 0）は「読み取れない」の分岐が捕まえるが、**半分しか読めない場合はそこを通らない。**
+expect_ng "requirements.md のイベント表に、コード書式の無い行を1つ足す" docs/requirements.md \
+  "/^| ${bt}presence:changed${bt} |/a\| notification:new | 通知（コード書式の付け忘れ） |" \
+  'requirements.md のイベント表に読み取れない行がある' \
+  '| notification:new |'
 expect_ng "requirements.md のイベント表から1行消す" docs/requirements.md \
   "/^| ${bt}unread:updated${bt} |/d" \
   'CLAUDE.md の「イベント定義（N種類）」: 7 と書かれているが、実際は 6'
@@ -903,15 +935,17 @@ expect_ng "tech-stack.md の「7種類の WebSocket イベント」を6種類に
 expect_ng "tech-stack.md の「7種類のイベント定義」を6種類に" docs/tech-stack.md \
   's/7種類のイベント定義/6種類のイベント定義/' \
   'tech-stack.md の「N種類のイベント定義」: 6 と書かれているが、実際は 7'
+# **features.md 5.1 の見出しも、変えたら落ちること。**
+# events() は見出しに一致しなければ何も返さず、それは「表が無い」と区別できない。
+# 見出しを改名すると、上の「表が戻っている」のガードは NG を出さずに死ぬ（偽の緑）。
+# **表を落としたこの PR では、requirements.md 側にしか読み取り失敗の確認が無かった。**
+expect_ng "features.md 5.1 の見出しを変えて、表の復活を検知できなくする" docs/features.md \
+  's/^### 5\.1 配信するイベント$/### 5.1 リアルタイムで配信するイベント/' \
+  'features.md の「5.1 配信するイベント」の節が見つからない' \
+  '^### 5\.1 リアルタイムで配信するイベント'
 expect_ng "requirements.md のイベント表の見出しを変えて読み取れなくする" docs/requirements.md \
   's/^#### リアルタイム配信の対象イベント$/#### 配信するイベント/' \
   'requirements.md からイベント表を読み取れない' '^#### 配信するイベント'
-# 読み取り失敗は両側で踏む。features.md 側の分岐が無いと、ここを壊したときに出る NG が
-# 「イベント表の内容が違う」だけになり、受け取った側は表の中身を突き合わせに行く
-# （実際に違うのは見出しである）。
-expect_ng "features.md のイベント表の見出しを変えて読み取れなくする" docs/features.md \
-  's/^### 5\.1 配信するイベント$/### 5.1 リアルタイムで配信するイベント/' \
-  'features.md からイベント表を読み取れない' '^### 5\.1 リアルタイムで配信するイベント'
 
 # --- 落ちてはならないこと。$4 で、置いたファイルが検査の対象に入るはず（in）か
 #     除外されるはず（out）かを切り替える。関数を2つに分けると、失敗時の出力や
@@ -993,6 +1027,14 @@ expect_ok "入れ子の node_modules の中のリンク切れも無視される"
 expect_ok "外部リンク（http / https / mailto）は存在を確かめない" docs/probe-external-link.md \
   '[外部の文書](https://example.invalid/does-not-exist) と [平文の外部](http://example.invalid/x) と [連絡先](mailto:nobody@example.invalid)' in
 
+
+# 検査0 の境界。**見るのは「セルの終端の連続空白」だけで、セルの途中の連続空白は見ない。**
+# ここを広げると、本文にたまたま連続空白が入った表が NG になり、
+# 「整形された」という誤った原因を出す。整形ツールは終端を埋めるのであって、途中は埋めない。
+expect_ok "表のセルの途中に連続空白があっても、整形とみなさない" docs/probe-table-spacing.md \
+  '| 見出し | 説明 |
+|---|---|
+| 値  の途中に連続空白がある | 終端の空白は1つ |' in
 # KEEP の分岐（PRUNE に一致しても除外しない）を、doc_excluded の委譲と
 # check-docs.sh の検査1 まで通して踏む唯一のケース。
 #
