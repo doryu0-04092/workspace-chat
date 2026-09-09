@@ -1034,7 +1034,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 「一覧の API はこの条件に加えて `AND c."archivedAt" IS NULL` が要る」と書いてあるが、
      * **こちらにそれを写すと、オーナーはアーカイブ済みチャンネルの `id` を知る手段を失い、
      * 「オーナーが復元できる」（F-35。Must）が成立しなくなる。**
-     * 一貫性のつもりで隣の注意書きを写すのが、最も起きやすい壊し方である。
+     * 一貫性のつもりで他の問い合わせの注意書きを写すのが、最も起きやすい壊し方である。
      * 下の `it` がこれを固定している。
      *
      * **この形をそのまま写さないこと。** `workspaceId` は URL のパスパラメータ由来である。
@@ -1380,7 +1380,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 書き換えていない文の意味だけが変わる（規則は scripts/doc-scope.sh の decls の直上）。
      *
      * **対象側の `deletedAt` — 書いていない**（現時点の決定であり、#78 で見直す）。
-     * 隣の `activeUserByLoginId` は付けているが、この問い合わせは
+     * `activeUserByLoginId` は付けているが、この問い合わせは
      * 対象側の `deletedAt` の有無で挙動を変えない。**理由は、退会済みを積極的に
      * 解決可能にするためではない。** `Membership` / `ChannelMember` の消し込み
      * （機能一覧 1.5。削除と同一トランザクションで連鎖削除する）を取りこぼした状態
@@ -1411,7 +1411,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 読まないこと。** 外すのは対象側の `deletedAt` であって、参加の条件ではない。
      *
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
-     * （REVIEW.md 3 / CWE-89）。**埋め込んでいる値の素性は、この一群の中で最も悪い。**
+     * （REVIEW.md 3 / CWE-89）。**埋め込んでいる値は、リクエスト由来ですらない自由入力である。**
      * `loginId` は**メッセージ本文の `@` に続く文字列**であり、パスパラメータですらない
      * 自由入力である（`channelId` もリクエスト由来）。
      *
@@ -1425,7 +1425,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * （理由は `schema.prisma` の `loginId` にある）として `$queryRaw` で書くと定めており、
      * **この経路は生 SQL で書くことが確定している。**
      */
-    function mentionTargetByLoginId(loginId: string, channelId: string, viewerId: string): string {
+    function mentionTargetByLoginId(viewerId: string, channelId: string, loginId: string): string {
       return `
         SELECT u."id"
         FROM "User" u
@@ -1460,7 +1460,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `);
       // 要求する側は `insider`（secret の正規の参加者）で固定し、対象側だけを見る。
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId(loginId, channelId, '00000000-0000-7000-8000-000000000002'),
+        mentionTargetByLoginId('00000000-0000-7000-8000-000000000002', channelId, loginId),
       );
       expect(output).toBe(userId);
     });
@@ -1487,9 +1487,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 要求する側は `insider`（secret の正規の参加者）で固定し、対象側だけを見る。
       const output = await expectSqlToSucceed(
         mentionTargetByLoginId(
-          loginId,
-          '00000000-0000-7000-8000-0000000000c2',
           '00000000-0000-7000-8000-000000000002',
+          '00000000-0000-7000-8000-0000000000c2',
+          loginId,
         ),
       );
       expect(output).toBe('');
@@ -1501,9 +1501,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // メンションが解決できることも兼ねて確認する。
       const output = await expectSqlToSucceed(
         mentionTargetByLoginId(
-          'insider',
-          '00000000-0000-7000-8000-0000000000c2',
           '00000000-0000-7000-8000-000000000002',
+          '00000000-0000-7000-8000-0000000000c2',
+          'insider',
         ),
       );
       expect(output).toBe('00000000-0000-7000-8000-000000000002');
@@ -1528,7 +1528,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
           VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000c1', '${ws}', '${viewerId}');
       `);
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId('insider', '00000000-0000-7000-8000-0000000000c2', viewerId),
+        mentionTargetByLoginId(viewerId, '00000000-0000-7000-8000-0000000000c2', 'insider'),
       );
       expect(output).toBe('');
     });
@@ -1568,9 +1568,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
           // 小文字で引くと、引数側の `lower()` を落とす改変（`lower(u."userId") = <引数>`）
           // が素通りする（登録が `Mixed_…`、引数が `mixed_…` のとき、列側だけを
           // 小文字化しても一致してしまう。実測）。**大文字にすると両側が要る。**
-          loginId.toUpperCase(),
-          channelId,
           '00000000-0000-7000-8000-000000000002',
+          channelId,
+          loginId.toUpperCase(),
         ),
       );
       expect(output).toBe(userId);
@@ -1582,7 +1582,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **要求する側がこの状態でも、宛先解決を求められてはならない。**
       const { userId: ghostViewerId } = await createDeletedUserKeepingMembership();
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId('insider', '00000000-0000-7000-8000-0000000000c2', ghostViewerId),
+        mentionTargetByLoginId(ghostViewerId, '00000000-0000-7000-8000-0000000000c2', 'insider'),
       );
       expect(output).toBe('');
     });
