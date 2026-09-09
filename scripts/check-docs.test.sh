@@ -201,30 +201,30 @@ fi
 #
 # 代償 3: 下の gi_probe_* が落ちる条件を与えているのは **gi_scan_tracked の中身**
 # （読み取り・名前の取り出し・KEEP の差し引き）だけである。
-# **実物を流す呼び出し（git ls-files -z | gi_scan_tracked）そのものには、
-# 落ちる条件が1つも無い。** doc_excluded_name が除外と判定する追跡ファイルが
+# **実物を流す呼び出し（gi_tracked_hits_in "$repo"）そのものには、
+# かつて落ちる条件が1つも無かった。** doc_excluded_name が除外と判定する追跡ファイルが
 # 1件も無く（.env.example は DOC_PRUNE_FILES の .env.* に一致するが、KEEP が差し引く）、
-# 結果が常に空であるため、次のどれも全ケースが緑で通る。
+# 結果が常に空であるため、次のどれも全ケースが緑で通った。
 #
 #   - git ls-files から -z を外す
 #   - 呼び出しの数行を丸ごと削る（確認そのものが消えても緑）
 #   - pathspec を足して走査範囲を狭める（例: -- docs/）
-#   - -C "$repo" の指し先を変える
+#   - -C の指し先を変える
 #
-# **「塞げない」ではない。塞いでいないだけである。**
+# **「塞げない」ではなかった。塞いでいなかっただけである。**
 # 実物に値を持つ追跡ファイルを置くのは、0c が塞ごうとしている状態そのものを
 # 作ることになるため採らない。**しかしその手は他にもある。**
-# 下の 0c-2b が実際に採っているのが、それである——専用の一時リポジトリを
-# git init し、そこに git add -f して、リポジトリを引数で受ける関数
-# （gi_claude_tracked_in）を本体と壊す確認で共有する。実物には何も置かずに、
-# **-z・pathspec・指し先の3つ**に落ちる条件を与えられる。
+# 0c-2b が採っているのが、それである——専用の一時リポジトリを git init し、
+# そこに git add -f して、リポジトリを引数で受ける関数を本体と壊す確認で共有する。
+# 実物には何も置かずに、**-z・pathspec・指し先の3つ**に落ちる条件を与えられる。
 #
-# **「呼び出しの数行を丸ごと削る」だけは、0c-2b でも塞げていない。**
+# **同じ形を、この gi_committed の呼び出しにも適用した**（#88）。
+# 下の gi_tracked_hits_in がリポジトリを引数で受け、専用の一時リポジトリに
+# 名前だけが除外に当たる空ファイルを1件置いて、それを拾えることを見る。
+# **上の4つのうち3つが塞がった**（実際に壊して落ちることを確かめてある）。
+#
+# **「呼び出しの数行を丸ごと削る」だけは、いまも塞げていない**——
 # 本体を削っても、残った壊す確認は一時リポジトリだけを見て OK を出す。
-# 上の4つのうち、同じ形を適用して塞がるのは3つである、と読むこと。
-# **同じ形をこの gi_committed の呼び出しにも適用できる。**
-# 適用していないのはこの PR の範囲外だからであり、**塞げないからではない。**
-# 現状で守れているのは関数の中身までである。
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_pat=""   # 一致したパターン。.gitignore 以外が一致元だったときは空
@@ -357,8 +357,8 @@ gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致し�
 # 決め打ちの一覧を同じ関数に流し、読み取り・名前の取り出し・KEEP の差し引きを同時に見る。
 #
 # **ここで塞がるのは関数の中身だけである。** 実物を流す呼び出し側
-# （下の git ls-files -z | gi_scan_tracked）にはいまも落ちる条件が無い。
-# 上の「代償 3」に、その範囲を書いてある。
+# （下の gi_tracked_hits_in "$repo"）は、その直前の probe が塞いでいる（#88）。
+# 上の「代償 3」に、いまも塞げていない1つを書いてある。
 #
 # 名前は一覧から導出する。手書きで並べると、DOC_PRUNE_FILES / DOC_KEEP_FILES を
 # 変えたときに走査は正しく動いているのに期待値だけが取り残され、
@@ -394,7 +394,73 @@ if [ "${#gi_probe_got[@]}" -ne "${#gi_probe_pass[@]}" ] ||
   echo "        実際: ${gi_probe_got[*]}"
   gi_ng=1
 fi
-mapfile -d '' -t gi_committed < <(git -C "$repo" ls-files -z | gi_scan_tracked)
+# --- 前提: 実物を問う走査が、実際に追跡ファイルを拾えること（#88）---
+# **これが無いと、-z を外しても・pathspec で範囲を狭めても・-C の指し先を変えても、
+# 全ケースが緑で通る**——実物には除外に当たる追跡ファイルが1件も無く、結果が常に空になるためである。
+# 上の「代償 3」が「呼び出し側には落ちる条件が無い」と書いていた範囲を、ここで塞ぐ。
+#
+# **実物には何も置かない。** 置くこと自体が、0c が防ごうとしている状態を作る。
+# 0c-2b と同じ形を採る——専用の一時リポジトリを git init し、そこに git add -f して、
+# **リポジトリを引数で受ける関数を、本体と壊す確認で共有する。**
+#
+# 落ちる条件の作り方:
+#   - **非 ASCII を含む名前**にする。-z を外すと git がパスを引用して出すため、
+#     期待するパスと一致しなくなる（件数では気づけない。パスで見る）
+#   - **sub/ の下**に置く。pathspec（例: -- docs/）で範囲を狭めると拾えなくなる
+#   - **引数のリポジトリを問う。** -C の指し先を固定に書き換えると、
+#     本体か壊す確認のどちらかが必ず落ちる
+#
+# **順序に意味がある。壊す確認の probe を先に足してから、本体を読む**（0c-2b と同じ）。
+# 逆にすると、本体の指し先を一時リポジトリに取り違えても、その時点では索引が空で
+# 0 件になり、**実物を一度も見ないまま緑で通る。**
+#
+# **名前は DOC_PRUNE_FILES から導出する。** 手書きで並べると、一覧を変えたときに
+# 走査は正しく動いているのに期待値だけが取り残される（上の gi_probe_pass と同じ理由）。
+gi_tracked_hits_in() { # $1=問う先の git リポジトリ。除外に当たる追跡ファイルを NUL 区切りで返す
+  git -C "$1" ls-files -z | gi_scan_tracked
+}
+
+# * を含むパターンからだけ作る（.env のような固定名は置き換えが起こらない）。
+gi_scan_probe_name=''
+for g in "${probe_prune_files[@]}"; do
+  case "$g" in *'*'*) gi_scan_probe_name="${g//\*/本番}"; break ;; esac
+done
+gi_scan_probe_ok=0
+if [ -z "$gi_scan_probe_name" ]; then
+  # DOC_PRUNE_FILES から * を含むパターンが消えると、ここが空になる。
+  # 名指ししないと、下の判定が「0 件」で落ちて -z や pathspec を疑わせる。
+  echo "  NG: DOC_PRUNE_FILES に * を含むパターンが無く、走査の確認用の名前を作れない"
+  gi_ng=1
+elif ! gi_scan_probe=$(mktemp -d); then
+  echo "  NG: 走査の確認用の一時ディレクトリを作れなかった（TMPDIR を確かめる）"
+  gi_ng=1
+elif ! git -C "$gi_scan_probe" init -q; then
+  echo "  NG: 走査の確認用の一時リポジトリを作れなかった（$gi_scan_probe）"
+  gi_ng=1
+elif ! mkdir -p "$gi_scan_probe/sub"; then
+  echo "  NG: 走査の確認用のディレクトリを作れなかった（$gi_scan_probe/sub）"
+  gi_ng=1
+elif ! : > "$gi_scan_probe/sub/$gi_scan_probe_name"; then
+  # **中身は書かない。判定は名前だけで行われる。**
+  echo "  NG: 走査の確認用のファイルを作れなかった（sub/$gi_scan_probe_name）"
+  gi_ng=1
+elif ! git -C "$gi_scan_probe" add -f -- "sub/$gi_scan_probe_name"; then
+  echo "  NG: 走査の確認用のファイルを索引に足せなかった（sub/$gi_scan_probe_name）"
+  gi_ng=1
+else
+  gi_scan_probe_ok=1
+fi
+if [ "$gi_scan_probe_ok" = 1 ]; then
+  mapfile -d '' -t gi_scan_probe_got < <(gi_tracked_hits_in "$gi_scan_probe")
+  if [ "${#gi_scan_probe_got[@]}" -ne 1 ] ||
+     [ "${gi_scan_probe_got[0]}" != "sub/$gi_scan_probe_name" ]; then
+    echo "  NG: 追跡ファイルの走査が、除外に当たる追跡ファイルを拾えていない"
+    echo "        期待: 1 件「sub/$gi_scan_probe_name」"
+    echo "        実際: ${#gi_scan_probe_got[@]} 件「${gi_scan_probe_got[*]}」"
+    gi_ng=1
+  fi
+fi
+mapfile -d '' -t gi_committed < <(gi_tracked_hits_in "$repo")
 if [ ${#gi_committed[@]} -gt 0 ]; then
   echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
   gi_ng=1
