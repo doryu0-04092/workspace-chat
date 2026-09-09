@@ -18,7 +18,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | lint・型チェック・ビルド・テストの CI | **完了**（[ci.yml](.github/workflows/ci.yml)） |
 | 依存の脆弱性検査 | **完了**（[audit.yml](.github/workflows/audit.yml)。**脆弱性に気づく経路はこれだけである**） |
 | **秘密の値の検査** | **完了**（[audit.yml](.github/workflows/audit.yml) の gitleaks。**中身を見るのはこれだけである**——`scripts/check-docs.test.sh` の 0c はファイル名しか見ない） |
-| 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない） |
+| 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない）。**固定するのは「新しい版が出たから上げる」だけであり、脆弱性を塞ぐ更新は取り込む**（下記「依存の版を上げない方針」） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Valkey。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
 | Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#42） |
@@ -35,6 +35,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | [機能一覧](docs/features.md) | 全機能の一覧と受け入れ条件。**要件の出所（要求 / 派生 / 提案・承認済）を区分表記** |
 | [技術スタック](docs/tech-stack.md) | 採用技術とバージョン、選定理由、LTS の根拠、**リソースのサイジング** |
 | [コードレビュー観点](REVIEW.md) | AI・人間の双方が使うレビュー観点。重大度の定義と、報告しないことの明示 |
+| [判定基準の作り直しの記録](docs/review-criteria-record.md) | 上の観点を**なぜそう決めたか**。実測の数字と経緯。**規則そのものは置かない**（ただし**規則文書へ移していない取り決めが残っている**。#156） |
 
 ## 技術スタック（概要）
 
@@ -95,7 +96,9 @@ npm run format:check
 npm run typecheck
 npm run build
 npm test
-npm audit --audit-level=high
+bash scripts/check-audit.test.sh
+npm audit --json > audit-report.json || true
+node scripts/check-audit.mjs audit-report.json
 shellcheck scripts/*.sh
 bash scripts/check-docs.sh
 bash scripts/check-docs.test.sh
@@ -142,6 +145,13 @@ bash scripts/check-docs.test.sh
 **npm の依存は、動くことを確かめた組み合わせで固定する。**
 [dependabot.yml](.github/dependabot.yml) の npm 側は版更新の PR を出さない設定にしている。
 
+> **この方針が却下するのは「新しい版が出たから上げる」だけである。**
+> **脆弱性を塞ぐための更新は、この方針の対象ではない。取り込む。**
+> 下の3件の根拠はすべて「新しい版が出たから上げる」型の提案であり、
+> **脆弱性を理由にしたものは1件も無い。**
+> **[audit.yml](.github/workflows/audit.yml) は「脆弱性に気づく経路はこれだけである」**
+> （[CLAUDE.md](CLAUDE.md)）**として置いてある。気づいた後に上げないなら、その経路を作った意味が消える。**
+
 判断は**一度きり**である。最初に選んだ版は互いに噛み合うことを確かめた組み合わせであり、
 **1つだけ動かすと噛み合わなくなる**。
 
@@ -174,13 +184,44 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 （API で確認した。有効なら 204 が返るところ、404 が返る）。
 アラートが無ければ security updates も動かないため、**自動で来る経路は無い。**
 
+**気づく経路は [audit.yml](.github/workflows/audit.yml) だけであり、気づいたら塞ぐ。**
+**塞ぎ方は毎回同じとは限らない。**
+
+| 状況 | 採る手 |
+|---|---|
+| 直接の依存に修正版がある | その依存を上げる |
+| **依存の依存**に修正版がある | `package.json` の `overrides` で差し替える |
+| **上流がまだ直していない** | **その版では塞げない。** イシューに記録し、**`scripts/audit-allowlist.json` に**その advisory だけを一時的に通す行を足す。**期限とイシューへの参照を必ず付ける**（実例: #166） |
+
+> **`overrides` は workspace 配下の依存には届かない**（2026-09-09 の実測。#166）。
+> root 直下の依存には効くが、`apps/api` の依存の依存には効かない。
+
+> **通すときは advisory を名指しする。** `--audit-level` を下げる形は採らない——
+> **その1件だけでなく、次に来る件も一緒に見逃す。**
+>
+> **ただし `npm audit` 自体には「この1件だけ無視する」指定が無い**
+> （npm 11.13.0 の `--help` で確認。あるのは `--audit-level` による閾値だけである）。
+> **そのため `--json` の出力を自前で判定している**——`scripts/check-audit.mjs`（仕組み）と
+> `scripts/audit-allowlist.json`（通す対象）に分けてある。
+> **道具を足す形（`audit-ci` 等）は、依存を増やすため採っていない。**
+
+**通すときの落とし方は2つある。片方だけでは足りない。**
+
+| 落とす条件 | 何を防ぐか |
+|---|---|
+| 許可していない high 以上が残っている | **通した1件のついでに、次に来た件を見逃すこと** |
+| **許可した id が1件も出なくなった** | **上流が直ったのに、通したまま忘れること** |
+
+**期限は日付で書かない。出口で書く**（例: 「F-27 の実装に着手するまで」）。
+**日付は延長を誘発する。** 出口なら、そこへ着いた時点で必ず突き当たる。
+
 > **これはリポジトリの設定であり、`dependabot.yml` には現れない。**
 > 「設定として残す」というこの方針が、security updates 側には及んでいない。
 > 有効にするかどうかは別途判断する（#36）。
 
 **3. `moderate` 以下は誰も知らせてくれない。**
-[audit.yml](.github/workflows/audit.yml) は `--audit-level=high` で落とすため、
-`moderate` 以下では失敗しない。かつては「Dependabot の PR で追う」としていたが、
+[audit.yml](.github/workflows/audit.yml) が落とすのは **high 以上**（`scripts/check-audit.mjs` の
+`BLOCKING`）であり、`moderate` 以下では失敗しない。かつては「Dependabot の PR で追う」としていたが、
 **その経路は無くなった。** 代わりに、audit.yml の「全件表示」ステップの出力を
 定期実行のログで人が読む。**読む先は1箇所に定めてある。**
 
@@ -194,7 +235,8 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 > 実装が長く止まる見込みなら、活動に依存しない経路を別途考える。
 
 **検知そのものは [audit.yml](.github/workflows/audit.yml) が毎週続ける。**
-`high` 以上なら落ちる。落ちたら、そのとき直す版を人が選ぶ。
+`high` 以上なら落ちる。落ちたら、そのとき直す版を人が選ぶ——
+**塞げる版が無い場合の扱いは、上の「塞ぎ方」の表による。**
 
 **GitHub Actions 側は止めていない。** こちらのメジャーは実行環境（Node 20 → 24）の
 移行を含み、放置すると非推奨のランタイムで動き続ける。実際に PR #4 のレビューで
@@ -840,7 +882,7 @@ Claude GitHub App のトークンに交換する経路を通るため、App が�
 | 制約 | 内容 |
 |---|---|
 | **fork からの PR では動かない** | パブリックリポジトリでは fork からの PR に Secrets が渡らない。**外部の PR にレビューが付かない**代わりに、外部から本人のトークンを消費されない |
-| **このワークフロー自身を変える PR ではレビューが動かない** | ワークフローの内容が既定ブランチと一字一句同じでないと、トークン交換の時点で中断する。**導入 PR も、後からこのファイルを直す PR も同じ**。マージすれば次の PR から動く。**このファイルの変更は他の変更と混ぜず、単独の PR にする** |
+| **このワークフロー自身を変える PR ではレビューが動かない** | ワークフローの内容が既定ブランチと一字一句同じでないと、トークン交換の時点で中断する。**導入 PR も、後からこのファイルを直す PR も同じ**。マージすれば次の PR から動く。**このファイルの変更は他の変更と混ぜず、単独の PR にする**。**マージした後は、その前に切られたブランチでも走らなくなる**——`main` を取り込むまで解消しない。**見分け方: `review` が `success` のまま 10 秒前後で終わり、コメントが投稿されない。**CI 4本の完走確認は緑のまま通るため、**一度もレビューされていない PR が「完走」として扱われる** |
 | **トークン消費が大きい** | レビューはセッション履歴を持たないため、毎回 PR 差分・`CLAUDE.md`・`REVIEW.md` を読み直す |
 | **PR の版の `CLAUDE.md` は読まれない** | ルートの `CLAUDE.md` は既定ブランチの版に差し替えられ、PR の版は `.claude-pr/CLAUDE.md` へ退避される（実測で確認。#46）。**レビュアーに効かせたい規則は `REVIEW.md` に書く。** `REVIEW.md` は PR の版がそのまま読まれる |
 

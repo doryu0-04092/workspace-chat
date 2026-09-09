@@ -79,3 +79,6 @@ tmp/
 
 # テストレポート（CI では Artifact として残す）
 reports/
+
+# npm audit --json の出力。CI が作る中間ファイルであり、追跡しない。
+audit-report.json
