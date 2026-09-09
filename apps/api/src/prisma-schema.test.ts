@@ -867,7 +867,13 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * （REVIEW.md 3 / CWE-89）。写してよいのは**条件の形**であって、
      * 値の埋め込み方ではない。`nextArchiveSequence` にも同じ注意がある。
      */
-    function visibleChannels(userId: string, workspaceId: string): string {
+    function visibleChannels({
+      userId,
+      workspaceId,
+    }: {
+      userId: string;
+      workspaceId: string;
+    }): string {
       return `
         SELECT c."name"
         FROM "Channel" c
@@ -896,12 +902,16 @@ describe('Prisma のスキーマとマイグレーション', () => {
     const otherWorkspaceChannel = '00000000-0000-7000-8000-0000000000c3';
 
     it('参加者にはプライベートチャンネルが見える', async () => {
-      const output = await expectSqlToSucceed(visibleChannels(insider, workspace));
+      const output = await expectSqlToSucceed(
+        visibleChannels({ userId: insider, workspaceId: workspace }),
+      );
       expect(output.split('\n')).toContain('secret');
     });
 
     it('参加していないメンバーにはプライベートチャンネルが見えない', async () => {
-      const output = await expectSqlToSucceed(visibleChannels(outsider, workspace));
+      const output = await expectSqlToSucceed(
+        visibleChannels({ userId: outsider, workspaceId: workspace }),
+      );
       expect(output.split('\n')).not.toContain('secret');
       // パブリックは見えていること。見えない実装でもこのテストは通ってしまうため、
       // **「何も見えない」で通過しないことを併せて確かめる。**
@@ -914,13 +924,17 @@ describe('Prisma のスキーマとマイグレーション', () => {
       //
       // **見えないのはチャンネルの中身までである。** 参加者一覧は取得できる
       // （機能一覧 3.1）。その経路はこの問い合わせを使わない（上の説明を参照）。
-      const output = await expectSqlToSucceed(visibleChannels(owner, workspace));
+      const output = await expectSqlToSucceed(
+        visibleChannels({ userId: owner, workspaceId: workspace }),
+      );
       expect(output.split('\n')).not.toContain('secret');
       expect(output.length).toBeGreaterThan(0);
     });
 
     it('ワークスペースに参加していない利用者には何も見えない', async () => {
-      const output = await expectSqlToSucceed(visibleChannels(stranger, workspace));
+      const output = await expectSqlToSucceed(
+        visibleChannels({ userId: stranger, workspaceId: workspace }),
+      );
       expect(output).toBe('');
     });
 
@@ -946,7 +960,13 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 実装では `channelId` も `userId` もプレースホルダとして渡す
      * （REVIEW.md 3 / CWE-89）。`visibleChannels` / `nextArchiveSequence` と同じ扱いである。
      */
-    function channelMemberViewers(userId: string, channelId: string): string {
+    function channelMemberViewers({
+      userId,
+      channelId,
+    }: {
+      userId: string;
+      channelId: string;
+    }): string {
       return `
         SELECT c."id"
         FROM "Channel" c
@@ -970,25 +990,33 @@ describe('Prisma のスキーマとマイグレーション', () => {
     const publicChannel = '00000000-0000-7000-8000-0000000000c1';
 
     it('参加者は、そのチャンネルの参加者一覧を取得できる', async () => {
-      const output = await expectSqlToSucceed(channelMemberViewers(insider, secretChannel));
+      const output = await expectSqlToSucceed(
+        channelMemberViewers({ userId: insider, channelId: secretChannel }),
+      );
       expect(output).toBe(secretChannel);
     });
 
     it('参加していないオーナーでも、参加者一覧は取得できる', async () => {
       // **中身は見えないが、人の出入りは管理できる。** すぐ上の
       // 「オーナーでも、参加していないプライベートチャンネルの中身は見えない」と対になる。
-      const output = await expectSqlToSucceed(channelMemberViewers(owner, secretChannel));
+      const output = await expectSqlToSucceed(
+        channelMemberViewers({ userId: owner, channelId: secretChannel }),
+      );
       expect(output).toBe(secretChannel);
     });
 
     it('参加していないメンバーは、参加者一覧を取得できない', async () => {
       // **これが無いと「全員に開ける」実装でも緑になる。**
-      const output = await expectSqlToSucceed(channelMemberViewers(outsider, secretChannel));
+      const output = await expectSqlToSucceed(
+        channelMemberViewers({ userId: outsider, channelId: secretChannel }),
+      );
       expect(output).toBe('');
     });
 
     it('ワークスペースの外の利用者は、参加者一覧を取得できない', async () => {
-      const output = await expectSqlToSucceed(channelMemberViewers(stranger, secretChannel));
+      const output = await expectSqlToSucceed(
+        channelMemberViewers({ userId: stranger, channelId: secretChannel }),
+      );
       expect(output).toBe('');
     });
 
@@ -998,7 +1026,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **ワークスペースに所属していない利用者は、種別によらず 404 である**（機能一覧 2.1）。
       // ここを種別だけで決めると、**パブリックチャンネルの存在と
       // `channelId` が有効であることが 403 として外部に漏れる。**
-      const output = await expectSqlToSucceed(channelMemberViewers(stranger, publicChannel));
+      const output = await expectSqlToSucceed(
+        channelMemberViewers({ userId: stranger, channelId: publicChannel }),
+      );
       expect(output).toBe('');
     });
 
@@ -1009,13 +1039,17 @@ describe('Prisma のスキーマとマイグレーション', () => {
       //
       // **この it が無いと、後から `c."visibility" = 'PUBLIC' OR` を足して
       // 緩めても1件も落ちない。** 承認を経ない変更が静かに通るのを防ぐ。
-      const output = await expectSqlToSucceed(channelMemberViewers(outsider, publicChannel));
+      const output = await expectSqlToSucceed(
+        channelMemberViewers({ userId: outsider, channelId: publicChannel }),
+      );
       expect(output).toBe('');
     });
 
     it('パブリックチャンネルの参加者は、参加者一覧を取得できる', async () => {
       // 上の it だけだと、**パブリックを一律で閉じる実装でも緑になる。**
-      const output = await expectSqlToSucceed(channelMemberViewers(insider, publicChannel));
+      const output = await expectSqlToSucceed(
+        channelMemberViewers({ userId: insider, channelId: publicChannel }),
+      );
       expect(output).toBe(publicChannel);
     });
 
@@ -1040,7 +1074,13 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **この形をそのまま写さないこと。** `workspaceId` は URL のパスパラメータ由来である。
      * 実装ではプレースホルダとして渡す（REVIEW.md 3 / CWE-89）。
      */
-    function manageableChannels(userId: string, workspaceId: string): string {
+    function manageableChannels({
+      userId,
+      workspaceId,
+    }: {
+      userId: string;
+      workspaceId: string;
+    }): string {
       return `
         SELECT c."name"
         FROM "Channel" c
@@ -1057,7 +1097,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
     it('オーナーには、参加していないプライベートチャンネルも一覧に出る', async () => {
       // **これが無いと F-09 が成立しない。** 参加者一覧を取得する権限があっても、
       // チャンネルの id を知る手段が無ければ行使できない。
-      const output = await expectSqlToSucceed(manageableChannels(owner, workspace));
+      const output = await expectSqlToSucceed(
+        manageableChannels({ userId: owner, workspaceId: workspace }),
+      );
       expect(output.split('\n')).toContain('secret');
     });
 
@@ -1077,19 +1119,25 @@ describe('Prisma のスキーマとマイグレーション', () => {
          SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
          WHERE "id" = '${id}';`,
       );
-      const output = await expectSqlToSucceed(manageableChannels(owner, workspace));
+      const output = await expectSqlToSucceed(
+        manageableChannels({ userId: owner, workspaceId: workspace }),
+      );
       expect(output.split('\n')).toContain('to-archive-1');
     });
 
     it('オーナーでないメンバーには、管理の一覧が1件も返らない', async () => {
       // **オーナー専用の経路であることを固定する。**
       // これが無いと、`m."role" = 'OWNER'` を落としても1件も落ちない。
-      const output = await expectSqlToSucceed(manageableChannels(insider, workspace));
+      const output = await expectSqlToSucceed(
+        manageableChannels({ userId: insider, workspaceId: workspace }),
+      );
       expect(output).toBe('');
     });
 
     it('別のワークスペースのオーナーには、管理の一覧が1件も返らない', async () => {
-      const output = await expectSqlToSucceed(manageableChannels(otherWorkspaceOwner, workspace));
+      const output = await expectSqlToSucceed(
+        manageableChannels({ userId: otherWorkspaceOwner, workspaceId: workspace }),
+      );
       expect(output).toBe('');
     });
 
@@ -1100,7 +1148,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 「所属ワークスペースが一致すること」を守っているつもりの2件が
       // **何も守らない状態に静かに落ちる。**
       const output = await expectSqlToSucceed(
-        channelMemberViewers(otherWorkspaceOwner, otherWorkspaceChannel),
+        channelMemberViewers({ userId: otherWorkspaceOwner, channelId: otherWorkspaceChannel }),
       );
       expect(output).toBe(otherWorkspaceChannel);
     });
@@ -1112,7 +1160,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **どこか1つのワークスペースのオーナーが、他人のワークスペースの
       // プライベートチャンネルの参加者一覧を取得できる**（機能一覧 2.1）。
       const output = await expectSqlToSucceed(
-        channelMemberViewers(otherWorkspaceOwner, secretChannel),
+        channelMemberViewers({ userId: otherWorkspaceOwner, channelId: secretChannel }),
       );
       expect(output).toBe('');
     });
@@ -1120,13 +1168,15 @@ describe('Prisma のスキーマとマイグレーション', () => {
     it('退会した利用者は、参加していたプライベートチャンネルを引けない', async () => {
       // **要求する側の経路。** `ChannelMember` が残っていても通さない。
       const { userId } = await createDeletedUserKeepingMembership();
-      const output = await expectSqlToSucceed(visibleChannels(userId, workspace));
+      const output = await expectSqlToSucceed(visibleChannels({ userId, workspaceId: workspace }));
       expect(output).toBe('');
     });
 
     it('退会した利用者は、参加者一覧を取得できない', async () => {
       const { userId } = await createDeletedUserKeepingMembership();
-      const output = await expectSqlToSucceed(channelMemberViewers(userId, secretChannel));
+      const output = await expectSqlToSucceed(
+        channelMemberViewers({ userId, channelId: secretChannel }),
+      );
       expect(output).toBe('');
     });
 
@@ -1145,14 +1195,18 @@ describe('Prisma のスキーマとマイグレーション', () => {
         INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
           VALUES ('${randomUUID()}', '${ownWorkspace}', 'theirs', 'theirs', 'PRIVATE');
       `);
-      const output = await expectSqlToSucceed(manageableChannels(userId, ownWorkspace));
+      const output = await expectSqlToSucceed(
+        manageableChannels({ userId, workspaceId: ownWorkspace }),
+      );
       expect(output).toBe('');
     });
 
     it('別のワークスペースのオーナーには、チャンネルが1つも見えない', async () => {
       // `visibleChannels` 側も同じ形の書き間違いを起こしうる。
       // **パブリックチャンネルまで見えてしまう**ため、こちらも押さえる。
-      const output = await expectSqlToSucceed(visibleChannels(otherWorkspaceOwner, workspace));
+      const output = await expectSqlToSucceed(
+        visibleChannels({ userId: otherWorkspaceOwner, workspaceId: workspace }),
+      );
       expect(output).toBe('');
     });
   });
@@ -1211,7 +1265,13 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
      * （REVIEW.md 3 / CWE-89）。
      */
-    function channelMemberList(viewerId: string, channelId: string): string {
+    function channelMemberList({
+      viewerId,
+      channelId,
+    }: {
+      viewerId: string;
+      channelId: string;
+    }): string {
       return `
         SELECT u."userId"
         FROM "ChannelMember" cm
@@ -1250,7 +1310,13 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
      * （REVIEW.md 3 / CWE-89）。
      */
-    function workspaceMemberList(viewerId: string, workspaceId: string): string {
+    function workspaceMemberList({
+      viewerId,
+      workspaceId,
+    }: {
+      viewerId: string;
+      workspaceId: string;
+    }): string {
       return `
         SELECT u."userId"
         FROM "Membership" m
@@ -1270,10 +1336,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
     it('退会した利用者は、ワークスペースの参加者一覧にも出ない', async () => {
       const { loginId } = await createDeletedUserKeepingMembership();
       const output = await expectSqlToSucceed(
-        workspaceMemberList(
-          '00000000-0000-7000-8000-000000000001',
-          '00000000-0000-7000-8000-0000000000a1',
-        ),
+        workspaceMemberList({
+          viewerId: '00000000-0000-7000-8000-000000000001',
+          workspaceId: '00000000-0000-7000-8000-0000000000a1',
+        }),
       );
       expect(output.split('\n')).not.toContain(loginId);
       // 現役の利用者は出ること。**否定側だけだと、常に空でも緑になる。**
@@ -1284,10 +1350,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 機能一覧 2.1。**3.1 の拒否コードの1段目が乗っている土台である。**
       // これが無いと、要求する側の条件を書き漏らした実装でも1件も落ちない。
       const output = await expectSqlToSucceed(
-        workspaceMemberList(
-          '00000000-0000-7000-8000-000000000004',
-          '00000000-0000-7000-8000-0000000000a1',
-        ),
+        workspaceMemberList({
+          viewerId: '00000000-0000-7000-8000-000000000004',
+          workspaceId: '00000000-0000-7000-8000-0000000000a1',
+        }),
       );
       expect(output).toBe('');
     });
@@ -1295,7 +1361,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
     it('退会した利用者は、ワークスペースの参加者一覧を取得できない', async () => {
       const { userId } = await createDeletedUserKeepingMembership();
       const output = await expectSqlToSucceed(
-        workspaceMemberList(userId, '00000000-0000-7000-8000-0000000000a1'),
+        workspaceMemberList({
+          viewerId: userId,
+          workspaceId: '00000000-0000-7000-8000-0000000000a1',
+        }),
       );
       expect(output).toBe('');
     });
@@ -1319,12 +1388,12 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 退会させる前は出ること。**肯定側が無いと、常に空を返す実装でも緑になる。**
       // `insider` は `general` の参加者である。
       const viewer = '00000000-0000-7000-8000-000000000002';
-      const before = await expectSqlToSucceed(channelMemberList(viewer, channelId));
+      const before = await expectSqlToSucceed(channelMemberList({ viewerId: viewer, channelId }));
       expect(before.split('\n')).toContain(loginId);
 
       // 退会（論理削除）。**`Membership` はあえて残したままにする。**
       await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';`);
-      const after = await expectSqlToSucceed(channelMemberList(viewer, channelId));
+      const after = await expectSqlToSucceed(channelMemberList({ viewerId: viewer, channelId }));
       expect(after.split('\n')).not.toContain(loginId);
     });
 
@@ -1334,10 +1403,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 非参加者にプライベートチャンネルの参加者一覧が返る。
       // `outsider` は同じワークスペースのメンバーだが `secret` に参加していない。
       const output = await expectSqlToSucceed(
-        channelMemberList(
-          '00000000-0000-7000-8000-000000000003',
-          '00000000-0000-7000-8000-0000000000c2',
-        ),
+        channelMemberList({
+          viewerId: '00000000-0000-7000-8000-000000000003',
+          channelId: '00000000-0000-7000-8000-0000000000c2',
+        }),
       );
       expect(output).toBe('');
     });
@@ -1346,20 +1415,20 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **オーナーの例外を壊さないこと**（機能一覧 3.1）。
       // 見せないのはメッセージと添付だけである。
       const output = await expectSqlToSucceed(
-        channelMemberList(
-          '00000000-0000-7000-8000-000000000001',
-          '00000000-0000-7000-8000-0000000000c2',
-        ),
+        channelMemberList({
+          viewerId: '00000000-0000-7000-8000-000000000001',
+          channelId: '00000000-0000-7000-8000-0000000000c2',
+        }),
       );
       expect(output.split('\n')).toContain('insider');
     });
 
     it('ワークスペースの外の利用者は、参加者一覧を取得できない', async () => {
       const output = await expectSqlToSucceed(
-        channelMemberList(
-          '00000000-0000-7000-8000-000000000004',
-          '00000000-0000-7000-8000-0000000000c2',
-        ),
+        channelMemberList({
+          viewerId: '00000000-0000-7000-8000-000000000004',
+          channelId: '00000000-0000-7000-8000-0000000000c2',
+        }),
       );
       expect(output).toBe('');
     });
@@ -1367,7 +1436,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
     it('退会した利用者は、参加者一覧そのものを取得できない', async () => {
       const { userId: ghost } = await createDeletedUserKeepingMembership();
       const output = await expectSqlToSucceed(
-        channelMemberList(ghost, '00000000-0000-7000-8000-0000000000c2'),
+        channelMemberList({ viewerId: ghost, channelId: '00000000-0000-7000-8000-0000000000c2' }),
       );
       expect(output).toBe('');
     });
@@ -1425,7 +1494,15 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * （理由は `schema.prisma` の `loginId` にある）として `$queryRaw` で書くと定めており、
      * **この経路は生 SQL で書くことが確定している。**
      */
-    function mentionTargetByLoginId(viewerId: string, channelId: string, loginId: string): string {
+    function mentionTargetByLoginId({
+      viewerId,
+      channelId,
+      loginId,
+    }: {
+      viewerId: string;
+      channelId: string;
+      loginId: string;
+    }): string {
       return `
         SELECT u."id"
         FROM "User" u
@@ -1460,7 +1537,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `);
       // 要求する側は `insider`（secret の正規の参加者）で固定し、対象側だけを見る。
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId('00000000-0000-7000-8000-000000000002', channelId, loginId),
+        mentionTargetByLoginId({
+          viewerId: '00000000-0000-7000-8000-000000000002',
+          channelId,
+          loginId,
+        }),
       );
       expect(output).toBe(userId);
     });
@@ -1486,11 +1567,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // `general`(c1) には参加しているが、`secret`(c2) には参加していない。
       // 要求する側は `insider`（secret の正規の参加者）で固定し、対象側だけを見る。
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId(
-          '00000000-0000-7000-8000-000000000002',
-          '00000000-0000-7000-8000-0000000000c2',
+        mentionTargetByLoginId({
+          viewerId: '00000000-0000-7000-8000-000000000002',
+          channelId: '00000000-0000-7000-8000-0000000000c2',
           loginId,
-        ),
+        }),
       );
       expect(output).toBe('');
     });
@@ -1500,11 +1581,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // 要求する側・対象側ともに `insider`（secret の参加者）。自分自身への
       // メンションが解決できることも兼ねて確認する。
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId(
-          '00000000-0000-7000-8000-000000000002',
-          '00000000-0000-7000-8000-0000000000c2',
-          'insider',
-        ),
+        mentionTargetByLoginId({
+          viewerId: '00000000-0000-7000-8000-000000000002',
+          channelId: '00000000-0000-7000-8000-0000000000c2',
+          loginId: 'insider',
+        }),
       );
       expect(output).toBe('00000000-0000-7000-8000-000000000002');
     });
@@ -1528,7 +1609,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
           VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000c1', '${ws}', '${viewerId}');
       `);
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId(viewerId, '00000000-0000-7000-8000-0000000000c2', 'insider'),
+        mentionTargetByLoginId({
+          viewerId,
+          channelId: '00000000-0000-7000-8000-0000000000c2',
+          loginId: 'insider',
+        }),
       );
       expect(output).toBe('');
     });
@@ -1563,15 +1648,16 @@ describe('Prisma のスキーマとマイグレーション', () => {
       `);
       // 要求する側は `insider`（secret の正規の参加者）で固定する。
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId(
+        mentionTargetByLoginId({
           // **登録した綴りとも、その小文字とも違う綴りで引く。**
-          // 小文字で引くと、引数側の `lower()` を落とす改変（`lower(u."userId") = <引数>`）
-          // が素通りする（登録が `Mixed_…`、引数が `mixed_…` のとき、列側だけを
-          // 小文字化しても一致してしまう。実測）。**大文字にすると両側が要る。**
-          '00000000-0000-7000-8000-000000000002',
+          viewerId:
+            // 小文字で引くと、引数側の `lower()` を落とす改変（`lower(u."userId") = <引数>`）
+            // が素通りする（登録が `Mixed_…`、引数が `mixed_…` のとき、列側だけを
+            // 小文字化しても一致してしまう。実測）。**大文字にすると両側が要る。**
+            '00000000-0000-7000-8000-000000000002',
           channelId,
-          loginId.toUpperCase(),
-        ),
+          loginId: loginId.toUpperCase(),
+        }),
       );
       expect(output).toBe(userId);
     });
@@ -1582,7 +1668,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **要求する側がこの状態でも、宛先解決を求められてはならない。**
       const { userId: ghostViewerId } = await createDeletedUserKeepingMembership();
       const output = await expectSqlToSucceed(
-        mentionTargetByLoginId(ghostViewerId, '00000000-0000-7000-8000-0000000000c2', 'insider'),
+        mentionTargetByLoginId({
+          viewerId: ghostViewerId,
+          channelId: '00000000-0000-7000-8000-0000000000c2',
+          loginId: 'insider',
+        }),
       );
       expect(output).toBe('');
     });
