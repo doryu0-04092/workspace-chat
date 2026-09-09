@@ -38,7 +38,10 @@ for f in "${docs[@]}"; do
   # 区切り行（| --- |）を特別扱いする必要はない。**整形ツールは区切り行を`-`で埋めるため、
   # 連続空白にならない**（Prettier 3.9.6 の出力で確認）。除外を足すと、一度も発火しない分岐が残る。
   # 見るのは「セルの終端に連続空白があるか」だけである。セルの途中の連続空白は対象にしない。
-  fmt_lines=$(awk '/^\|/ && /[^ |]  +\|/ { print NR }' "$f")
+  # **`./` を前置するのは、doc_find の出力が素の名前になりうるためである**（#47。doc_parent の注記）。
+  # **awk はこれを option と解釈しない**（gawk 5.4.0 で実測。プログラム文字列より後ろは operand）。
+  # **1つの書き方で揃えるために前置している。** 落ちるのは下の grep と doc_parent のほうである。
+  fmt_lines=$(awk '/^\|/ && /[^ |]  +\|/ { print NR }' "./$f")
   fmt_n=$(printf '%s\n' "$fmt_lines" | grep -c .)
   [ "$fmt_n" -eq 0 ] && continue
   fmt_total=$((fmt_total + fmt_n))
@@ -50,7 +53,7 @@ fi
 echo "  完了"
 echo "1. 相対リンクの検証（対象 ${#docs[@]} ファイル）"
 for f in "${docs[@]}"; do
-  d=$(dirname "$f")
+  d=$(doc_parent "$f")
   while IFS= read -r l; do
     [ -z "$l" ] && continue
     # 外部リンクはスキームで見分ける。先頭1文字で弾くと（かつての抽出パターン [^)h]）、
@@ -65,7 +68,7 @@ for f in "${docs[@]}"; do
     # ここで見ないと、本物のリポジトリでは通るのにテストの前提チェックだけが落ち、
     # 原因の切り分けに時間がかかる。制約を書くだけでは守られない。
     why=$(doc_excluded "$d/$l") && note "$f -> $l は検査の$why（リンク先にできない）"
-  done < <(grep -o "](\([^)]*\))" "$f" | sed 's/](\(.*\))/\1/' | sed 's/#.*//' | sort -u)
+  done < <(grep -o "](\([^)]*\))" "./$f" | sed 's/](\(.*\))/\1/' | sed 's/#.*//' | sort -u)
 done
 echo "  完了"
 
