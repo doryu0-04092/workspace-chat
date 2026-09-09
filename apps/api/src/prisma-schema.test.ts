@@ -1071,7 +1071,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * こちらは**管理に要る範囲だけを返す。** これが無いと、オーナーは
      * 参加者一覧を取得する権限を持ちながら **`channelId` を知る手段が1つも無い。**
      *
-     * **返すものは機能一覧 3.1 の決定表と同じである**——`id` / 名前 / 種別 / 参加者数。
+     * **決定表の「返すもの」は `id` / 名前 / 種別 / 参加者数と参加者一覧の5つだが、
+     * この問い合わせが返すのは前の4つである。** 参加者一覧は別の経路が返す
+     * （`channelMemberViewers` / `channelMemberList`）。**「同じである」と書かない**——
+     * この docblock を読んで決定表を開かない実装者に、管理の範囲が4項目として届く。
      * **`id` を落としてはならない。** 名前だけを返すと、すぐ上に書いた
      * 「`channelId` を知る手段が1つも無い」がそのまま残り、**F-09 も F-35 も行使できない。**
      * **返さないものは、メッセージ・添付ファイル・未読数である。** 会話の中身は一切返さない。
@@ -1127,10 +1130,17 @@ describe('Prisma のスキーマとマイグレーション', () => {
       //
       // **名前だけで照合してはならない。** 名前で見ると、`SELECT` から `c."id"` を
       // 落としても落ちない——**この経路が要る理由そのものが消えたのに、緑で通る。**
+      //
+      // **退会済みの参加者を先に1件入れる。** これが無いと、参加者数の
+      // `AND member."deletedAt" IS NULL` を落としても 1 のままで落ちない——
+      // docblock が名指しで塞いだ「退会済みの人を参加者として数える」が素通りする。
+      // この関数は secret(c2) に ChannelMember を残したまま退会させる。
+      await createDeletedUserKeepingMembership();
       const output = await expectSqlToSucceed(
         manageableChannels({ viewerId: owner, workspaceId: workspace }),
       );
-      // 機能一覧 3.1 の決定表の「返すもの」と同じ並び。secret の参加者は insider だけである。
+      // 決定表の「返すもの」のうち、この問い合わせが返す4つ。
+      // **secret の現役の参加者は insider だけである**（上で入れた退会済みは数えない）。
       expect(output.split('\n')).toContain(`${secretChannel}|secret|PRIVATE|1`);
     });
 
