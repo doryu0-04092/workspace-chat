@@ -72,6 +72,42 @@ DOC_PRUNE_DIRS=(
 DOC_PRUNE_FILES=(
   '.env' '.env.*'
   '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json'
+  # ログ。**値を持つ。** Terraform の crash.log は「プロバイダとの入出力を含む」と
+  # 公式が明記しており（クラッシュ時のダンプ）、npm / yarn / pnpm の debug ログも
+  # 実行時の引数と環境を書き出す。**複製すると一時ディレクトリに残り続ける。**
+  # `*.log` だけでは足りない——.gitignore 側は `npm-debug.log*` のように末尾に * を持ち、
+  # `npm-debug.log.1` のような回転後の名前に一致する。**同じ形で写す。**
+  #
+  # **crash.log は `*.log` に一致するが、それでも書く。** 下の突き合わせ（0c-3）は
+  # .gitignore のパターンと**文字列として**照合する。パターンどうしの包含は見ない——
+  # 見ようとすると `*.log` が `crash.log` を覆うかの判定が要り、
+  # **その判定自身が glob の解釈になって、検査が検査を必要とする。**
+  # **1対1で写すほうが、機械的で読み違えようがない。**
+  '*.log' 'crash.log' 'npm-debug.log*' 'yarn-debug.log*' 'yarn-error.log*' 'pnpm-debug.log*'
+  # Terraform の設定の上書き。**値を持ちうる**——プロバイダの認証情報を直接書ける。
+  'override.tf' 'override.tf.json'
+  # エディタのスワップ。**編集中のファイルの中身をそのまま持つ。**
+  # .env を開いている最中に落ちれば、その中身が入る。
+  '*.swp' '*.swo'
+)
+
+# .gitignore にあるファイル名のパターンのうち、**値を持たないと判断したもの。**
+#
+# **これは「無視してよい」の一覧ではない。「値を持たないと人が判断した」の記録である。**
+# 下の突き合わせ（check-docs.test.sh の 0c-3）は、.gitignore のファイル名パターンが
+# **DOC_PRUNE_FILES にも、この一覧にも無い**とき NG を出す。
+# **.gitignore に新しい行を足した人に、「値を持つか」を1回だけ判断させるための仕掛けである。**
+#
+# **突き合わせが一方向だった**（#44）。0c は DOC_PRUNE_FILES を起点に
+# 「.gitignore に無いもの」を検出していたが、**逆向きは素通りしていた。**
+# 実際に `*.log` と `crash.log` が片側だけになっていた。
+DOC_NO_VALUE_IGNORES=(
+  '.pnp.js'           # 依存の解決結果。値を持たない
+  '*.tsbuildinfo'     # 型検査の増分情報。値を持たない
+  '.DS_Store'         # macOS のフォルダ表示設定
+  'Thumbs.db'         # Windows のサムネイルの索引
+  'desktop.ini'       # Windows のフォルダ表示設定
+  'audit-report.json' # npm audit の出力。依存の脆弱性の一覧であり、秘密は持たない
 )
 
 # 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、

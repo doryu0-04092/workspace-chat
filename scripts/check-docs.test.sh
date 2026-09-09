@@ -48,14 +48,17 @@ probe=$(mktemp -d)
 probe_dirs=(.git .claude node_modules .pnp dist build .vite coverage .nyc_output
             playwright-report test-results blob-report reports generated uploads tmp
             .terraform .vscode .idea)
-probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json')
+probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json'
+                   '*.log' 'crash.log' 'npm-debug.log*' 'yarn-debug.log*' 'yarn-error.log*'
+                   'pnpm-debug.log*' 'override.tf' 'override.tf.json' '*.swp' '*.swo')
 probe_keep_files=('.env.example')
 # 現実に出てくる綴り。0a（木を作る）と 0c（.gitignore に問う）が同じものを見る。
 # 導出（${g//\*/x}）は1パターンにつき代表1名しか作らないため、
 # secrets.auto.tfvars.json のようなドットを複数含む綴りはこの一覧にしか依存しない。
 # 0a と 0c で別々に書き写すと、片方に足したときもう片方が静かに狭くなる。
 probe_real_names=(.env.local terraform.tfstate terraform.tfstate.backup
-                  prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json)
+                  prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json
+                  crash.log npm-debug.log.1 override.tf .env.swp)
 # 一致しては困る対（末尾一致であることの裏打ち）。
 # *.tfvars / *.tfvars.json はいずれも末尾一致であり、例示ファイルには一致しない。
 # この対を置かないと、末尾一致でない形へ崩しても 0a・0c が緑で通る。
@@ -717,6 +720,75 @@ elif [ "${#gi_read[@]}" -ne 1 ] ||
 else
   echo "  OK"
 fi
+
+
+# --- 前提: .gitignore のファイル名のパターンが、値を持つかどうか判断されていること（#44）---
+# **0c の突き合わせは一方向だった。** DOC_PRUNE_FILES を起点に「.gitignore に無いもの」は
+# 見ていたが、**逆向き（.gitignore にあるが DOC_PRUNE_FILES に無い）は素通りしていた。**
+# 実際に `*.log` と `crash.log` が片側だけになっており、**値を持つログが複製に含まれていた。**
+#
+# **判断そのものは機械にできない。** 「そのファイルが値を持つか」は人が決める。
+# **できるのは「判断されていない行を残さないこと」だけである。**
+# DOC_PRUNE_FILES（値を持つ）にも DOC_NO_VALUE_IGNORES（値を持たないと判断した）にも
+# 無いパターンが .gitignore に現れたら落とす。**新しい行を足した人に、1回だけ判断させる。**
+#
+# **ファイルを引数で受ける**（0c-2b・0c と同じ形）。実物には何も置かずに、
+# 分類の抜けを拾えることを確かめられる。
+echo "0c-3. .gitignore のファイル名のパターンが、値を持つかどうか判断されていること"
+gi3_unclassified_in() { # $1=.gitignore のパス。分類されていないパターンを1行ずつ返す
+  local pat d x
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    # 末尾の CR を落とす。Windows で編集された .gitignore を読んでも同じ結果にする。
+    pat=${pat%$'\r'}
+    case "$pat" in
+      '' | '#'*) continue ;;  # 空行とコメント
+      '!'*) continue ;;       # 打ち消し。DOC_KEEP_FILES 側で扱う
+      */) continue ;;         # ディレクトリ形。DOC_PRUNE_DIRS 側で扱う
+    esac
+    # 「dir/...」の形（.vscode/* など）は、先頭のディレクトリ名を DOC_PRUNE_DIRS で見る。
+    case "$pat" in
+      */*)
+        d=${pat%%/*}
+        for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$d" ] && continue 2; done
+        ;;
+    esac
+    for x in "${DOC_PRUNE_FILES[@]}" "${DOC_NO_VALUE_IGNORES[@]}"; do
+      [ "$x" = "$pat" ] && continue 2
+    done
+    printf '%s\n' "$pat"
+  done <"$1"
+}
+
+# **壊す確認を先に置く**（0c-2b と同じ理由。後に置くと、本体の指し先を取り違えても
+# その時点では空で緑になり、実物を一度も見ないまま通る）。
+gi3_probe=''
+gi3_probe_ok=0
+if ! gi3_probe=$(mktemp); then
+  echo "  NG: 分類の確認用の一時ファイルを作れなかった（TMPDIR を確かめる）"
+  fail=1
+elif ! printf '%s\n' '# コメント' 'node_modules/' '!.env.example' '.env' '*.unclassified-probe' >"$gi3_probe"; then
+  echo "  NG: 分類の確認用の .gitignore を書けなかった（$gi3_probe）"
+  fail=1
+else
+  gi3_probe_ok=1
+fi
+gi3_ng=0
+if [ "$gi3_probe_ok" = 1 ]; then
+  mapfile -t gi3_probe_got < <(gi3_unclassified_in "$gi3_probe")
+  # コメント・ディレクトリ形・打ち消し・分類済み（.env）はすべて落ち、1件だけ残るはず。
+  if [ "${#gi3_probe_got[@]}" -ne 1 ] || [ "${gi3_probe_got[0]}" != '*.unclassified-probe' ]; then
+    echo "  NG: 分類の抜けを拾えていない（期待 1 件「*.unclassified-probe」/ 実際 ${#gi3_probe_got[@]} 件「${gi3_probe_got[*]}」）"
+    gi3_ng=1
+  fi
+  rm -f "$gi3_probe"
+fi
+mapfile -t gi3_got < <(gi3_unclassified_in "$repo/.gitignore")
+if [ "${#gi3_got[@]}" -gt 0 ]; then
+  echo "  NG: .gitignore のパターンが、値を持つかどうか判断されていない: ${gi3_got[*]}"
+  echo "        値を持つなら DOC_PRUNE_FILES へ、持たないなら DOC_NO_VALUE_IGNORES へ足す（scripts/doc-scope.sh）"
+  gi3_ng=1
+fi
+if [ "$gi3_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
 # これが通らないと、以降の「落ちた」は壊したせいではなく複製の不備によるものになる。
