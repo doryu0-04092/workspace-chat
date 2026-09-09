@@ -88,6 +88,14 @@ jobs:
       # **検査の結果を握り潰しているのではない。** 合否は check-audit.mjs が決める。
       # 出力が JSON として読めなければ、そちらが exit 2 で落ちる
       # （registry の障害を「脆弱性ゼロ」と読み違えない）。
+      #
+      # **判定そのものが壊れていないことを、先に確かめる。**
+      # ここが黙って通すようになると、**脆弱性に気づく唯一の経路が形だけになる。**
+      # 正常系を1回通すだけでは、それは分からない
+      # （docs.yml が check-docs.test.sh を回しているのと同じ関係である）。
+      - name: 脆弱性検査の判定の検査
+        run: bash scripts/check-audit.test.sh
+
       - name: 依存の脆弱性検査
         run: |
           npm audit --json > audit-report.json || true
