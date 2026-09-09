@@ -294,7 +294,15 @@ file_event_rows() { # $1=ファイル。イベント名の行の数を、節に�
   # table_lines は節の中しか見ないため、5.1 の外（5.2 の中や新しい節）に
   # 表を置くと素通りする。イベント名の書式で数えるため、他の節の表は誤検知しない。
   # grep -c は一致 0 件で終了コード 1 を返すため、|| true で受ける。
-  grep -cE '^\| `[a-z]+:[a-z]+` \|' "$1" || true
+  #
+  # **バッククォートは変数に入れて渡す**（`check-docs.test.sh` と同じ形）。
+  # 素で単一引用符の中に書くと shellcheck が SC2016（展開されない式）と読んで落ちる。
+  # **手元に shellcheck が無いと気づけず、CI でだけ落ちる。**
+  # **`[\x60]` のような書き方は採らない**——`grep -E` は `\x60` を解釈せず、
+  # 文字クラスが `\` `x` `6` `0` の4文字になり、**検知が黙って効かなくなる**（実際に踏んだ）。
+  local bt
+  bt=$'\140'
+  grep -cE "^\| ${bt}[a-z]+:[a-z]+${bt} \|" "$1" || true
 }
 req_events=$(events docs/requirements.md "$req_head")
 kinds=$(printf '%s\n' "$req_events" | grep -c .)
