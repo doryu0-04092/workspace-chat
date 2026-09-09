@@ -103,6 +103,41 @@ describe('Prisma のスキーマとマイグレーション', () => {
     return { exitCode: result.exitCode, output: result.output.trim() };
   }
 
+  /**
+   * 問い合わせが返す**列名**を `|` 区切りで返す。
+   *
+   * **上の psql は `-tA` で見出しを外している。** 値をそのまま比較するためだが、
+   * その結果**列名の誤りが1つも捕まらない。** 式の列に別名を付け忘れても、
+   * Postgres が `?column?` や `coalesce` を返すだけで、**値は変わらないためテストは緑のまま通る。**
+   *
+   * **列名で読む実装（Prisma の `$queryRaw` を含む）では、そこが落ちる。**
+   * 参照実装が「この列を返す」と書いている以上、**列名も参照実装の一部である。**
+   *
+   * `-t` を外して見出しを出し、その1行目を返す。
+   */
+  async function sqlColumnNames(sql: string): Promise<string> {
+    const result = await container.exec([
+      'psql',
+      '-U',
+      container.getUsername(),
+      '-d',
+      container.getDatabase(),
+      '-v',
+      'ON_ERROR_STOP=1',
+      // -t を外す。見出しの行が要る。
+      '-A',
+      '-c',
+      sql,
+    ]);
+    expect(result.exitCode, `この SQL は成功するべきだが失敗した:\n${sql}\n${result.output}`).toBe(
+      0,
+    );
+    // 見出しの行が無ければ、列名の比較そのものが成り立たない。名指しして止める。
+    const header = result.output.trim().split('\n')[0];
+    expect(header, `見出しの行が返らなかった:\n${sql}\n${result.output}`).toBeDefined();
+    return header ?? '';
+  }
+
   /** SQL が失敗することを期待し、その出力を返す。成功したら失敗として扱う。 */
   async function expectSqlToFail(sql: string): Promise<string> {
     const { exitCode, output } = await psql(sql);
@@ -799,7 +834,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      */
     function nextArchiveSequence(baseName: string): string {
       return `
-        SELECT COALESCE(MIN(s.n), 1)
+        SELECT COALESCE(MIN(s.n), 1) AS "nextSequence"
         FROM generate_series(
           1,
           (SELECT count(*) + 1 FROM "Channel" WHERE "workspaceId" = '${workspace}')
@@ -825,6 +860,13 @@ describe('Prisma のスキーマとマイグレーション', () => {
          SET "archivedAt" = now(), "archiveSequence" = ${next}, "name" = "baseName" || '-${next}'
          WHERE "id" = '${id}';`,
       );
+    });
+
+    it('採番の問い合わせが返す列名が、参照実装のとおりである', async () => {
+      // **`AS "nextSequence"` を落とすと、Postgres は `coalesce` を返す。**
+      // 値は変わらないため、他のケースはすべて緑のまま通る。
+      const columns = await sqlColumnNames(nextArchiveSequence('general'));
+      expect(columns).toBe('nextSequence');
     });
   });
 
@@ -1179,6 +1221,14 @@ describe('Prisma のスキーマとマイグレーション', () => {
         manageableChannels({ viewerId: insider, workspaceId: workspace }),
       );
       expect(output).toBe('');
+    });
+
+    it('管理の一覧が返す列名が、参照実装のとおりである', async () => {
+      // **`AS "memberCount"` を落としても、値は変わらない。** ここでしか捕まらない。
+      const columns = await sqlColumnNames(
+        manageableChannels({ viewerId: owner, workspaceId: workspace }),
+      );
+      expect(columns).toBe('id|name|visibility|memberCount');
     });
 
     it('別のワークスペースのオーナーには、管理の一覧が1件も返らない', async () => {
@@ -1888,6 +1938,16 @@ describe('Prisma のスキーマとマイグレーション', () => {
         mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000004' }),
       );
       expect(output).toBe('00000000-0000-7000-8000-000000000004|よその人|f');
+    });
+
+    it('表示時の参照先解決が返す列名が、参照実装のとおりである', async () => {
+      // **式の列の別名は、値では捕まらない。** psql の `-tA` は値だけを出すため、
+      // `AS "isDeleted"` を落としても他の3件は緑のまま通る。
+      // **列名で読む実装（Prisma の `$queryRaw` を含む）では、そこで印が落ちる。**
+      const columns = await sqlColumnNames(
+        mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000002' }),
+      );
+      expect(columns).toBe('id|displayName|isDeleted');
     });
 
     it('現役の利用者は、ユーザーID から引ける', async () => {
