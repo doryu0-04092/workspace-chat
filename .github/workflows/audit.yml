@@ -174,8 +174,22 @@ jobs:
       # **タグ名をコメントで添えない。** [技術スタック](../../docs/tech-stack.md) が
       # pg_bigm の SHA-1 について同じ形を決めている——「**タグ名を残すと何にも照合されない値になり、
       # SHA-1 だけを上げたときに黙って古くなる**」「**ずれても CI は緑のまま**」。
-      # ここも同じで、**版名を照合する仕組みは無い。** どの版かを知りたいときは、
-      # この SHA を上流で引く（gh api repos/gitleaks/gitleaks-action/commits/<SHA>）。
+      #
+      # **ただし「照合されない」の理由は、ここでは pg_bigm と違う。**
+      # **Dependabot は同じ行のコメントを更新する**——GitHub の公式文書が
+      # 「Dependabot updates the version documentation of GitHub Actions when the comment is
+      # on the same line」と書いており、このリポジトリは github-actions の更新を現に受け取っている
+      # （dependabot.yml）。つまり**添えれば Dependabot が追随する。**
+      #
+      # **それでも添えない。追随する経路が Dependabot ひとつだけだからである。**
+      # このリポジトリは npm 側の版更新 PR を現に止めており（[README](../../README.md)
+      # 「依存の版を上げない方針」）、GitHub Actions 側も同じ判断で止めうる。
+      # **止めた瞬間、版名は誰にも直されない値になる。** CI は版名を照合しないため、
+      # **ずれても緑のままである**——tech-stack.md が言う状態にそのまま落ちる。
+      #
+      # どの版かを知りたいときは上流で引く（gh api repos/gitleaks/gitleaks-action/git/ref/tags/v3.0.0）。
+      # **2026-09-09 時点で、この SHA は v3.0.0 のコミットである**
+      # （git/ref/tags/v3.0.0 と git/ref/tags/v3 のどちらも e0c47f4f… を返す）。
       - name: 秘密の値がソースに書かれていないかの検査
         if: success() || failure()
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
