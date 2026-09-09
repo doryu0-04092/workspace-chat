@@ -136,7 +136,7 @@ bash scripts/check-docs.test.sh
 
 | ワークフロー | 内容 |
 |---|---|
-| [docs.yml](.github/workflows/docs.yml) | ドキュメントの検査（`scripts/check-docs.sh`）と、**その検査自身が壊れたら落ちることの確認**（`scripts/check-docs.test.sh`、58通り） |
+| [docs.yml](.github/workflows/docs.yml) | ドキュメントの検査（`scripts/check-docs.sh`）と、**その検査自身が壊れたら落ちることの確認**（`scripts/check-docs.test.sh`、61通り） |
 | [audit.yml](.github/workflows/audit.yml) | 依存の脆弱性検査と、**秘密の値がソースに書かれていないかの検査**（gitleaks）。PR・push に加えて**毎週月曜に定期実行する**（**gitleaks が全履歴を見るのは、この定期実行と手動実行だけである。PR と push では差分しか見ない**）（要件定義書 4.3 の「継続的に」） |
 | [claude_code_review.yml](.github/workflows/claude_code_review.yml) | AI コードレビュー（下記） |
 

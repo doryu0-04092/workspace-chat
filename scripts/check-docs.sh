@@ -279,10 +279,22 @@ fea_head='^#+ 5.1 配信するイベント'
 # 節の中の表の行を数える。events() が「コード書式で始まる行」しか拾わないのに対し、
 # こちらは**表の行すべて**を数える。差が出れば、読み飛ばされた行がある。
 table_lines() { # $1=ファイル $2=見出しの正規表現。節の中の「| で始まる行」の数を返す
+  # **終端は「#### 以外のあらゆる見出し」とする**（sec_decls と同じ形。#129）。
+  # ^# で抜けると、節の中に小見出しを1つ置いてその下に表を戻したとき、
+  # そこで exit するため行数が 0 のままになり、「表が戻っている」の NG が出ない。
+  # ubuntu-latest の既定 awk は mawk のため、^#{1,3} のような区間表現は使わない。
   awk -v h="$2" '$0 ~ h { in_sec = 1; next }
-                 in_sec && /^#/ { exit }
+                 in_sec && /^#/ && $0 !~ /^#### / { exit }
                  in_sec && /^\|/ { n++ }
                  END { print n+0 }' "$1"
+}
+
+file_event_rows() { # $1=ファイル。イベント名の行の数を、節によらず数える
+  # **節の外に置かれた表を検知する**（#121）。
+  # table_lines は節の中しか見ないため、5.1 の外（5.2 の中や新しい節）に
+  # 表を置くと素通りする。イベント名の書式で数えるため、他の節の表は誤検知しない。
+  # grep -c は一致 0 件で終了コード 1 を返すため、|| true で受ける。
+  grep -cE '^\| `[a-z]+:[a-z]+` \|' "$1" || true
 }
 req_events=$(events docs/requirements.md "$req_head")
 kinds=$(printf '%s\n' "$req_events" | grep -c .)
@@ -303,6 +315,17 @@ grep -qE "$fea_head" docs/features.md || note "features.md の「5.1 配信す�
 # **行の数で見る。events() の結果で見ない。** events() はコード書式で始まる行しか拾わないため、
 # **書式の無い表が戻された場合に空を返し、「戻っている」の NG が出ない。**
 [ "$(table_lines docs/features.md "$fea_head")" -eq 0 ] || note "features.md 5.1 にイベント表が戻っている（表は requirements.md 4.1 の1つだけである。#9）"
+# **節の外に置かれた表も見る**（#121）。上のガードは 5.1 の中しか見ないため、
+# 5.2 の中や新しい節に表を置くと素通りする。**コメントの主張（features.md に表が戻っていない）に
+# 実装を合わせる。** イベント名の書式で数えるため、他の節の表は誤検知しない。
+[ "$(file_event_rows docs/features.md)" -eq 0 ] || note "features.md にイベント名の表の行がある（節によらず、表は requirements.md 4.1 の1つだけである。#9）"
+# **5.1 が参照を持つことも見る**（#122）。#119 が確定した不変条件は「5.1 は参照だけを持つ」であり、
+# 表が無いことだけを見ると、**参照そのものを消しても緑で通る。**
+# そのとき 5.1 は「7種類」とだけ書いてあって、どこにも一覧が無い節になる。
+awk -v h="$fea_head" '$0 ~ h { in_sec = 1; next }
+                      in_sec && /^#/ && $0 !~ /^#### / { exit }
+                      in_sec { print }' docs/features.md |
+  grep -q 'requirements.md' || note "features.md 5.1 に requirements.md への参照が無い（一覧への導線が消える。#122）"
 if [ "$kinds" -eq 0 ]; then
   note "requirements.md からイベント表を読み取れない"
 else
