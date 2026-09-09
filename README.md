@@ -191,7 +191,7 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 |---|---|
 | 直接の依存に修正版がある | その依存を上げる |
 | **依存の依存**に修正版がある | `package.json` の `overrides` で差し替える |
-| **上流がまだ直していない** | **その版では塞げない。** イシューに記録し、**`scripts/audit-allowlist.json` に**その advisory だけを一時的に通す行を足す。**期限とイシューへの参照を必ず付ける**（実例: #166） |
+| **上流がまだ直していない** | **その版では塞げない。** イシューに記録し、**`scripts/audit-allowlist.json` に**その advisory だけを一時的に通す行を足す。**行には `id` / `package` / `until`（期限）/ `issue`（イシュー参照）が必須である**——1つでも欠けると `scripts/check-audit.mjs` が exit 2 で落とす（実例: #166） |
 
 > **`overrides` は workspace 配下の依存には届かない**（2026-09-09 の実測。#166）。
 > root 直下の依存には効くが、`apps/api` の依存の依存には効かない。
