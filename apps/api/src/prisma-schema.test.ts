@@ -1823,6 +1823,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **実装では1件ずつ呼ばない。** ここが1件を引く形なのは、参照実装が条件を示すためである。
      * 1つのメッセージに複数のメンションが載り、1画面に複数のメッセージが載る。
      * **参照先の UUID をまとめ、`WHERE u."id" = ANY($1)` で一括に引くこと。**
+     * **式の列には必ず別名を付ける。** `AS "isDeleted"` を落とすと、Postgres は列名を
+     * `?column?` にする。**列名で読む実装（Prisma の `$queryRaw` を含む）では、
+     * 退会済みの印が静かに落ちる**——`psql -tA` は値だけを出すため、この参照実装のテストでは気づけない。
+     *
      * **`u."id"` を返しているのはそのためである。** 返さないと、一括で引いたときに
      * **どの行がどの参照先か対応付けられない**（`ANY` は順序も件数も入力と揃わない——
      * 存在しない UUID は行が返らず、重複は1行にまとまる）。**落とさないこと。**
@@ -1848,7 +1852,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      */
     function mentionDisplayTarget({ targetId }: { targetId: string }): string {
       return `
-        SELECT u."id", u."displayName", (u."deletedAt" IS NOT NULL)
+        SELECT u."id", u."displayName", (u."deletedAt" IS NOT NULL) AS "isDeleted"
         FROM "User" u
         WHERE u."id" = '${targetId}';
       `;
