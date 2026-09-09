@@ -378,14 +378,15 @@ req_rows_sec=$(sec_body docs/requirements.md "$req_head" | count_event_rows)
 # **5.1 が参照を持つことも見る**（#122）。#119 が確定した不変条件は「5.1 は参照だけを持つ」であり、
 # 表が無いことだけを見ると、**参照そのものを消しても緑で通る。**
 # そのとき 5.1 は「7種類」とだけ書いてあって、どこにも一覧が無い節になる。
-# **指し先が 4.1 であることまで見る**（#182 第5巡）。文字列 `requirements.md` があるだけでは、
+# **リンクであることまで見る**（#182 第7巡）。文字列 `requirements.md` があるだけでは、
 # **4.8 を指すリンクでも、リンクですらない素の言及でも通る。**
-# NG の文言は「一覧への導線が消える」と主張しており、**導線が 4.1 に届くことまでが主張である。**
+# NG の文言は「一覧への**導線**が消える」と主張しており、**素の言及は導線ではない。**
+# 検査1（相対リンクの検証）はリンクの**先**の存在しか見ないため、ここが見なければ誰も見ない。
 # 指し先の見出しは req_head の1箇所から導く。**見出しを変えれば、ここも一緒に動く。**
 fea_ref=${req_head#'^#+ '}
 fea_body=$(sec_body docs/features.md "$fea_head")
-printf '%s\n' "$fea_body" | grep -q 'requirements.md' ||
-  note "features.md 5.1 に requirements.md への参照が無い（一覧への導線が消える。#122）"
+printf '%s\n' "$fea_body" | grep -qF '](requirements.md)' ||
+  note "features.md 5.1 に requirements.md へのリンクが無い（一覧への導線が消える。素の言及は導線ではない。#122）"
 printf '%s\n' "$fea_body" | grep -qF "$fea_ref" ||
   note "features.md 5.1 の参照が 4.1 の節を指していない（「$fea_ref」の語が無い。導線が 4.1 に届かない。#182）"
 if [ "$kinds" -eq 0 ]; then
