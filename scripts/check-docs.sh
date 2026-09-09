@@ -121,9 +121,11 @@ sec_decls() { # $1=節の見出しの正規表現。その節に現れる「全N
   # 終端は「#### 以外のあらゆる見出し」とする。^### だけで抜けると、次の見出しが ## だった場合に
   # 章をまたいで読み進み、節の外の数字を正しく読めたかのように返す。読み取り失敗より気づきにくい。
   # ubuntu-latest の既定 awk は mawk のため、^#{1,3} のような区間表現は使わない。
-  awk -v h="$1" '$0 ~ h { in_sec=1; next }
-                 in_sec && /^#/ && $0 !~ /^#### / { exit }
-                 in_sec { print }' docs/requirements.md \
+  awk -v h="$1" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
+                 in_sec && /^#/ && depth($0) <= h_depth { exit }
+                 in_sec { print }
+                 function depth(l) { match(l, /^#+/); return RLENGTH }
+                 ' docs/requirements.md \
     | decls_in "全 *[0-9][0-9]* *件"
 }
 sum=0
@@ -266,9 +268,12 @@ fi
 # 機能一覧を正にすると、要件定義書がそれを参照することになり、流れを遡る。
 # features.md 5.1 は参照だけを持つ。
 events() { # $1=ファイル $2=見出しの正規表現。イベント表の1列目を返す
-  awk -F'|' -v h="$2" '$0 ~ h { in_sec = 1; next }
-                       in_sec && /^#/ { exit }
-                       in_sec && /^\| `/ { e = $2; gsub(/^ +| +$/, "", e); print e }' "$1"
+  # 終端は table_lines と同じ形にする（節より浅い見出しだけが終端。深い見出しは節の中）。
+  awk -F'|' -v h="$2" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
+                       in_sec && /^#/ && depth($0) <= h_depth { exit }
+                       in_sec && /^\| `/ { e = $2; gsub(/^ +| +$/, "", e); print e }
+                       function depth(l) { match(l, /^#+/); return RLENGTH }
+                       ' "$1"
 }
 # **見出しは1箇所に置く。** events() と下の行数の数え上げが別々に持つと、
 # 見出しを変えたとき片方だけが直り、**行数の数え上げが 0 になって新しい検査が黙って死ぬ**
@@ -283,10 +288,12 @@ table_lines() { # $1=ファイル $2=見出しの正規表現。節の中の「|
   # ^# で抜けると、節の中に小見出しを1つ置いてその下に表を戻したとき、
   # そこで exit するため行数が 0 のままになり、「表が戻っている」の NG が出ない。
   # ubuntu-latest の既定 awk は mawk のため、^#{1,3} のような区間表現は使わない。
-  awk -v h="$2" '$0 ~ h { in_sec = 1; next }
-                 in_sec && /^#/ && $0 !~ /^#### / { exit }
+  awk -v h="$2" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
+                 in_sec && /^#/ && depth($0) <= h_depth { exit }
                  in_sec && /^\|/ { n++ }
-                 END { print n+0 }' "$1"
+                 END { print n+0 }
+                 function depth(l) { match(l, /^#+/); return RLENGTH }
+                 ' "$1"
 }
 
 file_event_rows() { # $1=ファイル。イベント名の行の数を、節によらず数える
@@ -338,9 +345,11 @@ grep -qE "$fea_head" docs/features.md || note "features.md の「5.1 配信す�
 # **5.1 が参照を持つことも見る**（#122）。#119 が確定した不変条件は「5.1 は参照だけを持つ」であり、
 # 表が無いことだけを見ると、**参照そのものを消しても緑で通る。**
 # そのとき 5.1 は「7種類」とだけ書いてあって、どこにも一覧が無い節になる。
-awk -v h="$fea_head" '$0 ~ h { in_sec = 1; next }
-                      in_sec && /^#/ && $0 !~ /^#### / { exit }
-                      in_sec { print }' docs/features.md |
+awk -v h="$fea_head" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
+                      in_sec && /^#/ && depth($0) <= h_depth { exit }
+                      in_sec { print }
+                 function depth(l) { match(l, /^#+/); return RLENGTH }
+                 ' docs/features.md |
   grep -q 'requirements.md' || note "features.md 5.1 に requirements.md への参照が無い（一覧への導線が消える。#122）"
 if [ "$kinds" -eq 0 ]; then
   note "requirements.md からイベント表を読み取れない"
