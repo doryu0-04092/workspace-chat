@@ -1791,6 +1791,79 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe('');
     });
 
+    /**
+     * 表示時の参照先解決 — 既に投稿され、対象が確定しているメッセージ本文中の
+     * メンションを描画するための問い合わせ（機能一覧 9.1 の経路2）。
+     *
+     * **経路1（`mentionTargetByLoginId`）を転用してはならない。**
+     * あちらは `ChannelMember` を内部結合するため、**正しく退会した利用者は
+     * 1件も返らない**（1.5 の決定により、退会と同一トランザクションで `Membership` が消え、
+     * `ChannelMember` は外部キーで連鎖して消える）。
+     * 転用すると、退会した人へのメンションが**本文から消えて見える。**
+     *
+     * **`User."id"`（UUID）から直接引く。** `ChannelMember` の有無を条件にしない——
+     * 対象が「いまそのチャンネルに参加しているか」は、既に確定した参照先の表示とは関係が無い。
+     * `User` の行は退会しても論理削除で残るため、この経路が 1.5 の
+     * 「表示名は削除済みの利用者として表示する」を成立させる。
+     *
+     * **`deletedAt` で絞らない。絞ると、退会した人へのメンションが本文から消える。**
+     * 代わりに `deletedAt` の有無を返し、**「削除済みの利用者」と表示するかどうかは
+     * 呼ぶ側が決める。** 表示の文言を SQL に埋めない（文言は表示層の関心である）。
+     *
+     * **引数は `User."id"`（UUID）であり、ログイン識別子の列 `userId` ではない。**
+     * このスキーマでは `User."userId"` がログイン識別子であり、**`"userId"` という
+     * 列名は2つの違うものを指す**（`beforeAll` の注記）。ここで引くのは前者ではない。
+     *
+     * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
+     * （REVIEW.md 3 / CWE-89）。埋め込む `targetId` は**メッセージ本文に保存された
+     * メンションの参照先**であり、投稿時に経路1 が解決して確定させたものである。
+     *
+     * **要求する側の条件を持たない。** 経路1 と違い、**この問い合わせ単体では
+     * 認可を判定していない。** 呼ぶ側が「そのメッセージを読んでよいか」を先に決めており、
+     * 読んでよいメッセージの本文に現れる参照先だけを引く前提である。
+     * **単独の API として公開してはならない**——公開すると、UUID を1件ずつ試すことで
+     * 利用者の存在と表示名を引ける（存在の探索。経路1 で塞いだものと同じ形）。
+     */
+    function mentionDisplayTarget({ targetId }: { targetId: string }): string {
+      return `
+        SELECT u."displayName", (u."deletedAt" IS NOT NULL)
+        FROM "User" u
+        WHERE u."id" = '${targetId}';
+      `;
+    }
+
+    it('退会した利用者へのメンションも、表示時には参照先を解決できる', async () => {
+      // **これが無いと、経路2 を経路1 で代用する実装が緑で通る。**
+      // 1.5 の「表示名は削除済みの利用者として表示する」が成立しなくなる。
+      const { userId: ghostId } = await createDeletedUserKeepingMembership();
+      // 消し込みを取りこぼさなかった側も作る。**こちらが本来の退会後の姿である**——
+      // ChannelMember が消えているため、経路1 では引けない。
+      await expectSqlToSucceed(
+        `DELETE FROM "ChannelMember" WHERE "userId" = '${ghostId}';
+         DELETE FROM "Membership" WHERE "userId" = '${ghostId}';`,
+      );
+      const output = await expectSqlToSucceed(mentionDisplayTarget({ targetId: ghostId }));
+      // 表示名は残り、退会済みであることが分かる。
+      expect(output).toBe('退会する人|t');
+    });
+
+    it('現役の利用者は、退会済みの印が付かない', async () => {
+      // **否定側だけだと、常に「退会済み」を返す実装でも緑になる。**
+      const output = await expectSqlToSucceed(
+        mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000002' }),
+      );
+      expect(output).toBe('参加者|f');
+    });
+
+    it('参加していないチャンネルの利用者でも、表示時には参照先を解決できる', async () => {
+      // **`ChannelMember` の有無を条件に足すと落ちる。**
+      // `stranger`(004) は ChannelMember も Membership も1件も持たない。
+      const output = await expectSqlToSucceed(
+        mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000004' }),
+      );
+      expect(output).toBe('よその人|f');
+    });
+
     it('現役の利用者は、ユーザーID から引ける', async () => {
       // **否定側だけだと、常に空を返す実装でも緑になる。**
       const output = await expectSqlToSucceed(activeUserByLoginId('owner'));
