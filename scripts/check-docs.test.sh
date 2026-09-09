@@ -201,30 +201,30 @@ fi
 #
 # 代償 3: 下の gi_probe_* が落ちる条件を与えているのは **gi_scan_tracked の中身**
 # （読み取り・名前の取り出し・KEEP の差し引き）だけである。
-# **実物を流す呼び出し（git ls-files -z | gi_scan_tracked）そのものには、
-# 落ちる条件が1つも無い。** doc_excluded_name が除外と判定する追跡ファイルが
+# **実物を流す呼び出し（gi_read_into gi_tracked_hits_in "$repo"）そのものには、
+# かつて落ちる条件が1つも無かった。** doc_excluded_name が除外と判定する追跡ファイルが
 # 1件も無く（.env.example は DOC_PRUNE_FILES の .env.* に一致するが、KEEP が差し引く）、
-# 結果が常に空であるため、次のどれも全ケースが緑で通る。
+# 結果が常に空であるため、次のどれも全ケースが緑で通った。
 #
 #   - git ls-files から -z を外す
 #   - 呼び出しの数行を丸ごと削る（確認そのものが消えても緑）
 #   - pathspec を足して走査範囲を狭める（例: -- docs/）
-#   - -C "$repo" の指し先を変える
+#   - -C の指し先を変える
 #
-# **「塞げない」ではない。塞いでいないだけである。**
+# **「塞げない」ではなかった。塞いでいなかっただけである。**
 # 実物に値を持つ追跡ファイルを置くのは、0c が塞ごうとしている状態そのものを
 # 作ることになるため採らない。**しかしその手は他にもある。**
-# 下の 0c-2b が実際に採っているのが、それである——専用の一時リポジトリを
-# git init し、そこに git add -f して、リポジトリを引数で受ける関数
-# （gi_claude_tracked_in）を本体と壊す確認で共有する。実物には何も置かずに、
-# **-z・pathspec・指し先の3つ**に落ちる条件を与えられる。
+# 0c-2b が採っているのが、それである——専用の一時リポジトリを git init し、
+# そこに git add -f して、リポジトリを引数で受ける関数を本体と壊す確認で共有する。
+# 実物には何も置かずに、**-z・pathspec・指し先の3つ**に落ちる条件を与えられる。
 #
-# **「呼び出しの数行を丸ごと削る」だけは、0c-2b でも塞げていない。**
+# **同じ形を、この gi_committed の呼び出しにも適用した**（#88）。
+# 下の gi_tracked_hits_in がリポジトリを引数で受け、専用の一時リポジトリに
+# 名前だけが除外に当たる空ファイルを1件置いて、それを拾えることを見る。
+# **上の4つのうち3つが塞がった**（実際に壊して落ちることを確かめてある）。
+#
+# **「呼び出しの数行を丸ごと削る」だけは、いまも塞げていない**——
 # 本体を削っても、残った壊す確認は一時リポジトリだけを見て OK を出す。
-# 上の4つのうち、同じ形を適用して塞がるのは3つである、と読むこと。
-# **同じ形をこの gi_committed の呼び出しにも適用できる。**
-# 適用していないのはこの PR の範囲外だからであり、**塞げないからではない。**
-# 現状で守れているのは関数の中身までである。
 echo "0c. 値を持つファイル名が .gitignore で無視され、かつ追跡されていないこと"
 gi_why=""
 gi_pat=""   # 一致したパターン。.gitignore 以外が一致元だったときは空
@@ -347,6 +347,14 @@ gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致し�
   while IFS= read -r -d '' p; do
     doc_excluded_name "${p##*/}" >/dev/null && printf '%s\0' "$p"
   done
+  # **明示的に 0 を返す。** while の終了コードは本体の最後のコマンドのものであり、
+  # 最後に読んだパスが除外に当たらなければ && が短絡して非ゼロになる——
+  # **実物を流すかぎり、ほぼ必ず非ゼロで終わる。**
+  # 呼び出し側が終了コードを見る形（gi_read_into）にした時点で、
+  # これを返すと「git ls-files が失敗した」と誤って報告される（実際に踏んだ）。
+  # **git の失敗は握り潰されない**——冒頭の set -o pipefail により、
+  # パイプラインは git が失敗すれば非ゼロを返す。
+  return 0
 }
 # 関数の中身に落ちる条件を持たせる。doc_excluded_name が除外と判定する追跡ファイルは
 # 1件も無く（.env.example は KEEP が差し引く）、実物を流すかぎり結果は常に空である。つまり、この確認を
@@ -357,8 +365,8 @@ gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致し�
 # 決め打ちの一覧を同じ関数に流し、読み取り・名前の取り出し・KEEP の差し引きを同時に見る。
 #
 # **ここで塞がるのは関数の中身だけである。** 実物を流す呼び出し側
-# （下の git ls-files -z | gi_scan_tracked）にはいまも落ちる条件が無い。
-# 上の「代償 3」に、その範囲を書いてある。
+# （下の gi_read_into gi_tracked_hits_in "$repo"）は、その直前の probe が塞いでいる（#88）。
+# 上の「代償 3」に、いまも塞げていない1つを書いてある。
 #
 # 名前は一覧から導出する。手書きで並べると、DOC_PRUNE_FILES / DOC_KEEP_FILES を
 # 変えたときに走査は正しく動いているのに期待値だけが取り残され、
@@ -394,10 +402,138 @@ if [ "${#gi_probe_got[@]}" -ne "${#gi_probe_pass[@]}" ] ||
   echo "        実際: ${gi_probe_got[*]}"
   gi_ng=1
 fi
-mapfile -d '' -t gi_committed < <(git -C "$repo" ls-files -z | gi_scan_tracked)
-if [ ${#gi_committed[@]} -gt 0 ]; then
-  echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
+# --- 前提: 実物を問う走査が、実際に追跡ファイルを拾えること（#88）---
+# **これが無いと、-z を外しても・pathspec で範囲を狭めても・-C の指し先を変えても、
+# 全ケースが緑で通る**——実物には除外に当たる追跡ファイルが1件も無く、結果が常に空になるためである。
+# 上の「代償 3」が「呼び出し側には落ちる条件が無い」と書いていた範囲を、ここで塞ぐ。
+#
+# **実物には何も置かない。** 置くこと自体が、0c が防ごうとしている状態を作る。
+# 0c-2b と同じ形を採る——専用の一時リポジトリを git init し、そこに git add -f して、
+# **リポジトリを引数で受ける関数を、本体と壊す確認で共有する。**
+#
+# 落ちる条件の作り方:
+#   - **-z を外すと 0 件になる。** この経路の読み手は下の gi_scan_tracked の
+#     `read -r -d ''` であり、NUL が1つも無ければループの中身が一度も実行されない。
+#     **件数の比較がこれを捕まえる。**（0c-2b の同じ注記が「件数では気づけない。パスで見る」と
+#     書いているのは、あちらの読み手が `mapfile -d ''` で出力全体が1要素として読まれるためである。
+#     **ここでは成立しない。** 写さないこと）
+#   - **名前に非 ASCII を含める**のは、-z があるかぎり git が引用しないことを併せて見るため。
+#     引用が残れば、件数ではなくパスの比較で落ちる
+#   - **sub/ の下**に置く。pathspec（例: -- docs/）で範囲を狭めると拾えなくなる
+#   - **引数のリポジトリを問う。** -C の指し先を固定に書き換えると、
+#     本体か壊す確認のどちらかが必ず落ちる
+#
+# **順序に意味がある。壊す確認の probe を先に足してから、本体を読む**（0c-2b と同じ）。
+# 逆にすると、本体の指し先を一時リポジトリに取り違えても、その時点では索引が空で
+# 0 件になり、**実物を一度も見ないまま緑で通る。**
+#
+# **名前は DOC_PRUNE_FILES から導出する。** 手書きで並べると、一覧を変えたときに
+# 走査は正しく動いているのに期待値だけが取り残される（上の gi_probe_pass と同じ理由）。
+gi_tracked_hits_in() { # $1=問う先の git リポジトリ。除外に当たる追跡ファイルを NUL 区切りで返す
+  git -C "$1" ls-files -z | gi_scan_tracked
+}
+
+# * を含むパターンからだけ作る（.env のような固定名は置き換えが起こらない）。
+gi_scan_probe_name=''
+for g in "${probe_prune_files[@]}"; do
+  case "$g" in *'*'*) gi_scan_probe_name="${g//\*/本番}"; break ;; esac
+done
+gi_scan_probe_ok=0
+if [ -z "$gi_scan_probe_name" ]; then
+  # DOC_PRUNE_FILES から * を含むパターンが消えると、ここが空になる。
+  # 名指ししないと、下の判定が「0 件」で落ちて -z や pathspec を疑わせる。
+  echo "  NG: DOC_PRUNE_FILES に * を含むパターンが無く、走査の確認用の名前を作れない"
   gi_ng=1
+elif ! gi_scan_probe=$(mktemp -d); then
+  echo "  NG: 走査の確認用の一時ディレクトリを作れなかった（TMPDIR を確かめる）"
+  gi_ng=1
+elif ! git -C "$gi_scan_probe" init -q; then
+  echo "  NG: 走査の確認用の一時リポジトリを作れなかった（$gi_scan_probe）"
+  gi_ng=1
+elif ! mkdir -p "$gi_scan_probe/sub"; then
+  echo "  NG: 走査の確認用のディレクトリを作れなかった（$gi_scan_probe/sub）"
+  gi_ng=1
+elif ! : > "$gi_scan_probe/sub/$gi_scan_probe_name"; then
+  # **中身は書かない。判定は名前だけで行われる。**
+  echo "  NG: 走査の確認用のファイルを作れなかった（sub/$gi_scan_probe_name）"
+  gi_ng=1
+elif ! git -C "$gi_scan_probe" add -f -- "sub/$gi_scan_probe_name"; then
+  echo "  NG: 走査の確認用のファイルを索引に足せなかった（sub/$gi_scan_probe_name）"
+  gi_ng=1
+else
+  gi_scan_probe_ok=1
+fi
+# **読み取りの層は、このファイルに1つだけ置く。**
+# 0c と 0c-2b は producer（NUL 区切りを標準出力へ出す関数）が違うだけで、
+# 入口での配列の戻し・mktemp の名指し・終了コードの判定・mapfile の名指し・rm -f・return 0 は
+# すべて同じである。**2箇所に書くと、片方だけ直したときに黙ってずれる**——
+# このファイルが他の手順について繰り返し禁じてきた形であり、
+# 実際に #88 の第1巡で「0c-2b から終了コードの判定だけを写し漏れる」を踏んだ。
+#
+# **読み取りの終了コードを見る。** プロセス置換（`< <(...)`）で受けると終了コードが失われ、
+# **git が失敗して出力が空でも「追跡されていない」と同じ 0 件になり、緑のまま通る。**
+# このファイルは冒頭で `set -uo pipefail` を敷いているため、
+# `git | gi_scan_tracked` のパイプラインは git の失敗をそのまま返す。捨てなければ拾える。
+#
+# **名指しの経路を1つにする。** 関数の中で NG を出して呼び出し側も出すと、
+# 2行が並んで**後から出るほう（git）を先に疑うことになる。**
+#
+# **mktemp の明示的な判定を外さないこと。** 外すと out が空文字になってリダイレクトが開けず、
+# producer は**一度も実行されないまま**非ゼロで返る。理由は「producer が失敗した」になり、
+# 読む側は pathspec や -z を見に行って、実際の原因（TMPDIR）に届かない。
+#
+# **成功経路では明示的に 0 を返す。** 最後の rm -f の終了コードが漏れると、
+# 読み取りは成功しているのに呼び出し側が偽の NG を出す
+# （しかも gi_read_err は空のままなので、括弧の中が空になる）。
+gi_read=()
+gi_read_err=''
+gi_read_into() { # $1=producer 関数名 $2=リポジトリ。結果は gi_read。読めなければ 1 と gi_read_err
+  local out
+  # **入口で配列を戻す。** mapfile が失敗すると代入が起きず、前回の呼び出しの値が残る。
+  # この関数は本体と壊す確認で繰り返し呼ばれるため、残った値で判定しうる。
+  gi_read=()
+  gi_read_err=''
+  if ! out=$(mktemp); then
+    gi_read_err='読み取り用の一時ファイルを作れなかった。TMPDIR を確かめる'
+    return 1
+  fi
+  if ! "$1" "$2" >"$out"; then
+    gi_read_err="$1 が失敗した: $2"
+    rm -f "$out"
+    return 1
+  fi
+  if ! mapfile -d '' -t gi_read <"$out"; then
+    gi_read_err='読み取り結果を配列に取り込めなかった（mapfile が失敗した）'
+    rm -f "$out"
+    return 1
+  fi
+  rm -f "$out"
+  return 0
+}
+if [ "$gi_scan_probe_ok" = 1 ]; then
+  if ! gi_read_into gi_tracked_hits_in "$gi_scan_probe"; then
+    echo "  NG: 走査の確認用の一時リポジトリを読めなかった（$gi_read_err）"
+    gi_ng=1
+  else
+    gi_scan_probe_got=("${gi_read[@]}")
+    if [ "${#gi_scan_probe_got[@]}" -ne 1 ] ||
+       [ "${gi_scan_probe_got[0]}" != "sub/$gi_scan_probe_name" ]; then
+      echo "  NG: 追跡ファイルの走査が、除外に当たる追跡ファイルを拾えていない"
+      echo "        期待: 1 件「sub/$gi_scan_probe_name」"
+      echo "        実際: ${#gi_scan_probe_got[@]} 件「${gi_scan_probe_got[*]}」"
+      gi_ng=1
+    fi
+  fi
+fi
+if ! gi_read_into gi_tracked_hits_in "$repo"; then
+  echo "  NG: 追跡ファイルの走査そのものが失敗した（$gi_read_err）"
+  gi_ng=1
+else
+  gi_committed=("${gi_read[@]}")
+  if [ ${#gi_committed[@]} -gt 0 ]; then
+    echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
+    gi_ng=1
+  fi
 fi
 if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
@@ -504,54 +640,11 @@ fi
 # 本体を読む。** 逆にすると、本体の指し先を一時リポジトリに取り違えても、
 # その時点では索引が空なので 0 件で緑になり、**実物の .claude/ を一度も
 # 見ないまま全ケースが緑で通る。** 先に足しておけば、取り違えた本体は probe を
-# 拾って「追跡されている」で落ちる。0c の代償3 が「-C の指し先を変えても
-# 落ちない」と書いている限界は、ここでは塞いである。
+# 拾って「追跡されている」で落ちる。**同じ形は 0c にも入れてある**（#88。上の代償 3）。
 gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されているパスを NUL 区切りで返す
   git -C "$1" ls-files -z -- .claude
 }
-# 読み取り結果は gi_claude_read に入れる。読めなければ 1 を返し、
-# **失敗の理由を gi_claude_read_err に入れる。**
-#
-# **名指しの経路を1つにする。** 関数の中で NG を出して呼び出し側も出すと、
-# 2行が並んで**後から出るほう（git）を先に疑うことになる。**
-#
-# **mktemp の明示的な判定を外さないこと。** 外すと out が空文字になって
-# リダイレクトが開けず、gi_claude_tracked_in は**一度も実行されないまま**
-# 非ゼロで返る。理由は `git ls-files が失敗した` になり、読む側は pathspec や
-# -z を見に行って、実際の原因（TMPDIR）に届かない。
-#
-# **成功経路では明示的に 0 を返す。** 最後の rm -f の終了コードが漏れると、
-# 読み取りは成功しているのに呼び出し側が偽の NG を出す（しかも
-# gi_claude_read_err は空のままなので、括弧の中が空になる）。
-gi_claude_read=()
-gi_claude_read_err=''
-gi_claude_read_into() { # $1=リポジトリ
-  local out
-  # **入口で配列を戻す。** mapfile が失敗すると代入が起きず、前回の呼び出しの値が
-  # そのまま残る。この関数は本体と壊す確認の2回呼ばれるため、残った値で判定しうる。
-  gi_claude_read=()
-  gi_claude_read_err=''
-  if ! out=$(mktemp); then
-    gi_claude_read_err='読み取り用の一時ファイルを作れなかった。TMPDIR を確かめる'
-    return 1
-  fi
-  if ! gi_claude_tracked_in "$1" > "$out"; then
-    gi_claude_read_err="git ls-files が失敗した: $1"
-    rm -f "$out"
-    return 1
-  fi
-  # mapfile の失敗も名指しする。ここを見ないと配列が空のまま return 0 に達し、
-  # **本体は「一度も読めていないのに追跡されていない」で緑**、壊す確認は
-  # 「壊す確認が効いていない（実際 0 件）」で pathspec や -z を疑わせる。
-  # どちらもこのファイルが他の手順について潰してきたものと同じ形である。
-  if ! mapfile -d '' -t gi_claude_read < "$out"; then
-    gi_claude_read_err='読み取り結果を配列に取り込めなかった（mapfile が失敗した）'
-    rm -f "$out"
-    return 1
-  fi
-  rm -f "$out"
-  return 0
-}
+# 読み取りは上の gi_read_into を通す（0c と共有）。**ここに層をもう1つ作らないこと。**
 echo "0c-2b. .claude/ 配下が追跡されていないこと"
 
 # 壊す確認の準備。**本体より先に行う**（上の「順序に意味がある」）。
@@ -600,11 +693,11 @@ else
   gi_claude_probe_ok=1
 fi
 
-if ! gi_claude_read_into "$repo"; then
-  echo "  NG: .claude/ 配下の追跡状況を読み取れなかった（$gi_claude_read_err）"
+if ! gi_read_into gi_claude_tracked_in "$repo"; then
+  echo "  NG: .claude/ 配下の追跡状況を読み取れなかった（$gi_read_err）"
   fail=1
-elif [ "${#gi_claude_read[@]}" -gt 0 ]; then
-  echo "  NG: .claude/ 配下が追跡されている: ${gi_claude_read[*]}"
+elif [ "${#gi_read[@]}" -gt 0 ]; then
+  echo "  NG: .claude/ 配下が追跡されている: ${gi_read[*]}"
   fail=1
 elif [ "$gi_claude_repo_ok" -eq 0 ]; then
   # 壊す確認には一時リポジトリが要る。0c-2 で既に NG を出しているため、
@@ -614,12 +707,12 @@ elif [ "$gi_claude_repo_ok" -eq 0 ]; then
   fail=1
 elif [ "$gi_claude_probe_ok" -eq 0 ]; then
   : # 準備の失敗は上で名指ししている
-elif ! gi_claude_read_into "$gi_claude_repo"; then
-  echo "  NG: 壊す確認の読み取りに失敗した（$gi_claude_read_err）"
+elif ! gi_read_into gi_claude_tracked_in "$gi_claude_repo"; then
+  echo "  NG: 壊す確認の読み取りに失敗した（$gi_read_err）"
   fail=1
-elif [ "${#gi_claude_read[@]}" -ne 1 ] ||
-     [ "${gi_claude_read[0]}" != "$gi_claude_probe_rel" ]; then
-  echo "  NG: 壊す確認が効いていない（期待 1 件「$gi_claude_probe_rel」/ 実際 ${#gi_claude_read[@]} 件「${gi_claude_read[*]}」）"
+elif [ "${#gi_read[@]}" -ne 1 ] ||
+     [ "${gi_read[0]}" != "$gi_claude_probe_rel" ]; then
+  echo "  NG: 壊す確認が効いていない（期待 1 件「$gi_claude_probe_rel」/ 実際 ${#gi_read[@]} 件「${gi_read[*]}」）"
   fail=1
 else
   echo "  OK"
