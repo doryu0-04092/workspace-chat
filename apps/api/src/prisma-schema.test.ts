@@ -1823,6 +1823,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **実装では1件ずつ呼ばない。** ここが1件を引く形なのは、参照実装が条件を示すためである。
      * 1つのメッセージに複数のメンションが載り、1画面に複数のメッセージが載る。
      * **参照先の UUID をまとめ、`WHERE u."id" = ANY($1)` で一括に引くこと。**
+     * **`u."id"` を返しているのはそのためである。** 返さないと、一括で引いたときに
+     * **どの行がどの参照先か対応付けられない**（`ANY` は順序も件数も入力と揃わない——
+     * 存在しない UUID は行が返らず、重複は1行にまとまる）。**落とさないこと。**
      *
      * **`targetId` にクライアント由来の値を渡してはならない。** これは**メッセージ本文に保存された
      * 参照先**であり、投稿時に経路1 が解決して確定させたものである。
@@ -1845,7 +1848,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      */
     function mentionDisplayTarget({ targetId }: { targetId: string }): string {
       return `
-        SELECT u."displayName", (u."deletedAt" IS NOT NULL)
+        SELECT u."id", u."displayName", (u."deletedAt" IS NOT NULL)
         FROM "User" u
         WHERE u."id" = '${targetId}';
       `;
@@ -1863,7 +1866,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       );
       const output = await expectSqlToSucceed(mentionDisplayTarget({ targetId: ghostId }));
       // 表示名は残り、退会済みであることが分かる。
-      expect(output).toBe('退会する人|t');
+      expect(output).toBe(`${ghostId}|退会する人|t`);
     });
 
     it('現役の利用者は、退会済みの印が付かない', async () => {
@@ -1871,7 +1874,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       const output = await expectSqlToSucceed(
         mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000002' }),
       );
-      expect(output).toBe('参加者|f');
+      expect(output).toBe('00000000-0000-7000-8000-000000000002|参加者|f');
     });
 
     it('参加していないチャンネルの利用者でも、表示時には参照先を解決できる', async () => {
@@ -1880,7 +1883,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       const output = await expectSqlToSucceed(
         mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000004' }),
       );
-      expect(output).toBe('よその人|f');
+      expect(output).toBe('00000000-0000-7000-8000-000000000004|よその人|f');
     });
 
     it('現役の利用者は、ユーザーID から引ける', async () => {
