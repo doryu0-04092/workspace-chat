@@ -373,10 +373,24 @@ Range リクエストの再試行**をクライアントに実装することに
    （[REVIEW.md](../REVIEW.md) 2.1 が名指しで禁じている形）。
 
    **S3 のキーは上表のとおり固定であり、実装時に決めるものではない。**
-   実装時に決めるのは **CloudFront が `/files` をどう剥がすか**だけである
-   （オリジンパス / CloudFront Functions / S3 側にその前置きを持つオブジェクトを置かない構成、のいずれか）。
+   実装時に決めるのは **CloudFront が `/files` をどう剥がすか**だけであり、
+   **剥がせるのは viewer-request で URI を書き換える手段だけである**
+   （CloudFront Functions / Lambda@Edge）。
+
+   > **オリジンパスでは剥がせない。** [AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesOrigin.html)
+   > は「**CloudFront appends the directory path to the value of Origin domain**」と定めており、
+   > 例として `example.com/acme/index.html` が `バケット/production/acme/index.html` になると示している。
+   > **前に付ける設定であって、取り除く設定ではない。**
+   > `/files` を指定すると転送先は `/files/files/workspace/...` になる。
+   >
+   > **「S3 側にその前置きを持つオブジェクトを置かない」も手段ではない。**
+   > それは上表が定めた**前提そのもの**であり、CloudFront は `/files/workspace/...` を
+   > そのまま投げて `NoSuchKey` になる。
+
    **「S3 のキーに `/files` を含めるか」という形の二択にしてはならない**——
    含める側を選ぶと、この表と [機能一覧](features.md) 11.1 の受け入れ条件を同時に破る。
+   **剥がせない手段を選んで配信が成立しないとき、復旧の圧力はキー側に `files/` を足す方向にかかる。**
+   **手段の列挙を通って、この節が閉じたはずの形に戻ることになる。**
 2. **チャンネルから外れた利用者は、Cookie の期限が切れるまでの間、そのチャンネルの添付を
    取得できてしまう。** 発行済みの Cookie を個別に失効させる手段がないためである。
    **有効期限を 15〜30 分と短く設定することで、影響する時間を限定する**（再発行はサーバー側で
