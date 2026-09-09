@@ -156,9 +156,19 @@ jobs:
       #
       # 代償: **誤検知が出ると、全 PR のマージ経路が塞がる。** その場合は .gitleaks.toml の
       # allowlist に**理由を書いて**除外する。理由なしに除外しない（npm audit の閾値と同じ扱い）。
+      # **このアクションだけ SHA で固定する。** 他は可変タグのままである
+      # （actions/checkout@v7 など）。**慣行を変えたのではなく、壊れ方が違うためである。**
+      #
+      # 可変タグは差し替えられる。差し替わったとき、他のアクションは**落ちる**側に壊れるが、
+      # **gitleaks は「漏洩なし」と報告して緑になる**——このステップは検査に通ることで緑になるためである。
+      # そして**過去に残った秘密を見る経路はこの週次実行だけであり**（上の走査範囲の注記）、
+      # **静かに通れば誰も気づけない。**
+      #
+      # **固定するのは「静かに通る側に壊れるもの」だけである。** 可変タグをやめる方針ではない。
+      # Dependabot は SHA 固定でも更新の PR を出す（コメントの版を見る）。
       - name: 秘密の値がソースに書かれていないかの検査
         if: success() || failure()
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: false
