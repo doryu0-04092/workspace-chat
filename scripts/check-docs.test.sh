@@ -1220,7 +1220,12 @@ expect_ok "外部リンク（http / https / mailto）は存在を確かめない
 
 # **先頭が - の Markdown がルート直下に置かれても、偽のリンク切れを出さないこと**（#47）。
 # doc_find の出力は `sed 's|^\./||'` を通るため、**ルート直下では素の名前になる。**
-# dirname / awk / grep はそれを option と解釈する。
+# **どのコマンドが option と解釈するかは、実測した**（gawk 5.4.0 / GNU coreutils）。
+#   dirname "-x.md"        → unknown option -- x（失敗）
+#   grep -o 'x' -x.md      → unknown option -- k（失敗）
+#   awk '{print}' -x.md    → **読めた（exit 0）。option と解釈しない**
+# **awk は落ちない。** プログラム文字列より後ろは operand として扱われるためである。
+# `./` を前置しているのは**1つの書き方で揃えるため**であって、awk が壊れるからではない。
 #
 # **塞ぐ前の帰結**（実測: `dirname "-x.md"` は `unknown option -- x` で終了コード 1）:
 # 検査1 が `/docs/requirements.md` という**絶対パス**を見に行き、
@@ -1230,6 +1235,59 @@ expect_ok "外部リンク（http / https / mailto）は存在を確かめない
 # **ルート直下でなければ再現しない。** `docs/-x.md` なら `${p##*/}` の前に `docs/` が付く。
 expect_ok "先頭が - の Markdown をルート直下に置いても、リンク切れにならない" -probe-dash.md \
   '[README](README.md)' in
+
+# 先頭が - の Markdown を**置いて**、期待する NG が出ることを見る（#47）。
+#
+# **expect_ng では書けない。** あちらは複製済みの追跡ファイルを sed で壊す形であり、
+# **このケースが要るのは「置いた新しいファイルの名前そのもの」**である。
+# 0d と同じ形（置いて回して文言を突き合わせる）を、名前を引数に取れるようにした。
+expect_ng_new() { # $1=説明 $2=作るファイル $3=中身 $4=NG に含まれるべき文言
+  local desc="$1" file="$2" body="$3" expect="$4" out rc
+  n=$((n + 1))
+  mkdir -p "$work/$(doc_parent "$file")"
+  printf '%s\n' "$body" >"$work/$file"
+  # 置けたことを先に確かめる。置けていないと検査は当然通り、
+  # 「落ちるべきなのに通った」という別の原因を疑わせる NG になる（expect_ok と同じ理由）。
+  if [ ! -f "$work/$file" ]; then
+    echo "  NG: $n. $desc — ファイルを置けていない。ケースが成立していない"
+    fail=1
+    return
+  fi
+  out=$(cd "$work" && bash scripts/check-docs.sh 2>&1)
+  rc=$?
+  rm -f "$work/$file"
+  if [ "$rc" -eq 0 ]; then
+    echo "  NG: $n. $desc — 落ちるべきなのに検査が通った"
+    fail=1
+  # **grep に -- を付ける。** $expect は先頭が - になりうる。
+  # **この PR が直している穴そのものを、このヘルパー自身が踏んだ**——
+  # 出力に文言があるのに「出ていない」と報告された（実測）。
+  elif ! printf '%s\n' "$out" | grep -qF -- "$expect"; then
+    echo "  NG: $n. $desc — 落ちたが、期待した指摘「$expect」が出ていない"
+    printf '%s\n' "$out" | grep '^  NG' | sed 's/^/        実際: /'
+    fail=1
+  else
+    echo "  OK: $n. $desc"
+  fi
+}
+
+# **束の適用先は3つあるが、落ちる条件を持てるのは2つである。**
+# ケース72（リンク切れにならないこと）が与えているのは doc_parent の1つだけなので、
+# 検査1 の grep にも条件を与える。
+#
+# **なぜ 72 だけでは足りないか。** 検査1 の grep を素の "$f" に戻すと、
+# grep が失敗してリンクを1件も返さず、while の本体に入らない。
+# **NG が出ないため 72 は「OK」と表示する。**
+# しかもその状態では doc_parent を dirname に戻しても NG が出ない——
+# **grep 側が壊れると、この束の唯一の落ちる条件まで一緒に消える。**
+#
+# **検査0 の awk には条件を与えない。与えられない。**
+# awk は先頭が - のファイルを option と解釈しない（上の実測）。
+# `./` を外しても落ちないため、**落ちる条件の無い確認になる。**
+# このファイルが繰り返し禁じてきた形なので、置かない。
+expect_ng_new "先頭が - の Markdown の壊れたリンクを、検査1 が見つける" -probe-dash-link.md \
+  '[存在しない](./does-not-exist.md)' \
+  '-probe-dash-link.md -> ./does-not-exist.md が存在しない'
 
 
 # 検査0 の境界。**見るのは「セルの終端の連続空白」だけで、セルの途中の連続空白は見ない。**
