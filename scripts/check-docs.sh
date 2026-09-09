@@ -116,8 +116,10 @@ kind_count() { # $1=区分名。強調記号と空白を落として4列目と�
                           END { print n+0 }' docs/features.md
 }
 # **節の本文の切り出しは、この1箇所で行う。**
-# sec_decls / events / table_lines / 5.1 の参照の4箇所が、同じ切り出しを要る。
-# 4箇所に複製すると、片方を直したときにもう片方が古い規則で残り、**食い違ったまま緑で通る。**
+# 切り出しを要るのは6箇所である——items / route_names / sec_decls / events / table_lines /
+# 5.1 の参照。**この一覧の鍵は「節を切り出しているか」であって、変数名ではない。**
+# 実際に items だけ変数が in_block で、`grep in_sec` の列挙から漏れていた（#182 第5巡）。
+# 複製すると、片方を直したときにもう片方が古い規則で残り、**食い違ったまま緑で通る。**
 # #129 で実際に起きた——実装は3箇所とも直っていたのに、規則を述べたコメントが2通り残り、
 # **どちらもそのまま従うと検査が壊れる記述だった。**
 #
@@ -167,9 +169,8 @@ echo "  完了（合計 $count 件 / 内訳の合計 $sum 件）"
 # 「どれを必ずテストするか」の合意そのものがずれる。
 echo "4. 「必ずテストを書く箇所」の一覧"
 items() { # $1=ファイル $2=見出しの正規表現。箇条書きの記号と強調を落として本文だけ返す
-  awk -v h="$2" '$0 ~ h { in_block=1; next }
-                 in_block && /^#/ { exit }
-                 in_block && /^([0-9]+\.|- )/ { print }' "$1" \
+  sec_body "$1" "$2" \
+    | awk '/^([0-9]+\.|- )/' \
     | sed 's/^[0-9]*\. *//; s/^- *//; s/\*\*//g'
 }
 req_items=$(items docs/requirements.md '^#+ 必ずテストを書く箇所')
@@ -210,10 +211,11 @@ echo "5. 「N経路」と「N種類」の宣言"
 # routes は正のままで下の読み取り失敗の分岐に落ちず、
 # 「表と requirements.md で経路の名前が違う（表: ）」が出る。
 # 受け取った側は、壊れていない requirements.md の列挙を疑うことになる。
-route_names=$(awk -F'|' '$0 ~ /^### 2\.1 / { in_sec = 1; next }
-                         in_sec && /^#/ { exit }
-                         in_sec && /^\| [0-9]+ \|/ {
-                           r = $3; gsub(/\*/, "", r); gsub(/^ +| +$/, "", r); print r }' REVIEW.md)
+# **見出しは文字クラスで書く。** awk の動的正規表現（-v で渡す文字列）では
+# `\.` が「文字列のエスケープ」と解釈され、`escape sequence \. treated as plain .` を
+# 標準エラーに出す。**検査は通るが、CI のログに毎回警告が出る。**
+route_names=$(sec_body REVIEW.md '^### 2[.]1 ' |
+  awk -F'|' '/^\| [0-9]+ \|/ { r = $3; gsub(/\*/, "", r); gsub(/^ +| +$/, "", r); print r }')
 routes=$(printf '%s\n' "$route_names" | grep -c .)
 if [ "$routes" -eq 0 ]; then
   # 以降の照合はすべてこの数を土台にしている。0 のまま進むと、
@@ -368,8 +370,16 @@ req_rows_sec=$(sec_body docs/requirements.md "$req_head" | count_event_rows)
 # **5.1 が参照を持つことも見る**（#122）。#119 が確定した不変条件は「5.1 は参照だけを持つ」であり、
 # 表が無いことだけを見ると、**参照そのものを消しても緑で通る。**
 # そのとき 5.1 は「7種類」とだけ書いてあって、どこにも一覧が無い節になる。
-sec_body docs/features.md "$fea_head" |
-  grep -q 'requirements.md' || note "features.md 5.1 に requirements.md への参照が無い（一覧への導線が消える。#122）"
+# **指し先が 4.1 であることまで見る**（#182 第5巡）。文字列 `requirements.md` があるだけでは、
+# **4.8 を指すリンクでも、リンクですらない素の言及でも通る。**
+# NG の文言は「一覧への導線が消える」と主張しており、**導線が 4.1 に届くことまでが主張である。**
+# 指し先の見出しは req_head の1箇所から導く。**見出しを変えれば、ここも一緒に動く。**
+fea_ref=${req_head#'^#+ '}
+fea_body=$(sec_body docs/features.md "$fea_head")
+printf '%s\n' "$fea_body" | grep -q 'requirements.md' ||
+  note "features.md 5.1 に requirements.md への参照が無い（一覧への導線が消える。#122）"
+printf '%s\n' "$fea_body" | grep -qF "$fea_ref" ||
+  note "features.md 5.1 の参照が 4.1 の節を指していない（「$fea_ref」の語が無い。導線が 4.1 に届かない。#182）"
 if [ "$kinds" -eq 0 ]; then
   note "requirements.md からイベント表を読み取れない"
 else
