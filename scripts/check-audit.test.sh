@@ -190,6 +190,14 @@ set_allow_raw '{"allow":[{"id":"GHSA-aaaa-aaaa-aaaa","package":"p","until":"u"}]
 expect "issue が無い" 2 "$work/r.json"
 set_allow_raw '{"allow":[{"id":"GHSA-aaaa-aaaa-aaaa","package":"p","until":"","issue":1}]}'
 expect "until が空文字" 2 "$work/r.json"
+# **4項目すべてを壊す。** id と package を落とさないと、REQUIRED からその2つを
+# 外しても全ケースが緑のまま通る（合成行も本物の許可一覧も両方を持っているため）。
+# **id を必須から外すと allowed のキーが undefined になり、stale 側が発火して
+# 「上流が直った合図」という誤った案内で exit 1 になる。** その経路も塞ぐ。
+set_allow_raw '{"allow":[{"package":"p","until":"u","issue":1}]}'
+expect "id が無い" 2 "$work/r.json"
+set_allow_raw '{"allow":[{"id":"GHSA-aaaa-aaaa-aaaa","until":"u","issue":1}]}'
+expect "package が無い" 2 "$work/r.json"
 
 echo "15. 許可した advisory の重大度が下がっても、一覧に出る"
 # **合否は変わらない。** 変わるのは「通している」ことが人に見えるかどうかである。
@@ -207,7 +215,7 @@ fi
 
 echo ""
 if [ "$fail" = 0 ]; then
-  echo "check-audit.mjs の壊す確認を 22 通りすべて通過しました"
+  echo "check-audit.mjs の壊す確認を 24 通りすべて通過しました"
 else
   echo "check-audit.mjs の壊す確認に失敗があります"
 fi
