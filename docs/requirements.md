@@ -391,6 +391,21 @@ Range リクエストの再試行**をクライアントに実装することに
    含める側を選ぶと、この表と [機能一覧](features.md) 11.1 の受け入れ条件を同時に破る。
    **剥がせない手段を選んで配信が成立しないとき、復旧の圧力はキー側に `files/` を足す方向にかかる。**
    **手段の列挙を通って、この節が閉じたはずの形に戻ることになる。**
+
+   **確認できたこと。** [AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/edge-function-restrictions-all.html)
+   は「**If a function changes the URI for a request, that doesn't change the cache behavior for
+   the request or the origin that the request is forwarded to**」と定めている。
+   **URI を書き換えても、`/files/*` のビヘイビア選択は元の URI のまま維持される。**
+
+   **確認できていないこと。** **署名付き Cookie の `Resource` の照合が、書き換えの前と後の
+   どちらの URI で行われるか。** 署名付き Cookie・エッジ関数の制約・トリガーの各文書を引いたが、
+   **照合の順序を定めた記述は見つからなかった**（上の一文はビヘイビアとオリジンにしか及ばない）。
+   **実装時に、実際に配信して確かめる。**
+
+   > **踏むと壊れる: 両立しなかった場合に、`Resource` を `/*` へ広げる回避を採ってはならない。**
+   > **1枚の Cookie で全チャンネルの添付が取れる**——[REVIEW.md](../REVIEW.md) 2.1 が名指しで禁じている形である。
+   > 書き換え後の URI で照合されると分かった場合は、**`Resource` を書き換え後のパスに合わせる**か、
+   > **配信 URL のパスから `/files` を落として4つの値を揃え直す。**
 2. **チャンネルから外れた利用者は、Cookie の期限が切れるまでの間、そのチャンネルの添付を
    取得できてしまう。** 発行済みの Cookie を個別に失効させる手段がないためである。
    **有効期限を 15〜30 分と短く設定することで、影響する時間を限定する**（再発行はサーバー側で
