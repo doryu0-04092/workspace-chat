@@ -156,9 +156,43 @@ jobs:
       #
       # 代償: **誤検知が出ると、全 PR のマージ経路が塞がる。** その場合は .gitleaks.toml の
       # allowlist に**理由を書いて**除外する。理由なしに除外しない（npm audit の閾値と同じ扱い）。
+      # **静かに通る側に壊れるアクションは SHA で固定する。** 他は可変タグのままである
+      # （actions/checkout@v7 など）。**慣行を変えたのではなく、壊れ方が違うためである。**
+      #
+      # **適用先は2件である**——このステップと claude_code_review.yml の claude-code-action。
+      # どちらも「検査に通ることで緑になる」形であり、差し替わると静かに通る。
+      # checkout / setup-node / upload-artifact は落ちる側であるため入らない
+      # （upload-artifact は if-no-files-found: error を持つ）。
+      #
+      # 可変タグは差し替えられる。差し替わったとき、他のアクションは**落ちる**側に壊れるが、
+      # **gitleaks は「漏洩なし」と報告して緑になる**——このステップは検査に通ることで緑になるためである。
+      # そして**過去に残った秘密を見る経路はこの週次実行だけであり**（上の走査範囲の注記）、
+      # **静かに通れば誰も気づけない。**
+      #
+      # **固定するのは「静かに通る側に壊れるもの」だけである。** 可変タグをやめる方針ではない。
+      #
+      # **タグ名をコメントで添えない。** [技術スタック](../../docs/tech-stack.md) が
+      # pg_bigm の SHA-1 について同じ形を決めている——「**タグ名を残すと何にも照合されない値になり、
+      # SHA-1 だけを上げたときに黙って古くなる**」「**ずれても CI は緑のまま**」。
+      #
+      # **ただし「照合されない」の理由は、ここでは pg_bigm と違う。**
+      # **Dependabot は同じ行のコメントを更新する**——GitHub の公式文書が
+      # 「Dependabot updates the version documentation of GitHub Actions when the comment is
+      # on the same line」と書いており、このリポジトリは github-actions の更新を現に受け取っている
+      # （dependabot.yml）。つまり**添えれば Dependabot が追随する。**
+      #
+      # **それでも添えない。追随する経路が Dependabot ひとつだけだからである。**
+      # このリポジトリは npm 側の版更新 PR を現に止めており（[README](../../README.md)
+      # 「依存の版を上げない方針」）、GitHub Actions 側も同じ判断で止めうる。
+      # **止めた瞬間、版名は誰にも直されない値になる。** CI は版名を照合しないため、
+      # **ずれても緑のままである**——tech-stack.md が言う状態にそのまま落ちる。
+      #
+      # どの版かを知りたいときは上流で引く（gh api repos/gitleaks/gitleaks-action/git/ref/tags/v3.0.0）。
+      # **2026-09-09 時点で、この SHA は v3.0.0 のコミットである**
+      # （git/ref/tags/v3.0.0 と git/ref/tags/v3 のどちらも e0c47f4f… を返す）。
       - name: 秘密の値がソースに書かれていないかの検査
         if: success() || failure()
-        uses: gitleaks/gitleaks-action@v3
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_COMMENTS: false

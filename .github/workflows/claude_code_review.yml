@@ -51,7 +51,16 @@ jobs:
         with:
           fetch-depth: 1
 
-      - uses: anthropics/claude-code-action@v1
+      # **SHA で固定する。** 差し替わったとき、このアクションは落ちる側ではなく
+      # **静かに通る側**に壊れる——**`review` の `success` は「完走した」であって
+      # 「指摘なし」ではない**（CLAUDE.md 開発フロー 6 / REVIEW.md 9.4）。
+      # 何も出さない実行は、緑のまま「指摘なし」に見える。
+      # 加えて、このステップだけが CLAUDE_CODE_OAUTH_TOKEN を渡し、
+      # pull-requests: write と id-token: write を持つ。
+      #
+      # **タグ名をコメントで添えない**（docs/tech-stack.md の決め。照合されない値になる）。
+      # どの版かは gh api repos/anthropics/claude-code-action/commits/<SHA> で引く。
+      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
