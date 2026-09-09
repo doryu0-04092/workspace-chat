@@ -1222,10 +1222,13 @@ expect_ok "外部リンク（http / https / mailto）は存在を確かめない
 # doc_find の出力は `sed 's|^\./||'` を通るため、**ルート直下では素の名前になる。**
 # **どのコマンドが option と解釈するかは、実測した**（gawk 5.4.0 / GNU coreutils）。
 #   dirname "-x.md"        → unknown option -- x（失敗）
-#   grep -o 'x' -x.md      → unknown option -- k（失敗）
+#   grep -o 'x' -x.md      → unknown option -- .（失敗。**`.` である。`k` ではない**——測り直した）
 #   awk '{print}' -x.md    → **読めた（exit 0）。option と解釈しない**
 # **awk は落ちない。** プログラム文字列より後ろは operand として扱われるためである。
 # `./` を前置しているのは**1つの書き方で揃えるため**であって、awk が壊れるからではない。
+# **awk の実測は gawk 5.4.0 で取った。CI が走らせるのは ubuntu-latest の既定 awk（mawk）であり、
+# そちらは未確認である。** mawk が option と解釈するなら `./` の前置が現に効いていることになり、
+# 記述の向きだけが変わる（`./` を外す変更はしていないため、どちらでも壊れない）。
 #
 # **塞ぐ前の帰結**（実測: `dirname "-x.md"` は `unknown option -- x` で終了コード 1）:
 # 検査1 が `/docs/requirements.md` という**絶対パス**を見に行き、
