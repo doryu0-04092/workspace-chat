@@ -29,7 +29,7 @@ echo "作業ディレクトリ: $work"
 # 漏れても失敗にはならず、検査がその文書を見ないだけで全ケースが緑のまま通る。
 # 「本物の検査が見ている範囲」と「テストが検査させている範囲」が黙ってずれる。
 while IFS= read -r p; do
-  mkdir -p "$work/$(dirname "$p")"
+  mkdir -p "$work/$(doc_parent "$p")"
   cp "$repo/$p" "$work/$p"
 done < <(cd "$repo" && doc_find -type f -print | sed 's|^\./||')
 
@@ -128,7 +128,7 @@ done
 # 名前を取り出して doc_excluded_name に渡しており、その取り出しに落ちる条件が無かった。
 #
 # **本番の呼び出し元が作らない形の入力である。** check-docs.sh の検査1 は
-# `$(dirname "$f")/$l` を渡すため、先頭は必ず `./` か `docs/` になる。
+# `$(doc_parent "$f")/$l` を渡すため、先頭は必ず `./` か `docs/` になる。
 # ここが固定しているのは、呼び出し元の形に依存しない関数単体の性質である。
 # 実際に先頭が - のまま流れるのは、git ls-files の出力を渡す 0c の走査のほう。
 for f in "${probe_dash_names[@]}"; do
@@ -748,7 +748,7 @@ fi
 # 前提確認である（0a・0b・0c と同じ扱い）。
 echo "0d. .claude/ 配下の Markdown が、DOC_PRUNE_DIRS の .claude を消すと検出されること"
 claude_probe='.claude/worktrees/probe-claude-scope/README.md'
-mkdir -p "$work/$(dirname "$claude_probe")"
+mkdir -p "$work/$(doc_parent "$claude_probe")"
 printf '%s\n' '[壊れたリンク](./does-not-exist.md)' > "$work/$claude_probe"
 
 if ! run_check; then
@@ -1149,7 +1149,7 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   shift 4
   local made=("$work/$file")
   n=$((n + 1))
-  mkdir -p "$work/$(dirname "$file")"
+  mkdir -p "$work/$(doc_parent "$file")"
   printf '%s\n' "$body" > "$work/$file"
   # ファイルを置けたことを先に確かめる。下の got=out は「doc_find の結果に含まれない」
   # でしか判定しておらず、「除外された」と「そもそも置けていない」の両方で成立する。
@@ -1176,13 +1176,13 @@ expect_ok() { # $1=説明 $2=作るファイル $3=中身 $4=in（検査の対�
   # 元に戻らない）。made に入れないことで、後片付けの対象からも外す。
   for extra in "$@"; do
     [ -e "$work/$extra" ] && continue
-    mkdir -p "$work/$(dirname "$extra")"
+    mkdir -p "$work/$(doc_parent "$extra")"
     : > "$work/$extra"
     made+=("$work/$extra")
   done
   # 置いたファイルが想定した側にあることを先に確かめる。逆側に落ちると
   # 「検査が落ちない」ことに意味が無くなり、ケースは静かに無効化される。
-  if (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF "$file"); then
+  if (cd "$work" && doc_find -name '*.md' -print | sed 's|^\./||' | grep -qxF -- "$file"); then
     got=in
   else
     got=out
@@ -1217,6 +1217,19 @@ expect_ok "入れ子の node_modules の中のリンク切れも無視される"
 # しかも文面は「リンク切れ」と読めるため、本来直す必要のないリンクの方を疑わせる。
 expect_ok "外部リンク（http / https / mailto）は存在を確かめない" docs/probe-external-link.md \
   '[外部の文書](https://example.invalid/does-not-exist) と [平文の外部](http://example.invalid/x) と [連絡先](mailto:nobody@example.invalid)' in
+
+# **先頭が - の Markdown がルート直下に置かれても、偽のリンク切れを出さないこと**（#47）。
+# doc_find の出力は `sed 's|^\./||'` を通るため、**ルート直下では素の名前になる。**
+# dirname / awk / grep はそれを option と解釈する。
+#
+# **塞ぐ前の帰結**（実測: `dirname "-x.md"` は `unknown option -- x` で終了コード 1）:
+# 検査1 が `/docs/requirements.md` という**絶対パス**を見に行き、
+# **そのファイルの相対リンクが全件「存在しない」で NG になる。**
+# 文面は「リンク切れ」と読めるため、**受け取った側は壊れていないリンクの方を疑う。**
+#
+# **ルート直下でなければ再現しない。** `docs/-x.md` なら `${p##*/}` の前に `docs/` が付く。
+expect_ok "先頭が - の Markdown をルート直下に置いても、リンク切れにならない" -probe-dash.md \
+  '[README](README.md)' in
 
 
 # 検査0 の境界。**見るのは「セルの終端の連続空白」だけで、セルの途中の連続空白は見ない。**
@@ -1281,7 +1294,7 @@ fi
 # 複製ループが拾わない名前を渡す。リポジトリに実在せず、
 # DOC_PRUNE_DIRS にも DOC_PRUNE_FILES にも当たらない綴りである。
 #
-# **階層を1つ持たせる。** ルート直下の名前だと dirname が `.` を返し、
+# **階層を1つ持たせる。** ルート直下の名前だと doc_parent が `.` を返し、
 # mkdir -p が `$work/.`（既にある）になって何もしないため、その1行だけを削っても
 # このケースが緑で通る。階層があれば、削った時点で `: >` が失敗して落ちる。
 fresh_target='probe-fresh-dir/target.txt'
