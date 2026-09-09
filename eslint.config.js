@@ -80,4 +80,22 @@ export default tseslint.config(
       'react-hooks/exhaustive-deps': 'error',
     },
   },
+  // scripts/ の下は CI が Node で直接動かすもので、ブラウザでも
+  // アプリのバンドルでもない。**Node のグローバルを宣言する。**
+  //
+  // 宣言しないと no-undef が process / console を「未定義」として落とす。
+  // **no-undef を無効にする形は採らない**——綴りを間違えた変数まで通るようになる。
+  //
+  // 使うものだけを列挙している。`globals` パッケージを足せば一括で入るが、
+  // **この2つのために依存を1つ増やすことになる。**
+  // ここで使うグローバルが増えたら、この行に足す。
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+  },
 );
