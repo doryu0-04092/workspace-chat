@@ -779,11 +779,17 @@ else
   gi3_expect "一覧に無い打ち消し行を拾えていない" '!probe-unlisted-keep' "${gi3_g[@]}"
   mapfile -t gi3_g < <(doc_groundless_no_value "$gi3_probe2")
   gi3_expect "根拠を失った DOC_NO_VALUE_IGNORES を拾えていない" "${DOC_NO_VALUE_IGNORES[0]}" "${gi3_g[@]}"
-  rm -f "$gi3_probe" "$gi3_probe2"
 fi
 
 gi3_check() { # $1=関数名 $2=NG の文言 $3=直し方
   local got
+  # **指し先が無ければ名指しで落とす。** 開けないファイルを渡すと出力が空になり、
+  # mapfile は 0 件、この関数は何も言わずに通る——**取り違えが緑で通る。**
+  if [ ! -f "$repo/.gitignore" ]; then
+    echo "  NG: $repo/.gitignore を読めない。この節の結果は信用できない"
+    gi3_ng=1
+    return
+  fi
   mapfile -t got < <("$1" "$repo/.gitignore")
   if [ "${#got[@]}" -gt 0 ]; then
     echo "  NG: $2: ${got[*]}"
@@ -803,6 +809,9 @@ gi3_check doc_unlisted_ignore_keeps \
 gi3_check doc_groundless_no_value \
   'DOC_NO_VALUE_IGNORES の項目が .gitignore に無い' \
   '.gitignore から消えたなら、この一覧からも消す（判断の記録が根拠を失う。scripts/doc-scope.sh）'
+# **後片付けは本体の後に行う。** 先に消すと、上の注記が言う「本体の指し先の取り違え」を
+# 塞げない——**消えたファイルを指しても、出力が空になって緑で通る。**
+rm -f "$gi3_probe" "$gi3_probe2"
 if [ "$gi3_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
