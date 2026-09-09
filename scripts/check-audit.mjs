@@ -108,12 +108,53 @@ function collectFindings(rep) {
 }
 
 const found = collectFindings(report);
-const allowed = new Map(allowlist.allow.map((a) => [a.id, a]));
+// 許可一覧の形を確かめる（#170）。
+// **監査レポート側と同じ扱いにする。** 片方だけを検査すると、終了コードの契約
+// （1 = 検査の失敗 / 2 = 入力の誤り）が入力の一方でだけ成立する。
+// allow を持たない JSON は allowlist.allow.map で TypeError になり、Node は
+// 未捕捉例外として exit 1 を返す。ログには「依存の脆弱性検査」の失敗として出るため、
+// **読む人は「脆弱性が見つかった」と読む。実際は判定が一度も走っていない。**
+//
+// 各行の必須項目も見る（#169）。README「依存の版を上げない方針」の表は
+// 「期限とイシューへの参照を必ず付ける」と定めているが、機械が確かめていなかった。
+// **この設計で「通す」が「塞ぐ」と別物であり続けられるのは、期限（出口）と
+// イシュー参照が必ず付いているからである。**
+function requireAllowlist(list, path) {
+  if (!list || typeof list !== 'object' || !Array.isArray(list.allow)) {
+    console.error(`許可一覧の形をしていない: ${path}`);
+    console.error('  allow（配列）が要る。');
+    process.exit(2);
+  }
+  const REQUIRED = ['id', 'package', 'until', 'issue'];
+  for (const [i, a] of list.allow.entries()) {
+    if (!a || typeof a !== 'object') {
+      console.error(`許可一覧の ${i + 1} 件目が物でない: ${path}`);
+      process.exit(2);
+    }
+    const missing = REQUIRED.filter((k) => a[k] === undefined || a[k] === null || a[k] === '');
+    if (missing.length > 0) {
+      console.error(`許可一覧の ${i + 1} 件目に必須の項目が無い: ${missing.join(' / ')}`);
+      console.error(`  ${JSON.stringify(a).slice(0, 200)}`);
+      console.error('  **期限（until）とイシュー参照（issue）が無い許可は、通したことを忘れる。**');
+      process.exit(2);
+    }
+  }
+  return list;
+}
+
+const allowed = new Map(
+  requireAllowlist(allowlist, join(HERE, 'audit-allowlist.json')).allow.map((a) => [a.id, a]),
+);
 
 const blocking = [...found.values()].filter((f) => BLOCKING.has(f.severity));
 const notAllowed = blocking.filter((f) => !allowed.has(f.id));
 const stale = [...allowed.values()].filter((a) => !found.has(a.id));
-const inEffect = blocking.filter((f) => allowed.has(f.id));
+// **重大度によらず、通しているものは一覧に出す**（#172）。
+// blocking から取ると、GitHub Advisory 側で high から moderate へ再評価された
+// とき、許可行は残ったまま出力から完全に消える。
+// **「通している」ことを人に思い出させる唯一の出力が無くなる。**
+// 合否は notAllowed と stale が決めるため、ここを広げても判定は変わらない。
+const inEffect = [...found.values()].filter((f) => allowed.has(f.id));
 
 if (inEffect.length > 0) {
   console.log('通している advisory（塞いだのではない）:');
