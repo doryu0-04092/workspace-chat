@@ -1068,11 +1068,17 @@ describe('Prisma のスキーマとマイグレーション', () => {
      *
      * **`visibleChannels` とは別の経路である。** あちらは「会話を取得してよいか」で、
      * 参加していないオーナーにはプライベートチャンネルを返さない。
-     * こちらは**存在と名前だけを返す。** これが無いと、オーナーは
+     * こちらは**管理に要る範囲だけを返す。** これが無いと、オーナーは
      * 参加者一覧を取得する権限を持ちながら **`channelId` を知る手段が1つも無い。**
      *
-     * **返すものは名前までである。** メッセージ・添付は返さない。
+     * **返すものは機能一覧 3.1 の決定表と同じである**——`id` / 名前 / 種別 / 参加者数。
+     * **`id` を落としてはならない。** 名前だけを返すと、すぐ上に書いた
+     * 「`channelId` を知る手段が1つも無い」がそのまま残り、**F-09 も F-35 も行使できない。**
+     * **返さないものは、メッセージ・添付ファイル・未読数である。** 会話の中身は一切返さない。
      * 境界は `visibleChannels` と同じく「人の出入りの管理」と「会話の閲覧」の間にある。
+     *
+     * **参加者数は退会者を除く。** 退会は論理削除で `ChannelMember` の行が残るため、
+     * そのまま数えると**退会済みの人を参加者として数える。**
      *
      * **`archivedAt` で絞ってはならない。** 兄弟の `visibleChannels` には
      * 「一覧の API はこの条件に加えて `AND c."archivedAt" IS NULL` が要る」と書いてあるが、
@@ -1097,25 +1103,35 @@ describe('Prisma のスキーマとマイグレーション', () => {
       workspaceId: string;
     }): string {
       return `
-        SELECT c."name"
+        SELECT c."id", c."name", c."visibility", count(member."id") AS "memberCount"
         FROM "Channel" c
         JOIN "Membership" m
           -- **要求する側が退会していないこと。** Membership が残っていても通さない。
           JOIN "User" viewer ON viewer."id" = m."userId" AND viewer."deletedAt" IS NULL
           ON m."workspaceId" = c."workspaceId" AND m."userId" = '${viewerId}'
+        -- **参加者数。** LEFT にするのは、参加者が0人のチャンネルも管理の一覧に要るためである。
+        -- 退会者は数えない（退会は論理削除であり ChannelMember の行は残る）。
+        LEFT JOIN "ChannelMember" cm
+          JOIN "User" member ON member."id" = cm."userId" AND member."deletedAt" IS NULL
+          ON cm."channelId" = c."id"
         WHERE c."workspaceId" = '${workspaceId}'
           AND m."role" = 'OWNER'
+        GROUP BY c."id", c."name", c."visibility"
         ORDER BY c."name";
       `;
     }
 
-    it('オーナーには、参加していないプライベートチャンネルも一覧に出る', async () => {
+    it('オーナーには、参加していないプライベートチャンネルも id つきで一覧に出る', async () => {
       // **これが無いと F-09 が成立しない。** 参加者一覧を取得する権限があっても、
       // チャンネルの id を知る手段が無ければ行使できない。
+      //
+      // **名前だけで照合してはならない。** 名前で見ると、`SELECT` から `c."id"` を
+      // 落としても落ちない——**この経路が要る理由そのものが消えたのに、緑で通る。**
       const output = await expectSqlToSucceed(
         manageableChannels({ viewerId: owner, workspaceId: workspace }),
       );
-      expect(output.split('\n')).toContain('secret');
+      // 機能一覧 3.1 の決定表の「返すもの」と同じ並び。secret の参加者は insider だけである。
+      expect(output.split('\n')).toContain(`${secretChannel}|secret|PRIVATE|1`);
     });
 
     it('オーナーには、アーカイブ済みのチャンネルも管理の一覧に出る', async () => {
@@ -1137,7 +1153,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       const output = await expectSqlToSucceed(
         manageableChannels({ viewerId: owner, workspaceId: workspace }),
       );
-      expect(output.split('\n')).toContain('to-archive-1');
+      expect(output.split('\n')).toContain(`${id}|to-archive-1|PUBLIC|0`);
     });
 
     it('オーナーでないメンバーには、管理の一覧が1件も返らない', async () => {
@@ -1385,6 +1401,32 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe('');
     });
 
+    it('別のワークスペースのオーナーは、こちらの在籍者一覧を取得できない', async () => {
+      // **要求する側の所属ワークスペースの一致（`vm."workspaceId" = m."workspaceId"`）を固定する。**
+      // これが無いと、その結合条件を落としても1件も落ちない——
+      // 上の「所属していない利用者」に渡している `stranger` は Membership を1件も持たないため、
+      // **条件を落としても `vm` が空のままで、常に緑になる。**
+      // 結果として、**どこか1つのワークスペースのオーナーが、他人のワークスペースの
+      // 在籍者一覧を取得できる**状態が CI を素通りする（機能一覧 2.1）。
+      //
+      // **肯定側と対で置く。** 否定側だけだと、`b4` が消えても両方とも空を返して緑になる。
+      // beforeAll が入れている固定データ。**第2ワークスペースのオーナーは、
+      // 第1ワークスペースには参加していない**（Membership b4 は a2 のもの）。
+      const otherWorkspaceOwner = '00000000-0000-7000-8000-000000000005';
+      const otherWorkspace = '00000000-0000-7000-8000-0000000000a2';
+      const workspace = '00000000-0000-7000-8000-0000000000a1';
+      const denied = await expectSqlToSucceed(
+        workspaceMemberList({ viewerId: otherWorkspaceOwner, workspaceId: workspace }),
+      );
+      expect(denied).toBe('');
+
+      // 肯定側 — 自分のワークスペースなら取得できる。
+      const allowed = await expectSqlToSucceed(
+        workspaceMemberList({ viewerId: otherWorkspaceOwner, workspaceId: otherWorkspace }),
+      );
+      expect(allowed.split('\n')).toContain('other_owner');
+    });
+
     it('退会した利用者は、ワークスペースの参加者一覧を取得できない', async () => {
       const { userId } = await createDeletedUserKeepingMembership();
       const output = await expectSqlToSucceed(
@@ -1466,6 +1508,39 @@ describe('Prisma のスキーマとマイグレーション', () => {
         channelMemberList({ viewerId: ghost, channelId: '00000000-0000-7000-8000-0000000000c2' }),
       );
       expect(output).toBe('');
+    });
+
+    it('別のワークスペースのオーナーは、こちらのチャンネルの参加者一覧を取得できない', async () => {
+      // **要求する側の所属ワークスペースの一致（`vm."workspaceId" = c."workspaceId"`）を固定する。**
+      // これが無いと、その結合条件を落としても1件も落ちない——
+      // これまで渡していた要求者のうち非参加者は `stranger`（Membership を1件も持たない）だけで、
+      // **条件を落としても `vm` が空のままで、常に緑になる。**
+      // 結果として、**どこか1つのワークスペースのオーナーが、他人のワークスペースの
+      // チャンネル参加者一覧を取得できる**状態が CI を素通りする（機能一覧 2.1）。
+      //
+      // **肯定側と対で置く。** 否定側だけだと、`b4`（第2ワークスペースのオーナーの Membership）が
+      // 消えても両方とも空を返して緑になる。兄弟の `channelMemberViewers` が同じ形を採っている。
+      // beforeAll が入れている固定データ。**第2ワークスペースのオーナーは、
+      // 第1ワークスペースには参加していない**（Membership b4 は a2 のもの）。
+      const otherWorkspaceOwner = '00000000-0000-7000-8000-000000000005';
+      const otherWorkspace = '00000000-0000-7000-8000-0000000000a2';
+      const otherWorkspaceChannel = '00000000-0000-7000-8000-0000000000c3';
+      const secretChannel = '00000000-0000-7000-8000-0000000000c2';
+      const denied = await expectSqlToSucceed(
+        channelMemberList({ viewerId: otherWorkspaceOwner, channelId: secretChannel }),
+      );
+      expect(denied).toBe('');
+
+      // 肯定側 — 自分のワークスペースのチャンネルなら取得できる。
+      // `their-secret`(c3) には参加者が居ないため、ここで1人入れる。
+      await expectSqlToSucceed(`
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '${otherWorkspaceChannel}', '${otherWorkspace}', '${otherWorkspaceOwner}');
+      `);
+      const allowed = await expectSqlToSucceed(
+        channelMemberList({ viewerId: otherWorkspaceOwner, channelId: otherWorkspaceChannel }),
+      );
+      expect(allowed.split('\n')).toContain('other_owner');
     });
 
     /**
