@@ -74,9 +74,24 @@ jobs:
       #
       # **閾値（--audit-level）を下げる形は採らない。**
       # その1件だけでなく、次に来る件も一緒に見逃すためである。
-      # 名指しで通す必要が出たときは、README の表のとおり --json を自前で判定する形にする。
+      # **名指しで通すために、--json の出力を自前で判定する。**
+      #
+      # 判定の中身は scripts/check-audit.mjs にある。**落とす条件は2つある。**
+      #   1. 許可していない high 以上が残っている
+      #   2. **許可した id が1件も出なくなった**（上流が直った合図。許可を消す）
+      # 2 が無いと、許可は消えないまま残り、「通している」ことを忘れる。
+      #
+      # 通す対象は scripts/audit-allowlist.json（データ）側にある。
+      # **仕組みとデータを分けているのは、仕組みを他のリポジトリへ持っていけるようにするためである。**
+      #
+      # || true は npm audit が「1件でも見つかると非ゼロ」を返すためで、
+      # **検査の結果を握り潰しているのではない。** 合否は check-audit.mjs が決める。
+      # 出力が JSON として読めなければ、そちらが exit 2 で落ちる
+      # （registry の障害を「脆弱性ゼロ」と読み違えない）。
       - name: 依存の脆弱性検査
-        run: npm audit --audit-level=high
+        run: |
+          npm audit --json > audit-report.json || true
+          node scripts/check-audit.mjs audit-report.json
 
       # moderate 以下を人が拾うための出力。**ここは落とさない。**
       # 上のステップが落ちても実行する。落ちたときこそ、
