@@ -142,9 +142,35 @@ else
   fail=1
 fi
 
+echo "12. 監査レポートの形をしていない JSON は落ちる（偽の緑を作らない）"
+# **JSON として読めることは、監査が走ったことを意味しない。**
+# npm audit が失敗すると {"error": {...}} を返すことがあり、これは JSON として読める。
+# 素通りすると「検出 0 件」になり、**許可一覧が空のときに exit 0** になる——
+# 脆弱性に気づく唯一の経路が、監査が1件も走っていない状況で緑を返す。
+# **許可一覧を空にして試す。** 空でないと stale 側が発火して、別の理由で落ちてしまう。
+set_allow
+printf '{"error":{"code":"ENETUNREACH","summary":"request to registry failed"}}
+' > "$work/r.json"
+expect "npm audit の error 応答" 2 "$work/r.json"
+
+set_allow
+printf '{}
+' > "$work/r.json"
+expect "空の JSON" 2 "$work/r.json"
+
+set_allow
+printf '{"vulnerabilities":{}}
+' > "$work/r.json"
+expect "auditReportVersion が無い" 2 "$work/r.json"
+
+set_allow
+printf '{"auditReportVersion":2}
+' > "$work/r.json"
+expect "vulnerabilities が無い" 2 "$work/r.json"
+
 echo ""
 if [ "$fail" = 0 ]; then
-  echo "check-audit.mjs の壊す確認を 11 通りすべて通過しました"
+  echo "check-audit.mjs の壊す確認を 15 通りすべて通過しました"
 else
   echo "check-audit.mjs の壊す確認に失敗があります"
 fi

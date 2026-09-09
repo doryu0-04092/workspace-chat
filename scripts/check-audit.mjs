@@ -51,7 +51,37 @@ function readJson(path, what) {
   }
 }
 
-const report = readJson(reportPath, 'npm audit の出力');
+// **JSON として読めることは、監査が走ったことを意味しない。**
+// npm audit が失敗したときは `{"error": {...}}` を返すことがあり、これは JSON として
+// 正しく読める。そのまま進むと `vulnerabilities` が無いだけの入力になり、
+// **「検出 0 件」として通る。** 許可一覧が空になった時点で exit 0 になり、
+// **監査が1件も実行されていない状況で緑を返す。**
+//
+// audit.yml は `npm audit --json > … || true` で終了コードを捨てているため、
+// **npm 側の失敗はこのファイルの中身でしか判別できない。**
+// したがって「監査レポートであること」をここで確かめる。
+function requireAuditReport(rep, path) {
+  if (rep && typeof rep === 'object' && rep.error) {
+    console.error(`npm audit が失敗している（監査は走っていない）: ${path}`);
+    console.error(`  ${JSON.stringify(rep.error).slice(0, 500)}`);
+    process.exit(2);
+  }
+  if (
+    !rep ||
+    typeof rep !== 'object' ||
+    typeof rep.auditReportVersion !== 'number' ||
+    typeof rep.vulnerabilities !== 'object' ||
+    rep.vulnerabilities === null
+  ) {
+    console.error(`監査レポートの形をしていない: ${path}`);
+    console.error('  auditReportVersion（数）と vulnerabilities（物）の両方が要る。');
+    console.error('  **読めなかったものを「脆弱性ゼロ」として通さない。**');
+    process.exit(2);
+  }
+  return rep;
+}
+
+const report = requireAuditReport(readJson(reportPath, 'npm audit の出力'), reportPath);
 const allowlist = readJson(join(HERE, 'audit-allowlist.json'), '許可一覧');
 
 // npm の出力（auditReportVersion 2）から、high 以上の advisory を集める。
