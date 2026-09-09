@@ -28,12 +28,15 @@
 #     **このリポジトリではアラート自体が無効**であるため、結局は来ない
 #     （有効にするかは #36 で判断する）
 #   - **moderate 以下は、誰も知らせてくれない。**
-#     audit.yml は --audit-level=high で落とすため moderate 以下では失敗しない。
+#     audit.yml が落とすのは high 以上（scripts/check-audit.mjs の BLOCKING）であり、
+#     moderate 以下では失敗しない。
 #     かつては「moderate 以下は Dependabot の PR で追う」としていたが、
 #     **その経路がこの変更で消えた。** 代わりに audit.yml の「全件表示」ステップの
 #     出力を、週次実行のログで人が読む
-#   - high 以上の**検知は audit.yml が毎週続ける**（npm audit --audit-level=high）。
-#     落ちたら、そのとき直す版を人が選ぶ。「気づけない」状態にはならない
+#   - high 以上の**検知は audit.yml が毎週続ける**（npm audit --json を
+#     scripts/check-audit.mjs が判定する）。落ちたら、そのとき直す版を人が選ぶ。
+#     **塞げる版が無い場合に限り、期限とイシュー参照を付けて名指しで通す**
+#     （README の「依存の版を上げない方針」の表）。「気づけない」状態にはならない
 version: 2
 updates:
   # npm。open-pull-requests-limit: 0 は、この生態系の版更新 PR を止める指定である。

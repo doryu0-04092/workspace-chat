@@ -96,7 +96,9 @@ npm run format:check
 npm run typecheck
 npm run build
 npm test
-npm audit --audit-level=high
+bash scripts/check-audit.test.sh
+npm audit --json > audit-report.json || true
+node scripts/check-audit.mjs audit-report.json
 shellcheck scripts/*.sh
 bash scripts/check-docs.sh
 bash scripts/check-docs.test.sh
@@ -189,7 +191,7 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 |---|---|
 | 直接の依存に修正版がある | その依存を上げる |
 | **依存の依存**に修正版がある | `package.json` の `overrides` で差し替える |
-| **上流がまだ直していない** | **その版では塞げない。** イシューに記録し、`audit.yml` で**その advisory だけ**を一時的に通す。**期限とイシューへの参照を必ず付ける**（実例: #166） |
+| **上流がまだ直していない** | **その版では塞げない。** イシューに記録し、**`scripts/audit-allowlist.json` に**その advisory だけを一時的に通す行を足す。**期限とイシューへの参照を必ず付ける**（実例: #166） |
 
 > **`overrides` は workspace 配下の依存には届かない**（2026-09-09 の実測。#166）。
 > root 直下の依存には効くが、`apps/api` の依存の依存には効かない。
@@ -218,8 +220,8 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 > 有効にするかどうかは別途判断する（#36）。
 
 **3. `moderate` 以下は誰も知らせてくれない。**
-[audit.yml](.github/workflows/audit.yml) は `--audit-level=high` で落とすため、
-`moderate` 以下では失敗しない。かつては「Dependabot の PR で追う」としていたが、
+[audit.yml](.github/workflows/audit.yml) が落とすのは **high 以上**（`scripts/check-audit.mjs` の
+`BLOCKING`）であり、`moderate` 以下では失敗しない。かつては「Dependabot の PR で追う」としていたが、
 **その経路は無くなった。** 代わりに、audit.yml の「全件表示」ステップの出力を
 定期実行のログで人が読む。**読む先は1箇所に定めてある。**
 
@@ -233,7 +235,8 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 > 実装が長く止まる見込みなら、活動に依存しない経路を別途考える。
 
 **検知そのものは [audit.yml](.github/workflows/audit.yml) が毎週続ける。**
-`high` 以上なら落ちる。落ちたら、そのとき直す版を人が選ぶ。
+`high` 以上なら落ちる。落ちたら、そのとき直す版を人が選ぶ——
+**塞げる版が無い場合の扱いは、上の「塞ぎ方」の表による。**
 
 **GitHub Actions 側は止めていない。** こちらのメジャーは実行環境（Node 20 → 24）の
 移行を含み、放置すると非推奨のランタイムで動き続ける。実際に PR #4 のレビューで
