@@ -54,6 +54,10 @@ set_allow() {
   } > "$work/audit-allowlist.json"
 }
 
+# 許可一覧をそのまま書く（形の検査用）。
+set_allow_raw() { printf '%s
+' "$1" > "$work/audit-allowlist.json"; }
+
 # npm audit --json の出力を合成する。`id:severity` の並びを受け取る。
 # via には文字列（別のパッケージ経由）が混ざる。**本物と同じ形にしておく**——
 # 混ざらない形で試すと、文字列を物として読む欠陥を見逃す。
@@ -134,6 +138,8 @@ if npm audit --json > "$work/real.json" 2>/dev/null; [ -s "$work/real.json" ]; t
     echo "  OK: 本物（exit 0）"
   else
     echo "  NG: 本物 — exit 0 を期待したが $got だった"
+    echo "      **許可外の high が増えた可能性がある。npm audit の出力を先に読むこと。**"
+    echo "      **壊れているのは判定ではなく依存かもしれない。**"
     sed 's/^/      /' "$work/out.txt"
     fail=1
   fi
@@ -168,9 +174,40 @@ printf '{"auditReportVersion":2}
 ' > "$work/r.json"
 expect "vulnerabilities が無い" 2 "$work/r.json"
 
+echo "13. 許可一覧の形が違えば落ちる（終了コードの契約を両方の入力で守る）"
+make_report "$work/r.json" "GHSA-aaaa-aaaa-aaaa:high"
+set_allow_raw '{"allow":{}}'
+expect "allow が配列でない" 2 "$work/r.json"
+set_allow_raw '{}'
+expect "allow が無い" 2 "$work/r.json"
+set_allow_raw '{"allow":["not-an-object"]}'
+expect "行が物でない" 2 "$work/r.json"
+
+echo "14. 許可行に期限・イシュー参照が無ければ落ちる"
+set_allow_raw '{"allow":[{"id":"GHSA-aaaa-aaaa-aaaa","package":"p","issue":1}]}'
+expect "until が無い" 2 "$work/r.json"
+set_allow_raw '{"allow":[{"id":"GHSA-aaaa-aaaa-aaaa","package":"p","until":"u"}]}'
+expect "issue が無い" 2 "$work/r.json"
+set_allow_raw '{"allow":[{"id":"GHSA-aaaa-aaaa-aaaa","package":"p","until":"","issue":1}]}'
+expect "until が空文字" 2 "$work/r.json"
+
+echo "15. 許可した advisory の重大度が下がっても、一覧に出る"
+# **合否は変わらない。** 変わるのは「通している」ことが人に見えるかどうかである。
+set_allow "GHSA-aaaa-aaaa-aaaa"
+make_report "$work/r.json" "GHSA-aaaa-aaaa-aaaa:moderate"
+node "$work/check-audit.mjs" "$work/r.json" >"$work/out.txt" 2>&1
+got=$?
+if [ "$got" = 0 ] && grep -q "GHSA-aaaa-aaaa-aaaa" "$work/out.txt"; then
+  echo "  OK: moderate に下がっても一覧に出る（exit 0）"
+else
+  echo "  NG: moderate に下がった許可が一覧から消えた（exit $got）"
+  sed 's/^/      /' "$work/out.txt"
+  fail=1
+fi
+
 echo ""
 if [ "$fail" = 0 ]; then
-  echo "check-audit.mjs の壊す確認を 15 通りすべて通過しました"
+  echo "check-audit.mjs の壊す確認を 22 通りすべて通過しました"
 else
   echo "check-audit.mjs の壊す確認に失敗があります"
 fi
