@@ -103,6 +103,41 @@ describe('Prisma のスキーマとマイグレーション', () => {
     return { exitCode: result.exitCode, output: result.output.trim() };
   }
 
+  /**
+   * 問い合わせが返す**列名**を `|` 区切りで返す。
+   *
+   * **上の psql は `-tA` で見出しを外している。** 値をそのまま比較するためだが、
+   * その結果**列名の誤りが1つも捕まらない。** 式の列に別名を付け忘れても、
+   * Postgres が `?column?` や `coalesce` を返すだけで、**値は変わらないためテストは緑のまま通る。**
+   *
+   * **列名で読む実装（Prisma の `$queryRaw` を含む）では、そこが落ちる。**
+   * 参照実装が「この列を返す」と書いている以上、**列名も参照実装の一部である。**
+   *
+   * `-t` を外して見出しを出し、その1行目を返す。
+   */
+  async function sqlColumnNames(sql: string): Promise<string> {
+    const result = await container.exec([
+      'psql',
+      '-U',
+      container.getUsername(),
+      '-d',
+      container.getDatabase(),
+      '-v',
+      'ON_ERROR_STOP=1',
+      // -t を外す。見出しの行が要る。
+      '-A',
+      '-c',
+      sql,
+    ]);
+    expect(result.exitCode, `この SQL は成功するべきだが失敗した:\n${sql}\n${result.output}`).toBe(
+      0,
+    );
+    // 見出しの行が無ければ、列名の比較そのものが成り立たない。名指しして止める。
+    const header = result.output.trim().split('\n')[0];
+    expect(header, `見出しの行が返らなかった:\n${sql}\n${result.output}`).toBeDefined();
+    return header ?? '';
+  }
+
   /** SQL が失敗することを期待し、その出力を返す。成功したら失敗として扱う。 */
   async function expectSqlToFail(sql: string): Promise<string> {
     const { exitCode, output } = await psql(sql);
@@ -122,6 +157,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
    *
    * **退会処理がこれらを消すのはアプリ側の規約であり、DB は止めない。**
    * その規約が破れた状態を再現して、読み取り側が塞いでいることを確かめるために使う。
+   *
+   * **正しく退会した状態の起点としても使う。** 呼ぶ側で `ChannelMember` / `Membership` を
+   * 消せば、1.5 の決定どおりの姿になる（9.1 の経路2 のテストがそうしている）。
+   * **`Membership` / `ChannelMember` を残す挙動を「取りこぼしの検査だけの都合」と読んで変えないこと**——
+   * 変えると、消す対象が無くなってあちらの前提が崩れる。
    */
   async function createDeletedUserKeepingMembership(): Promise<{
     userId: string;
@@ -794,7 +834,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      */
     function nextArchiveSequence(baseName: string): string {
       return `
-        SELECT COALESCE(MIN(s.n), 1)
+        SELECT COALESCE(MIN(s.n), 1) AS "nextSequence"
         FROM generate_series(
           1,
           (SELECT count(*) + 1 FROM "Channel" WHERE "workspaceId" = '${workspace}')
@@ -820,6 +860,13 @@ describe('Prisma のスキーマとマイグレーション', () => {
          SET "archivedAt" = now(), "archiveSequence" = ${next}, "name" = "baseName" || '-${next}'
          WHERE "id" = '${id}';`,
       );
+    });
+
+    it('採番の問い合わせが返す列名が、参照実装のとおりである', async () => {
+      // **`AS "nextSequence"` を落とすと、Postgres は `coalesce` を返す。**
+      // 値は変わらないため、他のケースはすべて緑のまま通る。
+      const columns = await sqlColumnNames(nextArchiveSequence('general'));
+      expect(columns).toBe('nextSequence');
     });
   });
 
@@ -1176,6 +1223,14 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toBe('');
     });
 
+    it('管理の一覧が返す列名が、参照実装のとおりである', async () => {
+      // **`AS "memberCount"` を落としても、値は変わらない。** ここでしか捕まらない。
+      const columns = await sqlColumnNames(
+        manageableChannels({ viewerId: owner, workspaceId: workspace }),
+      );
+      expect(columns).toBe('id|name|visibility|memberCount');
+    });
+
     it('別のワークスペースのオーナーには、管理の一覧が1件も返らない', async () => {
       const output = await expectSqlToSucceed(
         manageableChannels({ viewerId: otherWorkspaceOwner, workspaceId: workspace }),
@@ -1274,7 +1329,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * `mentionTargetByLoginId`（投稿時の宛先解決）は**対象側の** `deletedAt` を
      * 条件にしない（`ChannelMember` が実質の条件であるため。要求する側は
      * `viewer."deletedAt" IS NULL` を条件に持つ）。表示時の参照先解決（経路2。
-     * 現時点に参照実装は無い。#78）も、この照合とは別の問い合わせになる。
+     * 参照実装は下の `mentionDisplayTarget`。#78）も、この照合とは別の問い合わせになる。
      * **経路ごとに書き分けること。**
      *
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
@@ -1561,7 +1616,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **条件は名前で指す。** 数と並びで指すと、条件を足したときに
      * 書き換えていない文の意味だけが変わる（規則は scripts/doc-scope.sh の decls の直上）。
      *
-     * **対象側の `deletedAt` — 書いていない**（現時点の決定であり、#78 で見直す）。
+     * **対象側の `deletedAt` — 書いていない**（現時点の決定。**足すかは依頼側の判断を待つ**——#78。機能一覧 9.1 に両側の利点がある）。
      * `activeUserByLoginId` は付けているが、この問い合わせは
      * 対象側の `deletedAt` の有無で挙動を変えない。**理由は、退会済みを積極的に
      * 解決可能にするためではない。** `Membership` / `ChannelMember` の消し込み
@@ -1574,7 +1629,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 内部結合しており、行が無ければ何も返さないためである。過去のメンションを
      * 「削除済みの利用者」として表示する経路（機能一覧 9.1「表示時の参照先解決」）は
      * この問い合わせとは別であり、`User."id"`（UUID）を直接引いて `ChannelMember` を
-     * 問わない（参照実装は現時点のコードに無い）。
+     * 問わない。**参照実装は同じファイルの `mentionDisplayTarget` である**（#78）。
+     * **自分で書き起こさないこと**——`ChannelMember` を結合するか `deletedAt IS NULL` で絞ると、
+     * 退会した人へのメンションが本文から消えて見える。
      *
      * **対象がそのチャンネルの参加者であること** — `cm` の結合（機能一覧 9.1
      * 「そのチャンネルに参加していない利用者はメンションできない」）。
@@ -1789,6 +1846,108 @@ describe('Prisma のスキーマとマイグレーション', () => {
         }),
       );
       expect(output).toBe('');
+    });
+
+    /**
+     * 表示時の参照先解決 — 既に投稿され、対象が確定しているメッセージ本文中の
+     * メンションを描画するための問い合わせ（機能一覧 9.1 の経路2）。
+     *
+     * **経路1（`mentionTargetByLoginId`）を転用してはならない。**
+     * あちらは `ChannelMember` を内部結合するため、**正しく退会した利用者は
+     * 1件も返らない**（1.5 の決定により、退会と同一トランザクションで `Membership` が消え、
+     * `ChannelMember` は外部キーで連鎖して消える）。
+     * 転用すると、退会した人へのメンションが**本文から消えて見える。**
+     *
+     * **`User."id"`（UUID）から直接引く。** `ChannelMember` の有無を条件にしない——
+     * 対象が「いまそのチャンネルに参加しているか」は、既に確定した参照先の表示とは関係が無い。
+     * `User` の行は退会しても論理削除で残るため、この経路が 1.5 の
+     * 「表示名は削除済みの利用者として表示する」を成立させる。
+     *
+     * **`deletedAt` で絞らない。絞ると、退会した人へのメンションが本文から消える。**
+     * 代わりに `deletedAt` の有無を返す。**示すこと自体は 1.5 の決定であり、呼ぶ側の裁量ではない**
+     * （1.5 の決定表: 表示名は「削除済みの利用者として表示する（メンションの参照先も同様）」）。
+     * **呼ぶ側が決めるのは文言だけである。** 返した真偽値を無視して `displayName` だけを描くと、
+     * **退会した利用者へのメンションが現役の利用者と見分けが付かなくなる。**
+     * 表示の文言を SQL に埋めないのは、文言が表示層の関心だからである。
+     *
+     * **実装では1件ずつ呼ばない。** ここが1件を引く形なのは、参照実装が条件を示すためである。
+     * 1つのメッセージに複数のメンションが載り、1画面に複数のメッセージが載る。
+     * **参照先の UUID をまとめ、`WHERE u."id" = ANY($1)` で一括に引くこと。**
+     * **式の列には必ず別名を付ける。** `AS "isDeleted"` を落とすと、Postgres は列名を
+     * `?column?` にする。**列名で読む実装（Prisma の `$queryRaw` を含む）では、
+     * 退会済みの印が静かに落ちる**——`psql -tA` は値だけを出すため、この参照実装のテストでは気づけない。
+     *
+     * **`u."id"` を返しているのはそのためである。** 返さないと、一括で引いたときに
+     * **どの行がどの参照先か対応付けられない**（`ANY` は順序も件数も入力と揃わない——
+     * 存在しない UUID は行が返らず、重複は1行にまとまる）。**落とさないこと。**
+     *
+     * **`targetId` にクライアント由来の値を渡してはならない。** これは**メッセージ本文に保存された
+     * 参照先**であり、投稿時に経路1 が解決して確定させたものである。
+     * リクエストから受け取ると、**UUID を1件ずつ試して利用者の存在と表示名を引ける**
+     * （存在の探索。経路1 で塞いだものと同じ形）。**保存する側も、経路1 が返した値以外を保存しないこと。**
+     *
+     * **引数は `User."id"`（UUID）であり、ログイン識別子の列 `userId` ではない。**
+     * このスキーマでは `User."userId"` がログイン識別子であり、**`"userId"` という
+     * 列名は2つの違うものを指す**（`beforeAll` の注記）。ここで引くのは前者ではない。
+     *
+     * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
+     * （REVIEW.md 3 / CWE-89）。埋め込む `targetId` は**メッセージ本文に保存された
+     * メンションの参照先**であり、投稿時に経路1 が解決して確定させたものである。
+     *
+     * **要求する側の条件を持たない。** 経路1 と違い、**この問い合わせ単体では
+     * 認可を判定していない。** 呼ぶ側が「そのメッセージを読んでよいか」を先に決めており、
+     * 読んでよいメッセージの本文に現れる参照先だけを引く前提である。
+     * **単独の API として公開してはならない**——公開すると、UUID を1件ずつ試すことで
+     * 利用者の存在と表示名を引ける（存在の探索。経路1 で塞いだものと同じ形）。
+     */
+    function mentionDisplayTarget({ targetId }: { targetId: string }): string {
+      return `
+        SELECT u."id", u."displayName", (u."deletedAt" IS NOT NULL) AS "isDeleted"
+        FROM "User" u
+        WHERE u."id" = '${targetId}';
+      `;
+    }
+
+    it('退会した利用者へのメンションも、表示時には参照先を解決できる', async () => {
+      // **これが無いと、経路2 を経路1 で代用する実装が緑で通る。**
+      // 1.5 の「表示名は削除済みの利用者として表示する」が成立しなくなる。
+      const { userId: ghostId } = await createDeletedUserKeepingMembership();
+      // 消し込みを取りこぼさなかった側も作る。**こちらが本来の退会後の姿である**——
+      // ChannelMember が消えているため、経路1 では引けない。
+      await expectSqlToSucceed(
+        `DELETE FROM "ChannelMember" WHERE "userId" = '${ghostId}';
+         DELETE FROM "Membership" WHERE "userId" = '${ghostId}';`,
+      );
+      const output = await expectSqlToSucceed(mentionDisplayTarget({ targetId: ghostId }));
+      // 表示名は残り、退会済みであることが分かる。
+      expect(output).toBe(`${ghostId}|退会する人|t`);
+    });
+
+    it('現役の利用者は、退会済みの印が付かない', async () => {
+      // **否定側だけだと、常に「退会済み」を返す実装でも緑になる。**
+      const output = await expectSqlToSucceed(
+        mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000002' }),
+      );
+      expect(output).toBe('00000000-0000-7000-8000-000000000002|参加者|f');
+    });
+
+    it('参加していないチャンネルの利用者でも、表示時には参照先を解決できる', async () => {
+      // **`ChannelMember` の有無を条件に足すと落ちる。**
+      // `stranger`(004) は ChannelMember も Membership も1件も持たない。
+      const output = await expectSqlToSucceed(
+        mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000004' }),
+      );
+      expect(output).toBe('00000000-0000-7000-8000-000000000004|よその人|f');
+    });
+
+    it('表示時の参照先解決が返す列名が、参照実装のとおりである', async () => {
+      // **式の列の別名は、値では捕まらない。** psql の `-tA` は値だけを出すため、
+      // `AS "isDeleted"` を落としても他の3件は緑のまま通る。
+      // **列名で読む実装（Prisma の `$queryRaw` を含む）では、そこで印が落ちる。**
+      const columns = await sqlColumnNames(
+        mentionDisplayTarget({ targetId: '00000000-0000-7000-8000-000000000002' }),
+      );
+      expect(columns).toBe('id|displayName|isDeleted');
     });
 
     it('現役の利用者は、ユーザーID から引ける', async () => {
