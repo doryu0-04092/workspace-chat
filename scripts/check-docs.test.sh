@@ -958,7 +958,7 @@ expect_ng "features.md 5.1 の外（5.2 の中）にイベント表を置く" do
 # `grep -q requirements.md docs/features.md` に退化させても、このケースは緑で通る。
 expect_ng "features.md 5.1 から requirements.md への参照を消す" docs/features.md \
   "/^### 5\\.1 配信するイベント$/,/^### 5\\.2 /s|\\[要件定義書\\](requirements.md)|要件定義書|" \
-  'features.md 5.1 に requirements.md への参照が無い' "**一覧は 要件定義書 4.1"
+  'features.md 5.1 に requirements.md へのリンクが無い' "**一覧は 要件定義書 4.1"
 
 # **1行に2つ並べた行だけを外に置いても落ちること**（#121 の続き）。
 # 4.1 の表は `typing:start` / `typing:stop` を1行に並べている。パターンが末尾の
