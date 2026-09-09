@@ -734,60 +734,75 @@ fi
 #
 # **ファイルを引数で受ける**（0c-2b・0c と同じ形）。実物には何も置かずに、
 # 分類の抜けを拾えることを確かめられる。
-echo "0c-3. .gitignore のファイル名のパターンが、値を持つかどうか判断されていること"
-gi3_unclassified_in() { # $1=.gitignore のパス。分類されていないパターンを1行ずつ返す
-  local pat d x
-  while IFS= read -r pat || [ -n "$pat" ]; do
-    # 末尾の CR を落とす。Windows で編集された .gitignore を読んでも同じ結果にする。
-    pat=${pat%$'\r'}
-    case "$pat" in
-      '' | '#'*) continue ;;  # 空行とコメント
-      '!'*) continue ;;       # 打ち消し。DOC_KEEP_FILES 側で扱う
-      */) continue ;;         # ディレクトリ形。DOC_PRUNE_DIRS 側で扱う
-    esac
-    # 「dir/...」の形（.vscode/* など）は、先頭のディレクトリ名を DOC_PRUNE_DIRS で見る。
-    case "$pat" in
-      */*)
-        d=${pat%%/*}
-        for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$d" ] && continue 2; done
-        ;;
-    esac
-    for x in "${DOC_PRUNE_FILES[@]}" "${DOC_NO_VALUE_IGNORES[@]}"; do
-      [ "$x" = "$pat" ] && continue 2
-    done
-    printf '%s\n' "$pat"
-  done <"$1"
-}
+echo "0c-3. .gitignore の行が、どの一覧で扱うか決まっていること"
 
+# 4つの向きを見る。**「あちらで扱う」と書いた先が、実際に照合されていること**まで含む。
+#
+#   ファイル名の行  → DOC_PRUNE_FILES（値を持つ）か DOC_NO_VALUE_IGNORES（持たないと判断した）
+#   ディレクトリ行  → DOC_PRUNE_DIRS
+#   打ち消し（!）   → DOC_KEEP_FILES（DOC_PRUNE_DIRS の配下を指すものは対象外）
+#   逆向き          → DOC_NO_VALUE_IGNORES の各行が .gitignore に現に在ること
+#
+# **判断そのものは機械にできない。** できるのは「判断されていない行を残さないこと」だけである。
+#
 # **壊す確認を先に置く**（0c-2b と同じ理由。後に置くと、本体の指し先を取り違えても
 # その時点では空で緑になり、実物を一度も見ないまま通る）。
-gi3_probe=''
-gi3_probe_ok=0
-if ! gi3_probe=$(mktemp); then
-  echo "  NG: 分類の確認用の一時ファイルを作れなかった（TMPDIR を確かめる）"
-  fail=1
-elif ! printf '%s\n' '# コメント' 'node_modules/' '!.env.example' '.env' '*.unclassified-probe' >"$gi3_probe"; then
-  echo "  NG: 分類の確認用の .gitignore を書けなかった（$gi3_probe）"
-  fail=1
-else
-  gi3_probe_ok=1
-fi
 gi3_ng=0
-if [ "$gi3_probe_ok" = 1 ]; then
-  mapfile -t gi3_probe_got < <(gi3_unclassified_in "$gi3_probe")
-  # コメント・ディレクトリ形・打ち消し・分類済み（.env）はすべて落ち、1件だけ残るはず。
-  if [ "${#gi3_probe_got[@]}" -ne 1 ] || [ "${gi3_probe_got[0]}" != '*.unclassified-probe' ]; then
-    echo "  NG: 分類の抜けを拾えていない（期待 1 件「*.unclassified-probe」/ 実際 ${#gi3_probe_got[@]} 件「${gi3_probe_got[*]}」）"
+gi3_probe=''
+gi3_probe2=''
+if ! gi3_probe=$(mktemp) || ! gi3_probe2=$(mktemp); then
+  echo "  NG: 分類の確認用の一時ファイルを作れなかった（TMPDIR を確かめる）"
+  gi3_ng=1
+elif ! printf '%s\n' '# コメント' 'node_modules/' '!.env.example' '.env' \
+       '*.unclassified-probe' 'probe-unlisted-dir/' '!probe-unlisted-keep' \
+       '!.vscode/extensions.json' >"$gi3_probe"; then
+  echo "  NG: 分類の確認用の .gitignore を書けなかった（$gi3_probe）"
+  gi3_ng=1
+elif ! printf '%s\n' "${DOC_NO_VALUE_IGNORES[@]:1}" >"$gi3_probe2"; then
+  # 先頭の1件だけを落とした .gitignore。逆向きがその1件を拾えるはず。
+  echo "  NG: 逆向きの確認用の .gitignore を書けなかった（$gi3_probe2）"
+  gi3_ng=1
+else
+  gi3_expect() { # $1=説明 $2=期待する1件 $3...=実際に返ってきたもの
+    local desc="$1" want="$2"
+    shift 2
+    [ "$#" -eq 1 ] && [ "$1" = "$want" ] && return 0
+    echo "  NG: $desc（期待 1 件「$want」/ 実際 $# 件「$*」）"
+    gi3_ng=1
+  }
+  mapfile -t gi3_g < <(doc_unclassified_ignores "$gi3_probe")
+  gi3_expect "分類の抜けを拾えていない" '*.unclassified-probe' "${gi3_g[@]}"
+  mapfile -t gi3_g < <(doc_unlisted_ignore_dirs "$gi3_probe")
+  gi3_expect "一覧に無いディレクトリ行を拾えていない" 'probe-unlisted-dir/' "${gi3_g[@]}"
+  # `!.vscode/extensions.json` は DOC_PRUNE_DIRS の配下なので落ちるはず。
+  mapfile -t gi3_g < <(doc_unlisted_ignore_keeps "$gi3_probe")
+  gi3_expect "一覧に無い打ち消し行を拾えていない" '!probe-unlisted-keep' "${gi3_g[@]}"
+  mapfile -t gi3_g < <(doc_groundless_no_value "$gi3_probe2")
+  gi3_expect "根拠を失った DOC_NO_VALUE_IGNORES を拾えていない" "${DOC_NO_VALUE_IGNORES[0]}" "${gi3_g[@]}"
+  rm -f "$gi3_probe" "$gi3_probe2"
+fi
+
+gi3_check() { # $1=関数名 $2=NG の文言 $3=直し方
+  local got
+  mapfile -t got < <("$1" "$repo/.gitignore")
+  if [ "${#got[@]}" -gt 0 ]; then
+    echo "  NG: $2: ${got[*]}"
+    echo "        $3"
     gi3_ng=1
   fi
-  rm -f "$gi3_probe"
-fi
-mapfile -t gi3_got < <(gi3_unclassified_in "$repo/.gitignore")
-if [ "${#gi3_got[@]}" -gt 0 ]; then
-  echo "  NG: .gitignore のパターンが、値を持つかどうか判断されていない: ${gi3_got[*]}"
-  echo "        値を持つなら DOC_PRUNE_FILES へ、持たないなら DOC_NO_VALUE_IGNORES へ足す（scripts/doc-scope.sh）"
-  gi3_ng=1
-fi
+}
+gi3_check doc_unclassified_ignores \
+  '.gitignore のパターンが、値を持つかどうか判断されていない' \
+  '値を持つなら DOC_PRUNE_FILES へ、持たないなら DOC_NO_VALUE_IGNORES へ足す（scripts/doc-scope.sh）'
+gi3_check doc_unlisted_ignore_dirs \
+  '.gitignore のディレクトリ行が DOC_PRUNE_DIRS に無い' \
+  '足さないと、その配下の Markdown が複製され、検査の対象に入る（scripts/doc-scope.sh）'
+gi3_check doc_unlisted_ignore_keeps \
+  '.gitignore の打ち消し行が DOC_KEEP_FILES に無い' \
+  '除外から戻すなら DOC_KEEP_FILES へ足す（scripts/doc-scope.sh）'
+gi3_check doc_groundless_no_value \
+  'DOC_NO_VALUE_IGNORES の項目が .gitignore に無い' \
+  '.gitignore から消えたなら、この一覧からも消す（判断の記録が根拠を失う。scripts/doc-scope.sh）'
 if [ "$gi3_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------

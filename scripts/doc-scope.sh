@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # このファイルは実行せず、他のスクリプトから読み込む（shebang を持たない）。
-# check-docs.sh と check-docs.test.sh が共有する定義。2つのものを置く。
+# check-docs.sh と check-docs.test.sh が共有する定義。3つのものを置く。
 #   1. 検査の対象範囲（DOC_PRUNE_DIRS / DOC_PRUNE_FILES / DOC_KEEP_FILES と doc_find）
 #   2. 宣言から数を読み取る規則（decls / decls_in）
+#   3. .gitignore との突き合わせ（DOC_NO_VALUE_IGNORES と doc_unclassified_ignores 等の4つ）
 #
 # なぜ1箇所に置くか。片方だけに書くと「本物の検査が見ている範囲」と
 # 「テストが検査させる範囲」が黙ってずれる。ずれても失敗にはならず、
@@ -109,6 +110,107 @@ DOC_NO_VALUE_IGNORES=(
   'desktop.ini'       # Windows のフォルダ表示設定
   'audit-report.json' # npm audit の出力。依存の脆弱性の一覧であり、秘密は持たない
 )
+
+# .gitignore のパターンのうち、値を持つかどうかが**判断されていない**ものを1行ずつ返す。
+#
+# **この関数をここに置くのは、`DOC_NO_VALUE_IGNORES` を使う側だからである。**
+# 冒頭に書いたとおり、**両方のスクリプトが同じ結論を出さなければならない規則は、
+# 範囲であるかによらずここに置く。** 分類の規則はまさにそれである。
+#
+# **加えて、外にあると shellcheck が SC2034（未使用）で落とす**——
+# 一覧だけをここに置き、読む側を別ファイルにすると、このファイルの中では使われていない。
+# **実際に CI の docs で落ちた**（2026-09-10）。
+#
+# 読み飛ばすもの:
+#   - 空行とコメント
+#   - `!` の打ち消し（DOC_KEEP_FILES 側で扱う）
+#   - 末尾が `/` のディレクトリ形（DOC_PRUNE_DIRS 側で扱う）
+#   - `dir/...` の形で、先頭が DOC_PRUNE_DIRS にあるもの（.vscode/* など）
+doc_unclassified_ignores() { # $1=.gitignore のパス
+  local pat d x
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    # 末尾の CR を落とす。Windows で編集された .gitignore を読んでも同じ結果にする。
+    pat=${pat%$'\r'}
+    case "$pat" in
+      '' | '#'*) continue ;;
+      '!'*) continue ;;
+      */) continue ;;
+    esac
+    case "$pat" in
+      */*)
+        d=${pat%%/*}
+        for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$d" ] && continue 2; done
+        ;;
+    esac
+    for x in "${DOC_PRUNE_FILES[@]}" "${DOC_NO_VALUE_IGNORES[@]}"; do
+      [ "$x" = "$pat" ] && continue 2
+    done
+    printf '%s\n' "$pat"
+  done <"$1"
+}
+
+# .gitignore のディレクトリ行（末尾が `/`）のうち、DOC_PRUNE_DIRS に無いものを返す。
+#
+# **これが無いと、ディレクトリ軸に同じ抜けが残る。** `secrets/` のような行を足しても
+# DOC_PRUNE_DIRS に届かなければ、check-docs.test.sh の複製ループがその配下の Markdown を
+# 複製し、check-docs.sh がそれを検査対象にする——**#44 が塞いだのとまったく同じ形である。**
+#
+# `**/generated/` のような接頭辞は落とす。DOC_PRUNE_DIRS は名前で持つ（-name で指定するため）。
+doc_unlisted_ignore_dirs() { # $1=.gitignore のパス
+  local pat d x
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in
+      '' | '#'* | '!'*) continue ;;
+      */) ;;
+      *) continue ;;
+    esac
+    d=${pat%/}       # 末尾の / を落とす
+    d=${d##*/}       # **/generated → generated
+    for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$d" ] && continue 2; done
+    printf '%s\n' "$pat"
+  done <"$1"
+}
+
+# .gitignore の打ち消し行（`!`）のうち、DOC_KEEP_FILES に無いものを返す。
+#
+# **DOC_PRUNE_DIRS の配下を指す打ち消しは対象外である。** 冒頭の制約に書いたとおり、
+# `doc_excluded` はディレクトリ側で先に返すため、**KEEP はそこまで届かない**
+# （`!.vscode/extensions.json` がこれに当たる。KEEP に入れていないのは意図である）。
+doc_unlisted_ignore_keeps() { # $1=.gitignore のパス
+  local pat n d x
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in '!'*) ;; *) continue ;; esac
+    n=${pat#!}
+    case "$n" in
+      */*)
+        d=${n%%/*}
+        for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$d" ] && continue 2; done
+        ;;
+    esac
+    for x in "${DOC_KEEP_FILES[@]}"; do [ "$x" = "$n" ] && continue 2; done
+    printf '%s\n' "$pat"
+  done <"$1"
+}
+
+# DOC_NO_VALUE_IGNORES のうち、.gitignore に現れないものを返す。
+#
+# **他の2つの一覧は両方向を持っている**（DOC_PRUNE_FILES は「.gitignore で無視されるか」、
+# DOC_KEEP_FILES は「`!` に一致するか」を問い返される）。**この一覧だけが片方向だった。**
+# .gitignore から行が消えても、判断の記録が根拠を失ったまま残る。
+doc_groundless_no_value() { # $1=.gitignore のパス
+  local x pat found
+  for x in "${DOC_NO_VALUE_IGNORES[@]}"; do
+    found=0
+    while IFS= read -r pat || [ -n "$pat" ]; do
+      pat=${pat%$'\r'}
+      [ "$pat" = "$x" ] && { found=1; break; }
+    done <"$1"
+    [ "$found" = 0 ] && printf '%s\n' "$x"
+  done
+  return 0
+}
 
 # 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、
 # 値ではなく変数名しか持たない。除外すると、文書がそこへリンクした時点で
