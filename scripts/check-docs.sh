@@ -115,18 +115,32 @@ kind_count() { # $1=区分名。強調記号と空白を落として4列目と�
   awk -F'|' -v kind="$1" '/^\| F-[0-9][0-9] \|/ { k=$5; gsub(/[* ]/, "", k); if (k == kind) n++ }
                           END { print n+0 }' docs/features.md
 }
-# requirements.md 3.1〜3.3 も同じ数を「全N件」と宣言する。区分名を伴わない書き方のため
-# 上の grep では拾えない。節を特定して読む。節の見出しが変われば読み取りに失敗して NG になる。
-sec_decls() { # $1=節の見出しの正規表現。その節に現れる「全N件」の数をすべて返す
-  # 終端は「#### 以外のあらゆる見出し」とする。^### だけで抜けると、次の見出しが ## だった場合に
-  # 章をまたいで読み進み、節の外の数字を正しく読めたかのように返す。読み取り失敗より気づきにくい。
-  # ubuntu-latest の既定 awk は mawk のため、^#{1,3} のような区間表現は使わない。
-  awk -v h="$1" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
+# **節の本文の切り出しは、この1箇所で行う。**
+# sec_decls / events / table_lines / 5.1 の参照の4箇所が、同じ切り出しを要る。
+# 4箇所に複製すると、片方を直したときにもう片方が古い規則で残り、**食い違ったまま緑で通る。**
+# #129 で実際に起きた——実装は3箇所とも直っていたのに、規則を述べたコメントが2通り残り、
+# **どちらもそのまま従うと検査が壊れる記述だった。**
+#
+# **終端は「節の見出しと同じ深さか、それより浅い見出し」である。**
+# 他の3通りは、いずれも壊れることが分かっている。
+#   - 「あらゆる見出し」— 節の中に小見出しを1つ置いた時点で exit するため、
+#     その下に表を戻しても行数が 0 のままで NG が出ない（#129）
+#   - 「`####` 以外の見出し」— `^#### ` は5文字目が空白であることを要求するため
+#     `##### 一覧` に一致せず、そこで exit する。features.md は現に `#####` を使っている
+#   - 「節より浅い見出しだけ」— `### 3.1` の節が `### 3.2` で抜けず、章をまたいで
+#     節の外の数字を、正しく読めたかのように返す。読み取り失敗より気づきにくい
+# ubuntu-latest の既定 awk は mawk のため、^#{1,3} のような区間表現は使わない。
+sec_body() { # $1=ファイル $2=節の見出しの正規表現。その節の本文の行を返す
+  awk -v h="$2" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
                  in_sec && /^#/ && depth($0) <= h_depth { exit }
                  in_sec { print }
                  function depth(l) { match(l, /^#+/); return RLENGTH }
-                 ' docs/requirements.md \
-    | decls_in "全 *[0-9][0-9]* *件"
+                 ' "$1"
+}
+# requirements.md 3.1〜3.3 も同じ数を「全N件」と宣言する。区分名を伴わない書き方のため
+# 上の grep では拾えない。節を特定して読む。節の見出しが変われば読み取りに失敗して NG になる。
+sec_decls() { # $1=節の見出しの正規表現。その節に現れる「全N件」の数をすべて返す
+  sec_body docs/requirements.md "$1" | decls_in "全 *[0-9][0-9]* *件"
 }
 sum=0
 for kind in 要求 派生 提案・承認済; do
@@ -268,12 +282,8 @@ fi
 # 機能一覧を正にすると、要件定義書がそれを参照することになり、流れを遡る。
 # features.md 5.1 は参照だけを持つ。
 events() { # $1=ファイル $2=見出しの正規表現。イベント表の1列目を返す
-  # 終端は table_lines と同じ形にする（節より浅い見出しだけが終端。深い見出しは節の中）。
-  awk -F'|' -v h="$2" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
-                       in_sec && /^#/ && depth($0) <= h_depth { exit }
-                       in_sec && /^\| `/ { e = $2; gsub(/^ +| +$/, "", e); print e }
-                       function depth(l) { match(l, /^#+/); return RLENGTH }
-                       ' "$1"
+  sec_body "$1" "$2" |
+    awk -F'|' '/^\| `/ { e = $2; gsub(/^ +| +$/, "", e); print e }'
 }
 # **見出しは1箇所に置く。** events() と下の行数の数え上げが別々に持つと、
 # 見出しを変えたとき片方だけが直り、**行数の数え上げが 0 になって新しい検査が黙って死ぬ**
@@ -284,23 +294,19 @@ fea_head='^#+ 5.1 配信するイベント'
 # 節の中の表の行を数える。events() が「コード書式で始まる行」しか拾わないのに対し、
 # こちらは**表の行すべて**を数える。差が出れば、読み飛ばされた行がある。
 table_lines() { # $1=ファイル $2=見出しの正規表現。節の中の「| で始まる行」の数を返す
-  # **終端は「#### 以外のあらゆる見出し」とする**（sec_decls と同じ形。#129）。
-  # ^# で抜けると、節の中に小見出しを1つ置いてその下に表を戻したとき、
-  # そこで exit するため行数が 0 のままになり、「表が戻っている」の NG が出ない。
-  # ubuntu-latest の既定 awk は mawk のため、^#{1,3} のような区間表現は使わない。
-  awk -v h="$2" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
-                 in_sec && /^#/ && depth($0) <= h_depth { exit }
-                 in_sec && /^\|/ { n++ }
-                 END { print n+0 }
-                 function depth(l) { match(l, /^#+/); return RLENGTH }
-                 ' "$1"
+  # grep -c は一致 0 件で終了コード 1 を返し、pipefail に載る。|| true で受ける。
+  sec_body "$1" "$2" | grep -c '^|' || true
 }
 
-file_event_rows() { # $1=ファイル。イベント名の行の数を、節によらず数える
+count_event_rows() { # 標準入力を読み、イベント名の書式の表の行の数を返す
   # **節の外に置かれた表を検知する**（#121）。
   # table_lines は節の中しか見ないため、5.1 の外（5.2 の中や新しい節）に
   # 表を置くと素通りする。イベント名の書式で数えるため、他の節の表は誤検知しない。
   # grep -c は一致 0 件で終了コード 1 を返すため、|| true で受ける。
+  #
+  # **ファイルではなく標準入力を読む。** 同じ数え方を「ファイル全体」と「節の中」の
+  # 両方に当てるためである（下の requirements.md 自身の照合で使う）。
+  # 2通りに書くと、書式を直したときに片方が古い形で残る。
   #
   # **バッククォートは変数に入れて渡す**（`check-docs.test.sh` と同じ形）。
   # 素で単一引用符の中に書くと shellcheck が SC2016（展開されない式）と読んで落ちる。
@@ -313,11 +319,13 @@ file_event_rows() { # $1=ファイル。イベント名の行の数を、節に�
   # **7行目だけを 5.1 の外に置いたときに 0 を返す**——#121 で塞いだ経路がそのまま開く。
   # **検査が「見ている」と表示したまま見ていない状態であり、偽の緑である。**
   #
-  # 誤検知しないことは確認済み。features.md の「バッククォートで始まる表の行」は
-  # `POST /auth/login` 等と `@here` だけで、どちらも `[a-z]+:[a-z]+` に当たらない。
+  # 誤検知しないことは確認済み。**検査対象の Markdown 全部**を走らせて、
+  # 一致するのは requirements.md 4.1 の7行だけである（2026-09-09 時点）。
+  # features.md の「バッククォートで始まる表の行」は `POST /auth/login` 等と `@here` で、
+  # どちらも `[a-z]+:[a-z]+` に当たらない。
   local bt
   bt=$'\140'
-  grep -cE "^\| ${bt}[a-z]+:[a-z]+${bt}" "$1" || true
+  grep -cE "^\| ${bt}[a-z]+:[a-z]+${bt}" || true
 }
 req_events=$(events docs/requirements.md "$req_head")
 kinds=$(printf '%s\n' "$req_events" | grep -c .)
@@ -339,17 +347,28 @@ grep -qE "$fea_head" docs/features.md || note "features.md の「5.1 配信す�
 # **書式の無い表が戻された場合に空を返し、「戻っている」の NG が出ない。**
 [ "$(table_lines docs/features.md "$fea_head")" -eq 0 ] || note "features.md 5.1 にイベント表が戻っている（表は requirements.md 4.1 の1つだけである。#9）"
 # **節の外に置かれた表も見る**（#121）。上のガードは 5.1 の中しか見ないため、
-# 5.2 の中や新しい節に表を置くと素通りする。**コメントの主張（features.md に表が戻っていない）に
-# 実装を合わせる。** イベント名の書式で数えるため、他の節の表は誤検知しない。
-[ "$(file_event_rows docs/features.md)" -eq 0 ] || note "features.md にイベント名の表の行がある（節によらず、表は requirements.md 4.1 の1つだけである。#9）"
+# 5.2 の中や新しい節に表を置くと素通りする。イベント名の書式で数えるため、他の節の表は誤検知しない。
+#
+# **見る先を features.md に限らない**（#182）。不変条件は「表は requirements.md 4.1 の
+# 1つだけである」であり、**features.md だけを見ると、その主張より実装の範囲が狭い。**
+# docs/tech-stack.md は現に「7種類の WebSocket イベント」「7種類のイベント定義」を語る文書で、
+# **一覧の置き場として現実に起こりうる。** そこへ表が戻れば #9 で消した重複が復活し、
+# 片方だけ直したときに食い違う——この検査が守ろうとしている性質が、緑のまま破れる。
+for f in "${docs[@]}"; do
+  [ "$f" = docs/requirements.md ] && continue
+  [ "$(count_event_rows <"$f")" -eq 0 ] ||
+    note "$f にイベント名の表の行がある（節によらず、表は requirements.md 4.1 の1つだけである。#9）"
+done
+# **requirements.md 自身は、4.1 の中と全体が一致すること。** 上のループはこの1件を飛ばすため、
+# **同じ文書の別の節へ複製されても素通りする。** 4.1 の中で数えた行と全体の行を突き合わせる。
+req_rows_all=$(count_event_rows <docs/requirements.md)
+req_rows_sec=$(sec_body docs/requirements.md "$req_head" | count_event_rows)
+[ "$req_rows_all" -eq "$req_rows_sec" ] ||
+  note "requirements.md の 4.1 の外にイベント名の表の行がある（全体 $req_rows_all 行 / 4.1 の中 $req_rows_sec 行）"
 # **5.1 が参照を持つことも見る**（#122）。#119 が確定した不変条件は「5.1 は参照だけを持つ」であり、
 # 表が無いことだけを見ると、**参照そのものを消しても緑で通る。**
 # そのとき 5.1 は「7種類」とだけ書いてあって、どこにも一覧が無い節になる。
-awk -v h="$fea_head" '$0 ~ h { in_sec=1; h_depth=depth($0); next }
-                      in_sec && /^#/ && depth($0) <= h_depth { exit }
-                      in_sec { print }
-                 function depth(l) { match(l, /^#+/); return RLENGTH }
-                 ' docs/features.md |
+sec_body docs/features.md "$fea_head" |
   grep -q 'requirements.md' || note "features.md 5.1 に requirements.md への参照が無い（一覧への導線が消える。#122）"
 if [ "$kinds" -eq 0 ]; then
   note "requirements.md からイベント表を読み取れない"
