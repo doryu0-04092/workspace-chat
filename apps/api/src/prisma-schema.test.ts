@@ -863,7 +863,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **`workspaceId` は URL のパスパラメータ由来である**（機能一覧 2.1 の
      * 「所属していないワークスペースの情報は取得できない」の判定対象そのもの）。
      * `$queryRaw` へそのまま写した時点で注入経路になる。
-     * **実装では `workspaceId` も `userId` もプレースホルダとして渡す**
+     * **実装では `workspaceId` も `viewerId` もプレースホルダとして渡す**
      * （REVIEW.md 3 / CWE-89）。写してよいのは**条件の形**であって、
      * 値の埋め込み方ではない。`nextArchiveSequence` にも同じ注意がある。
      */
@@ -957,7 +957,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      *   - 全員に開ける       → 非参加者にも参加者一覧が漏れる
      *
      * **この形をそのまま写さないこと。** `channelId` は URL のパスパラメータ由来である。
-     * 実装では `channelId` も `userId` もプレースホルダとして渡す
+     * 実装では `channelId` も `viewerId` もプレースホルダとして渡す
      * （REVIEW.md 3 / CWE-89）。`visibleChannels` / `nextArchiveSequence` と同じ扱いである。
      */
     function channelMemberViewers({
@@ -1626,7 +1626,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // ユーザーID がすべて小文字だけであるため、素の等値比較でも同じ結果になる。
       //
       // **大文字を含む綴りで登録する側も要る。** 引数側だけを大文字にして
-      // `mentionTargetByLoginId('INSIDER', …)` と書くと、**列側の `lower()` だけを
+      // `mentionTargetByLoginId({ loginId: 'INSIDER', … })` と書くと、**列側の `lower()` だけを
       // 落とす改変**（`u."userId" = lower(<引数>)`）で落ちない。
       // このファイルに登録されるユーザーID はすべて小文字であり、
       // 引数側の `lower()` が `INSIDER` を `insider` に潰してしまうためである。
