@@ -347,6 +347,14 @@ gi_scan_tracked() { # 標準入力: NUL 区切りのパス。除外に一致し�
   while IFS= read -r -d '' p; do
     doc_excluded_name "${p##*/}" >/dev/null && printf '%s\0' "$p"
   done
+  # **明示的に 0 を返す。** while の終了コードは本体の最後のコマンドのものであり、
+  # 最後に読んだパスが除外に当たらなければ && が短絡して非ゼロになる——
+  # **実物を流すかぎり、ほぼ必ず非ゼロで終わる。**
+  # 呼び出し側が終了コードを見る形（gi_scan_read_into）にした時点で、
+  # これを返すと「git ls-files が失敗した」と誤って報告される（実際に踏んだ）。
+  # **git の失敗は握り潰されない**——冒頭の set -o pipefail により、
+  # パイプラインは git が失敗すれば非ゼロを返す。
+  return 0
 }
 # 関数の中身に落ちる条件を持たせる。doc_excluded_name が除外と判定する追跡ファイルは
 # 1件も無く（.env.example は KEEP が差し引く）、実物を流すかぎり結果は常に空である。つまり、この確認を
@@ -404,8 +412,13 @@ fi
 # **リポジトリを引数で受ける関数を、本体と壊す確認で共有する。**
 #
 # 落ちる条件の作り方:
-#   - **非 ASCII を含む名前**にする。-z を外すと git がパスを引用して出すため、
-#     期待するパスと一致しなくなる（件数では気づけない。パスで見る）
+#   - **-z を外すと 0 件になる。** この経路の読み手は下の gi_scan_tracked の
+#     `read -r -d ''` であり、NUL が1つも無ければループの中身が一度も実行されない。
+#     **件数の比較がこれを捕まえる。**（0c-2b の同じ注記が「件数では気づけない。パスで見る」と
+#     書いているのは、あちらの読み手が `mapfile -d ''` で出力全体が1要素として読まれるためである。
+#     **ここでは成立しない。** 写さないこと）
+#   - **名前に非 ASCII を含める**のは、-z があるかぎり git が引用しないことを併せて見るため。
+#     引用が残れば、件数ではなくパスの比較で落ちる
 #   - **sub/ の下**に置く。pathspec（例: -- docs/）で範囲を狭めると拾えなくなる
 #   - **引数のリポジトリを問う。** -C の指し先を固定に書き換えると、
 #     本体か壊す確認のどちらかが必ず落ちる
@@ -450,20 +463,59 @@ elif ! git -C "$gi_scan_probe" add -f -- "sub/$gi_scan_probe_name"; then
 else
   gi_scan_probe_ok=1
 fi
+# **読み取りの終了コードを見る**（0c-2b と同じ理由）。プロセス置換（`< <(...)`）で
+# 受けると終了コードが失われ、**git が失敗して出力が空でも「追跡されていない」と
+# 同じ 0 件になり、緑のまま通る。** このファイルは `set -uo pipefail` を敷いているため、
+# `git | gi_scan_tracked` のパイプラインは git の失敗をそのまま返す。捨てなければ拾える。
+gi_scan_read=()
+gi_scan_read_err=''
+gi_scan_read_into() { # $1=リポジトリ。結果は gi_scan_read。読めなければ 1 と gi_scan_read_err
+  local out
+  # **入口で配列を戻す。** mapfile が失敗すると代入が起きず、前回の呼び出しの値が残る。
+  # この関数は本体と壊す確認の2回呼ばれる。
+  gi_scan_read=()
+  gi_scan_read_err=''
+  if ! out=$(mktemp); then
+    gi_scan_read_err='読み取り用の一時ファイルを作れなかった。TMPDIR を確かめる'
+    return 1
+  fi
+  if ! gi_tracked_hits_in "$1" >"$out"; then
+    gi_scan_read_err="git ls-files が失敗した: $1"
+    rm -f "$out"
+    return 1
+  fi
+  if ! mapfile -d '' -t gi_scan_read <"$out"; then
+    gi_scan_read_err='読み取り結果を配列に取り込めなかった（mapfile が失敗した）'
+    rm -f "$out"
+    return 1
+  fi
+  rm -f "$out"
+  return 0
+}
 if [ "$gi_scan_probe_ok" = 1 ]; then
-  mapfile -d '' -t gi_scan_probe_got < <(gi_tracked_hits_in "$gi_scan_probe")
-  if [ "${#gi_scan_probe_got[@]}" -ne 1 ] ||
-     [ "${gi_scan_probe_got[0]}" != "sub/$gi_scan_probe_name" ]; then
-    echo "  NG: 追跡ファイルの走査が、除外に当たる追跡ファイルを拾えていない"
-    echo "        期待: 1 件「sub/$gi_scan_probe_name」"
-    echo "        実際: ${#gi_scan_probe_got[@]} 件「${gi_scan_probe_got[*]}」"
+  if ! gi_scan_read_into "$gi_scan_probe"; then
+    echo "  NG: 走査の確認用の一時リポジトリを読めなかった（$gi_scan_read_err）"
     gi_ng=1
+  else
+    gi_scan_probe_got=("${gi_scan_read[@]}")
+    if [ "${#gi_scan_probe_got[@]}" -ne 1 ] ||
+       [ "${gi_scan_probe_got[0]}" != "sub/$gi_scan_probe_name" ]; then
+      echo "  NG: 追跡ファイルの走査が、除外に当たる追跡ファイルを拾えていない"
+      echo "        期待: 1 件「sub/$gi_scan_probe_name」"
+      echo "        実際: ${#gi_scan_probe_got[@]} 件「${gi_scan_probe_got[*]}」"
+      gi_ng=1
+    fi
   fi
 fi
-mapfile -d '' -t gi_committed < <(gi_tracked_hits_in "$repo")
-if [ ${#gi_committed[@]} -gt 0 ]; then
-  echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
+if ! gi_scan_read_into "$repo"; then
+  echo "  NG: 追跡ファイルの走査そのものが失敗した（$gi_scan_read_err）"
   gi_ng=1
+else
+  gi_committed=("${gi_scan_read[@]}")
+  if [ ${#gi_committed[@]} -gt 0 ]; then
+    echo "  NG: 値を持つ名前のファイルが追跡されている（.gitignore は追跡済みに効かない）: ${gi_committed[*]}"
+    gi_ng=1
+  fi
 fi
 if [ "$gi_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
@@ -570,8 +622,7 @@ fi
 # 本体を読む。** 逆にすると、本体の指し先を一時リポジトリに取り違えても、
 # その時点では索引が空なので 0 件で緑になり、**実物の .claude/ を一度も
 # 見ないまま全ケースが緑で通る。** 先に足しておけば、取り違えた本体は probe を
-# 拾って「追跡されている」で落ちる。0c の代償3 が「-C の指し先を変えても
-# 落ちない」と書いている限界は、ここでは塞いである。
+# 拾って「追跡されている」で落ちる。**同じ形は 0c にも入れてある**（#88。上の代償 3）。
 gi_claude_tracked_in() { # $1=リポジトリ。.claude 配下で追跡されているパスを NUL 区切りで返す
   git -C "$1" ls-files -z -- .claude
 }
