@@ -617,7 +617,7 @@ Range リクエストの再試行**をクライアントに実装することに
    **そこで resource を `/*` へ広げると、1枚の Cookie で全チャンネルの添付が取れる**
    （[REVIEW.md](../REVIEW.md) 2.1 が名指しで禁じている形）。
 
-   **添付のオリジンへは、`/files/*` のビヘイビアからしか到達できないようにする**（例外はアバターの `/avatars/*` であり、パスを剥がさないため `avatars/` のキーにしか届かない。下記）。
+   **添付のオリジンへは、`/files/*` のビヘイビアからしか到達できないようにする**（例外はアバターの `/avatars/*` である。届く範囲と、確認できていないことは下記）。
    **添付で署名を要求するのは `/files/*` だけであり、オリジンへ渡る前に `/files` を剥がす。**
    **したがって剥がしたあとのパスは S3 のキーと同じ形であり、
    既定のビヘイビア（`*`。署名を要求しない）が受け取る URL の形と一致する。**
@@ -639,11 +639,21 @@ Range リクエストの再試行**をクライアントに実装することに
    | 隔離用のキー（検証前） | `quarantine/avatars/{UUID}/{ファイル名}`（**配信 URL・署名付き Cookie の対象を持たない**） |
    | 配信 URL のパス | `/avatars/{UUID}/{ファイル名}`（**S3 のキーと同じ形であり、剥がす関数は要らない**） |
    | 署名付き Cookie の対象 | `/avatars/*`（**ログインしている利用者に発行する**。ワークスペースやチャンネルの参加を問わない） |
-   | CloudFront のビヘイビア | `/avatars/*`（パスを剥がさずに添付のバケットへ渡すため、**届くキーは `avatars/` で始まるものだけである**） |
+   | CloudFront のビヘイビア | `/avatars/*`（パスを剥がさずに添付のバケットへ渡す。**このビヘイビアが選ばれるのは、正規化したパスが `/avatars/` で始まるときだけであるが、オリジンへ渡るのは正規化の前のパスである**——下記の「アバターの経路で確認できていないこと」） |
    | 署名付き Cookie の `Path` 属性 | `/avatars`（`/avatars/...` への要求に送られ、`/files/...` へは送られない——RFC 6265 5.1.4 の path-match「The cookie-path is a prefix of the request-path, and the first character of the request-path that is not included in the cookie-path is a %x2F ("/") character.」。**添付の Cookie と名前が同じでも `Path` が違うため、別の Cookie として保たれ、互いに上書きしない**——同 5.3「If the cookie store contains a cookie with the same name, domain, and path as the newly created cookie」） |
 
    **`/avatars/*` の Cookie の対象を `/*` に広げ、`Path` を `/` にしてはならない**——1枚の Cookie で全チャンネルの添付が取れる。
    **代償は、配信 URL を知っていれば、ログインしている別のワークスペースの利用者でも取得できることである**（キーに推測できない `{UUID}` を入れる。[機能一覧](features.md) 1.3）。
+
+   **アバターの経路で確認できたこと。** [AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesCacheBehavior.html)
+   は「**CloudFront normalizes URI paths consistent with RFC 3986 and then matches the path with the correct cache behavior. Once the cache behavior is matched, CloudFront sends the raw URI path to the origin.**」と定め、
+   正規化で取り除くものに「**multiple slashes (`//`) or periods (`..`)**」を挙げている。
+   **`/avatars/../workspace/...` は正規化で `/workspace/...` になり、`/avatars/*` ではなく既定のビヘイビア（静的配信のバケット）に当たる。**
+
+   **アバターの経路で確認できていないこと。** **`/avatars/*` が選ばれたあと、オリジンへ渡る正規化の前のパス（ドットセグメントや、符号化したドットを含むもの）を、S3 がどのキーとして解釈するか。**
+   S3 の[キーの命名の文書](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html)は、ドットだけのセグメントについて「**Different tools and SDKs might handle these patterns differently**」と述べるにとどまり、
+   **REST API の要求のパスをどのキーとして解釈するかを定めた記述は見つからなかった。**
+   **実装時に、ドットセグメントと符号化したドットを含む URL で配信して、`avatars/` の外のキーが返らないことを確かめる。** 返った場合は、その場で直さず依頼側へ上げる。
 
    **S3 のキーは上表のとおり固定であり、実装時に決めるものではない。**
    実装時に決めるのは **CloudFront が `/files` をどう剥がすか**だけであり、
