@@ -74,6 +74,9 @@ apps/api/          NestJS 11
 apps/web/          React 19 + Vite 7
 ```
 
+**`apps/web/vite.config.ts` は、`PORT` の解決規則を1つに保つため `apps/api/src/port.ts` を直接読む**（`apps/web/package.json` の依存に `apps/api` の宣言は無い。規則は `port.ts` の docblock が持つ）。
+**`port.ts` を移す・`apps/web` を単独でビルドする形に変えるときは、この読み込みも一緒に動かす。**
+
 #### 共有パッケージを CommonJS で出す理由と代償
 
 `packages/shared` の出力は **CommonJS** とする。
