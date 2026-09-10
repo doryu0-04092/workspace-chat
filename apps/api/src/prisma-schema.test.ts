@@ -1615,24 +1615,12 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **条件は名前で指す。** 数と並びで指すと、条件を足したときに
      * 書き換えていない文の意味だけが変わる（規則は scripts/doc-scope.sh の decls の直上）。
      *
-     * **対象側の `deletedAt` — `IS NULL` で絞る**（#191 の決定。2026-09-10。
-     * `activeUserByLoginId` と同じ付け方になった）。**理由は、退会済みを積極的に
-     * 排除するためというより、`Membership` / `ChannelMember` の消し込み
-     * （機能一覧 1.5。削除と同一トランザクションで連鎖削除する）を取りこぼした状態
-     * （1.5 が復旧について「塞ぎ方は2段構えにする」としたのと同じく、書き込み側の規約だけに頼らない場合）で、
-     * 退会済みの利用者が新しい宛先として解決されないための備えである。**
-     * **表示時の参照先解決（経路2。`mentionDisplayTarget`）が別の問い合わせとして
-     * 立った（#78・PR #190）ため、この条件を足しても「退会した人へのメンションが
-     * 本文から消える」は起きない**——表示は経路2 が担う。
+     * **対象側の `deletedAt` — `IS NULL` で絞る。要求する側も同じ。**
+     * 理由は機能一覧 9.1 の経路1（投稿時の宛先解決）と「経路1の参照実装」にある。ここに写さない。
      *
-     * **正しく退会した利用者（`Membership` が消え、`ChannelMember` が連鎖削除された
-     * 状態）は、対象としてこの問い合わせでは解決できない。** `ChannelMember` を
-     * 内部結合しており、行が無ければ何も返さないためである。過去のメンションを
-     * 「削除済みの利用者」として表示する経路（機能一覧 9.1「表示時の参照先解決」）は
-     * この問い合わせとは別であり、`User."id"`（UUID）を直接引いて `ChannelMember` を
-     * 問わない。**参照実装は同じファイルの `mentionDisplayTarget` である**（#78）。
-     * **自分で書き起こさないこと**——`ChannelMember` を結合するか `deletedAt IS NULL` で絞ると、
-     * 退会した人へのメンションが本文から消えて見える。
+     * **表示時の参照先解決（経路2）に転用しないこと。参照実装は同じファイルの `mentionDisplayTarget` である**——
+     * この問い合わせは `ChannelMember` を結合し `deletedAt IS NULL` で絞るため、
+     * 転用すると退会した人へのメンションが本文から消えて見える。
      *
      * **対象がそのチャンネルの参加者であること** — `cm` の結合（機能一覧 9.1
      * 「そのチャンネルに参加していない利用者はメンションできない」）。
@@ -1685,7 +1673,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
         JOIN "User" viewer
           ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
         WHERE lower(u."userId") = lower('${loginId}')
-          -- 対象側が退会していないこと（#191。消し込みの取りこぼしへの備え）。
+          -- 対象側が退会していないこと。
           AND u."deletedAt" IS NULL;
       `;
     }
@@ -1693,18 +1681,23 @@ describe('Prisma のスキーマとマイグレーション', () => {
     it('Membership / ChannelMember の消し込みを取りこぼしても、退会した利用者は宛先として解決されない', async () => {
       // **`createDeletedUserKeepingMembership` で、消し込みを取りこぼした状態
       // （ChannelMember が残ったまま deletedAt が立った状態）を再現する。**
-      // #191 の決定で対象側に `deletedAt IS NULL` を足したため、この状態でも
-      // 退会した利用者は新しい宛先として解決されない。
-      const { loginId } = await createDeletedUserKeepingMembership();
       // 要求する側は `insider`（secret の正規の参加者）で固定し、対象側だけを見る。
-      const output = await expectSqlToSucceed(
-        mentionTargetByLoginId({
-          viewerId: '00000000-0000-7000-8000-000000000002',
-          channelId: '00000000-0000-7000-8000-0000000000c2',
-          loginId,
-        }),
-      );
-      expect(output).toBe('');
+      const { userId, loginId } = await createDeletedUserKeepingMembership();
+      const query = mentionTargetByLoginId({
+        viewerId: '00000000-0000-7000-8000-000000000002',
+        channelId: '00000000-0000-7000-8000-0000000000c2',
+        loginId,
+      });
+
+      // **同じ利用者で、退会前は解決されることを先に見る。** 否定側だけだと、
+      // `ChannelMember` が作られていない・`loginId` の照合が外れている、のどちらでも
+      // 空になって緑になる。
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = NULL WHERE "id" = '${userId}';`);
+      expect(await expectSqlToSucceed(query)).toBe(userId);
+
+      // 取りこぼした状態に戻す。対象側の `deletedAt IS NULL` だけがこの差を作る。
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';`);
+      expect(await expectSqlToSucceed(query)).toBe('');
     });
 
     it('そのチャンネルに参加していない利用者は、メンションの参照先にできない', async () => {
