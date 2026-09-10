@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
+import { resolvePort } from '../api/src/port';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -16,10 +17,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        // 待ち受けポートは PORT で変えられる（apps/api/src/port.ts / .env.example）。
-        // **固定にすると PORT=8080 で api を起動したとき手元だけが静かに止まる**——
-        // proxy 先に繋がらず、リクエストが届かないため api のログには何も出ない。
-        target: `http://localhost:${process.env.PORT ?? '3000'}`,
+        // **`PORT` の解決規則は `apps/api/src/port.ts` が定める1つだけである。**
+        // ここで書き直すと api と web で規則が2つになる——とくに `PORT=`（空文字）は
+        // `port.ts` が起動時に落とす入力であり、web 側で既定値に落とすと
+        // **8080 のつもりが黙って 3000 に繋ぎに行く**（README「動かす」）。
+        target: `http://localhost:${resolvePort(process.env.PORT)}`,
         // WebSocket のハンドシェイクも同じ前置きに載るため、ws を有効にする。
         ws: true,
       },
