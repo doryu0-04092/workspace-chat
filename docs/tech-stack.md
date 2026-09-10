@@ -44,20 +44,25 @@
 ## 全体構成
 
 ```
-[React SPA]  ── REST/JSON ──┐
-   CloudFront + S3          ├─ [NestJS]  ── [PostgreSQL 17 + pg_bigm]
-             ── WebSocket ──┘   ECS Fargate    RDS
-                                   │
-                                   ├─ [Valkey] ElastiCache（配信の共有）
-                                   └─ [S3]     添付ファイル
-                                                ├ 配信は CloudFront 経由のみ
-                                                │  （チャンネル単位の署名付き Cookie）
-                                                └ アップロードはブラウザから直接 PUT（隔離用の接頭辞へ）
-                                                   （署名付き URL。配信とは別の経路。#176）
+[React SPA]  ── すべて同一ドメイン ──→ [CloudFront]  ビヘイビアを3つに分ける
+                                          │
+                                          ├─ /api/*   ──→ [ALB] ──→ [NestJS]  ── [PostgreSQL 17 + pg_bigm]
+                                          │              REST と WebSocket    ECS Fargate    RDS
+                                          │              （/api/socket.io/）      │
+                                          │                                       ├─ [Valkey] ElastiCache（配信の共有）
+                                          │                                       └─ [S3]     添付（アップロードは
+                                          │                                                    署名付き URL で隔離用の接頭辞へ直接 PUT。#176）
+                                          ├─ /files/* ──→ [S3]  添付の配信
+                                          │                     （チャンネル単位の署名付き Cookie）
+                                          └─ *        ──→ [S3]  静的配信
 ```
 
 フロントエンドは静的配信とし、NestJS を唯一のサーバーとする3層構造。
 REST と WebSocket の両方が ALB を経由する。
+**WebSocket のハンドシェイクのパスも `/api` 配下に置く**——Socket.IO の `path` を
+**`/api/socket.io/`** とする（**決定**。#77）。**CloudFront のビヘイビアは3つで閉じており**、
+`/api` の外に出ると**既定の `*` に落ちて静的配信のバケットへ向かい、ALB に届かない。**
+**`/api` の決定は、ブラウザからサーバーへ向かうすべての経路に当たる。REST だけではない。**
 
 ### リポジトリの構成
 
@@ -179,7 +184,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 項目 | 採用 | 備考 |
 |---|---|---|
 | IaC | **Terraform** 1.x | 既存プロジェクトで実績あり |
-| フロント配信 | CloudFront + S3 | 静的配信 |
+| フロント配信 | CloudFront + S3 | **静的配信・添付の配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを3つ。下の「本番構成のサイジング」の CloudFront の行。#77） |
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。TLS 終端。**ブラウザ通知に必要な HTTPS を提供する** |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
@@ -215,9 +220,9 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | **ECS Fargate** | **0.25 vCPU / 0.5 GB × 2 タスク** | **タスク数を 2 にするのは、複数インスタンス構成が実際に動くことを検証するためである。** 1 タスクでは ElastiCache を介した配信共有（難-2）が机上の設計に留まり、**本番で初めて壊れる**。同時接続 50 は Node.js の 1 プロセスで十分に扱える規模であり、vCPU は最小で足りる |
 | **RDS PostgreSQL 17** | **db.t4g.micro（2 vCPU / 1 GB）/ gp3 20 GB / Single-AZ** | メッセージ 100,000 件は本文込みでも数十 MB 規模であり、pg_bigm の索引を含めてもストレージ 20 GB に収まる。**Single-AZ は学習用途としての割り切り**（[要件定義書](requirements.md) 4.2） |
 | **ElastiCache for Valkey** | **cache.t4g.micro（0.5 GB）× 1 ノード** | 用途は **Pub/Sub による配信共有のみ**で、データを蓄積しない（**在席は保持しない**。[要件定義書](requirements.md) 4.2）。**レプリカは置かない**（停止すると複数タスク間の配信が止まる。これも割り切りである） |
-| **ALB** | 1 台 | TLS 終端と WebSocket の維持 |
+| **ALB** | 1 台 | TLS 終端と WebSocket の維持。**ターゲットグループのヘルスチェックのパスは `/api/health`**（F-39。#77 の決定によりアプリ側のパスが `/api` を持つ） |
 | **S3** | 上限を設けない（実測で監視） | 添付は画像 10 MB / 動画 100 MB / 文書・圧縮 25 MB を上限とする（[要件定義書](requirements.md) 4.3） |
-| **CloudFront** | 1 ディストリビューション / **オリジンを2つ**（フロントの静的配信のバケットと、**添付のバケット**） / **ビヘイビアを2つに分ける**（`/files/*` → **添付のバケット** / 既定の `*` → **静的配信のバケット**。**添付のオリジンへは、`/files/*` のビヘイビアからしか到達できない**（**CloudFront の内部の限定であって、バケット側で到達経路を閉じるという意味ではない**——**バケットを「CloudFront の OAC からのみ」に閉じると、アップロードの署名付き PUT が通らなくなる**。#176。上流は [要件定義書](requirements.md) 4.3）。[要件定義書](requirements.md) 4.3） / **`/files/*` のビヘイビアに応答ヘッダーのポリシー SecurityHeadersPolicy を付ける**（すべての応答に `X-Content-Type-Options: nosniff`。[機能一覧](features.md) 11.1） / **viewer-request の関数を1つ**（`/files` を剥がす。[要件定義書](requirements.md) 4.3。**これが無いと添付が `NoSuchKey` になり、参加者でも取得できない**。**署名付き Cookie の照合と両立するかは未確認であり、実際に配信して確かめる**） | フロントの静的配信と添付ファイルの配信を兼ねるが、**署名を要求するのは添付のパス（`/files/*`）のみ**とする（**署名付き Cookie の対象は `/files/workspace/{ws}/channel/{ch}/*`**。[要件定義書](requirements.md) 4.3）。ディストリビューション全体に署名を要求すると、**署名付き Cookie を持たない未ログインの利用者がログイン画面すら開けなくなる** |
+| **CloudFront** | 1 ディストリビューション / **オリジンを3つ**（フロントの静的配信のバケット、**添付のバケット**、**ALB**） / **ビヘイビアを3つに分ける**（**`/api/*` → ALB** / `/files/*` → **添付のバケット** / 既定の `*` → **静的配信のバケット**。**添付のバケットへは `/files/*` からしか到達できない**（**CloudFront の内部の限定であって、バケット側で到達経路を閉じるという意味ではない**——**バケットを「CloudFront の OAC からのみ」に閉じると、アップロードの署名付き PUT が通らなくなる**。#176）。[要件定義書](requirements.md) 4.3） / **`/files/*` のビヘイビアに応答ヘッダーのポリシー SecurityHeadersPolicy を付ける**（すべての応答に `X-Content-Type-Options: nosniff`。[機能一覧](features.md) 11.1） / **viewer-request の関数を1つ**（`/files` を剥がす。[要件定義書](requirements.md) 4.3。**これが無いと添付が `NoSuchKey` になり、参加者でも取得できない**。**署名付き Cookie の照合と両立するかは未確認であり、実際に配信して確かめる**） | フロントの静的配信・添付ファイルの配信・**API と WebSocket** を1つのドメインで兼ねる。**API を同一ドメインに置くのは、署名付き Cookie をこのホストに限って発行するためである**（#77 の決定）——署名付き Cookie は CloudFront のドメインに対して設定される必要があるが、発行するのは API であり、API が別サブドメインにあると `Domain` を広げない限り届かない。[要件定義書](requirements.md) 4.3 は「**サブドメインに Cookie を書ける攻撃者に破られる**」を明記してこの範囲を警戒しており、別サブドメインを採ると自分でその範囲を広げることになる。**`/api/*` はパスを剥がさずオリジンへ渡す**（アプリ側のパスも `/api` を含む）。**`/api/*` は GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE のすべてを許可する**（`Allowed HTTP methods`。[AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesCacheBehavior.html) は3つの選択肢しか持たず、**POST を通すのはこれだけである**。狭い側を選ぶと `POST /api/auth/login` がオリジンに届かず、**認証が成立しないまま、原因がエッジ側にあるためアプリのログには何も出ない**）。**`/api/*` はキャッシュしない**（`CachingDisabled` 相当）**、**すべてのビューアーのヘッダー・Cookie・クエリ文字列をオリジンへ転送する**（origin request policy の `AllViewer` 相当）——**転送するものを数えて列挙しない。** `Authorization` と Cookie とクエリ文字列だけを挙げると、**WebSocket のハンドシェイクが要求する `Upgrade` / `Connection` / `Sec-WebSocket-Key` / `Sec-WebSocket-Version` が落ちる**（RFC 6455）。**Socket.IO は既定で HTTP long-polling から入るため、繋がらないのではなく「常時 long-polling のまま」に静かに落ちる**（#77）——**CloudFront は既定でこれらをオリジンへ渡さない**（[AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/controlling-origin-requests.html)）。**これが無いと認証がまったく成立せず、さらに `Authorization` がキャッシュキーに入らないまま GET の応答がエッジに残り、非参加者へ返りうる**（[REVIEW.md](../REVIEW.md) 2.1 経路1）。**署名を要求するのは添付のパス（`/files/*`）のみ**とする（**署名付き Cookie の対象は `/files/workspace/{ws}/channel/{ch}/*`**。[要件定義書](requirements.md) 4.3）。ディストリビューション全体に署名を要求すると、**署名付き Cookie を持たない未ログインの利用者がログイン画面すら開けなくなる** |
 
 **この規模を超えた場合に最初に詰まるのは ECS タスクではなく RDS の接続数である。**
 `db.t4g.micro` の最大接続数は限られるため、**接続プールの上限をタスク数 × プール数で管理し、
