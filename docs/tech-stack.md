@@ -182,7 +182,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
 | **配信の共有** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
-| 添付ファイル | **S3 + CloudFront の署名付き Cookie** | パブリックアクセスは全面遮断。**S3 への直接アクセスは行わず、CloudFront 経由のみ**とする。署名付き URL を採らない理由は [要件定義書](requirements.md) 4.3 |
+| 添付ファイル | **S3 + CloudFront の署名付き Cookie**（配信）＋ **S3 への直接アップロード用の署名付き URL**（アップロード） | パブリックアクセスは全面遮断。**添付の経路は2つあり、扱いが逆になる**（[要件定義書](requirements.md) 4.3 の表が「アップロード（**配信とは別の経路**）」として区別している）。**配信**は **S3 への直接アクセスを行わず、CloudFront 経由のみ**とする。**配信で**署名付き URL を採らない理由は [要件定義書](requirements.md) 4.3。**アップロードは別の経路であり、ブラウザから S3 へ直接 PUT する署名付き URL を使う**（[機能一覧](features.md) 11.1 の「アップロード用の署名付き URL の発行にレート制限がかかる」が前提にしている経路である）。**バケットを「CloudFront の OAC からのみ」に閉じると、この PUT が通らなくなる**（#176） |
 
 #### WebSocket と複数インスタンスの問題
 
