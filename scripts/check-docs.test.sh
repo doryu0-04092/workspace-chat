@@ -758,7 +758,7 @@ fi
 # 分類の抜けを拾えることを確かめられる。
 echo "0c-3. .gitignore の行が、どの一覧で扱うか決まっていること"
 
-# 4つの向きを見る。**「あちらで扱う」と書いた先が、実際に照合されていること**まで含む。
+# 5つの向きを見る。**「あちらで扱う」と書いた先が、実際に照合されていること**まで含む。
 #
 #   ファイル名の行  → DOC_PRUNE_FILES（値を持つ）か DOC_NO_VALUE_IGNORES（持たないと判断した）
 #   ディレクトリ行  → DOC_PRUNE_DIRS
@@ -777,7 +777,7 @@ if ! gi3_probe=$(mktemp) || ! gi3_probe2=$(mktemp); then
   gi3_ng=1
 elif ! printf '%s\n' '# コメント' 'node_modules/' '!.env.example' '.env' \
        '*.unclassified-probe' 'probe-unlisted-dir/' '!probe-unlisted-keep' \
-       '!.vscode/extensions.json' >"$gi3_probe"; then
+       '!.vscode/extensions.json' '!node_modules/keep-me' >"$gi3_probe"; then
   echo "  NG: 分類の確認用の .gitignore を書けなかった（$gi3_probe）"
   gi3_ng=1
 elif ! printf '%s\n' "${DOC_NO_VALUE_IGNORES[@]:1}" >"$gi3_probe2"; then
@@ -801,6 +801,11 @@ else
   gi3_expect "一覧に無い打ち消し行を拾えていない" '!probe-unlisted-keep' "${gi3_g[@]}"
   mapfile -t gi3_g < <(doc_groundless_no_value "$gi3_probe2")
   gi3_expect "根拠を失った DOC_NO_VALUE_IGNORES を拾えていない" "${DOC_NO_VALUE_IGNORES[0]}" "${gi3_g[@]}"
+  # 親が丸ごと除外されている打ち消し。probe には node_modules/ があるため、
+  # その配下の打ち消しは**永久に効かない**。
+  # **`!.vscode/extensions.json` は落ちるはず**——probe に `.vscode/` の行が無いためである。
+  mapfile -t gi3_g < <(doc_unreachable_keeps "$gi3_probe")
+  gi3_expect "届かない打ち消しを拾えていない" '!node_modules/keep-me' "${gi3_g[@]}"
 fi
 
 gi3_check() { # $1=関数名 $2=NG の文言 $3=直し方

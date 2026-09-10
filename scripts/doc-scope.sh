@@ -226,7 +226,7 @@ doc_groundless_no_value() { # $1=.gitignore のパス
 # `.gitignore` の `.vscode/*` が `*` 付きで書かれているのは、この制約を避けるためである。
 #
 # **文書だけでは守れないので、機械で落とす。** `.vscode/*` を `.vscode/` に書き換えても、
-# 上の3つ（doc_unclassified_ignores / doc_unlisted_ignore_dirs / doc_unlisted_ignore_keeps）は
+# **だからこの関数を足した。** 上の3つ（doc_unclassified_ignores / doc_unlisted_ignore_dirs / doc_unlisted_ignore_keeps）は
 # **すべて読み飛ばして緑になる**（#44 第5巡の指摘）。
 doc_unreachable_keeps() { # $1=.gitignore のパス
   local pat n d line
