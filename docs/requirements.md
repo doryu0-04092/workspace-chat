@@ -680,7 +680,7 @@ Range リクエストの再試行**をクライアントに実装することに
 | 文書 | 25 MB | pdf / txt / csv / md / docx / xlsx / pptx |
 | 圧縮 | 25 MB | zip |
 
-いずれも**サーバー側で中身から形式を検証**し（マジックバイトを持つ形式はマジックバイト、持たないテキスト系は UTF-8 として正しく NUL を含まないこと。[機能一覧](features.md) 11.1）、拡張子と申告された Content-Type は信用しない。**配信の `Content-Type` はサーバーが決め、`/files/*` は `X-Content-Type-Options: nosniff` を返す**（同 11.1）。
+いずれも**サーバー側で中身から形式を検証**し（マジックバイトを持つ形式はマジックバイト、持たないテキスト系は UTF-8 として正しく NUL を含まないこと。[機能一覧](features.md) 11.1）、拡張子と申告された Content-Type は信用しない。**配信の `Content-Type` と `Content-Disposition`（画像・動画は `inline`、それ以外は `attachment`）はサーバーが決め、保存名の拡張子は検証した形式のものに付け替え、`/files/*` は `X-Content-Type-Options: nosniff` を返す**（同 11.1）。
 
 ### 4.4 プライバシー
 
