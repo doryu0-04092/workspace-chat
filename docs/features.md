@@ -260,7 +260,7 @@
 - **配信は CloudFront の `/avatars/*` のビヘイビアを通し、署名付き Cookie を要求する**——Cookie の対象は `/avatars/*`、`Path` 属性は `/avatars` であり、
   **ログインしている利用者に発行する**（ワークスペースやチャンネルの参加を問わない。アバターはどの画面にも出るため）。**`/avatars/*` はパスを剥がさずに渡す**（キーが `avatars/` で始まるため、剥がす関数は要らない。**オリジンへは正規化の前のパスが渡り、`avatars/` の外のキーに届かないかは未確認である**。[要件定義書](requirements.md) 4.3）
 - **配信の `Content-Type` は検証した形式からサーバーが決め（アップロード時の値を引き継がない）、`X-Content-Type-Options: nosniff` を返し、保存名の拡張子を検証した形式のものに付け替え、`Content-Disposition` を `inline` とする**（11.1 の添付と同じ規則）
-- **上記を検証する自動テストが存在する**——ログインしていない利用者が `/avatars/*` を取得できないこと、本人以外のアバターの発行・確定を求められないこと、検証に通らないものが配信用のキーに載らないこと、`avatarUrl` に利用者が渡した URL が入らないこと、配信の `Content-Type`・`Content-Disposition`・拡張子の付け替え・`nosniff`、`/avatars/*` の URL から `avatars/` の外のキー（添付の `workspace/...` を含む）を、ドットセグメントや符号化したドットを含む URL でも取得できないこと
+- **上記を検証する自動テストが存在する**——ログインしていない利用者が `/avatars/*` を取得できないこと、本人以外のアバターの発行・確定を求められないこと、検証に通らないものが配信用のキーに載らないこと、`avatarUrl` に利用者が渡した URL が入らないこと、配信の `Content-Type`・`Content-Disposition`・拡張子の付け替え・`nosniff`、`/avatars/*` の URL から `avatars/` の外のキー（添付の `workspace/...` と `quarantine/` を含む）を、ドットセグメントや符号化したドットを含む URL でも取得できないこと
 - ステータスは絵文字1つとテキスト（最大100文字）で構成される
 
 > **アバターの配信の代償**（決定・2026-09-11・依頼側。#227）。**配信 URL を知っていれば、ログインしている別のワークスペースの利用者でも取得できる**——署名付き Cookie の範囲を「ログインしている利用者」にしたためである。キーに推測できない `{UUID}` を入れる。**配信 URL には `{uid}` が載るため、URL を知る人には利用者の `User.id` と、UUIDv7 の先頭の時刻が分かる。**
@@ -1046,7 +1046,7 @@
   （公式文書 CopyObject「If your source bucket versioning is enabled, the `x-amz-copy-source` header by default identifies the current version of an object to copy. … To copy a different version, use the `versionId` query parameter.」）。
   **固定しないと、検証の後に同じ署名付き URL で隔離用のキーを差し替えた未検証のバイト列が、配信用のキーへコピーされる**（期限内は同じ URL で何度でも PUT できるため）
 - **検証に通らなかったものは配信用のキーへ移さず、隔離用のキーを削除する**
-- **隔離用のキーは、どの署名付き Cookie の対象にも一致しない**——配信 URL は `/files/quarantine/...` になり、
+- **隔離用のキーは、添付の署名付き Cookie の対象に一致しない**（`/avatars/*` の Cookie の URL から、正規化の前のパスで `quarantine/` のキーに届かないかは未確認であり、実際に配信して確かめる。[要件定義書](requirements.md) 4.3）——配信 URL は `/files/quarantine/...` になり、
   Cookie の対象 `/files/workspace/{ws}/channel/{ch}/*` の前方に一致しない
 - **アップロード用の署名付き URL の有効期限は5分とする**（決定・2026-09-10・依頼側）——
   S3 は期限をリクエストの開始時に確かめるため、期限内に始めた PUT は完走する（AWS 公式「Amazon S3 checks the expiration date and time of a signed URL at the time of the HTTP request」）。
@@ -1142,7 +1142,7 @@
 - **参加者が、そのチャンネルの添付を取得できる**——**署名付き Cookie の `Path` 属性は `/files` である**（`Path` を省くと既定値が発行時の URI のディレクトリ（`/api/...`）になり、`/files/...` に一度も送られない。[要件定義書](requirements.md) 4.3 の表）
 - **`/files` を外した URL（S3 のキーと同じ形）では取得できない**——
   **既定のビヘイビアは署名を要求しないため、そこから添付へ到達できてはならない**（[要件定義書](requirements.md) 4.3）
-- **`/avatars/*` の URL（ドットセグメントや符号化したドットを含むもの）では、添付（`workspace/{ws}/channel/{ch}/...` のキー）を取得できない**——
+- **`/avatars/*` の URL（ドットセグメントや符号化したドットを含むもの）では、添付（`workspace/{ws}/channel/{ch}/...` と、隔離用の `quarantine/...` のキー）を取得できない**——
   **アバターの署名付き Cookie はログインしている利用者なら誰にでも発行するため、そこから添付へ到達できてはならない**（[要件定義書](requirements.md) 4.3・1.3）
 - **非参加者に対して、そのチャンネルのパス配下に有効な Cookie が発行されない**
 - **配信は CloudFront 経由のみであり、S3 の URL を直接開いても取得できない**
@@ -1158,7 +1158,7 @@
 > 「長い動画を見ていて巻き戻すと 403 で止まる」**という壊れ方が起き、その回避実装が重いこと、
 > および Cookie ならチャンネル単位で1回の発行に集約できることである。
 
-> **認可の粒度がパス単位になる。** そのため **配信用の S3 のキー設計が認可の一部**になっている（隔離用のキーは配信されず、この構造の外にある。11.1）。
+> **認可の粒度がパス単位になる。** そのため **配信用の S3 のキー設計が認可の一部**になっている（隔離用のキーは配信 URL を持たず、この構造の外にある。`/avatars/*` の URL から届かないかは未確認である。11.1・[要件定義書](requirements.md) 4.3）。
 > `workspace/{ws}/channel/{ch}/...` の構造を崩すと認可が崩れる。
 > **Cookie が対象にするのは配信 URL のパス（`/files/` を前置したもの）であり、S3 のキーではない**。**Cookie の `Path` 属性も `/files` である**
 > （[要件定義書](requirements.md) 4.3 の表）。
