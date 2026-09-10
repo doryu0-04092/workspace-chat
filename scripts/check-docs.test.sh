@@ -103,6 +103,9 @@ no_slash() { # $1=一覧の名前 $2...=要素
 }
 no_slash DOC_PRUNE_FILES "${DOC_PRUNE_FILES[@]}"
 no_slash DOC_KEEP_FILES "${DOC_KEEP_FILES[@]}"
+# **DOC_NO_VALUE_IGNORES にも当てる。** ここに入れた行も 0c-3 の照合を通るため、
+# スラッシュを含む綴りを足すと「分類は済んだ」の側で緑になる（#44 第8巡）。
+no_slash DOC_NO_VALUE_IGNORES "${DOC_NO_VALUE_IGNORES[@]}"
 for d in "${probe_dirs[@]}"; do
   mkdir -p "$probe/$d" && : > "$probe/$d/x.md"
 done
@@ -773,7 +776,10 @@ gi3_ng=0
 gi3_probe=''
 gi3_probe2=''
 gi3_probe3=''
-if ! gi3_probe=$(mktemp) || ! gi3_probe2=$(mktemp) || ! gi3_probe3=$(mktemp); then
+gi3_probe4=''
+gi3_dir=''
+if ! gi3_probe=$(mktemp) || ! gi3_probe2=$(mktemp) || ! gi3_probe3=$(mktemp) ||
+  ! gi3_probe4=$(mktemp) || ! gi3_dir=$(mktemp -d); then
   echo "  NG: 分類の確認用の一時ファイルを作れなかった（TMPDIR を確かめる）"
   gi3_ng=1
 elif ! printf '%s\n' '# コメント' 'node_modules/' '!.env.example' '.env' \
@@ -822,6 +828,17 @@ else
   mapfile -t gi3_g < <(doc_unreachable_keeps "$gi3_probe3")
   gi3_expect "ディレクトリ除外の綴り違いを拾えていない" \
     '!probe-prefixed/keep-me' '!probe-bare/keep-me' -- "${gi3_g[@]}"
+  # 裸の名前が、実在するディレクトリを指しているとき（#44 第8巡）。
+  # **probe のディレクトリを実際に作る。** 綴りだけでは判定できないため、
+  # この関数はファイルシステムを見る。
+  if mkdir -p "$gi3_dir/probe-bare-dir" &&
+    printf '%s\n' 'probe-bare-dir' >"$gi3_probe4"; then
+    mapfile -t gi3_g < <(doc_bare_dirs_unlisted "$gi3_probe4" "$gi3_dir")
+    gi3_expect "実在するディレクトリを指す裸の名前を拾えていない" 'probe-bare-dir' -- "${gi3_g[@]}"
+  else
+    echo "  NG: 裸のディレクトリの確認用のファイルを作れなかった（$gi3_dir）"
+    gi3_ng=1
+  fi
 fi
 
 gi3_check() { # $1=関数名 $2=NG の文言 $3=直し方
@@ -855,9 +872,17 @@ gi3_check doc_groundless_no_value \
 gi3_check doc_unreachable_keeps \
   '打ち消し（!）の親ディレクトリが丸ごと除外されていて、永久に効かない' \
   '親を dir/ ではなく dir/* にする。git は除外したディレクトリの中を列挙しないため、! で戻せない'
+# **裸の名前が、実在するディレクトリを指しているとき。** gi3_check は引数を1つしか渡さないため、
+# ここだけ直に呼ぶ（この関数はリポジトリのルートも要る）。
+mapfile -t gi3_bare < <(doc_bare_dirs_unlisted "$repo/.gitignore" "$repo")
+if [ "${#gi3_bare[@]}" -gt 0 ]; then
+  echo "  NG: .gitignore の裸の名前が、実在するディレクトリを指していて DOC_PRUNE_DIRS に無い: ${gi3_bare[*]}"
+  echo "        DOC_PRUNE_DIRS へ足す。あわせて .gitignore 側も末尾に / を付けて、ディレクトリだと分かる形にする"
+  gi3_ng=1
+fi
 # **後片付けは本体の後に行う。** 先に消すと、上の注記が言う「本体の指し先の取り違え」を
 # 塞げない——**消えたファイルを指しても、出力が空になって緑で通る。**
-rm -f "$gi3_probe" "$gi3_probe2" "$gi3_probe3"
+rm -f "$gi3_probe" "$gi3_probe2" "$gi3_probe3" "$gi3_probe4"
 if [ "$gi3_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------

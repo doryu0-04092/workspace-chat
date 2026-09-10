@@ -240,8 +240,8 @@ doc_unreachable_keeps() { # $1=.gitignore のパス
     # **綴りを正規化して比べる。** `d/` との完全一致だけでは足りない（#44 第7巡）:
     #   - `**/generated/` … 接頭辞が付く。**現に .gitignore に在る形である**
     #   - `node_modules`  … 末尾の `/` が無くても、gitignore(5) ではディレクトリに一致する
-    # doc_unlisted_ignore_dirs は `${d##*/}` で同じ正規化をしている。
-    # **同じ行を2つの関数が別のものとして読まない。**
+    # **裸の名前をディレクトリとして読むのは、この関数だけである。** 下の
+    # doc_bare_dirs_unlisted の注記に、3つの関数が同じ行をどう読むかと、その理由を書いた。
     while IFS= read -r line || [ -n "$line" ]; do
       line=${line%$'\r'}
       case "$line" in
@@ -254,6 +254,40 @@ doc_unreachable_keeps() { # $1=.gitignore のパス
       [ "$c" = "$d" ] && { printf '%s\n' "$pat"; break; }
     done <"$1"
   done <"$1"
+}
+
+# **裸の名前（`/` も glob も含まない行）は、gitignore(5) ではファイルにもディレクトリにも一致する。**
+# **綴りからは、どちらのつもりで書かれたか決まらない。**
+#
+# 3つの関数は、この行を**違うものとして読む。そうでなければならない**——問いが違うためである。
+#
+#   doc_unclassified_ignores  ファイル名のパターンとして DOC_PRUNE_FILES / DOC_NO_VALUE_IGNORES と照合する
+#   doc_unlisted_ignore_dirs  見ない（末尾 `/` の行だけを見る。裸の名前はディレクトリと決まらない）
+#   doc_unreachable_keeps     **ディレクトリとして読む。** `!<その名前>/…` の親を問うており、
+#                             その打ち消しが在ること自体が「ディレクトリのつもり」の証拠である
+#
+# **残る穴を、ファイルシステムで塞ぐ。** 綴りから決まらないなら、**実際にそのディレクトリが在るかを見る。**
+# 在れば、その配下の Markdown が複製ループで一時ディレクトリに複製され、検査対象に入る——
+# **#44 が塞ごうとしている状態そのものである。**
+#
+# **DOC_PRUNE_DIRS を無条件に求めない。** いまの `.gitignore` の裸の名前は9件あり、
+# **すべてファイルである**（`.env` / `crash.log` / `.DS_Store` など）。
+# 無条件に求めると偽の NG が9件出る。**在るディレクトリだけを問う。**
+doc_bare_dirs_unlisted() { # $1=.gitignore のパス $2=リポジトリのルート
+  local pat x found
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in
+      '' | '#'* | '!'*) continue ;;
+      */* | *[*?[]*) continue ;;   # パスか glob を含む → 裸の名前ではない
+    esac
+    # そのディレクトリが実在するときだけ問う。
+    [ -d "$2/$pat" ] || continue
+    found=0
+    for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$pat" ] && { found=1; break; }; done
+    [ "$found" = 0 ] && printf '%s\n' "$pat"
+  done <"$1"
+  return 0
 }
 
 # 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、
