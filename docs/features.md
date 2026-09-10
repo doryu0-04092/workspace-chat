@@ -1065,7 +1065,7 @@
 - **`/files/*` のビヘイビアに CloudFront の SecurityHeadersPolicy を付け、すべての応答に `X-Content-Type-Options: nosniff` を返す**（CloudFront 公式）——
   宣言した `Content-Type` 以外として解釈させない（MDN「prevents a browser from treating a response as text/html when … the Content-Type header … indicates a non-HTML type」）
 - **上記の形式ごとの検証・配信の `Content-Type` と `Content-Disposition`・拡張子の付け替え・`nosniff` を検証する自動テストが存在する**
-- **ライフサイクルのフィルターと、確定のプリンシパルの権限（`GetObjectVersion`・`DeleteObject` を含む）は Terraform の定義であり、自動テストの対象外である**（[要件定義書](requirements.md) 4.8「この方式を適用しない範囲」）——**Terraform の実装時に、plan の出力で、フィルターが `quarantine/` だけに掛かることと、権限の列挙が [技術スタック](tech-stack.md) の添付ファイルの行と一致することを確かめる**
+- **ライフサイクルのフィルターと、確定のプリンシパルの権限（`GetObjectVersion`・`DeleteObject` を含む）は Terraform の定義であり、先にテストを書く対象ではない**（[要件定義書](requirements.md) 4.8「この方式を適用しない範囲」。**TDD の対象外であって、自動テストの対象外ではない**）——**Terraform の実装時に、plan の出力で、フィルターが `quarantine/` だけに掛かることと、権限の列挙が [技術スタック](tech-stack.md) の添付ファイルの行と一致することを確かめる**
 
 **判断が必要な点（実装時に決める）**
 
