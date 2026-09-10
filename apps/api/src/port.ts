@@ -8,6 +8,11 @@
  *
  * main.ts から独立させているのは、main.ts を読み込むと bootstrap() が
  * 走ってしまい、テストからは呼べないためである。
+ *
+ * **web の開発サーバーの中継（apps/web/vite.config.ts の server.proxy）も、この関数で
+ * 中継先のポートを決める。** 規則を変えると api と web の両方に効く。
+ * api と web は別プロセスで環境変数を共有しないため、**両方の端末に同じ PORT を渡す**
+ * （README「動かす」）。片方にだけ渡すと、web は 3000 に繋ぎに行き、api のログには何も出ない。
  */
 export function resolvePort(raw: string | undefined): number {
   if (raw === undefined) {

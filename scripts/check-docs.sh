@@ -334,7 +334,7 @@ count_event_rows() { # 標準入力を読み、イベント名の書式の表の
   #
   # 誤検知しないことは確認済み。**検査対象の Markdown 全部**を、バッククォートを任意にした
   # この形で走らせて、一致するのは requirements.md 4.1 の7行だけである（2026-09-09 時点）。
-  # features.md の「バッククォートで始まる表の行」は `POST /auth/login` 等と `@here` で、
+  # features.md の「バッククォートで始まる表の行」は `POST /api/auth/login` 等と `@here` で、
   # どちらも `[a-z]+:[a-z]+` に当たらない。
   local bt
   bt=$'\140'
