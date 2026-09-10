@@ -229,16 +229,29 @@ doc_groundless_no_value() { # $1=.gitignore のパス
 # **だからこの関数を足した。** 上の3つ（doc_unclassified_ignores / doc_unlisted_ignore_dirs / doc_unlisted_ignore_keeps）は
 # **すべて読み飛ばして緑になる**（#44 第5巡の指摘）。
 doc_unreachable_keeps() { # $1=.gitignore のパス
-  local pat n d line
+  local pat n d line c
   while IFS= read -r pat || [ -n "$pat" ]; do
     pat=${pat%$'\r'}
     case "$pat" in '!'*) ;; *) continue ;; esac
     n=${pat#!}
     case "$n" in */*) d=${n%%/*} ;; *) continue ;; esac
-    # 同じ .gitignore に `d/` の行があれば、この打ち消しは届かない。
+    # 同じ .gitignore に、その親ディレクトリを丸ごと除外する行があれば、この打ち消しは届かない。
+    #
+    # **綴りを正規化して比べる。** `d/` との完全一致だけでは足りない（#44 第7巡）:
+    #   - `**/generated/` … 接頭辞が付く。**現に .gitignore に在る形である**
+    #   - `node_modules`  … 末尾の `/` が無くても、gitignore(5) ではディレクトリに一致する
+    # doc_unlisted_ignore_dirs は `${d##*/}` で同じ正規化をしている。
+    # **同じ行を2つの関数が別のものとして読まない。**
     while IFS= read -r line || [ -n "$line" ]; do
       line=${line%$'\r'}
-      [ "$line" = "$d/" ] && { printf '%s\n' "$pat"; break; }
+      case "$line" in
+        '' | '#'* | '!'*) continue ;;
+        */) c=${line%/}; c=${c##*/} ;;   # generated/ → generated / **/generated/ → generated
+        *[*?[]*) continue ;;             # glob を含む行は、ディレクトリを丸ごと除外しない
+        */*) continue ;;                 # パスを含み `/` で終わらない → ファイルの指定
+        *) c=$line ;;                    # node_modules のような裸の名前
+      esac
+      [ "$c" = "$d" ] && { printf '%s\n' "$pat"; break; }
     done <"$1"
   done <"$1"
 }
