@@ -635,15 +635,15 @@ Range リクエストの再試行**をクライアントに実装することに
 
    | 対象 | 値 |
    |---|---|
-   | S3 のキー | `avatars/{UUID}/{ファイル名}`（**すべてサーバーが組み立てる**。`{UUID}` は推測できない値） |
-   | 隔離用のキー（検証前） | `quarantine/avatars/{UUID}/{ファイル名}`（**配信 URL・署名付き Cookie の対象を持たない**） |
-   | 配信 URL のパス | `/avatars/{UUID}/{ファイル名}`（**S3 のキーと同じ形であり、剥がす関数は要らない**） |
+   | S3 のキー | `avatars/{uid}/{UUID}/{ファイル名}`（**すべてサーバーが組み立てる**。`{uid}` は認証した本人の `User.id`（主キー。ログイン ID の `userId` ではない）、`{UUID}` は推測できない値。**`{uid}` を含めるのは、差し替えで残った古いオブジェクトも、その利用者のものとして選べるようにするためである**——`avatarUrl` は現行の1件しか持たない。6.2） |
+   | 隔離用のキー（検証前） | `quarantine/avatars/{uid}/{UUID}/{ファイル名}`（**配信 URL・署名付き Cookie の対象を持たない**） |
+   | 配信 URL のパス | `/avatars/{uid}/{UUID}/{ファイル名}`（**S3 のキーと同じ形であり、剥がす関数は要らない**） |
    | 署名付き Cookie の対象 | `/avatars/*`（**ログインしている利用者に発行する**。ワークスペースやチャンネルの参加を問わない） |
    | CloudFront のビヘイビア | `/avatars/*`（パスを剥がさずに添付のバケットへ渡す。**このビヘイビアが選ばれるのは、正規化したパスが `/avatars/` で始まるときだけであるが、オリジンへ渡るのは正規化の前のパスである**——下記の「アバターの経路で確認できていないこと」） |
    | 署名付き Cookie の `Path` 属性 | `/avatars`（`/avatars/...` への要求に送られ、`/files/...` へは送られない——RFC 6265 5.1.4 の path-match「The cookie-path is a prefix of the request-path, and the first character of the request-path that is not included in the cookie-path is a %x2F ("/") character.」。**添付の Cookie と名前が同じでも `Path` が違うため、別の Cookie として保たれ、互いに上書きしない**——同 5.3「If the cookie store contains a cookie with the same name, domain, and path as the newly created cookie」） |
 
    **`/avatars/*` の Cookie の対象を `/*` に広げ、`Path` を `/` にしてはならない**——1枚の Cookie で全チャンネルの添付が取れる。
-   **代償は、配信 URL を知っていれば、ログインしている別のワークスペースの利用者でも取得できることである**（キーに推測できない `{UUID}` を入れる。[機能一覧](features.md) 1.3）。
+   **代償は、配信 URL を知っていれば、ログインしている別のワークスペースの利用者でも取得できることである**（キーに推測できない `{UUID}` を入れる。[機能一覧](features.md) 1.3）。**配信 URL には `{uid}` が載るため、URL を知る人には利用者の `User.id` と、UUIDv7 の先頭の時刻（3.5.2）が分かる。**
 
    **アバターの経路で確認できたこと。** [AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesCacheBehavior.html)
    は「**CloudFront normalizes URI paths consistent with RFC 3986 and then matches the path with the correct cache behavior. Once the cache behavior is matched, CloudFront sends the raw URI path to the origin.**」と定め、
@@ -879,7 +879,7 @@ Range リクエストの再試行**をクライアントに実装することに
   物理削除の仕組みが別途必要になる。**添付ファイルについては、この仕組みだけでは削除が成立しない**——
   S3 のバージョニングにより旧バージョンとデリートマーカーが残るため（4.2「バックアップ」）、
   **物理削除の仕組みには、旧バージョンとデリートマーカーの削除を含める必要がある**
-- **アバター画像も、退会や差し替えの後に S3 のオブジェクトが残る**（表示はしない。[機能一覧](features.md) 1.3・1.5）。**物理削除の仕組みには、アバターの配信用のキー（`avatars/`）も含める必要がある**
+- **アバター画像も、退会や差し替えの後に S3 のオブジェクトが残る**（表示はしない。[機能一覧](features.md) 1.3・1.5）。**物理削除の仕組みには、アバターのキー（`avatars/{uid}/` と `quarantine/avatars/{uid}/` の接頭辞。旧バージョンとデリートマーカーを含む）も含める必要がある**——キーが `{uid}` を含むため、差し替えで残った古いオブジェクトもその利用者のものとして選べる（4.3）
 
 ### 6.3 外部送信規律（2023年6月施行）
 
