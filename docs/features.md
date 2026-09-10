@@ -976,7 +976,12 @@
 
 **受け入れ条件**
 
-- **サーバー側でマジックバイトを検証する。** 拡張子や申告された Content-Type を信用しない
+- **サーバー側で中身から形式を検証する。** 拡張子や申告された Content-Type を信用しない——
+  **マジックバイトを持つ形式（画像・動画・pdf・zip と、zip を容器とする docx / xlsx / pptx）はマジックバイトで、
+  持たないテキスト系（txt / csv / md）は UTF-8 として正しく NUL を含まないことで検証する**（決定・2026-09-11・依頼側。
+  BOM の無いテキストには決まった先頭バイト列が無い——ファイル署名の一覧）
+- **UTF-8 の検証は HTML を止めない**——中身が HTML でも UTF-8 としては正しい（Node の `TextDecoder` の `fatal` で実測）。
+  **HTML として解釈させないのは、配信ヘッダーの箇条の役目である**
 - 上限を超えるファイルは拒否される
 - **許可リストに無い形式は拒否される**（拒否リストではない）
 - **SVG がアップロードできない**
@@ -996,7 +1001,7 @@
   （決定・2026-09-10・依頼側。OWASP File Upload Cheat Sheet「Restrict characters to an allowed subset」。残す文字は S3 の公式文書「Object key naming guidelines」の safe characters に含まれる）
 - **検証を通るまで、配信できるキーに置かない**（#211）——署名付き URL の宛先は**隔離用のキー**（**ブラウザが書けるのはここだけである。配信用のキーへ書くのは、確定を行うサーバーの権限だけ**）
   `quarantine/workspace/{ws}/channel/{ch}/{UUID}/{ファイル名}` とし、
-  サーバーが形式・サイズ・マジックバイトを検証してから、**検証で読んだ版（`versionId`）に固定して配信用のキー（キーの形式の行）へコピーし、隔離用のキーを削除する**
+  サーバーが形式・サイズ・中身（形式ごとの検証）を検証してから、**検証で読んだ版（`versionId`）に固定して配信用のキー（キーの形式の行）へコピーし、隔離用のキーを削除する**
   （S3 に移動の操作は無く、コピーと削除で行う。公式文書「Copying, moving, and renaming objects」）
 - **コピー元は、検証で読んだ版に固定する**——バージョニングが有効なバケットでは、コピー元の指定は既定で現行の版を指す
   （公式文書 CopyObject「If your source bucket versioning is enabled, the `x-amz-copy-source` header by default identifies the current version of an object to copy. … To copy a different version, use the `versionId` query parameter.」）。
@@ -1014,6 +1019,17 @@
 - **アップロードを確定する（隔離用のキーから配信用のキーへ移す）時点で、参加者判定をやり直す**（決定・2026-09-10・依頼側）——
   **発行後にキック・退出した利用者の PUT は、期限内であっても確定で拒否され、配信用のキーに届かない**
 - **確定時の参加者判定のやり直し、検証に通らないものが配信用のキーに移らないこと、配信用のキーには検証した版のバイト列だけが載ること（検証の後に隔離用のキーを差し替えても載らないこと）、別のチャンネルの隔離用のキーを確定させられないこと、隔離用のキーを署名付き Cookie で取得できないことを検証する自動テストが存在する**
+- **配信するオブジェクトの `Content-Type` は、検証した形式からサーバーが決める**（決定・2026-09-11・依頼側）——
+  確定のコピーでメタデータを置き換え（`x-amz-metadata-directive: REPLACE`。既定の `COPY` ではアップロード時の値が引き継がれる。S3 公式 CopyObject）、
+  テキスト系は `text/plain; charset=utf-8` に固定する
+- **`Content-Disposition` は、画像・動画は `inline`、それ以外は `attachment` とする**（決定・2026-09-11・依頼側）——
+  画像のプレビューと動画の `#t=30` 表示のため。**テキスト系・pdf・Office・zip はアプリ内で描画しない**
+- **保存名の拡張子は、検証した形式のものに付け替える**——キーの `{ファイル名}`（キーの形式の行）と、`Content-Disposition` の `filename` / `filename*` の両方
+  （両方あると `filename*` が優先される。MDN）。**元のファイル名は表示用に DB に持ち、保存名には使わない**——
+  二重拡張子（`.jpg.php`）や `.txt` を名乗る HTML が、保存したときに元の拡張子で開かれることを防ぐ（OWASP File Upload Cheat Sheet の Extension Validation）
+- **`/files/*` のビヘイビアに CloudFront の SecurityHeadersPolicy を付け、すべての応答に `X-Content-Type-Options: nosniff` を返す**（CloudFront 公式）——
+  宣言した `Content-Type` 以外として解釈させない（MDN「prevents a browser from treating a response as text/html when … the Content-Type header … indicates a non-HTML type」）
+- **上記の形式ごとの検証・配信の `Content-Type` と `Content-Disposition`・拡張子の付け替え・`nosniff` を検証する自動テストが存在する**
 
 > **踏むと壊れる: サーバーが multipart を受け取る経路を実装する前に、`scripts/audit-allowlist.json` の `multer` 3件を外し、
 > `multer` 2.3.0 を取り込めることを確認する（#166）。**
@@ -1026,6 +1042,13 @@
 > **PUT したまま確定を求めずに放置されたものも残る。** ライフサイクルを置かない決定（[要件定義書](requirements.md) 4.2）により、
 > どちらも `terraform destroy` まで残る——**4.2 の孤児オブジェクトと同じ代償（費用と個人情報の残留）である。**
 > **ライフサイクルを新たに置く判断はしていない**（4.2 の決定を動かすため）
+
+> **検証の範囲の代償**（2026-09-11）。**中身の安全までは確かめない。**
+> - **docx / xlsx / pptx は zip と同じ先頭バイト列（`50 4B 03 04`）を持つ**（ファイル署名の一覧）ため、マジックバイトでは zip や他の zip 形式と区別できない。**容器の中身は検査しない**
+> - **マクロを保存できるのは m で終わる拡張子（.docm / .xlsm / .pptm）だけ**であり（Microsoft 公式「Open XML Formats and file name extensions」）、許可リストはそれを含まない。**ただし中身を検査しないため、拡張子を偽ったものは検出しない**
+> - **ウイルス対策・CDR（無害化）は行わない**（OWASP File Upload Cheat Sheet が手段として挙げる）。入れるなら新しい機能であり、提案と承認が要る
+> - **csv の式の実行（CSV injection）は防がない**——利用者のファイルを書き換えないため。表計算ソフトで開いた側で式が動きうる（**出典の OWASP の本文は取得できず、検索結果の要約での確認にとどまる**）
+> - **UTF-16 のテキストは NUL を含むため拒否される**（Node で実測）
 
 > **拒否リストを採らない理由。** 「実行形式を除く」という書き方では、`.exe` を弾いても
 > `.dll` `.jar` `.ps1` `.scr` `.msi` `.lnk` が残る。**拒否リストは必ず抜ける。**
