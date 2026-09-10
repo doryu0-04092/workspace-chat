@@ -1031,10 +1031,10 @@
   Cookie の対象 `/files/workspace/{ws}/channel/{ch}/*` の前方に一致しない
 - **アップロード用の署名付き URL の有効期限は5分とする**（決定・2026-09-10・依頼側）——
   S3 は期限をリクエストの開始時に確かめるため、期限内に始めた PUT は完走する（AWS 公式「Amazon S3 checks the expiration date and time of a signed URL at the time of the HTTP request」）。
-  **期限内は同じ URL で何度でも PUT できる**（同「You can use the presigned URL multiple times, up to the expiration date and time」）——**ただし下の条件付き書き込みにより、書けるのはそのキーに現行の版が無い間だけである**
+  **期限内は同じ URL で何度でも PUT できる**（同「You can use the presigned URL multiple times, up to the expiration date and time」）——**ただし下の条件付き書き込みにより、書けるのはそのキーに現行の版が無いか、現行の版がデリートマーカーである間だけである**
 - **署名付き URL には `If-None-Match: *` を署名して含め、同じ発行のキーへの上書きを拒否する**（決定・2026-09-11・依頼側）——
   S3 の条件付き書き込みは「If there's an existing object, the write operation fails, resulting in a `412 Precondition Failed`」であり、
-  バージョニングが有効なバケットでも現行の版があれば拒否される（公式文書「How to prevent object overwrites with conditional writes」。条件付き書き込みには SigV4 の署名が要る）。
+  バージョニングが有効なバケットでも、現行の版がデリートマーカーでない限り拒否される（公式文書「How to prevent object overwrites with conditional writes」。条件付き書き込みには SigV4 の署名が要る）。
   **キーは発行ごとに新しい `{UUID}` で組み立てるため、同じ画像でも別の投稿としてなら何度でも上げられる。拒否するのは、1回の発行の URL で同じキーへ書き直すことだけである**。
   **これにより1回の発行で書けるのは1版（確定の後にもう1回）に限られ、発行のレート制限が S3 への書き込みの回数の上限として働く**（量の上限ではない——1回の PUT の大きさは署名付き URL では強制されず、確定の段の検証で拒否するまで隔離用のキーに書かれる）
 - **`quarantine/` の接頭辞にだけライフサイクルを置く**（決定・2026-09-11・依頼側。[要件定義書](requirements.md) 4.2 の「ライフサイクルは置かない」の例外）——
