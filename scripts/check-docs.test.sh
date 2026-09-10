@@ -95,7 +95,7 @@ no_slash() { # $1=一覧の名前 $2...=要素
     case "$g" in
       */*)
         echo "  NG: $name の「$g」がスラッシュを含む（basename にしか当たらないため、永久に一致しない）"
-        echo "        パスで絞るなら DOC_PRUNE_DIRS でディレクトリごと除外する"
+        echo "        パスで絞るなら、先頭のディレクトリ名を DOC_PRUNE_DIRS へ足す"
         fail=1
         ;;
     esac
@@ -821,7 +821,7 @@ gi3_check() { # $1=関数名 $2=NG の文言 $3=直し方
 }
 gi3_check doc_unclassified_ignores \
   '.gitignore のパターンが、値を持つかどうか判断されていない' \
-  '値を持つなら DOC_PRUNE_FILES へ、持たないなら DOC_NO_VALUE_IGNORES へ足す（scripts/doc-scope.sh）。スラッシュを含む行は足しても効かない——DOC_PRUNE_DIRS でディレクトリごと除外する'
+  '値を持つなら DOC_PRUNE_FILES へ、持たないなら DOC_NO_VALUE_IGNORES へ足す（scripts/doc-scope.sh）。スラッシュを含む行は、先頭のディレクトリ名を DOC_PRUNE_DIRS へ足す（.gitignore の行は書き換えない）'
 gi3_check doc_unlisted_ignore_dirs \
   '.gitignore のディレクトリ行が DOC_PRUNE_DIRS に無い' \
   '足さないと、その配下の Markdown が複製され、検査の対象に入る（scripts/doc-scope.sh）'
@@ -831,6 +831,9 @@ gi3_check doc_unlisted_ignore_keeps \
 gi3_check doc_groundless_no_value \
   'DOC_NO_VALUE_IGNORES の項目が .gitignore に無い' \
   '.gitignore から消えたなら、この一覧からも消す（判断の記録が根拠を失う。scripts/doc-scope.sh）'
+gi3_check doc_unreachable_keeps \
+  '打ち消し（!）の親ディレクトリが丸ごと除外されていて、永久に効かない' \
+  '親を dir/ ではなく dir/* にする。git は除外したディレクトリの中を列挙しないため、! で戻せない'
 # **後片付けは本体の後に行う。** 先に消すと、上の注記が言う「本体の指し先の取り違え」を
 # 塞げない——**消えたファイルを指しても、出力が空になって緑で通る。**
 rm -f "$gi3_probe" "$gi3_probe2"

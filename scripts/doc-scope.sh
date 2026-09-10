@@ -198,9 +198,14 @@ doc_unlisted_ignore_keeps() { # $1=.gitignore のパス
 
 # DOC_NO_VALUE_IGNORES のうち、.gitignore に現れないものを返す。
 #
-# **他の2つの一覧は両方向を持っている**（DOC_PRUNE_FILES は「.gitignore で無視されるか」、
-# DOC_KEEP_FILES は「`!` に一致するか」を問い返される）。**この一覧だけが片方向だった。**
+# **DOC_PRUNE_FILES と DOC_KEEP_FILES は両方向を持っている**（前者は「.gitignore で無視されるか」、
+# 後者は「`!` に一致するか」を問い返される）。**この一覧だけが片方向だった。**
 # .gitignore から行が消えても、判断の記録が根拠を失ったまま残る。
+#
+# **DOC_PRUNE_DIRS には、この形の逆向きを持たせられない。** 集合として比較すると偽の NG が出る。
+#   - `.git` は .gitignore に1行も無い（git が本来的に除外するため、書く必要が無い）
+#   - `.vscode` は `.vscode/*`、`generated` は `**/generated/` と、別の綴りで現れる
+# **あちら側の守りは 0a の `same DOC_PRUNE_DIRS`**（probe_dirs との一致）である。
 doc_groundless_no_value() { # $1=.gitignore のパス
   local x pat found
   for x in "${DOC_NO_VALUE_IGNORES[@]}"; do
@@ -212,6 +217,30 @@ doc_groundless_no_value() { # $1=.gitignore のパス
     [ "$found" = 0 ] && printf '%s\n' "$x"
   done
   return 0
+}
+
+# 打ち消し（`!`）のうち、**親ディレクトリが丸ごと除外されていて永久に効かないもの**を返す。
+#
+# **git は除外されたディレクトリの中を列挙しない。** `dir/` で丸ごと無視したうえで
+# `!dir/x` と書いても、**その打ち消しは効かない**（gitignore(5) の明記）。
+# `.gitignore` の `.vscode/*` が `*` 付きで書かれているのは、この制約を避けるためである。
+#
+# **文書だけでは守れないので、機械で落とす。** `.vscode/*` を `.vscode/` に書き換えても、
+# 上の3つ（doc_unclassified_ignores / doc_unlisted_ignore_dirs / doc_unlisted_ignore_keeps）は
+# **すべて読み飛ばして緑になる**（#44 第5巡の指摘）。
+doc_unreachable_keeps() { # $1=.gitignore のパス
+  local pat n d line
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in '!'*) ;; *) continue ;; esac
+    n=${pat#!}
+    case "$n" in */*) d=${n%%/*} ;; *) continue ;; esac
+    # 同じ .gitignore に `d/` の行があれば、この打ち消しは届かない。
+    while IFS= read -r line || [ -n "$line" ]; do
+      line=${line%$'\r'}
+      [ "$line" = "$d/" ] && { printf '%s\n' "$pat"; break; }
+    done <"$1"
+  done <"$1"
 }
 
 # 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、
