@@ -1046,7 +1046,7 @@
   （公式文書 CopyObject「If your source bucket versioning is enabled, the `x-amz-copy-source` header by default identifies the current version of an object to copy. … To copy a different version, use the `versionId` query parameter.」）。
   **版の固定は多層の防御である**——下の条件付き書き込みにより、検証の後・コピーの前は現行の版があるため、同じ URL での差し替えは拒否される。**固定しておけば、その前提が崩れても（署名に `If-None-Match` を含め忘れた実装など）、検証していないバイト列は配信用のキーへコピーされない**
 - **検証に通らなかったものは配信用のキーへ移さず、隔離用のキーを削除する**
-- **隔離用のキーは、添付の署名付き Cookie の対象に一致しない**（`/avatars/*` の Cookie の URL から、正規化の前のパスで `quarantine/` のキーに届かないかは未確認であり、実際に配信して確かめる。[要件定義書](requirements.md) 4.3）——配信 URL は `/files/quarantine/...` になり、
+- **隔離用のキーは、添付の署名付き Cookie の対象に一致しない**（`/avatars/*` の Cookie の URL と、ドットセグメントを含む `/files/*` の URL から、正規化の前のパスで `quarantine/` のキーに届かないかは未確認であり、実際に配信して確かめる。[要件定義書](requirements.md) 4.3）——配信 URL は `/files/quarantine/...` になり、
   Cookie の対象 `/files/workspace/{ws}/channel/{ch}/*` の前方に一致しない
 - **アップロード用の署名付き URL の有効期限は5分とする**（決定・2026-09-10・依頼側）——
   S3 は期限をリクエストの開始時に確かめるため、期限内に始めた PUT は完走する（AWS 公式「Amazon S3 checks the expiration date and time of a signed URL at the time of the HTTP request」）。
