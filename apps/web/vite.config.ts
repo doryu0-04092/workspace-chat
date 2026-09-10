@@ -24,7 +24,8 @@ export default defineConfig({
         // **値は `.env` からは来ない。** Vite は設定ファイルの評価時に `.env` を読まず、
         // 見えるのはその時点の環境変数だけである（api も `.env` を読まない。.env.example）。
         // **api を起動した端末と同じ `PORT` を、この開発サーバーの端末にも渡すこと。**
-        target: `http://localhost:${resolvePort(process.env.PORT)}`,
+        // 接続先のホストは `127.0.0.1` に固定し `localhost` と書かない（README「接続先の組み立て方」）。
+        target: `http://127.0.0.1:${resolvePort(process.env.PORT)}`,
         // WebSocket のハンドシェイクも同じ前置きに載るため、ws を有効にする。
         ws: true,
       },
