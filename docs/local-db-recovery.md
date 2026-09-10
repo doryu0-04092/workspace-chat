@@ -4,6 +4,9 @@
 ボリュームの中身とずれてしまったとき、**手元のデータを捨てずに**直す手順である。
 捨ててよい場合の最短経路は [README](../README.md) を参照。
 
+**このファイル名は `.env.example` の3箇所から参照されている。** 移動・改名するときは
+`.env.example` 側も直す。
+
 **`.env` に触る前に、いまの `POSTGRES_USER` と `POSTGRES_DB` を控える。**
 `POSTGRES_USER` / `POSTGRES_DB` を変えたあと**データを捨てずに直す**には古い名前が要る（後述）。
 `.env` を書き換えれば `.env` 側から消え、`docker compose down` や `up` による作り直しで
