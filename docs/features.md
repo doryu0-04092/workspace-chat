@@ -996,8 +996,11 @@
   （決定・2026-09-10・依頼側。OWASP File Upload Cheat Sheet「Restrict characters to an allowed subset」。残す文字は S3 の公式文書「Object key naming guidelines」の safe characters に含まれる）
 - **検証を通るまで、配信できるキーに置かない**（#211）——署名付き URL の宛先は**隔離用のキー**
   `quarantine/workspace/{ws}/channel/{ch}/{UUID}/{ファイル名}` とし、
-  サーバーが形式・サイズ・マジックバイトを検証してから、**配信用のキー（キーの形式の行）へコピーし、隔離用のキーを削除する**
+  サーバーが形式・サイズ・マジックバイトを検証してから、**検証で読んだ版（`versionId`）に固定して配信用のキー（キーの形式の行）へコピーし、隔離用のキーを削除する**
   （S3 に移動の操作は無く、コピーと削除で行う。公式文書「Copying, moving, and renaming objects」）
+- **コピー元は、検証で読んだ版に固定する**——バージョニングが有効なバケットでは、コピー元の指定は既定で現行の版を指す
+  （公式文書 CopyObject「If your source bucket versioning is enabled, the `x-amz-copy-source` header by default identifies the current version of an object to copy. … To copy a different version, use the `versionId` query parameter.」）。
+  **固定しないと、検証の後に同じ署名付き URL で隔離用のキーを差し替えた未検証のバイト列が、配信用のキーへコピーされる**（期限内は同じ URL で何度でも PUT できるため）
 - **検証に通らなかったものは配信用のキーへ移さず、隔離用のキーを削除する**
 - **隔離用のキーは、どの署名付き Cookie の対象にも一致しない**——配信 URL は `/files/quarantine/...` になり、
   Cookie の対象 `/files/workspace/{ws}/channel/{ch}/*` の前方に一致しない
@@ -1006,7 +1009,7 @@
   **期限内は同じ URL で何度でも PUT できる**（同「You can use the presigned URL multiple times, up to the expiration date and time」）
 - **アップロードを確定する（隔離用のキーから配信用のキーへ移す）時点で、参加者判定をやり直す**（決定・2026-09-10・依頼側）——
   **発行後にキック・退出した利用者の PUT は、期限内であっても確定で拒否され、配信用のキーに届かない**
-- **確定時の参加者判定のやり直しと、検証に通らないものが配信用のキーに移らないことを検証する自動テストが存在する**
+- **確定時の参加者判定のやり直し、検証に通らないものが配信用のキーに移らないこと、配信用のキーには検証した版のバイト列だけが載ること（検証の後に隔離用のキーを差し替えても載らないこと）を検証する自動テストが存在する**
 
 > **踏むと壊れる: サーバーが multipart を受け取る経路を実装する前に、`scripts/audit-allowlist.json` の `multer` 3件を外し、
 > `multer` 2.3.0 を取り込めることを確認する（#166）。**
@@ -1054,7 +1057,7 @@
   **既定のビヘイビアは署名を要求しないため、そこから添付へ到達できてはならない**（[要件定義書](requirements.md) 4.3）
 - **非参加者に対して、そのチャンネルのパス配下に有効な Cookie が発行されない**
 - **配信は CloudFront 経由のみであり、S3 の URL を直接開いても取得できない**
-  （**アップロードは別の経路であり、ブラウザから S3 へ直接 PUT する。#176**。
+  （**アップロードは別の経路であり、ブラウザから S3 の隔離用のキーへ直接 PUT する（11.1）。#176**。
   上流は [要件定義書](requirements.md) 4.3 の「**パブリックアクセスの全面遮断**」であり、
   **署名付き PUT はパブリックアクセスではないため両立する**）
 - Cookie は期限切れ後に無効になる
