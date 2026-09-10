@@ -16,7 +16,10 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        // 待ち受けポートは PORT で変えられる（apps/api/src/port.ts / .env.example）。
+        // **固定にすると PORT=8080 で api を起動したとき手元だけが静かに止まる**——
+        // proxy 先に繋がらず、リクエストが届かないため api のログには何も出ない。
+        target: `http://localhost:${process.env.PORT ?? '3000'}`,
         // WebSocket のハンドシェイクも同じ前置きに載るため、ws を有効にする。
         ws: true,
       },

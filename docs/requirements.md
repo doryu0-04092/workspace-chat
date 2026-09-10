@@ -608,8 +608,9 @@ Range リクエストの再試行**をクライアントに実装することに
    | 配信 URL のパス | `/files/workspace/{ws}/channel/{ch}/{UUID}/{ファイル名}` |
    | 署名付き Cookie の対象 | `/files/workspace/{ws}/channel/{ch}/*`（**配信 URL のパス**） |
    | CloudFront のビヘイビア | `/files/*`（[技術スタック](tech-stack.md)。**署名を要求するのはここだけ**） |
+   | 署名付き Cookie の `Path` 属性 | `/files`（**発行するのは API（`/api/...`）だが、消費されるのは `/files/...` である。** `Path` を省くと既定値は発行時のリクエスト URI のディレクトリ（`/api/...`）になり、**`/files/...` のリクエストには一度も送られない**——参加者でも添付が取得できない。**`Path=/` にはしない**——上の「対象」の範囲と、Cookie が実際に送られる範囲が食い違う。#77） |
 
-   **配信 URL のパス・署名付き Cookie の対象・CloudFront のビヘイビアの3つが `/files/` で揃い、
+   **配信 URL のパス・署名付き Cookie の対象・その `Path` 属性・CloudFront のビヘイビアの4つが `/files` で揃い、
    S3 のキーだけがそれを持たない。** この形でないと参加者でも 403 になる——
    Cookie の resource と要求 URL が一致しないためである。
    **そこで resource を `/*` へ広げると、1枚の Cookie で全チャンネルの添付が取れる**
