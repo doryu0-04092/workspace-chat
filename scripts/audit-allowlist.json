@@ -25,7 +25,7 @@
       "title": "細工した multipart のフィールド名による DoS",
       "issue": 166,
       "until": "サーバーが multipart を受け取る経路（アバター画像など）を実装するまで",
-      "reason": "@nestjs/platform-express が multer 2.2.0 を完全固定しており、11 系・12 系のいずれにも 2.3.0 を使う版が無い。overrides は workspace 配下に届かない。現時点でアップロード経路は実装しておらず、動く経路が無い"
+      "reason": "@nestjs/platform-express が multer 2.2.0 を完全固定しており、11 系・12 系のいずれにも 2.3.0 を使う版が無い。overrides は workspace 配下に届かない。現時点でサーバーが multipart を受け取る経路は無く（添付のアップロードはブラウザから S3 へ直接 PUT する）、動く経路が無い"
     },
     {
       "id": "GHSA-535w-7cp7-47q4",
