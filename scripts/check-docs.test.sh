@@ -793,13 +793,13 @@ elif ! printf '%s\n' '**/probe-prefixed/' '!probe-prefixed/keep-me' \
   gi3_ng=1
 else
   gi3_expect() { # $1=説明 $2...=期待する件（最後の引数の後ろが実際の値。-- で区切る）
-    local desc="$1" want=() got=()
+    local desc="$1" gi3_w=() gi3_r=()
     shift
-    while [ "$#" -gt 0 ] && [ "$1" != '--' ]; do want+=("$1"); shift; done
+    while [ "$#" -gt 0 ] && [ "$1" != '--' ]; do gi3_w+=("$1"); shift; done
     shift
-    got=("$@")
-    [ "${want[*]}" = "${got[*]}" ] && [ "${#want[@]}" -eq "${#got[@]}" ] && return 0
-    echo "  NG: $desc（期待 ${#want[@]} 件「${want[*]}」/ 実際 ${#got[@]} 件「${got[*]}」）"
+    gi3_r=("$@")
+    [ "${gi3_w[*]}" = "${gi3_r[*]}" ] && [ "${#gi3_w[@]}" -eq "${#gi3_r[@]}" ] && return 0
+    echo "  NG: $desc（期待 ${#gi3_w[@]} 件「${gi3_w[*]}」/ 実際 ${#gi3_r[@]} 件「${gi3_r[*]}」）"
     gi3_ng=1
   }
   mapfile -t gi3_g < <(doc_unclassified_ignores "$gi3_probe")
