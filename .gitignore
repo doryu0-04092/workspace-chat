@@ -1,6 +1,13 @@
 # **行を足したら、scripts/doc-scope.sh の一覧にも振り分ける。**
-# ファイル名なら DOC_PRUNE_FILES（値を持つ）か DOC_NO_VALUE_IGNORES（持たない）へ、
-# ディレクトリなら DOC_PRUNE_DIRS へ、打ち消し（!）なら DOC_KEEP_FILES へ。
+#   ファイル名（スラッシュ無し） … DOC_PRUNE_FILES（値を持つ）か DOC_NO_VALUE_IGNORES（持たない）
+#   ディレクトリ（末尾が /）     … DOC_PRUNE_DIRS
+#   打ち消し（!）                … DOC_KEEP_FILES。**ただし DOC_PRUNE_DIRS の配下を指すものは足さない**
+#                                  （doc_excluded がディレクトリ側で先に返るため、KEEP は届かない）
+#
+# **スラッシュを含むファイル名のパターン（infra/*.tfvars など）は、どの一覧でも扱えない。**
+# DOC_PRUNE_FILES / DOC_KEEP_FILES は **basename にしか当たらない**——足しても永久に一致しないのに
+# 0c-3 は緑になる（**偽の緑**）。**そういう行は書かず、DOC_PRUNE_DIRS でディレクトリごと除外する。**
+#
 # **振り分けないと check-docs.test.sh の 0c-3 が落ちる**（#44）。
 # 落ちる側にしてあるのは、**振り分けを忘れると、値を持つファイルが
 # 検査の一時ディレクトリに複製されて残り続ける**ためである。

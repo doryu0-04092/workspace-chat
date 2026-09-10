@@ -81,6 +81,28 @@ same DOC_PRUNE_FILES \
   "$(printf '%s\n' "${probe_prune_files[@]}" | sort)" "$(printf '%s\n' "${DOC_PRUNE_FILES[@]}" | sort)"
 same DOC_KEEP_FILES \
   "$(printf '%s\n' "${probe_keep_files[@]}"  | sort)" "$(printf '%s\n' "${DOC_KEEP_FILES[@]}"  | sort)"
+# **ファイル名の一覧に、スラッシュを含むパターンを入れない。**
+# doc_find は `find -name "$g"`、doc_excluded_name は `case "$base" in $g)` であり、
+# **どちらも basename にだけ当たる。** スラッシュを含むパターンを足しても**永久に一致しない。**
+#
+# **一方 0c-3 は一覧と文字列として照合するため、足した時点で緑になる**——
+# 「分類は済んだ／除外は効いていない」という偽の緑が作れる（#44 第4巡の指摘）。
+# **指示を読み違えても、ここで止まる。**
+no_slash() { # $1=一覧の名前 $2...=要素
+  local name="$1" g
+  shift
+  for g in "$@"; do
+    case "$g" in
+      */*)
+        echo "  NG: $name の「$g」がスラッシュを含む（basename にしか当たらないため、永久に一致しない）"
+        echo "        パスで絞るなら DOC_PRUNE_DIRS でディレクトリごと除外する"
+        fail=1
+        ;;
+    esac
+  done
+}
+no_slash DOC_PRUNE_FILES "${DOC_PRUNE_FILES[@]}"
+no_slash DOC_KEEP_FILES "${DOC_KEEP_FILES[@]}"
 for d in "${probe_dirs[@]}"; do
   mkdir -p "$probe/$d" && : > "$probe/$d/x.md"
 done
@@ -98,7 +120,7 @@ for f in "${probe_real_keeps[@]}"; do : > "$probe/$f"; done
 expected=$(printf '%s\n' keep.md "${probe_real_keeps[@]}" "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
 got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
 if [ "$got" = "$expected" ]; then
-  echo "  OK（残るのは $expected）"
+  echo "  OK: doc_find の結果は想定どおり（残るのは $expected）"
 else
   echo "  NG: 除外の範囲が想定と違う → $got"
   fail=1
@@ -799,13 +821,13 @@ gi3_check() { # $1=関数名 $2=NG の文言 $3=直し方
 }
 gi3_check doc_unclassified_ignores \
   '.gitignore のパターンが、値を持つかどうか判断されていない' \
-  '値を持つなら DOC_PRUNE_FILES へ、持たないなら DOC_NO_VALUE_IGNORES へ足す（scripts/doc-scope.sh）'
+  '値を持つなら DOC_PRUNE_FILES へ、持たないなら DOC_NO_VALUE_IGNORES へ足す（scripts/doc-scope.sh）。スラッシュを含む行は足しても効かない——DOC_PRUNE_DIRS でディレクトリごと除外する'
 gi3_check doc_unlisted_ignore_dirs \
   '.gitignore のディレクトリ行が DOC_PRUNE_DIRS に無い' \
   '足さないと、その配下の Markdown が複製され、検査の対象に入る（scripts/doc-scope.sh）'
 gi3_check doc_unlisted_ignore_keeps \
   '.gitignore の打ち消し行が DOC_KEEP_FILES に無い' \
-  '除外から戻すなら DOC_KEEP_FILES へ足す（scripts/doc-scope.sh）'
+  '除外から戻すなら DOC_KEEP_FILES へ足す（scripts/doc-scope.sh）。DOC_PRUNE_DIRS の配下を指すものは足さない——ディレクトリ側で先に除外されるため KEEP は届かない'
 gi3_check doc_groundless_no_value \
   'DOC_NO_VALUE_IGNORES の項目が .gitignore に無い' \
   '.gitignore から消えたなら、この一覧からも消す（判断の記録が根拠を失う。scripts/doc-scope.sh）'
