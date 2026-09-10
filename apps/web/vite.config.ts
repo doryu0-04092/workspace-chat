@@ -21,6 +21,9 @@ export default defineConfig({
         // ここで書き直すと api と web で規則が2つになる——とくに `PORT=`（空文字）は
         // `port.ts` が起動時に落とす入力であり、web 側で既定値に落とすと
         // **8080 のつもりが黙って 3000 に繋ぎに行く**（README「動かす」）。
+        // **値は `.env` からは来ない。** Vite は設定ファイルの評価時に `.env` を読まず、
+        // 見えるのはその時点の環境変数だけである（api も `.env` を読まない。.env.example）。
+        // **api を起動した端末と同じ `PORT` を、この開発サーバーの端末にも渡すこと。**
         target: `http://localhost:${resolvePort(process.env.PORT)}`,
         // WebSocket のハンドシェイクも同じ前置きに載るため、ws を有効にする。
         ws: true,
