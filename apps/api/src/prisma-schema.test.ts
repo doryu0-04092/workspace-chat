@@ -1674,7 +1674,6 @@ describe('Prisma のスキーマとマイグレーション', () => {
           ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
         WHERE lower(u."userId") = lower('${loginId}')
           -- 対象側が退会していないこと。
-@@@END
           AND u."deletedAt" IS NULL;
       `;
     }
