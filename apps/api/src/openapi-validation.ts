@@ -69,10 +69,12 @@ const CODES: Record<number, { code: string; message: string }> = {
  *
  * **送られた値を応答に載せない。** 返すのは落ちた箇所（`path`）と規則の説明（`message`）だけである。
  * パスワードの検証で落ちたときに、送られたパスワードが応答やログに出ないようにするため。
+ * **本体の読み取りの失敗（壊れた JSON・大きすぎる本体）は、ここには届く前に body-read-error.ts が返す。**
  */
 @Catch()
 export class OpenApiValidationErrorFilter extends BaseExceptionFilter {
   override catch(exception: unknown, host: ArgumentsHost): void {
+    const response = host.switchToHttp().getResponse<Response>();
     if (!isValidatorError(exception)) {
       super.catch(exception, host);
       return;
@@ -87,6 +89,6 @@ export class OpenApiValidationErrorFilter extends BaseExceptionFilter {
         ? { errors: exception.errors.map(({ path, message }) => ({ path, message })) }
         : {}),
     };
-    host.switchToHttp().getResponse<Response>().status(exception.status).json(body);
+    response.status(exception.status).json(body);
   }
 }

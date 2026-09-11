@@ -2,6 +2,7 @@ import type { INestApplication, NestApplicationOptions } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { bodyReadErrorHandler } from './body-read-error';
 import { resolveTrustProxyHops } from './rate-limit/rate-limit-config';
 
 /**
@@ -16,9 +17,18 @@ import { resolveTrustProxyHops } from './rate-limit/rate-limit-config';
  *
  * **発信元（`req.ip`）は `trust proxy` で決まる**（段数は TRUST_PROXY_HOPS。rate-limit-config.ts）。
  * レート制限はこれで数えるため、段数を誤ると偽の発信元を名乗られるか、全員が1つの発信元として数えられる。
+ *
+ * **踏むと壊れる: 本体の読み取りは Nest の既定（`bodyParser`）を切り、JSON だけを読み、その直後に
+ * body-read-error.ts を置く。** 既定に戻すと、壊れた JSON の失敗のメッセージ（入力の断片を含む）が応答に出る。
+ * 受け付ける本体は仕様どおり JSON だけである（urlencoded は読まない）。
  */
 export async function createApp(options?: NestApplicationOptions): Promise<INestApplication> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, options);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    ...options,
+    bodyParser: false,
+  });
+  app.useBodyParser('json');
+  app.use(bodyReadErrorHandler);
   app.setGlobalPrefix('api');
   app.set('trust proxy', resolveTrustProxyHops(process.env.TRUST_PROXY_HOPS));
   return app;

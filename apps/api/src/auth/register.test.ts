@@ -382,6 +382,72 @@ describe('DB に繋がらないとき', () => {
   });
 });
 
+// 本体が JSON として壊れているときと大きすぎるときは、仕様の検証より前（本体の読み取り）で落ちる。
+// **JSON.parse の失敗のメッセージは、壊れた位置の周辺の入力を切り出して含む**ため、
+// 仕様の検証の失敗だけを見ていると、パスワードの断片が応答やログに出る経路を見逃す。
+describe('本体を読み取れないとき', () => {
+  let app: INestApplication;
+  let base: string;
+  const logger = new CapturingLogger();
+  const password = 'leaky-secret-9f3k';
+
+  beforeAll(async () => {
+    // どの要求もハンドラに届かないため、DB・Valkey は繋がらない宛先でよい。
+    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
+    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
+    vi.stubEnv('TRUST_PROXY_HOPS', '1');
+    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    ({ app, base } = await startApp(logger));
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    vi.unstubAllEnvs();
+  });
+
+  function postRaw(body: string): Promise<Response> {
+    return fetch(`${base}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+      body,
+    });
+  }
+
+  it.each([
+    ['パスワードの直後で壊れている', `{"userId":"broken_json","password":"${password}" x}`],
+    ['パスワードの途中で切れている', `{"userId":"broken_json","password":"${password}`],
+    ['パスワードの直前で壊れている', `{"userId":"broken_json",,"password":"${password}"}`],
+    // 以下の2つは、既定の扱いのままだと失敗のメッセージに入力の断片が載る形（Unexpected token）。
+    ['パスワードを引用符で囲んでいない', `{"userId":"broken_json","password":${password}}`],
+    ['本体がパスワードの文字列だけ', password],
+  ])(
+    '%s JSON は 400（ErrorResponse）を返し、応答にもログにもパスワードを出さない',
+    async (_label, body) => {
+      const res = await postRaw(body);
+      const text = await res.text();
+
+      // 漏れを先に見る。形（状態コードと code）を先に見ると、漏れているときも形の違いで先に落ち、
+      // 「漏れを捕まえる」確認が働いているかを変異で確かめられない。
+      const all = `${logger.lines.join('\n')}\n${text}`;
+      expect(all).not.toContain(password);
+      expect(all).not.toContain(password.slice(0, 8));
+      expect(res.status).toBe(400);
+      expect((JSON.parse(text) as ErrorResponse).code).toBe('invalid_body');
+    },
+  );
+
+  it('大きすぎる本体は 413（ErrorResponse）を返し、応答にもログにもパスワードを出さない', async () => {
+    const res = await postRaw(
+      JSON.stringify({ userId: 'too_large', password, displayName: 'x'.repeat(200_000) }),
+    );
+    const text = await res.text();
+
+    expect(res.status).toBe(413);
+    expect((JSON.parse(text) as ErrorResponse).code).toBe('payload_too_large');
+    expect(`${logger.lines.join('\n')}\n${text}`).not.toContain(password);
+  });
+});
+
 /** 新規登録のレート制限の上限（機能一覧 1.1。発信元単位で1時間に10回）。 */
 const REGISTER_LIMIT = 10;
 

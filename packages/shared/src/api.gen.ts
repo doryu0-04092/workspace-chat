@@ -130,7 +130,7 @@ export interface operations {
                     "application/json": components["schemas"]["RegisterResponse"];
                 };
             };
-            /** @description 入力が仕様に合わない */
+            /** @description 入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。 どちらも送られた値を応答に載せない */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -150,6 +150,15 @@ export interface operations {
             };
             /** @description ユーザーID が既に使われている（大文字小文字だけの違いも同じ ID と見なす）。 代償: どのユーザーID が登録済みかがこの応答で分かり、列挙に使える（ログインは区別しない。機能一覧 1.2）。 利用者が別の ID を選び直せることを優先した。列挙は発信元単位のレート制限（429。1時間に10回）で抑える */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 本体が大きすぎる（payload_too_large。上限は Nest の JSON の読み取りの既定の 100kb） */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -44,7 +44,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/RegisterResponse'
         '400':
-          description: 入力が仕様に合わない
+          description: >-
+            入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。
+            どちらも送られた値を応答に載せない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: 本体が大きすぎる（payload_too_large。上限は Nest の JSON の読み取りの既定の 100kb）
           content:
             application/json:
               schema:
