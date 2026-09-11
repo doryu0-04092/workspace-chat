@@ -4,7 +4,7 @@
 # 1. マイグレーション用（migrate）のイメージを、空の PostgreSQL 17 に適用できる
 # 2. 実行用（runtime）のイメージが起動し、/api/health が 200 を返す
 # 3. 実行用のイメージのログが、1行1件の JSON で標準出力に出る（要件定義書 4.6）。標準エラーには何も出さない
-# 4. 実行用のイメージに、秘密を置くファイル（.env）とテストのコードが入っていない
+# 4. 実行用のイメージに、秘密を置くファイル（.env）とテストのコードが入っていない。マイグレーション用のイメージにも .env が入っていない
 # 5. 実行用のイメージは root で動かない
 #
 # Docker が動いていることが前提。作ったコンテナとネットワークは終わりに消す（イメージは残す）。
@@ -92,6 +92,8 @@ leaked=$(docker run --rm --entrypoint sh "$runtime_image" -c \
   'find /app -path /app/node_modules -prune -o \( -name ".env" -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print' |
   head -n 5)
 [ -z "$leaked" ] || fail "イメージに入れないはずのファイルがある: $leaked"
+leaked_env=$(docker run --rm --entrypoint sh "$migrate_image" -c 'find /app -path /app/node_modules -prune -o -name ".env" -print' | head -n 5)
+[ -z "$leaked_env" ] || fail "マイグレーション用のイメージに .env がある: $leaked_env"
 
 echo "== 5. 実行用のイメージは root で動かない"
 user=$(docker inspect --format "{{.Config.User}}" "$runtime_image")
