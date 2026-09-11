@@ -342,7 +342,7 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 
 | 対象 | 採用 | 判断 |
 |---|---|---|
-| **eslint-plugin-react-hooks** | **^7.1.1** | 最新版。`peerDependencies` の `eslint` はこの版でも `^10.0.0` を含む広い範囲を受け入れる。**`configs.recommended` はそのまま使わない**——rules-of-hooks / exhaustive-deps に加え、React Compiler 向けの静的解析ルール（purity・refs・static-components など10件超）を丸ごと束ねており、#18 が挙げた問題（hooks の呼び出し規則の違反・useEffect の依存配列の漏れ）はこの2つだけで足りる。`apps/web/eslint.config.js` で2つに絞って有効化する |
+| **eslint-plugin-react-hooks** | **^7.1.1** | 最新版。`peerDependencies` の `eslint` はこの版でも `^10.0.0` を含む広い範囲を受け入れる。**`configs.recommended` はそのまま使わない**——rules-of-hooks / exhaustive-deps に加え、React Compiler 向けの静的解析ルール（purity・refs・static-components など10件超）を丸ごと束ねており、#18 が挙げた問題（hooks の呼び出し規則の違反・useEffect の依存配列の漏れ）はこの2つだけで足りる。直下の `eslint.config.js`（`files: ['apps/web/**/*.{ts,tsx}']`）で2つに絞って有効化済み |
 
 #### 追加で確認した項目 — REST の型の生成（2026-09-11。#243）
 
