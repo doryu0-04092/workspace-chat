@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import type { INestApplication } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app-setup';
+import { stubApiEnv } from '../testing/api-env';
 
 type LogLine = { level?: string; message?: unknown; context?: string; requestId?: string };
 
@@ -33,10 +34,7 @@ describe('構造化ログとリクエスト ID', () => {
       }) as typeof stream.write);
     }
     // DB に繋がらない宛先にし、新規登録で想定外の失敗（500）を起こしてログを出させる。
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
-    vi.stubEnv('TRUST_PROXY_HOPS', '0');
-    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    stubApiEnv();
     app = await createApp();
     await app.listen(0, '127.0.0.1');
     const { port } = app.getHttpServer().address() as AddressInfo;
