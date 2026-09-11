@@ -307,7 +307,8 @@ model RefreshToken {
   userId String @db.Uuid
 
   /// ログイン1回ごとの系列。再利用を検知したときに、この値で系列ごと失効させる。
-  familyId String @db.Uuid
+  /// **ログインでは渡さず、この既定値（UUIDv7。要件定義書 3.5.2）で作る。** 入れ替えでは元の行の値を引き継ぐ。
+  familyId String @default(uuid(7)) @db.Uuid
 
   /// **トークンの SHA-256（16進 64 文字）だけを入れる列。** トークン自体は保存しない。
   /// 32 バイトの乱数であり総当たりが成り立たないため、パスワードと違って遅いハッシュ（Argon2id）を使わず、

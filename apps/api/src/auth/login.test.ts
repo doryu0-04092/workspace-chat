@@ -19,7 +19,7 @@ type LoginResponses = paths['/auth/login']['post']['responses'];
 type LoginResponse = LoginResponses[200]['content']['application/json'];
 type ErrorResponse = LoginResponses[401 | 429]['content']['application/json'];
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 const REFRESH_TOKEN_TTL_SECONDS = 14 * 24 * 60 * 60;
 /** 発信元単位のログインの上限（15 分に 20 回）。 */
@@ -184,7 +184,8 @@ describe('POST /api/auth/login（F-02）', () => {
       expect(rows).toHaveLength(1);
       const [row] = rows;
       expect(row?.tokenHash).toBe(sha256Hex(cookie?.value ?? ''));
-      expect(row?.familyId).toMatch(UUID);
+      // 要件定義書 3.5.2: 識別子は UUIDv7（索引に載る列の局所性を損なわない）。
+      expect(row?.familyId).toMatch(UUID_V7);
       expect(row?.revokedAt).toBeNull();
       const expiresAt = row?.expiresAt.getTime() ?? 0;
       expect(expiresAt).toBeGreaterThanOrEqual(before + REFRESH_TOKEN_TTL_SECONDS * 1000);

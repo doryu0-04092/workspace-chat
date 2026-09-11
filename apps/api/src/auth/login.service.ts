@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import {
   HttpException,
   HttpStatus,
@@ -86,7 +86,6 @@ export class LoginService {
     await this.prisma.refreshToken.create({
       data: {
         userId: user.id,
-        familyId: randomUUID(),
         tokenHash: hashRefreshToken(refreshToken),
         expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000),
       },
