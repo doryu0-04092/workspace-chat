@@ -338,6 +338,12 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 > （#245）・テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts) と、
 > アプリを組み立てるテスト（接続しない宛先を渡す）である。
 
+#### 追加で確認した項目 — React hooks の lint ルール（2026-09-07。#18 / #76）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **eslint-plugin-react-hooks** | **^7.1.1** | 最新版。`peerDependencies` の `eslint` はこの版でも `^10.0.0` を含む広い範囲を受け入れる。**`configs.recommended` はそのまま使わない**——rules-of-hooks / exhaustive-deps に加え、React Compiler 向けの静的解析ルール（purity・refs・static-components など10件超）を丸ごと束ねており、#18 が挙げた問題（hooks の呼び出し規則の違反・useEffect の依存配列の漏れ）はこの2つだけで足りる。`apps/web/eslint.config.js` で2つに絞って有効化する |
+
 #### 追加で確認した項目 — REST の型の生成（2026-09-11。#243）
 
 [要件定義書](requirements.md) 4.7「REST API の仕様を唯一の正とし、そこから型を生成する」の道具。
