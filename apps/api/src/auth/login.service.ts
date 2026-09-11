@@ -1,16 +1,9 @@
-import { randomBytes } from 'node:crypto';
-import {
-  HttpException,
-  HttpStatus,
-  Inject,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
-import { type ErrorResponse, errorBodyForStatus } from '../error-response';
+import { type ErrorResponse, RetryAfterException } from '../error-response';
 import { PrismaService } from '../prisma.service';
-import type { LoginBackoffStore } from './login-backoff';
-import { hashSecret, verifySecret } from './secret-hash';
+import { accountBackoffKey, type LoginBackoffStore } from './login-backoff';
+import { dummySecretHash, verifySecret } from './secret-hash';
 import { SessionService } from './session.service';
 
 type LoginOperation = paths['/auth/login']['post'];
@@ -19,13 +12,6 @@ export type LoginResponse = LoginOperation['responses'][200]['content']['applica
 
 /** アカウント単位の制限の保存先を注入するトークン。 */
 export const LOGIN_BACKOFF_STORE = Symbol('LOGIN_BACKOFF_STORE');
-
-/** 待ち時間の間の試行。`Retry-After`（秒）を付けて返すため、残りの時間を持つ。 */
-export class LoginBackoffException extends HttpException {
-  constructor(readonly retryAfterSeconds: number) {
-    super(errorBodyForStatus(HttpStatus.TOO_MANY_REQUESTS), HttpStatus.TOO_MANY_REQUESTS);
-  }
-}
 
 const INVALID_CREDENTIALS: ErrorResponse = {
   code: 'invalid_credentials',
@@ -36,9 +22,6 @@ type UserRow = { id: string; userId: string; displayName: string; passwordHash: 
 
 @Injectable()
 export class LoginService {
-  /** 利用者が見つからないときに照合する、捨てるためのハッシュ。起動後の最初の失敗で1回だけ作る。 */
-  private dummyHash: Promise<string> | undefined;
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
@@ -54,10 +37,10 @@ export class LoginService {
    * - 失敗の理由（ID が無い・パスワードが違う・退会済み）は応答で区別しない
    */
   async login(input: LoginRequest): Promise<{ body: LoginResponse; refreshToken: string }> {
-    const key = input.userId.toLowerCase();
+    const key = accountBackoffKey('login', input.userId);
     const started = await this.backoff.begin(key, Date.now());
     if (!started.allowed) {
-      throw new LoginBackoffException(Math.ceil(started.retryAfterMs / 1000));
+      throw new RetryAfterException(Math.ceil(started.retryAfterMs / 1000));
     }
 
     const rows = await this.prisma.$queryRaw<UserRow[]>`
@@ -67,7 +50,7 @@ export class LoginService {
     `;
     const user = rows[0];
     const matched = await verifySecret(
-      user?.passwordHash ?? (await this.getDummyHash()),
+      user?.passwordHash ?? (await dummySecretHash()),
       input.password,
     );
     if (!user || !matched) {
@@ -86,10 +69,5 @@ export class LoginService {
       },
       refreshToken: tokens.refreshToken,
     };
-  }
-
-  private getDummyHash(): Promise<string> {
-    this.dummyHash ??= hashSecret(randomBytes(32).toString('base64url'));
-    return this.dummyHash;
   }
 }
