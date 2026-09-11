@@ -59,7 +59,12 @@ export class SessionService {
     if (!row) throw invalidToken();
 
     const now = new Date();
-    // 失効済み（入れ替え済み・ログアウト済み）のトークンは、下のトランザクションで失効させる行が 0 件になり、再利用として扱う。
+    // 失効済み（入れ替え済み・ログアウト済み）のトークンは、期限や退会より先に見て系列ごと失効させる——期限は入れ替えのたびに
+    // 延びるため、系列が生きたまま古いトークンだけが期限切れになる。同時の入れ替えの後の側は、下のトランザクションで見分ける。
+    if (row.revokedAt !== null) {
+      await this.revokeFamily(row.familyId, now);
+      throw invalidToken();
+    }
     if (row.expiresAt <= now || row.user.deletedAt !== null) throw invalidToken();
 
     const next = generateRefreshToken();

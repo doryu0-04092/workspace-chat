@@ -180,10 +180,23 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       expect((await post('refresh', next)).status).toBe(401);
     });
 
+    // 期限は入れ替えのたびに延びるため、系列が生きたまま、入れ替え済みの古いトークンだけが期限切れになる。
+    it('入れ替え済みのトークンが期限切れでも、出されたら系列ごと失効させる', async () => {
+      const { token } = await login();
+      const next = cookieValue(await post('refresh', token))!;
+      await prisma.refreshToken.update({
+        where: { tokenHash: sha256Hex(token) },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+
+      expect((await post('refresh', token)).status).toBe(401);
+      expect((await post('refresh', next)).status).toBe(401);
+    });
+
     it('同じトークンで同時にリフレッシュしても、入れ替えに成功するのは1つだけである', async () => {
       const { token } = await login();
       const results = await Promise.all([post('refresh', token), post('refresh', token)]);
-      expect(results.filter((res) => res.status === 200).length).toBeLessThanOrEqual(1);
+      expect(results.filter((res) => res.status === 200)).toHaveLength(1);
     });
 
     it.each([
