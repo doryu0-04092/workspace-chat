@@ -193,7 +193,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。TLS 終端。**ブラウザ通知に必要な HTTPS を提供する** |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
-| **配信の共有** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
+| **配信の共有・レート制限の回数** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。**レート制限の回数も置く**（`@nest-lab/throttler-storage-redis` が `ioredis` の接続で Lua の `eval` を使う。#245）。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
 | 添付ファイル | **S3 + CloudFront の署名付き Cookie**（配信）＋ **S3 への直接アップロード用の署名付き URL**（アップロード） | パブリックアクセスは全面遮断。**添付の経路は2つあり、扱いが逆になる**（[要件定義書](requirements.md) 4.3 の表が「アップロード（**配信とは別の経路**）」として区別している）。**配信**は **S3 への直接アクセスを行わず、CloudFront 経由のみ**とする。**配信で**署名付き URL を採らない理由は [要件定義書](requirements.md) 4.3。**アップロードは別の経路であり、ブラウザから S3 へ直接 PUT する署名付き URL を使う**（[機能一覧](features.md) 11.1 の「アップロード用の署名付き URL の発行にレート制限がかかる」が前提にしている経路である）。**ブラウザ（署名付き URL）から書けるのは隔離用の接頭辞 `quarantine/` だけであり、配信用のキーへ書けるのは確定を行うサーバーの権限だけである**（バケットポリシーは、接頭辞ではなく**書く主体**で分けて起こす——確定のコピーも宛先に `s3:PutObject` を要するため、接頭辞だけで閉じると確定が拒否される。**主体を分けるには署名者を分ける**——署名付き URL への PUT は、URL を署名したプリンシパルとして認証される（AWS 公式「The credentials used by the presigned URL are those of the AWS Identity and Access Management (IAM) principal who generated the URL.」）。**アップロード URL の署名には、`quarantine/` 配下にだけ `s3:PutObject` を持つ専用のプリンシパルを使い、確定を行うプリンシパル（`quarantine/` の `GetObject`・`GetObjectVersion`（版を指定した読み出しに要る——S3 公式 GetObject「If you include a `versionId` in your request header, you must have the `s3:GetObjectVersion` permission to access a specific version of an object.」）と `DeleteObject`、配信用の接頭辞の `PutObject`——**検証に通らなかったものと、コピーの済んだものを隔離用のキーから削除する**ため。[機能一覧](features.md) 11.1）と別にする**。同じプリンシパルで両方を行うと、ブラウザからの PUT も配信用のキーへ通る。[機能一覧](features.md) 11.1。#211）。**`quarantine/` にだけライフサイクル（`Expiration` と `NoncurrentVersionExpiration`）を置き、フィルターは `quarantine/` を明示する**——ライフサイクルの削除はバケットポリシーでは止められず、接頭辞を誤ると配信用の添付が消える（同 11.1）。**アバター画像も同じバケットの別の接頭辞に置く**（隔離用は `quarantine/avatars/`、配信用は `avatars/`。アップロード URL の署名と確定の主体の分け方は添付と同じであり、確定のプリンシパルの配信用の接頭辞の `PutObject` には `avatars/` を含む。[機能一覧](features.md) 1.3）。**バケットを「CloudFront の OAC からのみ」に閉じると、この PUT が通らなくなる**（#176） |
 
 #### WebSocket と複数インスタンスの問題
@@ -442,7 +442,9 @@ NestJS のコンストラクタインジェクションは、この指定が出�
   `shared_preload_libraries=pg_bigm` も渡す必要がある。
   **環境は「ローカル・RDS」の2つではなく、テストを含めて3つある**
 - **ElastiCache で AUTH トークンと転送時暗号化（`rediss://`）を使うかを決め、
-  `@socket.io/redis-adapter` がその接続で動くことを確認する。**
+  `@socket.io/redis-adapter` と、レート制限の接続（`apps/api/src/rate-limit/rate-limit.module.ts` の `ioredis`。`REDIS_URL`）の
+  両方がその接続で動くことを確認する。** **レート制限の側は、繋がらなくても api が止まらずに各タスクのメモリへ迂回し、
+  アラートにもしない**（[要件定義書](requirements.md) 4.2）**ため、この確認を飛ばすと取り違えに誰も気づけない**
   **ローカルの Valkey は無認証の `redis://` であり、この経路を一度も通らない**
   （下記「ローカルの Valkey に認証を掛けない」）
 
@@ -505,7 +507,8 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 
 **理由。** Amazon ElastiCache が提供する Redis OSS のエンジン版は **7.1 が上限**であり、
 **7.2 以降は Valkey としてのみ提供される。** AWS は新規の構築に Valkey を推奨している。
-`@socket.io/redis-adapter`（Pub/Sub）の用途は Redis 7.x の範囲に収まるため、
+`@socket.io/redis-adapter`（Pub/Sub）とレート制限（`@nest-lab/throttler-storage-redis` の Lua の `eval`。#245）の用途は Redis 7.x の範囲に収まるため
+（レート制限が `valkey/valkey:8-alpine` で動くことはテストで確かめている）、
 **現時点で動かないものは無い。** それでも移す理由は、Redis OSS 7.x が AWS 側で新機能の
 開発対象から外れていること、および価格である。
 
@@ -518,7 +521,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 **ElastiCache for Valkey が実際にどの版を提供するかは未確認**であり、Terraform で環境を作る段階で確認する。
 
 > **代償を明記する。** **Valkey は Redis のフォークである。** 現時点では Redis 互換の機能
-> （Pub/Sub）しか使っておらず問題は無いが、**Redis 8 以降で入る、
+> （Pub/Sub と Lua の `eval`）しか使っておらず問題は無いが、**Redis 8 以降で入る、
 > Valkey に取り込まれない独自機能が必要になった場合、ElastiCache 上では Redis 側へ戻れない。**
 > ElastiCache の Redis OSS は 7.1 が上限のままであり、Valkey を選んだ時点で
 > それ以降の Redis の機能へのアクセスは手放している。
@@ -530,7 +533,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 **127.0.0.1 にだけ束縛しており、ローカルでは守るものが無い**ためである。
 
 > **代償を明記する。** 本番の ElastiCache は **AUTH トークン**と**転送時暗号化**（`rediss://`）を持つ。
-> ローカルが無認証の `redis://` だと、**アプリの Redis クライアント設定に認証と TLS の経路が
+> ローカルが無認証の `redis://` だと、**アプリの Redis クライアント設定（Socket.IO のアダプタと、レート制限の `ioredis` の接続）に認証と TLS の経路が
 > 一度も現れない。** PostgreSQL 側はパスワードのずれをヘルスチェックが検知するところまで
 > 作ってあるが、**Valkey にはそれに対応するものが無く、作りようもない**（掛ける認証が無いため）。
 > 露見するのは Terraform で環境を作ったあと、**版差と同じく最も遅い段階**である。
