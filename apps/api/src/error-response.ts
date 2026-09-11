@@ -77,6 +77,7 @@ export class ErrorResponseFilter implements ExceptionFilter {
     const response = host.switchToHttp().getResponse<Response>();
 
     if (isValidatorError(exception)) {
+      if (exception.status >= 500) this.logger.error(exception.message, exception.stack);
       const body: ErrorResponse = {
         ...errorBodyForStatus(exception.status),
         ...(exception.status === 400
@@ -90,11 +91,13 @@ export class ErrorResponseFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const given = exception.getResponse();
-      // 5xx を投げた HttpException も想定外の失敗として残す（本体には載せない）。
-      if (status >= 500) this.logger.error(exception.message, exception.stack);
-      response
-        .status(status)
-        .json(isErrorResponse(given) ? given : (BY_STATUS[status] ?? REJECTED));
+      // 5xx は、本体に何を載せて投げても internal_error にし、想定外の失敗としてログに残す。
+      if (status >= 500) {
+        this.logger.error(exception.message, exception.stack);
+        response.status(status).json(errorBodyForStatus(status));
+        return;
+      }
+      response.status(status).json(isErrorResponse(given) ? given : errorBodyForStatus(status));
       return;
     }
 
