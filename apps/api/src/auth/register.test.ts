@@ -451,6 +451,17 @@ describe('本体を読み取れないとき', () => {
 /** 新規登録のレート制限の上限（機能一覧 1.1。発信元単位で1時間に10回）。 */
 const REGISTER_LIMIT = 10;
 
+/**
+ * 止めている時間（Retry-After。秒）が「1時間」であること。上限を超えた直後に見るため、ほぼ 3600 になる。
+ * **下限を置く。** 10 回を数秒で送るテストでは、窓が1分でも1時間でも 11 回目が 429 になり、
+ * 「1時間」を支えているのはルートの定数だけになる（窓を縮めても落ちない）。止める時間は窓と同じ長さである。
+ */
+function expectRetryAfterIsAboutAnHour(res: Response): void {
+  const retryAfter = Number(res.headers.get('retry-after'));
+  expect(retryAfter).toBeGreaterThan(3500);
+  expect(retryAfter).toBeLessThanOrEqual(3600);
+}
+
 function registerBody(): { userId: string; password: string; displayName: string } {
   return { userId: uniqueUserId(), password: 'rate-limit-password', displayName: '制限' };
 }
@@ -494,9 +505,7 @@ describe('新規登録のレート制限（発信元単位）', () => {
 
     expect(res.status).toBe(429);
     expect(((await res.json()) as ErrorResponse).code).toBe('too_many_requests');
-    const retryAfter = Number(res.headers.get('retry-after'));
-    expect(retryAfter).toBeGreaterThan(0);
-    expect(retryAfter).toBeLessThanOrEqual(3600);
+    expectRetryAfterIsAboutAnHour(res);
     expect(await taskA.app.get(PrismaService).user.count({ where: { loginId: body.userId } })).toBe(
       0,
     );
@@ -552,7 +561,7 @@ describe('Valkey に繋がらないときの新規登録のレート制限', () 
     }
     const res = await postRegister(base, registerBody(), ip);
     expect(res.status).toBe(429);
-    expect(Number(res.headers.get('retry-after'))).toBeLessThanOrEqual(3600);
+    expectRetryAfterIsAboutAnHour(res);
 
     // 起動時に繋がらなかったことと、要求で迂回に切り替えたことを、それぞれ1回だけ残す。
     const atStartup = logger.lines.filter((line) =>
