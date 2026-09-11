@@ -98,6 +98,7 @@ npm run format:check
 npm run typecheck
 npm run build
 npm test
+bash scripts/api-image.test.sh
 bash scripts/check-audit.test.sh
 npm audit --json > audit-report.json || true
 node scripts/check-audit.mjs audit-report.json
@@ -107,7 +108,7 @@ bash scripts/check-docs.test.sh
 ```
 
 （`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
-この1行だけ飛ばす）
+この1行だけ飛ばす。`npm test` と `scripts/api-image.test.sh` は Docker が動いていることが前提）
 
 `scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる
 （**番号は付けない**——下記の出力の見出し `1.`〜`3.` と桁が揃わず、別のものを指してしまう）。
