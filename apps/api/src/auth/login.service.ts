@@ -6,18 +6,12 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import type { paths } from '@workspace-chat/shared';
 import { type ErrorResponse, errorBodyForStatus } from '../error-response';
 import { PrismaService } from '../prisma.service';
 import type { LoginBackoffStore } from './login-backoff';
 import { hashSecret, verifySecret } from './secret-hash';
-import {
-  ACCESS_TOKEN_TTL_SECONDS,
-  REFRESH_TOKEN_TTL_SECONDS,
-  generateRefreshToken,
-  hashRefreshToken,
-} from './session-tokens';
+import { SessionService } from './session.service';
 
 type LoginOperation = paths['/auth/login']['post'];
 export type LoginRequest = LoginOperation['requestBody']['content']['application/json'];
@@ -47,7 +41,7 @@ export class LoginService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly jwt: JwtService,
+    private readonly sessions: SessionService,
     @Inject(LOGIN_BACKOFF_STORE) private readonly backoff: LoginBackoffStore,
   ) {}
 
@@ -82,23 +76,15 @@ export class LoginService {
     }
     await this.backoff.reset(key);
 
-    const refreshToken = generateRefreshToken();
-    await this.prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: hashRefreshToken(refreshToken),
-        expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000),
-      },
-    });
-    const accessToken = await this.jwt.signAsync({ sub: user.id });
+    const tokens = await this.sessions.start(user.id);
     return {
       body: {
-        accessToken,
+        accessToken: tokens.accessToken,
         tokenType: 'Bearer',
-        expiresIn: ACCESS_TOKEN_TTL_SECONDS,
+        expiresIn: tokens.expiresIn,
         user: { id: user.id, userId: user.userId, displayName: user.displayName },
       },
-      refreshToken,
+      refreshToken: tokens.refreshToken,
     };
   }
 

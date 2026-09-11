@@ -21,6 +21,7 @@ export interface ApiConfig {
   readonly apiTaskCount: number;
   readonly registrationEnabled: boolean;
   readonly jwtSecret: string;
+  readonly webOrigin: string;
 }
 
 /** ApiConfig を注入するトークン。 */
@@ -41,6 +42,36 @@ export function resolveJwtSecret(raw: string | undefined): string {
   }
   if (Buffer.byteLength(raw, 'utf8') < JWT_SECRET_MIN_BYTES) {
     throw new Error(`JWT_SECRET が短すぎます（${JWT_SECRET_MIN_BYTES} バイト以上を渡す）`);
+  }
+  return raw;
+}
+
+/**
+ * web の origin（環境変数 `WEB_ORIGIN`。例: `https://chat.example.com`）。**必須。**
+ * Cookie を使う要求の CSRF の対処で、Origin / Referer と突き合わせる（要件定義書 4.3。auth/same-origin.ts）。
+ * **origin の形（スキーム://ホスト[:ポート]）でなければ起動時に落とす**——末尾の / やパスが付くと、ブラウザが送る Origin と
+ * 一致せず、正規の要求がすべて 403 になる。
+ */
+export function resolveWebOrigin(raw: string | undefined): string {
+  if (raw === undefined || raw === '') {
+    throw new Error(
+      'WEB_ORIGIN が設定されていません（web の origin。例: https://chat.example.com）',
+    );
+  }
+  let url: URL | undefined;
+  try {
+    url = new URL(raw);
+  } catch {
+    url = undefined;
+  }
+  if (
+    url === undefined ||
+    (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+    url.origin !== raw
+  ) {
+    throw new Error(
+      `WEB_ORIGIN の値が不正です（スキーム://ホスト[:ポート] の形で、末尾の / やパスを付けない）: ${JSON.stringify(raw)}`,
+    );
   }
   return raw;
 }
@@ -82,6 +113,7 @@ export const API_SETTINGS: ApiSettings = {
     secret: true,
     hint: `${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す`,
   },
+  webOrigin: { env: 'WEB_ORIGIN', resolve: resolveWebOrigin, secret: false },
 };
 
 /**

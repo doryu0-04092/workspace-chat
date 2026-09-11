@@ -38,7 +38,8 @@ export interface LoginBackoffStore {
   reset(key: string): Promise<void>;
 }
 
-type Entry = { failures: number; lastMs: number };
+/** `lastFailureMs` は数え直しの起点、`lastMs` は待ち時間の起点（最後の失敗か、照合へ通した時刻の遅い方）。 */
+type Entry = { failures: number; lastFailureMs: number; lastMs: number };
 
 /** 記録の数の上限。memory-rate-limit-storage.ts と同じ見積もり（1件あたり数百バイト）。 */
 const DEFAULT_MAX_ENTRIES = 50_000;
@@ -66,7 +67,7 @@ export class MemoryLoginBackoffStore implements LoginBackoffStore {
   async begin(key: string, nowMs: number): Promise<BeginResult> {
     const entry = this.entries.get(key);
     if (!entry) return { allowed: true };
-    if (nowMs - entry.lastMs >= LOGIN_BACKOFF_RESET_MS) {
+    if (nowMs - entry.lastFailureMs >= LOGIN_BACKOFF_RESET_MS) {
       this.entries.delete(key);
       return { allowed: true };
     }
@@ -79,14 +80,14 @@ export class MemoryLoginBackoffStore implements LoginBackoffStore {
   async recordFailure(key: string, nowMs: number): Promise<void> {
     const entry = this.entries.get(key);
     const failures =
-      entry && nowMs - entry.lastMs < LOGIN_BACKOFF_RESET_MS ? entry.failures + 1 : 1;
+      entry && nowMs - entry.lastFailureMs < LOGIN_BACKOFF_RESET_MS ? entry.failures + 1 : 1;
     // Map は挿入順を保つ。消してから入れ直し、最も新しく触れたものを末尾に置く。
     this.entries.delete(key);
     if (this.entries.size >= this.maxEntries) {
       const oldest = this.entries.keys().next();
       if (!oldest.done) this.entries.delete(oldest.value);
     }
-    this.entries.set(key, { failures, lastMs: nowMs });
+    this.entries.set(key, { failures, lastFailureMs: nowMs, lastMs: nowMs });
   }
 
   async reset(key: string): Promise<void> {
@@ -103,11 +104,12 @@ const BEGIN_SCRIPT = `
 local failures = tonumber(redis.call('HGET', KEYS[1], 'failures') or '0')
 if failures == 0 then return 0 end
 local now = tonumber(ARGV[1])
-local last = tonumber(redis.call('HGET', KEYS[1], 'last') or '0')
-if now - last >= tonumber(ARGV[3]) then
+local lastFailure = tonumber(redis.call('HGET', KEYS[1], 'lastFailure') or '0')
+if now - lastFailure >= tonumber(ARGV[3]) then
   redis.call('DEL', KEYS[1])
   return 0
 end
+local last = tonumber(redis.call('HGET', KEYS[1], 'last') or '0')
 local wait = math.min(2 ^ (failures - 1) * 1000, tonumber(ARGV[2]))
 if now < last + wait then return last + wait - now end
 redis.call('HSET', KEYS[1], 'last', ARGV[1])
@@ -116,10 +118,10 @@ return 0
 
 const FAILURE_SCRIPT = `
 local now = tonumber(ARGV[1])
-local last = tonumber(redis.call('HGET', KEYS[1], 'last') or '0')
-if now - last >= tonumber(ARGV[2]) then redis.call('HDEL', KEYS[1], 'failures') end
+local lastFailure = tonumber(redis.call('HGET', KEYS[1], 'lastFailure') or '0')
+if now - lastFailure >= tonumber(ARGV[2]) then redis.call('HDEL', KEYS[1], 'failures') end
 redis.call('HINCRBY', KEYS[1], 'failures', 1)
-redis.call('HSET', KEYS[1], 'last', ARGV[1])
+redis.call('HSET', KEYS[1], 'last', ARGV[1], 'lastFailure', ARGV[1])
 redis.call('PEXPIRE', KEYS[1], ARGV[2])
 return 0
 `;

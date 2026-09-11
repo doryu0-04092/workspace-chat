@@ -31,6 +31,7 @@ describe('AppModule', () => {
           apiTaskCount: 1,
           registrationEnabled: true,
           jwtSecret: randomBytes(32).toString('base64url'),
+          webOrigin: 'http://web.test',
         }),
       ],
     }).compile();

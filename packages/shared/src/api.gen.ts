@@ -64,6 +64,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * アクセストークンの更新（F-02）
+         * @description Cookie（refresh_token）のリフレッシュトークンを新しいものに入れ替え、新しいアクセストークンを返す（機能一覧 1.2）。 入れ替え済みのトークンが出されたら、そのログインの系列のトークンをすべて失効させる（RFC 9700 4.14.2）。 本体は送らない。X-Requested-By が無い要求は 400、Sec-Fetch-Site / Origin / Referer が同じ origin を示さない要求は 403 （要件定義書 4.3 の CSRF の対処）。
+         */
+        post: operations["refreshTokens"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ログアウト（F-02）
+         * @description Cookie（refresh_token）のリフレッシュトークンの系列をすべて失効させ、Cookie を消す（機能一覧 1.2）。 トークンが無い・知らない場合も 204 を返す。本体は送らない。CSRF の対処は /auth/refresh と同じ。
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -73,7 +113,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "invalid_token" | "csrf_rejected" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -100,6 +140,14 @@ export interface components {
             /** @description 1〜128文字。下限を登録（8文字）に揃えないのは、下限を変えたときに既存の利用者がログインできなくならないようにするため */
             password: string;
         };
+        RefreshResponse: {
+            /** @description JWT（HS256）。Authorization ヘッダーに Bearer で付ける */
+            accessToken: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+            /** @description アクセストークンの有効期間（秒） */
+            expiresIn: number;
+        };
         LoginResponse: {
             /** @description JWT（HS256）。Authorization ヘッダーに Bearer で付ける */
             accessToken: string;
@@ -121,6 +169,15 @@ export interface components {
         };
     };
     responses: {
+        /** @description Sec-Fetch-Site・Origin・Referer のどれも、api と同じ origin からの要求であることを示さない（csrf_rejected） */
+        CsrfRejected: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description 入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。 どちらも送られた値を応答に載せない */
         BadRequest: {
             headers: {
@@ -178,7 +235,10 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
+        RequestedBy: "workspace-chat";
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -293,6 +353,69 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    refreshTokens: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
+                "X-Requested-By": components["parameters"]["RequestedBy"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 入れ替えた */
+            200: {
+                headers: {
+                    /** @description 新しいリフレッシュトークン（refresh_token） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description リフレッシュトークンが無い・知らない・失効済み・期限切れ、または利用者が退会済み（invalid_token）。 どれに当たったかは区別しない。Cookie を消す */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            403: components["responses"]["CsrfRejected"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
+                "X-Requested-By": components["parameters"]["RequestedBy"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ログアウトした（Cookie を消す） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["CsrfRejected"];
+            405: components["responses"]["MethodNotAllowed"];
             500: components["responses"]["InternalServerError"];
         };
     };

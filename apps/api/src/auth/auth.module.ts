@@ -15,6 +15,9 @@ import {
 } from './login-backoff';
 import { LoginController } from './login.controller';
 import { LOGIN_BACKOFF_STORE, LoginService } from './login.service';
+import { CsrfGuard } from './csrf.guard';
+import { SessionController } from './session.controller';
+import { SessionService } from './session.service';
 import { REGISTRATION_ENABLED } from './registration-enabled';
 import { RegisterController } from './register.controller';
 import { RegisterService } from './register.service';
@@ -34,10 +37,12 @@ import { ACCESS_TOKEN_TTL_SECONDS } from './session-tokens';
       }),
     }),
   ],
-  controllers: [RegisterController, LoginController],
+  controllers: [RegisterController, LoginController, SessionController],
   providers: [
     RegisterService,
     LoginService,
+    SessionService,
+    CsrfGuard,
     {
       provide: REGISTRATION_ENABLED,
       inject: [API_CONFIG],

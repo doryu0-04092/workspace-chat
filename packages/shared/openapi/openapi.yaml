@@ -126,9 +126,89 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /auth/refresh:
+    post:
+      operationId: refreshTokens
+      summary: アクセストークンの更新（F-02）
+      description: >-
+        Cookie（refresh_token）のリフレッシュトークンを新しいものに入れ替え、新しいアクセストークンを返す（機能一覧 1.2）。
+        入れ替え済みのトークンが出されたら、そのログインの系列のトークンをすべて失効させる（RFC 9700 4.14.2）。
+        本体は送らない。X-Requested-By が無い要求は 400、Sec-Fetch-Site / Origin / Referer が同じ origin を示さない要求は 403
+        （要件定義書 4.3 の CSRF の対処）。
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RequestedBy'
+      responses:
+        '200':
+          description: 入れ替えた
+          headers:
+            Set-Cookie:
+              description: 新しいリフレッシュトークン（refresh_token）
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: >-
+            リフレッシュトークンが無い・知らない・失効済み・期限切れ、または利用者が退会済み（invalid_token）。
+            どれに当たったかは区別しない。Cookie を消す
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: ログアウト（F-02）
+      description: >-
+        Cookie（refresh_token）のリフレッシュトークンの系列をすべて失効させ、Cookie を消す（機能一覧 1.2）。
+        トークンが無い・知らない場合も 204 を返す。本体は送らない。CSRF の対処は /auth/refresh と同じ。
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RequestedBy'
+      responses:
+        '204':
+          description: ログアウトした（Cookie を消す）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/CsrfRejected'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
+  parameters:
+    RequestedBy:
+      name: X-Requested-By
+      in: header
+      required: true
+      description: >-
+        Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に
+        プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3）
+      schema:
+        type: string
+        enum:
+          - workspace-chat
   # 複数のパスに共通のエラーの応答。パスに固有の意味を持つもの（403・409 など）はパスに書く。
   responses:
+    CsrfRejected:
+      description: >-
+        Sec-Fetch-Site・Origin・Referer のどれも、api と同じ origin からの要求であることを示さない（csrf_rejected）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     BadRequest:
       description: >-
         入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。
@@ -196,6 +276,8 @@ components:
             - user_id_taken
             - registration_disabled
             - invalid_credentials
+            - invalid_token
+            - csrf_rejected
             - request_rejected
             - internal_error
         message:
@@ -268,6 +350,24 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+    RefreshResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - accessToken
+        - tokenType
+        - expiresIn
+      properties:
+        accessToken:
+          description: JWT（HS256）。Authorization ヘッダーに Bearer で付ける
+          type: string
+        tokenType:
+          type: string
+          enum:
+            - Bearer
+        expiresIn:
+          description: アクセストークンの有効期間（秒）
+          type: integer
     LoginResponse:
       type: object
       additionalProperties: false
