@@ -388,6 +388,15 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 |---|---|---|
 | **yaml**（開発依存） | **^2.9.0** | 最新。テストで REST の仕様（openapi.yaml）を読み、認証を要さない操作（`security: []`）と api の `@Public()` のルートが一致することを確かめる（`apps/api/src/auth/access-token.test.ts`）。推移依存（vite）としては既に入っていたが、直接読むため明示した。**製品のコードからは読まない** |
 
+#### 追加で確認した項目 — Socket.IO の接続の入口（2026-09-12。#284）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **socket.io** | **^4.8.3** | 最新（上表「リアルタイム」の 4.x）。`@nestjs/platform-socket.io` 11.2.3 が同じ 4.8.3 を依存に持つ |
+| **@nestjs/websockets**・**@nestjs/platform-socket.io** | **^11.2.3** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（peerDependencies は `@nestjs/common` の ^11.0.0） |
+| **@socket.io/redis-adapter** | **^8.3.0** | 最新（上表「難-2」）。`ioredis` の接続をそのまま渡せる。**アダプタはコマンドの Promise を待たずに捨てる**（`publish`・終了時の `unsubscribe`）ため、Valkey が止まっていると未処理の reject でプロセスが落ちる。接続に失敗の受け手を付けてから渡す（`apps/api/src/realtime/realtime-valkey.ts`） |
+| **socket.io-client**（開発依存） | **^4.8.3** | テストで実際に接続する（Origin・トークン・タスクをまたぐ配信）。web が使うときに web の依存へ足す |
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。

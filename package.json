@@ -31,6 +31,7 @@
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.6",
     "prisma": "^7.10.0",
+    "socket.io-client": "^4.8.3",
     "testcontainers": "^12.1.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.69.0",

@@ -26,6 +26,9 @@
  * 要求とその応答（acknowledgement）・`@here` の受け取りの返事は、サーバーが自発的に配るイベントではない。**足すときは、この2つとは別の定義として置く。**
  */
 
+/** ハンドシェイクの `path`（上の「踏むと壊れる」）。サーバーとクライアントはこれを読む。 */
+export const REALTIME_PATH = '/api/socket.io/';
+
 /** 配信する変化の種類。文書が「N種類」と数えている単位。 */
 export const REALTIME_EVENT_KINDS = [
   'message:new',

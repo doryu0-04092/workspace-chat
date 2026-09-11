@@ -6,6 +6,8 @@ import { bodyReadErrorHandler } from './body-read-error';
 import { resolveApiConfig } from './config/api-config';
 import { JsonLogger } from './logging/json-logger';
 import { requestContext } from './logging/request-context';
+import { RealtimeIoAdapter } from './realtime/realtime-io.adapter';
+import { REALTIME_VALKEY_CLIENTS } from './realtime/realtime-valkey';
 
 /**
  * アプリを組み立てる入口を1つに置く。**main.ts とテストはどちらも createApp を通す**
@@ -45,5 +47,12 @@ export async function createApp(options?: NestApplicationOptions): Promise<INest
   app.use(bodyReadErrorHandler);
   app.setGlobalPrefix('api');
   app.set('trust proxy', config.trustProxyHops);
+  // WebSocket（Socket.IO）のパス・Origin・タスクをまたぐ配信は realtime/realtime-io.adapter.ts が持つ。
+  app.useWebSocketAdapter(
+    new RealtimeIoAdapter(app, {
+      webOrigin: config.webOrigin,
+      valkey: app.get(REALTIME_VALKEY_CLIENTS),
+    }),
+  );
   return app;
 }
