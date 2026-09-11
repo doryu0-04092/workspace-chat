@@ -1,4 +1,6 @@
-import { Body, Controller, ForbiddenException, Inject, Post } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Inject, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { RateLimitGuard } from '../rate-limit/rate-limit.module';
 import { REGISTRATION_ENABLED } from './registration-enabled';
 import { RegisterService, type RegisterRequest, type RegisterResponse } from './register.service';
 
@@ -15,7 +17,14 @@ export class RegisterController {
     @Inject(REGISTRATION_ENABLED) private readonly registrationEnabled: boolean,
   ) {}
 
+  /**
+   * **発信元単位で1時間に10回**（機能一覧 1.1）。ガードはハンドラより前に数えるため、409（重複）も 403（停止中）も
+   * 1回として数える——409 はユーザーID の列挙に使えるため、数えないと抑えにならない。
+   * 仕様の検証（400）はガードより前のミドルウェアで返るため、数えない（ハッシュ化に届かず、重い処理を起こさない）。
+   */
   @Post('register')
+  @UseGuards(RateLimitGuard)
+  @Throttle({ default: { limit: 10, ttl: 60 * 60 * 1000 } })
   register(@Body() body: RegisterRequest): Promise<RegisterResponse> {
     // ハッシュ化（CPU とメモリを使う）より前に止める。
     if (!this.registrationEnabled) {

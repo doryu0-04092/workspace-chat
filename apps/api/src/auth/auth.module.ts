@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
+import { RateLimitModule } from '../rate-limit/rate-limit.module';
 import { REGISTRATION_ENABLED, resolveRegistrationEnabled } from './registration-enabled';
 import { RegisterController } from './register.controller';
 import { RegisterService } from './register.service';
 
 @Module({
+  imports: [RateLimitModule],
   controllers: [RegisterController],
   providers: [
     RegisterService,

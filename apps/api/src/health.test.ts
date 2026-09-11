@@ -17,6 +17,7 @@ describe('GET /api/health（F-39）', () => {
     // アプリの組み立てには接続先が要る（prisma.service.ts）。**繋がらない宛先を渡す**——
     // 死活確認が DB に問い合わせれば、ここで失敗する。
     vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
+    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
     app = await createApp({ logger: false });
     await app.listen(0, '127.0.0.1');
     const { port } = app.getHttpServer().address() as AddressInfo;

@@ -1,6 +1,8 @@
 import type { INestApplication, NestApplicationOptions } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { resolveTrustProxyHops } from './rate-limit/rate-limit-config';
 
 /**
  * アプリを組み立てる入口を1つに置く。**main.ts とテストはどちらも createApp を通す**
@@ -11,9 +13,13 @@ import { AppModule } from './app.module';
  * CloudFront は `/api/*` だけを ALB へ振り分け、それ以外は静的配信のバケットへ向かう。
  * `/api` の外にルートを置くと ALB に届かず、アプリ側のログには何も出ない。
  * 外すと health.test.ts が落ちる。
+ *
+ * **発信元（`req.ip`）は `trust proxy` で決まる**（段数は TRUST_PROXY_HOPS。rate-limit-config.ts）。
+ * レート制限はこれで数えるため、段数を誤ると偽の発信元を名乗られるか、全員が1つの発信元として数えられる。
  */
 export async function createApp(options?: NestApplicationOptions): Promise<INestApplication> {
-  const app = await NestFactory.create(AppModule, options);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, options);
   app.setGlobalPrefix('api');
+  app.set('trust proxy', resolveTrustProxyHops(process.env.TRUST_PROXY_HOPS));
   return app;
 }

@@ -148,9 +148,20 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description ユーザーID が既に使われている（大文字小文字だけの違いも同じ ID と見なす）。 代償: どのユーザーID が登録済みかがこの応答で分かり、列挙に使える（ログインは区別しない。機能一覧 1.2）。 利用者が別の ID を選び直せることを優先した。列挙は発信元単位のレート制限（機能一覧 1.1）で抑える */
+            /** @description ユーザーID が既に使われている（大文字小文字だけの違いも同じ ID と見なす）。 代償: どのユーザーID が登録済みかがこの応答で分かり、列挙に使える（ログインは区別しない。機能一覧 1.2）。 利用者が別の ID を選び直せることを優先した。列挙は発信元単位のレート制限（429。1時間に10回）で抑える */
             409: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 発信元単位のレート制限を超えた（1時間に10回。機能一覧 1.1）。201・403・409 の要求も1回として数える。 入力の検証で落ちた要求（400）は数えない */
+            429: {
+                headers: {
+                    /** @description 再び受け付けるまでの秒数 */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

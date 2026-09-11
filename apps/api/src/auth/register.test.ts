@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app-setup';
 import { PrismaService } from '../prisma.service';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
+import { startValkey } from '../testing/valkey';
+import type { StartedTestContainer } from 'testcontainers';
 import { canonicalRecoveryCode } from './recovery-code';
 
 type RegisterResponses = paths['/auth/register']['post']['responses'];
@@ -75,16 +77,31 @@ async function startApp(logger: LoggerService): Promise<{ app: INestApplication;
   return { app, base: `http://127.0.0.1:${port}` };
 }
 
-function postRegister(base: string, body: unknown): Promise<Response> {
+/** 繋がらない Valkey の宛先。レート制限はメモリへ迂回する。 */
+const UNREACHABLE_REDIS_URL = 'redis://127.0.0.1:9';
+
+let ipSequence = 0;
+/**
+ * 要求ごとに違う発信元を作る（文書用の IPv6 の範囲 2001:db8::/32）。
+ * **レート制限は発信元単位で数えるため、同じ発信元から送り続けると、登録そのものを見るテストが 429 で落ちる。**
+ * アプリは TRUST_PROXY_HOPS=1 で起動し、X-Forwarded-For の最後の値を発信元として読む。
+ */
+function nextIp(): string {
+  ipSequence += 1;
+  return `2001:db8::${ipSequence.toString(16)}`;
+}
+
+function postRegister(base: string, body: unknown, ip: string = nextIp()): Promise<Response> {
   return fetch(`${base}/api/auth/register`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
     body: JSON.stringify(body),
   });
 }
 
 describe('POST /api/auth/register（F-01 / F-03 / F-37）', () => {
   let container: StartedPostgreSqlContainer;
+  let valkey: StartedTestContainer;
   let app: INestApplication;
   let base: string;
   let prisma: PrismaService;
@@ -92,7 +109,12 @@ describe('POST /api/auth/register（F-01 / F-03 / F-37）', () => {
 
   beforeAll(async () => {
     container = await startMigratedPostgres();
+    const started = await startValkey();
+    valkey = started.container;
     vi.stubEnv('DATABASE_URL', container.getConnectionUri());
+    vi.stubEnv('REDIS_URL', started.url);
+    vi.stubEnv('TRUST_PROXY_HOPS', '1');
+    vi.stubEnv('API_TASK_COUNT', undefined);
     vi.stubEnv('REGISTRATION_ENABLED', undefined);
     ({ app, base } = await startApp(logger));
     prisma = app.get(PrismaService);
@@ -101,6 +123,7 @@ describe('POST /api/auth/register（F-01 / F-03 / F-37）', () => {
   afterAll(async () => {
     await app?.close();
     await container?.stop();
+    await valkey?.stop();
     vi.unstubAllEnvs();
   });
 
@@ -294,6 +317,8 @@ describe('新規登録の停止（REGISTRATION_ENABLED=false。要件定義書 5
   beforeAll(async () => {
     container = await startMigratedPostgres();
     vi.stubEnv('DATABASE_URL', container.getConnectionUri());
+    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
+    vi.stubEnv('TRUST_PROXY_HOPS', '1');
     vi.stubEnv('REGISTRATION_ENABLED', 'false');
     ({ app, base } = await startApp(new CapturingLogger()));
   }, POSTGRES_STARTUP_TIMEOUT_MS);
@@ -328,6 +353,8 @@ describe('DB に繋がらないとき', () => {
 
   beforeAll(async () => {
     vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
+    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
+    vi.stubEnv('TRUST_PROXY_HOPS', '1');
     vi.stubEnv('REGISTRATION_ENABLED', undefined);
     ({ app, base } = await startApp(logger));
   });
@@ -352,5 +379,123 @@ describe('DB に繋がらないとき', () => {
     const all = `${logger.lines.join('\n')}\n${text}`;
     expect(all).not.toContain(password);
     expect(all).not.toContain('$argon2');
+  });
+});
+
+/** 新規登録のレート制限の上限（機能一覧 1.1。発信元単位で1時間に10回）。 */
+const REGISTER_LIMIT = 10;
+
+function registerBody(): { userId: string; password: string; displayName: string } {
+  return { userId: uniqueUserId(), password: 'rate-limit-password', displayName: '制限' };
+}
+
+// 機能一覧 1.1「新規登録に発信元単位のレート制限がかかる」。状態は Valkey に置き、タスクをまたいで数える。
+describe('新規登録のレート制限（発信元単位）', () => {
+  let postgres: StartedPostgreSqlContainer;
+  let valkey: StartedTestContainer;
+  let taskA: { app: INestApplication; base: string };
+  let taskB: { app: INestApplication; base: string };
+
+  beforeAll(async () => {
+    postgres = await startMigratedPostgres();
+    const started = await startValkey();
+    valkey = started.container;
+    vi.stubEnv('DATABASE_URL', postgres.getConnectionUri());
+    vi.stubEnv('REDIS_URL', started.url);
+    vi.stubEnv('TRUST_PROXY_HOPS', '1');
+    vi.stubEnv('API_TASK_COUNT', '2');
+    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    // 同じ Valkey に繋ぐ2つのアプリ。本番の2タスク（tech-stack.md）の代わり。
+    taskA = await startApp(new CapturingLogger());
+    taskB = await startApp(new CapturingLogger());
+  }, POSTGRES_STARTUP_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await taskA?.app.close();
+    await taskB?.app.close();
+    await postgres?.stop();
+    await valkey?.stop();
+    vi.unstubAllEnvs();
+  });
+
+  it('同じ発信元から上限を超えると 429（too_many_requests）と Retry-After（秒）を返し、行を作らない', async () => {
+    const ip = nextIp();
+    for (let i = 0; i < REGISTER_LIMIT; i++) {
+      expect((await postRegister(taskA.base, registerBody(), ip)).status).toBe(201);
+    }
+    const body = registerBody();
+    const res = await postRegister(taskA.base, body, ip);
+
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as ErrorResponse).code).toBe('too_many_requests');
+    const retryAfter = Number(res.headers.get('retry-after'));
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(3600);
+    expect(await taskA.app.get(PrismaService).user.count({ where: { loginId: body.userId } })).toBe(
+      0,
+    );
+  });
+
+  it('別の発信元は止めない', async () => {
+    const blocked = nextIp();
+    for (let i = 0; i <= REGISTER_LIMIT; i++)
+      await postRegister(taskA.base, registerBody(), blocked);
+    expect((await postRegister(taskA.base, registerBody(), nextIp())).status).toBe(201);
+  });
+
+  // Valkey に置く理由。各タスクのメモリで数えると、ALB の振り分けで上限が「上限 × タスク数」になる。
+  it('タスクをまたいで数える', async () => {
+    const ip = nextIp();
+    for (let i = 0; i < REGISTER_LIMIT; i++) {
+      const task = i % 2 === 0 ? taskA : taskB;
+      expect((await postRegister(task.base, registerBody(), ip)).status).toBe(201);
+    }
+    expect((await postRegister(taskA.base, registerBody(), ip)).status).toBe(429);
+    expect((await postRegister(taskB.base, registerBody(), ip)).status).toBe(429);
+  });
+});
+
+// Valkey が止まっている間は、各タスクのメモリで数える（決定・2026-09-11・依頼側）。止めずに、上限をタスク数で割る。
+describe('Valkey に繋がらないときの新規登録のレート制限', () => {
+  let postgres: StartedPostgreSqlContainer;
+  let app: INestApplication;
+  let base: string;
+  const logger = new CapturingLogger();
+
+  beforeAll(async () => {
+    postgres = await startMigratedPostgres();
+    vi.stubEnv('DATABASE_URL', postgres.getConnectionUri());
+    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
+    vi.stubEnv('TRUST_PROXY_HOPS', '1');
+    vi.stubEnv('API_TASK_COUNT', '2');
+    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    ({ app, base } = await startApp(logger));
+  }, POSTGRES_STARTUP_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await app?.close();
+    await postgres?.stop();
+    vi.unstubAllEnvs();
+  });
+
+  it('登録は止めずに、上限をタスク数で割って数え、切り替えたことを1回だけログに残す', async () => {
+    const ip = nextIp();
+    const perTask = REGISTER_LIMIT / 2;
+    for (let i = 0; i < perTask; i++) {
+      expect((await postRegister(base, registerBody(), ip)).status).toBe(201);
+    }
+    const res = await postRegister(base, registerBody(), ip);
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get('retry-after'))).toBeLessThanOrEqual(3600);
+
+    // 起動時に繋がらなかったことと、要求で迂回に切り替えたことを、それぞれ1回だけ残す。
+    const atStartup = logger.lines.filter((line) =>
+      line.includes('Valkey に接続できないまま起動する'),
+    );
+    const switched = logger.lines.filter((line) => line.includes('Valkey に書けないため'));
+    expect(atStartup).toHaveLength(1);
+    expect(switched).toHaveLength(1);
+    expect(atStartup[0]?.startsWith('warn ')).toBe(true);
+    expect(switched[0]?.startsWith('warn ')).toBe(true);
   });
 });

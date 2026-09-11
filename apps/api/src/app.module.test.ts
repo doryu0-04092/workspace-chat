@@ -16,6 +16,7 @@ describe('AppModule', () => {
     //
     // 組み立てには接続先が要る（prisma.service.ts）。接続は最初の問い合わせまで張られないため、繋がらない宛先でよい。
     vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
+    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
