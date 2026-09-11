@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import type { AddressInfo } from 'node:net';
 import type { INestApplication } from '@nestjs/common';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app-setup';
 import { HealthController } from './health.controller';
 
@@ -14,6 +14,10 @@ describe('GET /api/health（F-39）', () => {
   let base: string;
 
   beforeAll(async () => {
+    // アプリの組み立てには接続先が要る（prisma.service.ts）。**繋がらない宛先を渡す**——
+    // 死活確認が DB に問い合わせれば、ここで失敗する。
+    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
+    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
     app = await createApp({ logger: false });
     await app.listen(0, '127.0.0.1');
     const { port } = app.getHttpServer().address() as AddressInfo;
@@ -22,6 +26,7 @@ describe('GET /api/health（F-39）', () => {
 
   afterAll(async () => {
     await app?.close();
+    vi.unstubAllEnvs();
   });
 
   it('認証情報（Authorization ヘッダー・Cookie）が無くても 200 を返す', async () => {

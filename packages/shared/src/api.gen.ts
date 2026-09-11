@@ -24,10 +24,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 新規登録（F-01 / F-03 / F-37）
+         * @description 認証を要さない。登録と同時にログイン状態にはしない（トークンは返さない）。 リカバリーコードはこの応答でだけ返し、以後は再表示できない（機能一覧 1.1）。
+         */
+        post: operations["register"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ErrorResponse: {
+            code: string;
+            message: string;
+            /** @description 入力の検証で落ちた箇所。送られた値は含めない */
+            errors?: {
+                path: string;
+                message: string;
+            }[];
+        };
+        RegisterRequest: {
+            /** @description 英数字とアンダースコアのみ、3〜30文字（機能一覧 1.1） */
+            userId: string;
+            /** @description 8〜128文字（機能一覧 1.1。上限は決定・2026-09-11・依頼側）。文字数はコードポイントで数える */
+            password: string;
+            /** @description 1〜50文字。空白だけは不可（機能一覧 1.1。決定・2026-09-11・依頼側。列の型にも入れてある） */
+            displayName: string;
+        };
+        RegisterResponse: {
+            user: {
+                /** Format: uuid */
+                id: string;
+                userId: string;
+                displayName: string;
+            };
+            /** @description Crockford の Base32 で16文字（80ビット）を4文字ずつハイフンで区切る */
+            recoveryCode: string;
+        };
         HealthResponse: {
             /** @enum {string} */
             status: "ok";
@@ -57,6 +104,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    register: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterRequest"];
+            };
+        };
+        responses: {
+            /** @description 登録した */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisterResponse"];
+                };
+            };
+            /** @description 入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。 どちらも送られた値を応答に載せない */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 新規登録を停止している（要件定義書 5.1） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description ユーザーID が既に使われている（大文字小文字だけの違いも同じ ID と見なす）。 代償: どのユーザーID が登録済みかがこの応答で分かり、列挙に使える（ログインは区別しない。機能一覧 1.2）。 利用者が別の ID を選び直せることを優先した。列挙は発信元単位のレート制限（429。1時間に10回）で抑える */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 本体が大きすぎる（payload_too_large。上限は Nest の JSON の読み取りの既定の 100kb） */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 発信元単位のレート制限を超えた（1時間に10回。機能一覧 1.1）。201・403・409 の要求も1回として数える。 入力の検証で落ちた要求（400）は数えない */
+            429: {
+                headers: {
+                    /** @description 再び受け付けるまでの秒数 */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

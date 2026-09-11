@@ -22,8 +22,146 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+  /auth/register:
+    post:
+      operationId: register
+      summary: 新規登録（F-01 / F-03 / F-37）
+      description: >-
+        認証を要さない。登録と同時にログイン状態にはしない（トークンは返さない）。
+        リカバリーコードはこの応答でだけ返し、以後は再表示できない（機能一覧 1.1）。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: 登録した
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          description: >-
+            入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。
+            どちらも送られた値を応答に載せない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: 本体が大きすぎる（payload_too_large。上限は Nest の JSON の読み取りの既定の 100kb）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 新規登録を停止している（要件定義書 5.1）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: >-
+            ユーザーID が既に使われている（大文字小文字だけの違いも同じ ID と見なす）。
+            代償: どのユーザーID が登録済みかがこの応答で分かり、列挙に使える（ログインは区別しない。機能一覧 1.2）。
+            利用者が別の ID を選び直せることを優先した。列挙は発信元単位のレート制限（429。1時間に10回）で抑える
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: >-
+            発信元単位のレート制限を超えた（1時間に10回。機能一覧 1.1）。201・403・409 の要求も1回として数える。
+            入力の検証で落ちた要求（400）は数えない
+          headers:
+            Retry-After:
+              description: 再び受け付けるまでの秒数
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   schemas:
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        errors:
+          description: 入力の検証で落ちた箇所。送られた値は含めない
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - path
+              - message
+            properties:
+              path:
+                type: string
+              message:
+                type: string
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+        - password
+        - displayName
+      properties:
+        userId:
+          description: 英数字とアンダースコアのみ、3〜30文字（機能一覧 1.1）
+          type: string
+          pattern: '^[A-Za-z0-9_]{3,30}$'
+        password:
+          description: >-
+            8〜128文字（機能一覧 1.1。上限は決定・2026-09-11・依頼側）。文字数はコードポイントで数える
+          type: string
+          minLength: 8
+          maxLength: 128
+        displayName:
+          description: 1〜50文字。空白だけは不可（機能一覧 1.1。決定・2026-09-11・依頼側。列の型にも入れてある）
+          type: string
+          minLength: 1
+          maxLength: 50
+          pattern: '\S'
+    RegisterResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - user
+        - recoveryCode
+      properties:
+        user:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - userId
+            - displayName
+          properties:
+            id:
+              type: string
+              format: uuid
+            userId:
+              type: string
+            displayName:
+              type: string
+        recoveryCode:
+          description: Crockford の Base32 で16文字（80ビット）を4文字ずつハイフンで区切る
+          type: string
+          pattern: '^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$'
     HealthResponse:
       type: object
       additionalProperties: false

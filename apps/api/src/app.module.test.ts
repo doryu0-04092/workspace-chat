@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { REALTIME_EVENT_KINDS } from '@workspace-chat/shared';
 import { AppModule } from './app.module';
 
@@ -13,6 +13,10 @@ describe('AppModule', () => {
     //
     // コンストラクタインジェクションが成立することは、変換の設定に対する
     // 検査として dependency-injection.test.ts が持つ（#14）。
+    //
+    // 組み立てには接続先が要る（prisma.service.ts）。接続は最初の問い合わせまで張られないため、繋がらない宛先でよい。
+    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
+    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
@@ -20,6 +24,7 @@ describe('AppModule', () => {
 
   afterAll(async () => {
     await app?.close();
+    vi.unstubAllEnvs();
   });
 
   it('起動する', () => {

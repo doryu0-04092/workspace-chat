@@ -111,13 +111,13 @@ services:
     # Redis 互換のコマンド名（実体は valkey-server・valkey-cli へのシンボリックリンク）である。
     # 実行して確認した（2026-09-06。redis-cli --version は valkey-cli 8.1.10 を返した）。
     image: valkey/valkey:8-alpine
-    # 永続化を明示的に切る。用途は Pub/Sub による配信共有だけで、
+    # 永続化を明示的に切る。用途は Pub/Sub による配信共有と、期限つきのレート制限の回数だけで、
     # データを蓄積しない（docs/tech-stack.md）。
     #
     # 在席はここには入らない。各タスクのメモリにあり、Valkey には保持しない
     # （docs/requirements.md 4.2）。
     #
-    # 代償: 再起動で配信の共有が一度切れる。蓄積した状態は無いため失われるものが無い。
+    # 代償: 再起動で配信の共有が一度切れ、レート制限の回数は数え直しになる。作り直せない状態は無い。
     command:
       - redis-server
       - --save

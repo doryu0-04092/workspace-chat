@@ -10,11 +10,17 @@
     "dev": "node --watch dist/main.js"
   },
   "dependencies": {
+    "@nest-lab/throttler-storage-redis": "^1.2.0",
     "@nestjs/common": "^11.2.3",
     "@nestjs/core": "^11.2.3",
     "@nestjs/platform-express": "^11.2.3",
+    "@nestjs/throttler": "^6.5.0",
+    "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@workspace-chat/shared": "*",
+    "argon2": "^0.45.1",
+    "express-openapi-validator": "^5.6.2",
+    "ioredis": "^5.11.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },

@@ -49,7 +49,7 @@
                                           ├─ /api/*   ──→ [ALB] ──→ [NestJS]  ── [PostgreSQL 17 + pg_bigm]
                                           │              REST と WebSocket    ECS Fargate    RDS
                                           │              （/api/socket.io/）      │
-                                          │                                       ├─ [Valkey] ElastiCache（配信の共有）
+                                          │                                       ├─ [Valkey] ElastiCache（配信の共有・レート制限の回数）
                                           │                                       └─ [S3]     添付（アップロードは
                                           │                                                    署名付き URL で隔離用の接頭辞へ直接 PUT。#176）
                                           ├─ /files/* ──→ [S3]  添付の配信
@@ -193,7 +193,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。TLS 終端。**ブラウザ通知に必要な HTTPS を提供する** |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
-| **配信の共有** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
+| **配信の共有・レート制限の回数** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。**レート制限の回数も置く**（`@nest-lab/throttler-storage-redis` が `ioredis` の接続で Lua の `eval` を使う。#245）。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
 | 添付ファイル | **S3 + CloudFront の署名付き Cookie**（配信）＋ **S3 への直接アップロード用の署名付き URL**（アップロード） | パブリックアクセスは全面遮断。**添付の経路は2つあり、扱いが逆になる**（[要件定義書](requirements.md) 4.3 の表が「アップロード（**配信とは別の経路**）」として区別している）。**配信**は **S3 への直接アクセスを行わず、CloudFront 経由のみ**とする。**配信で**署名付き URL を採らない理由は [要件定義書](requirements.md) 4.3。**アップロードは別の経路であり、ブラウザから S3 へ直接 PUT する署名付き URL を使う**（[機能一覧](features.md) 11.1 の「アップロード用の署名付き URL の発行にレート制限がかかる」が前提にしている経路である）。**ブラウザ（署名付き URL）から書けるのは隔離用の接頭辞 `quarantine/` だけであり、配信用のキーへ書けるのは確定を行うサーバーの権限だけである**（バケットポリシーは、接頭辞ではなく**書く主体**で分けて起こす——確定のコピーも宛先に `s3:PutObject` を要するため、接頭辞だけで閉じると確定が拒否される。**主体を分けるには署名者を分ける**——署名付き URL への PUT は、URL を署名したプリンシパルとして認証される（AWS 公式「The credentials used by the presigned URL are those of the AWS Identity and Access Management (IAM) principal who generated the URL.」）。**アップロード URL の署名には、`quarantine/` 配下にだけ `s3:PutObject` を持つ専用のプリンシパルを使い、確定を行うプリンシパル（`quarantine/` の `GetObject`・`GetObjectVersion`（版を指定した読み出しに要る——S3 公式 GetObject「If you include a `versionId` in your request header, you must have the `s3:GetObjectVersion` permission to access a specific version of an object.」）と `DeleteObject`、配信用の接頭辞の `PutObject`——**検証に通らなかったものと、コピーの済んだものを隔離用のキーから削除する**ため。[機能一覧](features.md) 11.1）と別にする**。同じプリンシパルで両方を行うと、ブラウザからの PUT も配信用のキーへ通る。[機能一覧](features.md) 11.1。#211）。**`quarantine/` にだけライフサイクル（`Expiration` と `NoncurrentVersionExpiration`）を置き、フィルターは `quarantine/` を明示する**——ライフサイクルの削除はバケットポリシーでは止められず、接頭辞を誤ると配信用の添付が消える（同 11.1）。**アバター画像も同じバケットの別の接頭辞に置く**（隔離用は `quarantine/avatars/`、配信用は `avatars/`。アップロード URL の署名と確定の主体の分け方は添付と同じであり、確定のプリンシパルの配信用の接頭辞の `PutObject` には `avatars/` を含む。[機能一覧](features.md) 1.3）。**バケットを「CloudFront の OAC からのみ」に閉じると、この PUT が通らなくなる**（#176） |
 
 #### WebSocket と複数インスタンスの問題
@@ -224,7 +224,7 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 |---|---|---|
 | **ECS Fargate** | **0.25 vCPU / 0.5 GB × 2 タスク** | **タスク数を 2 にするのは、複数インスタンス構成が実際に動くことを検証するためである。** 1 タスクでは ElastiCache を介した配信共有（難-2）が机上の設計に留まり、**本番で初めて壊れる**。同時接続 50 は Node.js の 1 プロセスで十分に扱える規模であり、vCPU は最小で足りる |
 | **RDS PostgreSQL 17** | **db.t4g.micro（2 vCPU / 1 GB）/ gp3 20 GB / Single-AZ** | メッセージ 100,000 件は本文込みでも数十 MB 規模であり、pg_bigm の索引を含めてもストレージ 20 GB に収まる。**Single-AZ は学習用途としての割り切り**（[要件定義書](requirements.md) 4.2） |
-| **ElastiCache for Valkey** | **cache.t4g.micro（0.5 GB）× 1 ノード** | 用途は **Pub/Sub による配信共有のみ**で、データを蓄積しない（**在席は保持しない**。[要件定義書](requirements.md) 4.2）。**レプリカは置かない**（停止すると複数タスク間の配信が止まる。これも割り切りである） |
+| **ElastiCache for Valkey** | **cache.t4g.micro（0.5 GB）× 1 ノード** | 用途は **Pub/Sub による配信共有と、期限つきのレート制限の回数だけ**で、データを蓄積しない（**在席は保持しない**。[要件定義書](requirements.md) 4.2）。**レプリカは置かない**（停止すると複数タスク間の配信が止まり、レート制限は各タスクのメモリでの計数に落ちる。これも割り切りである） |
 | **ALB** | 1 台 | TLS 終端と WebSocket の維持。**ターゲットグループのヘルスチェックのパスは `/api/health`**（F-39。#77 の決定によりアプリ側のパスが `/api` を持つ） |
 | **S3** | 上限を設けない（実測で監視） | 添付は画像 10 MB / 動画 100 MB / 文書・圧縮 25 MB を上限とする（[要件定義書](requirements.md) 4.3） |
 | **CloudFront** | 1 ディストリビューション / **オリジンを3つ**（フロントの静的配信のバケット、**添付のバケット**、**ALB**） / **ビヘイビアを4つに分ける**（**`/api/*` → ALB** / `/files/*` → **添付のバケット** / **`/avatars/*` → 添付のバケット**（パスを剥がさない。**オリジンへは正規化の前のパスが渡り、`avatars/` の外のキーに届かないかは未確認であり、[要件定義書](requirements.md) 4.3 の「確かめる URL の形」の URL で実際に配信して確かめる**。[要件定義書](requirements.md) 4.3） / 既定の `*` → **静的配信のバケット**。**添付のバケットへは `/files/*` と `/avatars/*` からしか到達できない**（**CloudFront の内部の限定であって、バケット側で到達経路を閉じるという意味ではない**——**バケットを「CloudFront の OAC からのみ」に閉じると、アップロードの署名付き PUT が通らなくなる**。#176）。[要件定義書](requirements.md) 4.3） / **`/files/*` と `/avatars/*` のビヘイビアに応答ヘッダーのポリシー SecurityHeadersPolicy を付ける**（すべての応答に `X-Content-Type-Options: nosniff`。[機能一覧](features.md) 11.1・1.3） / **viewer-request の関数を1つ**（`/files` を剥がす。[要件定義書](requirements.md) 4.3。**これが無いと添付が `NoSuchKey` になり、参加者でも取得できない**。**署名付き Cookie の照合と両立するかは未確認であり、実際に配信して確かめる**。**オリジンへは正規化の前のパスが渡り、`/files/*` の内側で Cookie の対象の外のキーに届かないかも未確認であり、同じく「確かめる URL の形」の URL で配信して確かめる**） | フロントの静的配信・添付ファイルの配信・**API と WebSocket** を1つのドメインで兼ねる。**API を同一ドメインに置くのは、署名付き Cookie をこのホストに限って発行するためである**（#77 の決定）——署名付き Cookie は CloudFront のドメインに対して設定される必要があるが、発行するのは API であり、API が別サブドメインにあると `Domain` を広げない限り届かない。[要件定義書](requirements.md) 4.3 は「**サブドメインに Cookie を書ける攻撃者に破られる**」を明記してこの範囲を警戒しており、別サブドメインを採ると自分でその範囲を広げることになる。**`/api/*` はパスを剥がさずオリジンへ渡す**（アプリ側のパスも `/api` を含む）。**`/api/*` は GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE のすべてを許可する**（`Allowed HTTP methods`。[AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesCacheBehavior.html) は3つの選択肢しか持たず、**POST を通すのはこれだけである**。狭い側を選ぶと `POST /api/auth/login` がオリジンに届かず、**認証が成立しないまま、原因がエッジ側にあるためアプリのログには何も出ない**）。**`/api/*` はキャッシュしない**（`CachingDisabled` 相当）**、**すべてのビューアーのヘッダー・Cookie・クエリ文字列をオリジンへ転送する**（origin request policy の `AllViewer` 相当）——**転送するものを数えて列挙しない。** `Authorization` と Cookie とクエリ文字列だけを挙げると、**WebSocket のハンドシェイクが要求する `Upgrade` / `Connection` / `Sec-WebSocket-Key` / `Sec-WebSocket-Version` が落ちる**（RFC 6455）。**Socket.IO は既定で HTTP long-polling から入るため、繋がらないのではなく「常時 long-polling のまま」に静かに落ちる**（#77）——**CloudFront は既定でこれらをオリジンへ渡さない**（[AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/controlling-origin-requests.html)）。**これが無いと認証がまったく成立せず、さらに `Authorization` がキャッシュキーに入らないまま GET の応答がエッジに残り、非参加者へ返りうる**（[REVIEW.md](../REVIEW.md) 2.1 経路1）。**署名を要求するのは添付のパス（`/files/*`）とアバターのパス（`/avatars/*`）のみ**とする（**署名付き Cookie の対象は `/files/workspace/{ws}/channel/{ch}/*` と `/avatars/*`**。[要件定義書](requirements.md) 4.3）。ディストリビューション全体に署名を要求すると、**署名付き Cookie を持たない未ログインの利用者がログイン画面すら開けなくなる** |
@@ -334,8 +334,9 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 >
 > **`DATABASE_URL` の変数名は README と `.env.example` に記載した**（値は書かない。
 > CLAUDE.md 禁止事項）。**コードの中で**この変数名を参照しているのは、
-> 現時点では `prisma.config.ts` と
-> [prisma-schema.test.ts](../apps/api/src/prisma-schema.test.ts) である。
+> 現時点では `prisma.config.ts`・api の [prisma.service.ts](../apps/api/src/prisma.service.ts)
+> （#245）・テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts) と、
+> アプリを組み立てるテスト（接続しない宛先を渡す）である。
 
 #### 追加で確認した項目 — REST の型の生成（2026-09-11。#243）
 
@@ -345,6 +346,20 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 | 対象 | 採用 | 判断 |
 |---|---|---|
 | **openapi-typescript** | **^7.13.0** | 最新。型だけを生成する（実行時のコードを出さない）。**採らなかったもの**: `@nestjs/swagger`（デコレーターから仕様を作るため、仕様を唯一の正とする向きと逆）／`@hey-api/openapi-ts`（型に加えて SDK などを出し、型の生成に対して機能が多い） |
+
+#### 追加で確認した項目 — 新規登録（2026-09-11。#245）
+
+F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の dependencies）。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **argon2** | **^0.45.1** | 最新。パスワードとリカバリーコードの Argon2id のハッシュ化（上表「パスワード」）。パラメータは OWASP Password Storage Cheat Sheet の最小構成「m=19456 (19 MiB), t=2, p=1」を**コードで明示する**（ライブラリの既定値 m=65536, t=3, p=4 に寄りかからない。`apps/api/src/auth/secret-hash.ts`）。**ペッパーは使わない**——同シートはペッパーを「secrets vaults」や HSM に置くとしており、この構成にはまだその置き場が無い。**代償: DB のハッシュが漏れたとき、オフラインの総当たりをペッパーで遅らせられない**（Argon2id のコストだけが頼りになる） |
+| **@prisma/adapter-pg** | **^7.10.0** | `prisma` と同じ版。**Prisma 7 のクライアントはドライバアダプタを必須とする**。`pg` を依存として引く |
+| **express-openapi-validator** | **^5.6.2** | 最新。要求を REST の仕様どおりか確かめる（要件定義書 4.7 の「仕様を唯一の正とする」をサーバーの入力の側に当てる）。OpenAPI 3.1 は 5.4.0 以降、Express 5（NestJS 11 の既定）は 5.5.0 以降で対応と README が明記している。**`fileUploader: false` で使う**——この依存は `multer` を引き（`@nestjs/platform-express` が完全固定する 2.2.0 に重なる）、multipart を受け取らせると [scripts/audit-allowlist.json](../scripts/audit-allowlist.json) の until「サーバーが multipart を受け取る経路を実装するまで」の前提が崩れる。**採らなかったもの**: `ajv` を直接使って Pipe を自作する（パス・メソッド・メディア型の突き合わせを自前で書くことになる）／`openapi-backend`（NestJS への組み込みの公式の例が無い） |
+| **@nestjs/throttler** | **^6.5.0** | 最新。レート制限（上表「レート制限」の新規登録の分）。ガードは全体に掛けず、ルートごとに `@UseGuards` と `@Throttle` で上限を決める。**同梱のメモリの保存先（`ThrottlerStorageService`）は使わない**——記録を Map から消さず、要求1回ごとにタイマーを1つ作るため、発信元を変えながら叩かれるとメモリが増え続ける（`apps/api/src/rate-limit/memory-rate-limit-storage.ts` に自前で置いた） |
+| **@nest-lab/throttler-storage-redis** | **^1.2.0** | 最新。状態を Valkey に置き、タスクをまたいで数える（Lua の `eval` で原子的に数える）。`@nestjs/throttler` の >=6.0.0 を受け入れる。旧 `nestjs-throttler-storage-redis` は npm で非推奨 |
+| **ioredis** | **^5.11.1** | 上の保存先が要求する接続（peerDependencies の >=5.0.0）。**`enableOfflineQueue: false`・`commandTimeout` で、Valkey が止まっているときにすぐ失敗させる**（既定は接続が切れている間のコマンドを溜め、要求が詰まる） |
+| **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動する（`GenericContainer`）。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
 
 #### TypeScript 7 を採らない理由
 
@@ -427,7 +442,9 @@ NestJS のコンストラクタインジェクションは、この指定が出�
   `shared_preload_libraries=pg_bigm` も渡す必要がある。
   **環境は「ローカル・RDS」の2つではなく、テストを含めて3つある**
 - **ElastiCache で AUTH トークンと転送時暗号化（`rediss://`）を使うかを決め、
-  `@socket.io/redis-adapter` がその接続で動くことを確認する。**
+  `@socket.io/redis-adapter` と、レート制限の接続（`apps/api/src/rate-limit/rate-limit.module.ts` の `ioredis`。`REDIS_URL`）の
+  両方がその接続で動くことを確認する。** **レート制限の側は、繋がらなくても api が止まらずに各タスクのメモリへ迂回し、
+  アラートにもしない**（[要件定義書](requirements.md) 4.2）**ため、この確認を飛ばすと取り違えに誰も気づけない**
   **ローカルの Valkey は無認証の `redis://` であり、この経路を一度も通らない**
   （下記「ローカルの Valkey に認証を掛けない」）
 
@@ -490,7 +507,8 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 
 **理由。** Amazon ElastiCache が提供する Redis OSS のエンジン版は **7.1 が上限**であり、
 **7.2 以降は Valkey としてのみ提供される。** AWS は新規の構築に Valkey を推奨している。
-`@socket.io/redis-adapter`（Pub/Sub）の用途は Redis 7.x の範囲に収まるため、
+`@socket.io/redis-adapter`（Pub/Sub）とレート制限（`@nest-lab/throttler-storage-redis` の Lua の `eval`。#245）の用途は Redis 7.x の範囲に収まるため
+（レート制限が `valkey/valkey:8-alpine` で動くことはテストで確かめている）、
 **現時点で動かないものは無い。** それでも移す理由は、Redis OSS 7.x が AWS 側で新機能の
 開発対象から外れていること、および価格である。
 
@@ -503,7 +521,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 **ElastiCache for Valkey が実際にどの版を提供するかは未確認**であり、Terraform で環境を作る段階で確認する。
 
 > **代償を明記する。** **Valkey は Redis のフォークである。** 現時点では Redis 互換の機能
-> （Pub/Sub）しか使っておらず問題は無いが、**Redis 8 以降で入る、
+> （Pub/Sub と Lua の `eval`）しか使っておらず問題は無いが、**Redis 8 以降で入る、
 > Valkey に取り込まれない独自機能が必要になった場合、ElastiCache 上では Redis 側へ戻れない。**
 > ElastiCache の Redis OSS は 7.1 が上限のままであり、Valkey を選んだ時点で
 > それ以降の Redis の機能へのアクセスは手放している。
@@ -515,7 +533,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 **127.0.0.1 にだけ束縛しており、ローカルでは守るものが無い**ためである。
 
 > **代償を明記する。** 本番の ElastiCache は **AUTH トークン**と**転送時暗号化**（`rediss://`）を持つ。
-> ローカルが無認証の `redis://` だと、**アプリの Redis クライアント設定に認証と TLS の経路が
+> ローカルが無認証の `redis://` だと、**アプリの Redis クライアント設定（Socket.IO のアダプタと、レート制限の `ioredis` の接続）に認証と TLS の経路が
 > 一度も現れない。** PostgreSQL 側はパスワードのずれをヘルスチェックが検知するところまで
 > 作ってあるが、**Valkey にはそれに対応するものが無く、作りようもない**（掛ける認証が無いため）。
 > 露見するのは Terraform で環境を作ったあと、**版差と同じく最も遅い段階**である。
@@ -526,7 +544,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 #### ローカルの Valkey に永続化を持たせない
 
 `compose.yaml` の redis は `--save '' --appendonly no` で RDB・AOF の両方を切り、
-`/data` に `tmpfs` を当てる。用途は **Pub/Sub による配信共有だけ**で、
+`/data` に `tmpfs` を当てる。用途は **Pub/Sub による配信共有と、期限つきのレート制限の回数だけ**で、
 **データを蓄積しない**ためである。
 
 **`tmpfs` は書き込みを切ったうえでさらに要る。** 匿名ボリュームを作るのは redis の設定ではなく
@@ -535,8 +553,9 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 `docker compose down`（`-v` 無し）は匿名ボリュームを消さないため、
 `down` → `up` を繰り返すだけで積み上がる（実際に増えることを確認した）。
 
-> **代償を明記する。** **再起動で、配信の共有が一度切れる。**
-> Valkey が持つのは Pub/Sub の経路だけであり、**蓄積した状態は無いため失われるものが無い。**
+> **代償を明記する。** **再起動で、配信の共有が一度切れ、レート制限の回数は数え直しになる。**
+> Valkey が持つのは Pub/Sub の経路と期限つきのレート制限の回数だけであり、**作り直せない状態は無い**
+> （回数が失われたときの代償は [要件定義書](requirements.md) 4.2）。
 > **在席はここには入らない**——各タスクのメモリにあり、Valkey の再起動では消えない
 > （[要件定義書](requirements.md) 4.2。**停止と復旧のときの振る舞いもそこが定める**）。
 > **メッセージのように作り直せない情報を Valkey に置いたら、この判断は成り立たなくなる。**
