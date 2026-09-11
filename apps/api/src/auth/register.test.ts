@@ -85,7 +85,8 @@ let ipSequence = 0;
 /**
  * 要求ごとに違う発信元を作る（文書用の IPv6 の範囲 2001:db8::/32）。
  * **レート制限は発信元単位で数えるため、同じ発信元から送り続けると、登録そのものを見るテストが 429 で落ちる。**
- * アプリは TRUST_PROXY_HOPS=1 で起動し、X-Forwarded-For の最後の値を発信元として読む。
+ * **この値が発信元として読まれるかは、呼び出し元のアプリの段数で変わる**——段数 1 で起動したアプリでは
+ * X-Forwarded-For の最後の値が発信元になる。段数 0 の「中継の段数が 0 のとき」では、読まれないことを確かめる側で使う。
  */
 function nextIp(): string {
   ipSequence += 1;
@@ -341,6 +342,36 @@ describe('新規登録の停止（REGISTRATION_ENABLED=false。要件定義書 5
     expect(res.status).toBe(403);
     expect(((await res.json()) as ErrorResponse).code).toBe('registration_disabled');
     expect(await app.get(PrismaService).user.count()).toBe(0);
+  });
+});
+
+// 発信元は信頼した段数から決まり、利用者は X-Forwarded-For で偽の発信元を名乗れない（#252。PR #246 第8巡）。
+// ほかのテストはすべて段数 1 に X-Forwarded-For を1つだけ付けて送るため、段数を 1 / 2 / true のどれにしても
+// 結果が変わらない。**「段数が多すぎると偽の発信元を名乗れる」側は、このテストだけが落とす。**
+describe('中継の段数が 0 のとき（X-Forwarded-For を信じない）', () => {
+  let app: INestApplication;
+  let base: string;
+
+  beforeAll(async () => {
+    // 停止中の 403 もレート制限の回数に数える（ガードはハンドラより前）。DB と Valkey は要らない。
+    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
+    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
+    vi.stubEnv('TRUST_PROXY_HOPS', '0');
+    vi.stubEnv('API_TASK_COUNT', undefined);
+    vi.stubEnv('REGISTRATION_ENABLED', 'false');
+    ({ app, base } = await startApp(new CapturingLogger()));
+  });
+
+  afterAll(async () => {
+    await app?.close();
+    vi.unstubAllEnvs();
+  });
+
+  it('X-Forwarded-For を要求ごとに変えても同じ発信元として数え、上限を超えたら 429', async () => {
+    for (let i = 0; i < REGISTER_LIMIT; i++) {
+      expect((await postRegister(base, registerBody(), nextIp())).status).toBe(403);
+    }
+    expect((await postRegister(base, registerBody(), nextIp())).status).toBe(429);
   });
 });
 

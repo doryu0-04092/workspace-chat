@@ -18,6 +18,7 @@ describe('GET /api/health（F-39）', () => {
     // 死活確認が DB に問い合わせれば、ここで失敗する。
     vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
     vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
+    vi.stubEnv('TRUST_PROXY_HOPS', '0');
     app = await createApp({ logger: false });
     await app.listen(0, '127.0.0.1');
     const { port } = app.getHttpServer().address() as AddressInfo;

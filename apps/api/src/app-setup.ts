@@ -23,6 +23,9 @@ import { resolveTrustProxyHops } from './rate-limit/rate-limit-config';
  * 受け付ける本体は仕様どおり JSON だけである（urlencoded は読まない）。
  */
 export async function createApp(options?: NestApplicationOptions): Promise<INestApplication> {
+  // 起動を止める設定の検証は、アプリを組み立てる前に済ませる（main.ts の PORT と同じ）。
+  // 後に置くと、Prisma と Valkey への接続を一通り試してから落ちる。
+  const trustProxyHops = resolveTrustProxyHops(process.env.TRUST_PROXY_HOPS);
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     ...options,
     bodyParser: false,
@@ -30,6 +33,6 @@ export async function createApp(options?: NestApplicationOptions): Promise<INest
   app.useBodyParser('json');
   app.use(bodyReadErrorHandler);
   app.setGlobalPrefix('api');
-  app.set('trust proxy', resolveTrustProxyHops(process.env.TRUST_PROXY_HOPS));
+  app.set('trust proxy', trustProxyHops);
   return app;
 }
