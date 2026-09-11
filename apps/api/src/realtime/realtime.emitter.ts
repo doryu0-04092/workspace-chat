@@ -13,6 +13,8 @@ export class RealtimeEmitter {
   constructor(private readonly gateway: RealtimeGateway) {}
 
   toUsers(userIds: readonly string[], event: RealtimeEventName, payload: unknown): void {
+    // **宛先が空なら送らない。** Socket.IO は部屋を1つも指定しない配信を、名前空間の全接続へ送る。
+    if (userIds.length === 0) return;
     this.gateway.server.to(userIds.map(userRoom)).emit(event, payload);
   }
 }

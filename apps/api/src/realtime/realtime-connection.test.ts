@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import type { AddressInfo } from 'node:net';
-import type { INestApplication } from '@nestjs/common';
+import { type INestApplication, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { REALTIME_PATH } from '@workspace-chat/shared';
@@ -8,6 +8,7 @@ import { io, type Socket } from 'socket.io-client';
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app-setup';
+import { AccessTokenResolver } from '../auth/access-token.guard';
 import { hashSecret } from '../auth/secret-hash';
 import { PrismaService } from '../prisma.service';
 import { TEST_WEB_ORIGIN, stubApiEnv } from '../testing/api-env';
@@ -243,6 +244,40 @@ describe('Socket.IO の接続の入口（F-16）', () => {
 
       expect(count).toEqual({ alice: 1, bob: 1 });
     });
+
+    // Socket.IO は宛先の部屋が空だと、部屋で絞らずに名前空間の全接続へ送る。宛先を確かめた結果が 0 人になる呼び出しはありうる。
+    it('宛先が空なら、どの接続にも届かない', async () => {
+      const alice = await login();
+      const aliceSocket = (await open(firstBase, { token: alice.token })).socket;
+      const received = nextEvent(aliceSocket, 'message:new', 1_000);
+
+      first.get(RealtimeEmitter).toUsers([], 'message:new', { leaked: true });
+
+      expect(await received).toBeUndefined();
+    });
+  });
+
+  // 機能一覧 1.4 / error-response.ts と同じ決め: 想定外の失敗は、例外のメッセージを応答に載せず、ログに error で残す。
+  it('ハンドシェイクの想定外の失敗は、例外のメッセージを渡さず internal_error で断り、ログに残す', async () => {
+    const { token } = await login();
+    const resolver = first.get(AccessTokenResolver);
+    const failing = vi
+      .spyOn(resolver, 'resolve')
+      .mockRejectedValueOnce(new Error('secret-looking detail from prisma'));
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    try {
+      const { error, socket } = await open(firstBase, { token });
+      expect(socket.connected).toBe(false);
+      expect(error?.data).toEqual({ code: 'internal_error' });
+      expect(`${error?.message} ${JSON.stringify(error?.data)}`).not.toContain('secret-looking');
+      expect(logged).toHaveBeenCalledWith(
+        expect.stringContaining('secret-looking'),
+        expect.any(String),
+      );
+    } finally {
+      failing.mockRestore();
+      logged.mockRestore();
+    }
   });
 
   // 要件定義書 4.2: Valkey が止まっている間は、タスク間の配信共有が止まるが、接続は保ち、同じタスクの中の配信は続く。

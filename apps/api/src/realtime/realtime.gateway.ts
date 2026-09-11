@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
   type OnGatewayConnection,
   type OnGatewayInit,
@@ -16,7 +17,10 @@ export function userRoom(userId: string): string {
 type RealtimeSocket = Socket & { data: { user?: AuthenticatedUser } };
 
 /** 断ったときにクライアントの `connect_error` の `data` に載る値。HTTP の 401 の `code` と同じ綴り（仕様の列挙から取る）。 */
-type RejectCode = Extract<ErrorResponse['code'], 'authentication_required' | 'invalid_token'>;
+type RejectCode = Extract<
+  ErrorResponse['code'],
+  'authentication_required' | 'invalid_token' | 'internal_error'
+>;
 
 function reject(code: RejectCode): Error & { data: { code: RejectCode } } {
   return Object.assign(new Error(code), { data: { code } });
@@ -27,12 +31,16 @@ function reject(code: RejectCode): Error & { data: { code: RejectCode } } {
  *
  * - **トークンはハンドシェイクの `auth.token` だけから読む**（Cookie で渡さない。5.2）。無い → `authentication_required`
  * - **HTTP の入口と同じ AccessTokenResolver で解決し、使えないトークンも退会済みも `invalid_token` で断る**（1.4。#90）
+ * - **解決の想定外の失敗（DB に繋がらないなど）は、例外のメッセージを渡さず `internal_error` で断り、ログに error で残す**
+ *   （Socket.IO は `next(err)` の `message` をクライアントへ送る。`server.use` は Nest の例外フィルタを通らないため、error-response.ts と同じ決めをここで当てる）
  * - 認証を通った接続を、その利用者の部屋に入れる（9.2）
  */
 @WebSocketGateway()
 export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnection<RealtimeSocket> {
   @WebSocketServer()
   server!: Server;
+
+  private readonly logger = new Logger('RealtimeGateway');
 
   constructor(private readonly tokens: AccessTokenResolver) {}
 
@@ -52,7 +60,11 @@ export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnecti
           socket.data.user = user;
           next();
         },
-        (error: unknown) => next(error instanceof Error ? error : new Error(String(error))),
+        (error: unknown) => {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          this.logger.error(failure.message, failure.stack ?? '');
+          next(reject('internal_error'));
+        },
       );
     });
   }
