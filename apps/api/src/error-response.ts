@@ -60,7 +60,8 @@ function isErrorResponse(value: unknown): value is ErrorResponse {
  *
  * - 要求の検証の失敗（express-openapi-validator）→ 状態コードごとの本体。400 には落ちた箇所（`path`）と
  *   規則の説明（`message`）だけを `errors` に載せる。**送られた値は載せない**
- * - `code` を持つ本体で投げた HttpException（登録の 403・409、レート制限の 429 など）→ その本体のまま
+ * - `code` を持つ本体で投げた HttpException（登録の 403・409、レート制限の 429 など）→ その本体のまま。
+ *   **ただし 404 だけは、何を載せても状態コードの本体にする**（機能一覧 1.4。ハンドラごとの文言で存在を認めさせない）
  * - `code` を持たない HttpException（前置き /api の外の Nest の既定の 404 など）→ 状態コードごとの本体。
  *   **例外のメッセージは載せない**（Nest の既定の 404 は「Cannot GET /…」とパスを述べる）
  * - それ以外（想定外の失敗）→ 500（internal_error）。**例外のメッセージを応答に載せない**
@@ -97,7 +98,9 @@ export class ErrorResponseFilter implements ExceptionFilter {
         response.status(status).json(errorBodyForStatus(status));
         return;
       }
-      response.status(status).json(isErrorResponse(given) ? given : errorBodyForStatus(status));
+      // 404 は、投げた側が何を載せても「見つかりません」にする（機能一覧 1.4。本体の文言で存在を認めない）。
+      const body = status !== 404 && isErrorResponse(given) ? given : errorBodyForStatus(status);
+      response.status(status).json(body);
       return;
     }
 

@@ -1,4 +1,4 @@
-import { type ArgumentsHost, HttpException, Logger } from '@nestjs/common';
+import { type ArgumentsHost, HttpException, Logger, NotFoundException } from '@nestjs/common';
 import * as OpenApiValidator from 'express-openapi-validator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ErrorResponseFilter } from './error-response';
@@ -63,5 +63,24 @@ describe('例外フィルタの 5xx', () => {
     expect(sent.status).toBe(409);
     expect(sent.body).toEqual(body);
     expect(logged).not.toHaveBeenCalled();
+  });
+});
+
+// 機能一覧 1.4「404 の応答の本体が、存在を漏らさない」「揃えるのは横断的な例外処理であり、各ハンドラは個別に文言を書かない」。
+// ハンドラが個別の本体で 404 を投げても、ここで揃える。
+describe('例外フィルタの 404', () => {
+  it.each([
+    [
+      '存在を認める文言の本体',
+      new NotFoundException({ code: 'not_found', message: '権限がありません' }),
+    ],
+    ['別の code の本体', new HttpException({ code: 'request_rejected', message: 'x' }, 404)],
+    ['文字列のメッセージ', new NotFoundException('チャンネルはあるが参加していない')],
+  ])('%s で投げても、本体は「見つかりません」に揃う', (_label, exception) => {
+    const { host, sent } = fakeHost();
+    new ErrorResponseFilter().catch(exception, host);
+
+    expect(sent.status).toBe(404);
+    expect(sent.body).toEqual({ code: 'not_found', message: '見つかりません' });
   });
 });
