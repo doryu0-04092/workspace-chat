@@ -1,0 +1,309 @@
+import 'reflect-metadata';
+import { createHash } from 'node:crypto';
+import type { AddressInfo } from 'node:net';
+import type { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import type { paths } from '@workspace-chat/shared';
+import type { StartedTestContainer } from 'testcontainers';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createApp } from '../app-setup';
+import { PrismaService } from '../prisma.service';
+import { TEST_WEB_ORIGIN, stubApiEnv } from '../testing/api-env';
+import { CapturingLogger } from '../testing/capturing-logger';
+import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
+import { startValkey } from '../testing/valkey';
+import { hashSecret } from './secret-hash';
+
+type RefreshResponse =
+  paths['/auth/refresh']['post']['responses'][200]['content']['application/json'];
+type ErrorResponse = paths['/auth/refresh']['post']['responses'][
+  401 | 403]['content']['application/json'];
+
+let sequence = 0;
+function uniqueUserId(): string {
+  sequence += 1;
+  return `Refresh_${Date.now().toString(36)}_${sequence}`;
+}
+
+let ipSequence = 0;
+function nextIp(): string {
+  ipSequence += 1;
+  return `2001:db8::2:${ipSequence.toString(16)}`;
+}
+
+/** ブラウザが同じ origin から送るときのヘッダー（独自のヘッダーと Sec-Fetch-Site）。 */
+const SAME_ORIGIN = { 'x-requested-by': 'workspace-chat', 'sec-fetch-site': 'same-origin' };
+
+function setCookie(res: Response): string | undefined {
+  return res.headers.getSetCookie().find((c) => c.startsWith('refresh_token='));
+}
+
+function cookieValue(res: Response): string | undefined {
+  const cookie = setCookie(res);
+  return cookie === undefined
+    ? undefined
+    : decodeURIComponent(cookie.split(';')[0]!.slice('refresh_token='.length));
+}
+
+/** Cookie を消す Set-Cookie（値が空で、期限が過去）か。Path が一致しないと、ブラウザは元の Cookie を消さない。 */
+function isClearingCookie(res: Response): boolean {
+  const cookie = setCookie(res);
+  if (cookie === undefined) return false;
+  const expires = /Expires=([^;]+)/i.exec(cookie)?.[1];
+  return (
+    cookie.startsWith('refresh_token=;') &&
+    cookie.includes('Path=/api/auth') &&
+    expires !== undefined &&
+    new Date(expires).getTime() < Date.now()
+  );
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
+  let postgres: StartedPostgreSqlContainer;
+  let valkey: StartedTestContainer;
+  let app: INestApplication;
+  let base: string;
+  let prisma: PrismaService;
+  const logger = new CapturingLogger();
+
+  function post(
+    path: 'refresh' | 'logout',
+    token: string | undefined,
+    headers: Record<string, string> = SAME_ORIGIN,
+  ): Promise<Response> {
+    return fetch(`${base}/api/auth/${path}`, {
+      method: 'POST',
+      headers: {
+        'x-forwarded-for': nextIp(),
+        ...(token === undefined ? {} : { cookie: `refresh_token=${encodeURIComponent(token)}` }),
+        ...headers,
+      },
+    });
+  }
+
+  /** 利用者を作ってログインし、リフレッシュトークンと User.id を返す。 */
+  async function login(
+    options: { deleted?: boolean } = {},
+  ): Promise<{ token: string; userId: string }> {
+    const loginId = uniqueUserId();
+    const user = await prisma.user.create({
+      data: {
+        loginId,
+        displayName: '更新する人',
+        passwordHash: await hashSecret('refresh-password'),
+      },
+    });
+    const res = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+      body: JSON.stringify({ userId: loginId, password: 'refresh-password' }),
+    });
+    expect(res.status).toBe(200);
+    if (options.deleted) {
+      await prisma.user.update({ where: { id: user.id }, data: { deletedAt: new Date() } });
+    }
+    return { token: cookieValue(res)!, userId: user.id };
+  }
+
+  beforeAll(async () => {
+    postgres = await startMigratedPostgres();
+    const started = await startValkey();
+    valkey = started.container;
+    stubApiEnv({
+      DATABASE_URL: postgres.getConnectionUri(),
+      REDIS_URL: started.url,
+      TRUST_PROXY_HOPS: '1',
+    });
+    app = await createApp({ logger });
+    await app.listen(0, '127.0.0.1');
+    const { port } = app.getHttpServer().address() as AddressInfo;
+    base = `http://127.0.0.1:${port}`;
+    prisma = app.get(PrismaService);
+  }, POSTGRES_STARTUP_TIMEOUT_MS);
+
+  afterAll(async () => {
+    await app?.close();
+    await postgres?.stop();
+    await valkey?.stop();
+    vi.unstubAllEnvs();
+  });
+
+  describe('リフレッシュ', () => {
+    it('新しいアクセストークンを返し、リフレッシュトークンを同じ系列の新しいものに入れ替える', async () => {
+      const { token, userId } = await login();
+      const res = await post('refresh', token);
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as RefreshResponse;
+      expect(body.tokenType).toBe('Bearer');
+      expect(body.expiresIn).toBe(15 * 60);
+      expect(app.get(JwtService).verify<{ sub: string }>(body.accessToken).sub).toBe(userId);
+
+      const next = cookieValue(res);
+      expect(next).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(next).not.toBe(token);
+      expect(setCookie(res)).toMatch(/HttpOnly/);
+      expect(setCookie(res)).toMatch(/Secure/);
+      expect(setCookie(res)).toMatch(/SameSite=Strict/);
+      expect(setCookie(res)).toMatch(/Path=\/api\/auth/);
+
+      const old = await prisma.refreshToken.findUniqueOrThrow({
+        where: { tokenHash: sha256Hex(token) },
+      });
+      const current = await prisma.refreshToken.findUniqueOrThrow({
+        where: { tokenHash: sha256Hex(next!) },
+      });
+      expect(old.revokedAt).not.toBeNull();
+      expect(current.revokedAt).toBeNull();
+      expect(current.familyId).toBe(old.familyId);
+    });
+
+    it('入れ替えた後のトークンで、もう一度リフレッシュできる', async () => {
+      const { token } = await login();
+      const next = cookieValue(await post('refresh', token))!;
+      expect((await post('refresh', next)).status).toBe(200);
+    });
+
+    // RFC 9700 4.14.2: 入れ替え済みのトークンが出されたら、盗まれたものとみなして系列ごと失効させる。
+    it('入れ替え済みのトークンが出されたら 401 を返し、その系列の新しいトークンも失効させる', async () => {
+      const { token } = await login();
+      const next = cookieValue(await post('refresh', token))!;
+
+      const reused = await post('refresh', token);
+      expect(reused.status).toBe(401);
+      expect(((await reused.json()) as ErrorResponse).code).toBe('invalid_token');
+      expect((await post('refresh', next)).status).toBe(401);
+    });
+
+    it('同じトークンで同時にリフレッシュしても、入れ替えに成功するのは1つだけである', async () => {
+      const { token } = await login();
+      const results = await Promise.all([post('refresh', token), post('refresh', token)]);
+      expect(results.filter((res) => res.status === 200).length).toBeLessThanOrEqual(1);
+    });
+
+    it.each([
+      ['Cookie が無い', undefined],
+      ['知らないトークン', 'A'.repeat(43)],
+    ])('%s なら 401 で、Cookie を消す', async (_label, token) => {
+      const res = await post('refresh', token);
+      expect(res.status).toBe(401);
+      expect(((await res.json()) as ErrorResponse).code).toBe('invalid_token');
+      expect(isClearingCookie(res)).toBe(true);
+    });
+
+    it('期限切れのトークンは 401', async () => {
+      const { token } = await login();
+      await prisma.refreshToken.update({
+        where: { tokenHash: sha256Hex(token) },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+      expect((await post('refresh', token)).status).toBe(401);
+    });
+
+    // 機能一覧 1.5: 退会したらトークンの再発行はできない。
+    it('退会済みの利用者のトークンは 401', async () => {
+      const { token } = await login({ deleted: true });
+      expect((await post('refresh', token)).status).toBe(401);
+    });
+  });
+
+  describe('ログアウト', () => {
+    it('204 を返して Cookie を消し、そのトークンではもうリフレッシュできない', async () => {
+      const { token } = await login();
+      const res = await post('logout', token);
+      expect(res.status).toBe(204);
+      expect(isClearingCookie(res)).toBe(true);
+      expect((await post('refresh', token)).status).toBe(401);
+    });
+
+    it('入れ替えた後にログアウトしたら、その系列のどのトークンでもリフレッシュできない', async () => {
+      const { token } = await login();
+      const next = cookieValue(await post('refresh', token))!;
+      expect((await post('logout', next)).status).toBe(204);
+      expect((await post('refresh', next)).status).toBe(401);
+    });
+
+    // 入れ替え前の古いトークンでログアウトしても、系列の今のトークンまで失効させる（使ったトークンの行だけを失効させない）。
+    it('入れ替え前のトークンでログアウトしても、系列の今のトークンでリフレッシュできない', async () => {
+      const { token } = await login();
+      const next = cookieValue(await post('refresh', token))!;
+      expect((await post('logout', token)).status).toBe(204);
+      expect((await post('refresh', next)).status).toBe(401);
+    });
+
+    it('別のログイン（別の系列）のトークンは失効させない', async () => {
+      const first = await login();
+      const secondRes = await fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+        body: JSON.stringify({
+          userId: (await prisma.user.findUniqueOrThrow({ where: { id: first.userId } })).loginId,
+          password: 'refresh-password',
+        }),
+      });
+      const second = cookieValue(secondRes)!;
+      expect((await post('logout', first.token)).status).toBe(204);
+      expect((await post('refresh', second)).status).toBe(200);
+    });
+
+    it.each([
+      ['Cookie が無い', undefined],
+      ['知らないトークン', 'A'.repeat(43)],
+    ])('%s でも 204 で、Cookie を消す', async (_label, token) => {
+      const res = await post('logout', token);
+      expect(res.status).toBe(204);
+      expect(isClearingCookie(res)).toBe(true);
+    });
+  });
+
+  // 機能一覧 1.2 / 要件定義書 4.3: Cookie を使う2つのエンドポイントは、独自のヘッダーの無い要求と、同じ origin からでない要求を拒否する。
+  describe.each(['refresh', 'logout'] as const)('/api/auth/%s の CSRF の対処', (path) => {
+    it('X-Requested-By が無ければ 400 で、トークンを使わない', async () => {
+      const { token } = await login();
+      const res = await post(path, token, { 'sec-fetch-site': 'same-origin' });
+      expect(res.status).toBe(400);
+      expect((await post('refresh', token)).status).toBe(200);
+    });
+
+    it.each([
+      ['Sec-Fetch-Site が cross-site', { 'sec-fetch-site': 'cross-site', origin: TEST_WEB_ORIGIN }],
+      ['Origin が別の origin', { origin: 'https://evil.example.com' }],
+      ['Referer が別の origin', { referer: 'https://evil.example.com/' }],
+      ['Sec-Fetch-Site・Origin・Referer のどれも無い', {}],
+    ])('%s なら 403（csrf_rejected）で、トークンを使わない', async (_label, headers) => {
+      const { token } = await login();
+      const res = await post(path, token, { 'x-requested-by': 'workspace-chat', ...headers });
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as ErrorResponse).code).toBe('csrf_rejected');
+      expect((await post('refresh', token)).status).toBe(200);
+    });
+
+    it.each([
+      ['Origin が web の origin', { origin: TEST_WEB_ORIGIN }],
+      ['Referer が web の origin の下', { referer: `${TEST_WEB_ORIGIN}/channels` }],
+    ])('%s なら通す', async (_label, headers) => {
+      const { token } = await login();
+      const res = await post(path, token, { 'x-requested-by': 'workspace-chat', ...headers });
+      expect(res.status).toBe(path === 'refresh' ? 200 : 204);
+    });
+  });
+
+  it('トークンをログに出さない', async () => {
+    const { token } = await login();
+    const res = await post('refresh', token);
+    const next = cookieValue(res)!;
+    const { accessToken } = (await res.json()) as RefreshResponse;
+    await post('refresh', token); // 再利用の検知の経路
+    await post('logout', next);
+
+    const all = logger.lines.join('\n');
+    expect(all).not.toContain(token);
+    expect(all).not.toContain(next);
+    expect(all).not.toContain(accessToken);
+  });
+});
