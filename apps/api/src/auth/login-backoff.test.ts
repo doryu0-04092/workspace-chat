@@ -95,6 +95,19 @@ function describeStore(name: string, create: () => LoginBackoffStore): void {
       expect(await store.begin(k, later + 1_000)).toEqual({ allowed: true });
     });
 
+    // 数え直しの起点は最後の「失敗」である。照合へ通した（begin）ことで起点を動かすと、Valkey（キーの期限は失敗のときに延ばす）と
+    // メモリで数え直す時刻が分かれる。
+    it('照合へ通しても、数え直しの起点は最後の失敗のままである', async () => {
+      const store = create();
+      const k = key();
+      for (let i = 0; i < 12; i++) await store.recordFailure(k, T);
+      expect(await store.begin(k, T + LOGIN_BACKOFF_MAX_MS)).toEqual({ allowed: true });
+      const later = T + LOGIN_BACKOFF_RESET_MS;
+      expect(await store.begin(k, later)).toEqual({ allowed: true });
+      await store.recordFailure(k, later);
+      expect(await store.begin(k, later + 1_000)).toEqual({ allowed: true });
+    });
+
     it('キーごとに独立して数える', async () => {
       const store = create();
       const a = key();
