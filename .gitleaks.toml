@@ -1,0 +1,16 @@
+# gitleaks の設定（.github/workflows/audit.yml の「秘密の値がソースに書かれていないかの検査」）。
+# 既定の規則をそのまま使い、誤検知だけを理由を書いて除外する。**理由なしに除外しない。**
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+誤検知の除外。すべて、テストが「応答・ログに出ないこと」を確かめるために送る偽のパスワードである。
+- leaky-secret-9f3k: apps/api/src/auth/register.test.ts の「本体を読み取れないとき」。
+  generic-api-key（変数名 password と、数字を含みエントロピーが 3.5 を超える値）に当たった（PR #246 第4巡）。
+  PR の走査はコミットごとに行うため、値を変えても当たったコミットが残る限り落ち続ける。
+  除外は値の完全一致に限る（コミットごと除外すると、同じコミットに入った本物の秘密も見逃す）。
+"""
+regexes = [
+  '''^leaky-secret-9f3k$''',
+]
