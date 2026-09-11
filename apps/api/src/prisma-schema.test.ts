@@ -1125,7 +1125,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * この docblock を読んで決定表を開かない実装者に、管理の範囲が4項目として届く。
      * **`id` を落としてはならない。** 名前だけを返すと、すぐ上に書いた
      * 「`channelId` を知る手段が1つも無い」がそのまま残り、**F-09 も F-35 も行使できない。**
-     * **返さないものは、メッセージ・添付ファイル・未読数である。** 会話の中身は一切返さない。
+     * **返さないものは、メッセージ・添付ファイル・未読数・在席である。** 会話の中身は一切返さない。
      * 境界は `visibleChannels` と同じく「人の出入りの管理」と「会話の閲覧」の間にある。
      *
      * **参加者数は退会者を除く。** 退会は論理削除で `ChannelMember` の行が残るため、
@@ -1326,9 +1326,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 読み取り側にも条件を置いて二重にする。
      *
      * **メンション（機能一覧 9.1）はこの問い合わせを使わない。**
-     * `mentionTargetByLoginId`（投稿時の宛先解決）は**対象側の** `deletedAt` を
-     * 条件にしない（`ChannelMember` が実質の条件であるため。要求する側は
-     * `viewer."deletedAt" IS NULL` を条件に持つ）。表示時の参照先解決（経路2。
+     * `mentionTargetByLoginId`（投稿時の宛先解決）は**対象側にも要求する側にも**
+     * `deletedAt IS NULL` を当てる（#191 の決定）。表示時の参照先解決（経路2。
      * 参照実装は下の `mentionDisplayTarget`。#78）も、この照合とは別の問い合わせになる。
      * **経路ごとに書き分けること。**
      *
@@ -1358,8 +1357,11 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **引数に要求者を取らない形にしてはならない。** 呼ぶ側の確認に委ねると、
      * **写した実装が、非参加者にプライベートチャンネルの参加者一覧を返す。**
      *
+     * **在席はこの問い合わせで返さない**——参加者が求めた場合も、オーナーが求めた場合も（機能一覧 9.2。
+     * 在席は部屋の側の経路だけで渡す。ここに足すと、そのチャンネルを開いていない参加者が在席を取得できる）。
+     *
      * **オーナーの例外を壊さないこと。** オーナーは参加していなくても
-     * 参加者一覧を取得できる。**見せないのは、メッセージ・添付ファイル・未読数である**（機能一覧 3.1 の決定表。**この3つで全部である**——2つだけ挙げると、残りは見せてよいと読める）。
+     * 参加者一覧を取得できる。**見せてよいのは管理用の範囲（`id` / 名前 / 種別 / 参加者数と参加者一覧）だけである**（機能一覧 3.1 の決定表は、取得できる側を「だけ」で閉じている）。**メッセージ・添付ファイル・未読数・在席は、その外にある**——見せないものの側を数で閉じると、足した値（在席など）が見せてよい側に読める。
      *
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
      * （REVIEW.md 3 / CWE-89）。
@@ -1548,7 +1550,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
 
     it('参加していないオーナーは、参加者一覧を取得できる', async () => {
       // **オーナーの例外を壊さないこと**（機能一覧 3.1）。
-      // 見せないのは、メッセージ・添付ファイル・未読数である（機能一覧 3.1 の決定表）。
+      // 見せてよいのは管理用の範囲（id / 名前 / 種別 / 参加者数と参加者一覧）だけである（機能一覧 3.1 の決定表）。
       const output = await expectSqlToSucceed(
         channelMemberList({
           viewerId: '00000000-0000-7000-8000-000000000001',
@@ -1616,22 +1618,12 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * **条件は名前で指す。** 数と並びで指すと、条件を足したときに
      * 書き換えていない文の意味だけが変わる（規則は scripts/doc-scope.sh の decls の直上）。
      *
-     * **対象側の `deletedAt` — 書いていない**（現時点の決定。**足すかは依頼側の判断を待つ**——#78。機能一覧 9.1 に両側の利点がある）。
-     * `activeUserByLoginId` は付けているが、この問い合わせは
-     * 対象側の `deletedAt` の有無で挙動を変えない。**理由は、退会済みを積極的に
-     * 解決可能にするためではない。** `Membership` / `ChannelMember` の消し込み
-     * （機能一覧 1.5。削除と同一トランザクションで連鎖削除する）を取りこぼした状態
-     * （1.5 が「読み取り側にも条件を置いて二重にする」としている対象そのもの）でも、
-     * この経路が `deletedAt` の有無で挙動を変えないための備えである。
+     * **対象側の `deletedAt` — `IS NULL` で絞る。要求する側も同じ。**
+     * 理由は機能一覧 9.1 の経路1（投稿時の宛先解決）と「経路1の参照実装」にある。ここに写さない。
      *
-     * **正しく退会した利用者（`Membership` が消え、`ChannelMember` が連鎖削除された
-     * 状態）は、対象としてこの問い合わせでは解決できない。** `ChannelMember` を
-     * 内部結合しており、行が無ければ何も返さないためである。過去のメンションを
-     * 「削除済みの利用者」として表示する経路（機能一覧 9.1「表示時の参照先解決」）は
-     * この問い合わせとは別であり、`User."id"`（UUID）を直接引いて `ChannelMember` を
-     * 問わない。**参照実装は同じファイルの `mentionDisplayTarget` である**（#78）。
-     * **自分で書き起こさないこと**——`ChannelMember` を結合するか `deletedAt IS NULL` で絞ると、
-     * 退会した人へのメンションが本文から消えて見える。
+     * **表示時の参照先解決（経路2）に転用しないこと。参照実装は同じファイルの `mentionDisplayTarget` である**——
+     * この問い合わせは `ChannelMember` を結合し `deletedAt IS NULL` で絞るため、
+     * 転用すると退会した人へのメンションが本文から消えて見える。
      *
      * **対象がそのチャンネルの参加者であること** — `cm` の結合（機能一覧 9.1
      * 「そのチャンネルに参加していない利用者はメンションできない」）。
@@ -1645,9 +1637,6 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * 同じく**引数に要求者を取る。** これを欠くと、
      * 非参加者が `@ユーザーID` を1件ずつ試すことで、そのプライベートチャンネルに
      * 誰が参加しているかを探れてしまう（存在の探索）。
-     *
-     * **「対象側の `deletedAt` を書いていない」ことだけを見て「条件を足すな」と
-     * 読まないこと。** 外すのは対象側の `deletedAt` であって、参加の条件ではない。
      *
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す
      * （REVIEW.md 3 / CWE-89）。**埋め込む3つは、素性がそれぞれ違う。**
@@ -1686,36 +1675,32 @@ describe('Prisma のスキーマとマイグレーション', () => {
         -- 要求する側が退会していないこと。
         JOIN "User" viewer
           ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
-        WHERE lower(u."userId") = lower('${loginId}');
+        WHERE lower(u."userId") = lower('${loginId}')
+          -- 対象側が退会していないこと。
+          AND u."deletedAt" IS NULL;
       `;
     }
 
-    it('Membership / ChannelMember の消し込みを取りこぼしていても、対象側の deletedAt の有無で挙動を変えない', async () => {
-      // **対象側は、`ChannelMember` が残っている限り、`deletedAt` の有無で結果を変えない。**
-      // 正しく退会した利用者（ChannelMember が連鎖削除された状態）は、この問い合わせでは
-      // そもそも解決できない（ChannelMember を内部結合しているため）。
-      const userId = randomUUID();
-      const loginId = `mentioned_${randomUUID().slice(0, 8)}`;
-      const channelId = '00000000-0000-7000-8000-0000000000c2';
-      const ws = '00000000-0000-7000-8000-0000000000a1';
-      await expectSqlToSucceed(`
-        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
-          VALUES ('${userId}', '${loginId}', '退会した人', 'argon2id-placeholder');
-        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
-          VALUES ('${randomUUID()}', '${ws}', '${userId}', 'MEMBER');
-        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
-          VALUES ('${randomUUID()}', '${channelId}', '${ws}', '${userId}');
-        UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';
-      `);
+    it('Membership / ChannelMember の消し込みを取りこぼしても、退会した利用者は宛先として解決されない', async () => {
+      // **`createDeletedUserKeepingMembership` で、消し込みを取りこぼした状態
+      // （ChannelMember が残ったまま deletedAt が立った状態）を再現する。**
       // 要求する側は `insider`（secret の正規の参加者）で固定し、対象側だけを見る。
-      const output = await expectSqlToSucceed(
-        mentionTargetByLoginId({
-          viewerId: '00000000-0000-7000-8000-000000000002',
-          channelId,
-          loginId,
-        }),
-      );
-      expect(output).toBe(userId);
+      const { userId, loginId } = await createDeletedUserKeepingMembership();
+      const query = mentionTargetByLoginId({
+        viewerId: '00000000-0000-7000-8000-000000000002',
+        channelId: '00000000-0000-7000-8000-0000000000c2',
+        loginId,
+      });
+
+      // **同じ利用者で、退会前は解決されることを先に見る。** 否定側だけだと、
+      // `ChannelMember` が作られていない・`loginId` の照合が外れている、のどちらでも
+      // 空になって緑になる。
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = NULL WHERE "id" = '${userId}';`);
+      expect(await expectSqlToSucceed(query)).toBe(userId);
+
+      // 取りこぼした状態に戻す。対象側の `deletedAt IS NULL` だけがこの差を作る。
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';`);
+      expect(await expectSqlToSucceed(query)).toBe('');
     });
 
     it('そのチャンネルに参加していない利用者は、メンションの参照先にできない', async () => {
@@ -1856,6 +1841,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * あちらは `ChannelMember` を内部結合するため、**正しく退会した利用者は
      * 1件も返らない**（1.5 の決定により、退会と同一トランザクションで `Membership` が消え、
      * `ChannelMember` は外部キーで連鎖して消える）。
+     * **加えて、あちらは対象側に `deletedAt IS NULL` を当てている**（#191 の決定）——
+     * 消し込みを取りこぼしていても、退会済みは返らない。**転用できない理由は2本ある。**
      * 転用すると、退会した人へのメンションが**本文から消えて見える。**
      *
      * **`User."id"`（UUID）から直接引く。** `ChannelMember` の有無を条件にしない——
