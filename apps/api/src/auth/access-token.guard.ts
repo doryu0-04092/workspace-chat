@@ -11,6 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import type { Request, Response } from 'express';
 import type { ErrorResponse } from '../error-response';
 import { PrismaService } from '../prisma.service';
+import { INVALID_TOKEN } from './session.service';
 
 const PUBLIC = Symbol('PUBLIC');
 
@@ -39,12 +40,6 @@ export const CurrentUser = createParamDecorator(
 const AUTHENTICATION_REQUIRED: ErrorResponse = {
   code: 'authentication_required',
   message: 'ログインしてください',
-};
-
-/** アクセストークンが使えないときの本体。**壊れている・期限切れ・退会済みを区別しない**（機能一覧 1.4）。 */
-const INVALID_ACCESS_TOKEN: ErrorResponse = {
-  code: 'invalid_token',
-  message: 'ログインし直してください',
 };
 
 /** RFC 6750 2.1 の b64token。 */
@@ -93,7 +88,7 @@ export class AccessTokenGuard implements CanActivate {
           });
     if (!user) {
       response.setHeader('WWW-Authenticate', 'Bearer error="invalid_token"');
-      throw new UnauthorizedException(INVALID_ACCESS_TOKEN);
+      throw new UnauthorizedException(INVALID_TOKEN);
     }
     request[AUTHENTICATED_USER] = { id: user.id };
     return true;

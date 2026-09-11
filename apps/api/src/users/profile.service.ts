@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
 import { type ErrorResponse, errorBodyForStatus } from '../error-response';
+import { INVALID_TOKEN } from '../auth/session.service';
 import { PrismaService } from '../prisma.service';
 
 type GetOperation = paths['/users/me']['get'];
@@ -11,15 +12,9 @@ export type UpdateProfileRequest = PatchOperation['requestBody']['content']['app
 /**
  * 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ）。
  * JSON Schema の pattern（Unicode の `u` フラグ）では文字列の性質を書けないため、仕様ではなくここで確かめる。
- * 文字列の性質には `v` フラグが要る。tsconfig.base.json の target（ES2022）ではリテラルに書けないため、コンストラクタで作る（実行する Node 24 は扱える）。
+ * 数え方は依頼側の判断を経ていない（#283）。文字列の性質には `v` フラグが要る。tsconfig.base.json の target（ES2022）ではリテラルに書けないため、コンストラクタで作る（実行する Node 24 は扱える）。
  */
 const SINGLE_EMOJI = new RegExp('^\\p{RGI_Emoji}$', 'v');
-
-/** トークンの確認の後に退会した場合。入口（AccessTokenGuard）の 401 と同じ本体にする（機能一覧 1.4）。 */
-const INVALID_ACCESS_TOKEN: ErrorResponse = {
-  code: 'invalid_token',
-  message: 'ログインし直してください',
-};
 
 const PROFILE_SELECT = {
   id: true,
@@ -40,7 +35,7 @@ export class ProfileService {
       where: { id: userId, deletedAt: null },
       select: PROFILE_SELECT,
     });
-    if (!user) throw new UnauthorizedException(INVALID_ACCESS_TOKEN);
+    if (!user) throw new UnauthorizedException(INVALID_TOKEN);
     return toProfile(user);
   }
 

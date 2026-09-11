@@ -231,7 +231,7 @@ export interface components {
         UpdateProfileRequest: {
             /** @description 1〜50文字。空白だけは不可（RegisterRequest と同じ） */
             displayName?: string;
-            /** @description 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色や ZWJ で繋いだ列・国旗も1つと数える）。 この形は pattern で表せないため、api が確かめて 400（validation_failed）を返す。null で消す */
+            /** @description 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色や ZWJ で繋いだ列・国旗も1つと数える）。 この形は pattern で表せないため、api が確かめて 400（validation_failed）を返す。null で消す。 数え方と、テキストと片方だけ設定できるかは依頼側の判断を経ていない（#283） */
             statusEmoji?: string | null;
             /** @description 1〜100文字（文字数はコードポイントで数える。機能一覧 1.3）。null で消す */
             statusText?: string | null;
@@ -242,7 +242,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description Authorization ヘッダーに Bearer のアクセストークンが無い（authentication_required）か、 トークンが壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。入力の検証（400）はトークンの確認より先に行う */
+        /** @description Authorization ヘッダーに Bearer のアクセストークンが無い（authentication_required）か、 トークンが壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
         Unauthorized: {
             headers: {
                 /** @description トークンが無いときは `Bearer`、使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1） */
