@@ -451,7 +451,7 @@ Vite も設定ファイルを評価する時点では `.env` を読まず、そ�
 加えて `Number()` は `0x1F8`（504）・`0b101`（5）・`1e3`（1000）・前後の空白付き（` 80 `）も
 受理するため、**結果だけを見ていると設定ミスを取り逃がす。**
 
-**api の起動には環境変数 `DATABASE_URL` が要る。** 未設定・空は起動時に落ちる（`apps/api/src/prisma.service.ts`）。
+**api の起動には環境変数 `DATABASE_URL` が要る。** 未設定・空は起動時に落ちる（`apps/api/src/config/api-config.ts`）。
 値は上の「DATABASE_URL（Prisma。#42）」で `.env` に書いたものと同じだが、**api は `.env` を読まない**ため、
 `PORT` と同じく api を起動する端末の環境変数として渡す。
 
