@@ -3,9 +3,9 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { bodyReadErrorHandler } from './body-read-error';
+import { resolveApiConfig } from './config/api-config';
 import { JsonLogger } from './logging/json-logger';
 import { requestContext } from './logging/request-context';
-import { resolveTrustProxyHops } from './rate-limit/rate-limit-config';
 
 /**
  * アプリを組み立てる入口を1つに置く。**main.ts とテストはどちらも createApp を通す**
@@ -31,10 +31,10 @@ import { resolveTrustProxyHops } from './rate-limit/rate-limit-config';
  * 片づけ（onApplicationShutdown / onModuleDestroy）は app.close() を呼ぶテストでだけ走り、本番では走らない。
  */
 export async function createApp(options?: NestApplicationOptions): Promise<INestApplication> {
-  // 起動を止める設定の検証は、アプリを組み立てる前に済ませる（bootstrap.ts の PORT と同じ）。
+  // 起動を止める設定の検証は、アプリを組み立てる前にすべて済ませる（bootstrap.ts の PORT と同じ。config/api-config.ts）。
   // 後に置くと、Prisma と Valkey への接続を一通り試してから落ちる。
-  const trustProxyHops = resolveTrustProxyHops(process.env.TRUST_PROXY_HOPS);
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+  const config = resolveApiConfig(process.env);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config), {
     logger: new JsonLogger(),
     ...options,
     bodyParser: false,
@@ -44,6 +44,6 @@ export async function createApp(options?: NestApplicationOptions): Promise<INest
   app.useBodyParser('json');
   app.use(bodyReadErrorHandler);
   app.setGlobalPrefix('api');
-  app.set('trust proxy', trustProxyHops);
+  app.set('trust proxy', config.trustProxyHops);
   return app;
 }
