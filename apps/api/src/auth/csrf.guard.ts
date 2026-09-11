@@ -5,13 +5,17 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
+import type { components } from '@workspace-chat/shared';
 import type { Request } from 'express';
 import { API_CONFIG, type ApiConfig } from '../config/api-config';
 import type { ErrorResponse } from '../error-response';
 import { isSameOriginRequest } from './same-origin';
 
-/** Cookie を使う要求に求める独自のヘッダーの値（仕様の `X-Requested-By`）。 */
-export const REQUESTED_BY = 'workspace-chat';
+/**
+ * Cookie を使う要求に求める独自のヘッダーの値。**型を仕様（`components.parameters.RequestedBy` の enum）から取る**——
+ * 仕様の値だけを変えると、ここが型検査で落ちる（仕様と実装の2箇所で値が食い違わない）。
+ */
+export const REQUESTED_BY: components['parameters']['RequestedBy'] = 'workspace-chat';
 
 const CSRF_REJECTED: ErrorResponse = {
   code: 'csrf_rejected',
