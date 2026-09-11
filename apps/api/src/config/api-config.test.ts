@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveApiConfig } from './api-config';
+import { API_SETTINGS, resolveApiConfig } from './api-config';
 import { resolveDatabaseUrl } from './database-url';
 
 describe('DB の接続先（DATABASE_URL）', () => {
@@ -48,13 +48,7 @@ describe('起動の設定（resolveApiConfig）', () => {
     } catch (error) {
       message = (error as Error).message;
     }
-    for (const name of [
-      'DATABASE_URL',
-      'REDIS_URL',
-      'TRUST_PROXY_HOPS',
-      'API_TASK_COUNT',
-      'REGISTRATION_ENABLED',
-    ]) {
+    for (const name of Object.values(API_SETTINGS).map((setting) => setting.env)) {
       expect(message).toContain(name);
     }
   });
