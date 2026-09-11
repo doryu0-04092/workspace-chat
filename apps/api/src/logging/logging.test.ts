@@ -64,15 +64,9 @@ describe('構造化ログとリクエスト ID', () => {
     expect(startup.every((line) => line.requestId === undefined)).toBe(true);
   });
 
-  it('要求ごとに違うリクエスト ID を振り、応答の X-Request-Id で返す', async () => {
-    const first = (await fetch(`${base}/api/health`)).headers.get('x-request-id');
-    const second = (await fetch(`${base}/api/health`)).headers.get('x-request-id');
-    expect(first).toMatch(UUID);
-    expect(second).toMatch(UUID);
-    expect(first).not.toBe(second);
-  });
-
-  it('要求の中で出たログに、その要求の X-Request-Id と同じリクエスト ID が付く', async () => {
+  /** 新規登録を1回送り（DB に繋がらず 500 になる）、その要求の間に書かれた error のログを返す。 */
+  async function errorLogsOfOneRequest(): Promise<LogLine[]> {
+    const before = jsonLines().length;
     const res = await fetch(`${base}/api/auth/register`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -83,12 +77,27 @@ describe('構造化ログとリクエスト ID', () => {
       }),
     });
     expect(res.status).toBe(500);
-    const requestId = res.headers.get('x-request-id');
-    expect(requestId).toMatch(UUID);
+    return jsonLines()
+      .slice(before)
+      .filter((line) => line.level === 'error');
+  }
 
-    const errors = jsonLines().filter((line) => line.level === 'error');
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((line) => line.requestId === requestId)).toBe(true);
+  it('要求の中で出たログに、その要求のリクエスト ID が付き、要求ごとに違う', async () => {
+    const first = await errorLogsOfOneRequest();
+    const second = await errorLogsOfOneRequest();
+    expect(first.length).toBeGreaterThan(0);
+    expect(second.length).toBeGreaterThan(0);
+
+    const firstIds = new Set(first.map((line) => line.requestId));
+    const secondIds = new Set(second.map((line) => line.requestId));
+    // 1つの要求の中のログは、すべて同じ ID を持つ。
+    expect(firstIds.size).toBe(1);
+    expect(secondIds.size).toBe(1);
+    const [firstId] = firstIds;
+    const [secondId] = secondIds;
+    expect(firstId).toMatch(UUID);
+    expect(secondId).toMatch(UUID);
+    expect(firstId).not.toBe(secondId);
   });
 
   // 4.6「標準出力にのみ」。ConsoleLogger は既定で error を標準エラーへ書く。

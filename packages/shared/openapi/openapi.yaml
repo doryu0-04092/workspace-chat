@@ -8,7 +8,6 @@ info:
   description: >-
     エラーの応答の本体はすべて ErrorResponse である。仕様に無いパス（前置き /api の外を含む）は
     404（not_found）を返し、パスごとには載せない。
-    すべての応答は X-Request-Id ヘッダー（サーバーが要求ごとに振る UUID）を持つ。問い合わせのときに、その要求のログを引く鍵になる。
 servers:
   # 全ルートの前置きは /api（#77 の決定。apps/api/src/app-setup.ts の createApp が付ける）。
   - url: /api
