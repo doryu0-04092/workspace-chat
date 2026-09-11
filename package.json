@@ -12,7 +12,7 @@
   ],
   "scripts": {
     "generate": "prisma generate",
-    "generate:api": "openapi-typescript packages/shared/openapi/openapi.yaml -o packages/shared/src/api.gen.ts && prettier --write packages/shared/src/api.gen.ts",
+    "generate:api": "openapi-typescript packages/shared/openapi/openapi.yaml -o packages/shared/src/api.gen.ts",
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "pretypecheck": "npm run generate",
