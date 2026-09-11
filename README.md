@@ -238,6 +238,10 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 > 止まっても通知は来ない。**Actions の画面から手動で再有効化する。**
 > 実装が長く止まる見込みなら、活動に依存しない経路を別途考える。
 
+**同じ週次実行に gitleaks（秘密の値の検査）も乗っている。** 止まると、
+`npm audit` だけでなく、過去に残った秘密を見る経路も同時に止まる
+（詳細と帰結は [docs/requirements.md](docs/requirements.md) の秘密の露出の行）。
+
 **検知そのものは [audit.yml](.github/workflows/audit.yml) が毎週続ける。**
 `high` 以上なら落ちる。落ちたら、そのとき直す版を人が選ぶ——
 **塞げる版が無い場合の扱いは、上の「塞ぎ方」の表による。**
