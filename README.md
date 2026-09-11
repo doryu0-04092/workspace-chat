@@ -91,6 +91,7 @@ npm test        テストを実行する
 CI が回すのと同じ検査を手元で通すには次を順に実行する。
 
 ```
+rm -f packages/shared/src/api.gen.ts && npm run generate:api && git ls-files --error-unmatch packages/shared/src/api.gen.ts && git diff --exit-code -- packages/shared/src/api.gen.ts
 npm run lint
 bash scripts/lint-scope.test.sh
 npm run format:check

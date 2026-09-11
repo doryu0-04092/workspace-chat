@@ -1,0 +1,36 @@
+# REST API の仕様。これが唯一の正であり、型はここから生成する（要件定義書 4.7）。
+# 変更したら `npm run generate:api` で packages/shared/src/api.gen.ts を作り直す。
+# 作り直さずに push すると、CI（code）の「REST の型が仕様と一致することの確認」が落ちる。
+openapi: 3.1.0
+info:
+  title: workspace-chat API
+  version: 0.0.0
+servers:
+  # 全ルートの前置きは /api（#77 の決定。apps/api/src/app-setup.ts の createApp が付ける）。
+  - url: /api
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: 死活確認（F-39）
+      description: 認証を要さない。DB・Redis 等に問い合わせない（機能一覧 14.1）。
+      security: []
+      responses:
+        '200':
+          description: 稼働している
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok

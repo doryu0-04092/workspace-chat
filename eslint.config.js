@@ -9,6 +9,7 @@ export default tseslint.config(
   // **人が書いたものではなく、指摘されても直せない**（REVIEW.md 7）。
   // 現時点では指摘は出ないが、Prisma の版が上がるか lint の規則が増えた時点で、
   // **誰も直せないコードで lint が落ちる**状態になる。
+  // `packages/shared/src/api.gen.ts` は openapi-typescript が出力する REST の型であり、同じ理由で外す。
   //
   // .claude/ にはエージェントが作る git のワークツリーが入る。
   // その中には apps/ の複製がまるごと含まれるため、走査すると
@@ -24,6 +25,7 @@ export default tseslint.config(
       '**/coverage/**',
       'reports/**',
       '**/generated/**',
+      'packages/shared/src/api.gen.ts',
       '.claude/**',
     ],
   },

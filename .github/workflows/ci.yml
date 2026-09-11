@@ -44,6 +44,15 @@ jobs:
       - name: 依存の取得
         run: npm ci
 
+      # REST の型（packages/shared/src/api.gen.ts）は仕様（openapi.yaml）から生成し、追跡下に置く。
+      # 仕様だけを変えて作り直し忘れると、型検査は古い型のまま通ってしまう。作り直して差分が出たら落とす。
+      # **確認が空回りしたときにも落ちる形にする。**
+      # - 作り直す前に消す: 生成の出力先（package.json の generate:api の -o）がずれると、古い生成物が
+      #   書き換えられずに残り、差分が出ない。消しておけば、ずれたとき追跡中のファイルの削除として差分に出る
+      # - 追跡されていることを確かめる: git diff は追跡していないファイルを比べない（未追跡のパスで exit 0）
+      - name: REST の型が仕様と一致することの確認
+        run: rm -f packages/shared/src/api.gen.ts && npm run generate:api && git ls-files --error-unmatch packages/shared/src/api.gen.ts && git diff --exit-code -- packages/shared/src/api.gen.ts
+
       - name: lint（ESLint）
         run: npm run lint
 

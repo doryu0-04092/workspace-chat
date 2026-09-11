@@ -12,6 +12,7 @@
   ],
   "scripts": {
     "generate": "prisma generate",
+    "generate:api": "openapi-typescript packages/shared/openapi/openapi.yaml -o packages/shared/src/api.gen.ts",
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "pretypecheck": "npm run generate",
@@ -27,6 +28,7 @@
     "@types/node": "^24.13.3",
     "eslint": "^10.9.1",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.6",
     "prisma": "^7.10.0",
     "typescript": "^5.9.3",
