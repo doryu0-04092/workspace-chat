@@ -1,6 +1,12 @@
-import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import {
+  type DynamicModule,
+  type MiddlewareConsumer,
+  Module,
+  type NestModule,
+} from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
+import { type ApiConfig, ApiConfigModule } from './config/api-config';
 import { HealthController } from './health.controller';
 import { ErrorResponseFilter } from './error-response';
 import { OpenApiValidationMiddleware } from './openapi-validation';
@@ -17,11 +23,18 @@ import { PrismaModule } from './prisma.service';
  * （サーバー・クライアントの両方で設定する。機能一覧 5.2）。
  */
 @Module({
-  imports: [PrismaModule, AuthModule],
   controllers: [HealthController],
   providers: [{ provide: APP_FILTER, useClass: ErrorResponseFilter }],
 })
 export class AppModule implements NestModule {
+  /** 起動の設定（検証済み）を受け取って組み立てる。設定の検証は createApp が組み立ての前に行う。 */
+  static forRoot(config: ApiConfig): DynamicModule {
+    return {
+      module: AppModule,
+      imports: [ApiConfigModule.forRoot(config), PrismaModule, AuthModule],
+    };
+  }
+
   configure(consumer: MiddlewareConsumer): void {
     consumer.apply(OpenApiValidationMiddleware).forRoutes('{*splat}');
   }
