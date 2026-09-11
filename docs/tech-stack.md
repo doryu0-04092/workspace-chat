@@ -240,7 +240,7 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | ECS Fargate（0.25 vCPU / 0.5 GB × **2**） | 約 $18 |
 | ALB | 約 $16 |
 | RDS db.t4g.micro（Single-AZ） | 約 $13 |
-| ElastiCache for Valkey cache.t4g.micro（価格の根拠は「Valkey の版（ローカル）」） | 約 $9 |
+| ElastiCache for Valkey cache.t4g.micro（価格は未確認。「Valkey の版（ローカル）」にあるのは Redis 比の相対値のみで、この額の根拠にならない） | 約 $9 |
 | S3 + CloudFront | 数ドル |
 | **合計** | **約 $55〜65 / 月** |
 
@@ -361,6 +361,14 @@ F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の 
 | **ioredis** | **^5.11.1** | 上の保存先が要求する接続（peerDependencies の >=5.0.0）。**`enableOfflineQueue: false`・`commandTimeout` で、Valkey が止まっているときにすぐ失敗させる**（既定は接続が切れている間のコマンドを溜め、要求が詰まる） |
 | **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動する（`GenericContainer`）。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
 
+#### 追加で確認した項目 — ログイン（2026-09-11。#257）
+
+F-02 で追加した依存（`apps/api` の dependencies）。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **@nestjs/jwt** | **^11.0.2** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（11.0.2 の peerDependencies は `@nestjs/common` の ^11.0.0 を受け入れる）。`jsonwebtoken` 9.0.3 を包む。**署名も検証も HS256 だけにする**（`verifyOptions.algorithms`。RFC 8725 3.1「Libraries MUST enable the caller to specify a supported set of algorithms」）。鍵は環境変数 `JWT_SECRET`（32 バイト以上。RFC 7518 3.2「A key of the same size as the hash output (for instance, 256 bits for "HS256") or larger MUST be used」） |
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。
@@ -428,7 +436,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
      `psql` の実問い合わせで3つとも赤にするところまで作ってあるが、
      **符号化と照合順序はその対象外である。緑のまま、2-gram 索引の挙動だけが環境ごとに変わる。**
      露見するのは検索を実装したあとであり、**本書が繰り返し避けてきた「最も遅い段階」**にあたる
-- **その前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
+- **`CREATE EXTENSION` の前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
   pg_bigm は共有ライブラリの事前読み込みを必須としている（公式ドキュメント）。
   **ローカルは `compose.yaml` が `postgres -c shared_preload_libraries=pg_bigm` で渡しているが、
   RDS には同じ指定が無い。** RDS では DB パラメータグループに書く必要があり、
@@ -517,7 +525,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 
 ローカルは `valkey/valkey:8-alpine` とする。**本番と同系統に寄せた暫定である**
 （`redis-server` / `redis-cli` 等の Redis 互換コマンド名がそのまま使えることを実行して確認した。
-`compose.yaml` の `command` とヘルスチェックはこれまでの記述を変えていない）。
+`compose.yaml` の `command` とヘルスチェックは**値は変えていない**。コメントは加筆した）。
 **ElastiCache for Valkey が実際にどの版を提供するかは未確認**であり、Terraform で環境を作る段階で確認する。
 
 > **代償を明記する。** **Valkey は Redis のフォークである。** 現時点では Redis 互換の機能
@@ -547,11 +555,11 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 `/data` に `tmpfs` を当てる。用途は **Pub/Sub による配信共有と、期限つきのレート制限の回数だけ**で、
 **データを蓄積しない**ためである。
 
-**`tmpfs` は書き込みを切ったうえでさらに要る。** 匿名ボリュームを作るのは redis の設定ではなく
-**イメージの `VOLUME /data` 宣言**であり、その位置にマウントが無いと
-**コンテナを作るたびに Docker が匿名ボリュームを作る**。
-`docker compose down`（`-v` 無し）は匿名ボリュームを消さないため、
-`down` → `up` を繰り返すだけで積み上がる（実際に増えることを確認した）。
+**`tmpfs` は匿名ボリュームの対策として要るわけではない。** `docker image inspect valkey/valkey:8-alpine
+--format '{{.Config.Volumes}}'` で確かめると `null` であり、**このイメージは `/data` を `VOLUME`
+宣言していない**（作成・削除を繰り返しても匿名ボリュームが増えないことも確認した）。
+`tmpfs` を当てているのは、**イメージの版が変わって `VOLUME` 宣言が付いても永続化させない**ことを
+明示的に保証するためである。
 
 > **代償を明記する。** **再起動で、配信の共有が一度切れ、レート制限の回数は数え直しになる。**
 > Valkey が持つのは Pub/Sub の経路と期限つきのレート制限の回数だけであり、**作り直せない状態は無い**

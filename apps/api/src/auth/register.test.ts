@@ -7,6 +7,8 @@ import * as argon2 from 'argon2';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app-setup';
 import { PrismaService } from '../prisma.service';
+import { stubApiEnv } from '../testing/api-env';
+import { CapturingLogger } from '../testing/capturing-logger';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
 import { startValkey } from '../testing/valkey';
 import type { StartedTestContainer } from 'testcontainers';
@@ -16,34 +18,6 @@ type RegisterResponses = paths['/auth/register']['post']['responses'];
 type RegisterResponse = RegisterResponses[201]['content']['application/json'];
 type ErrorResponse = RegisterResponses[400 | 403 | 409 | 413 | 429]['content']['application/json'];
 type InternalErrorResponse = RegisterResponses[500]['content']['application/json'];
-
-/** アプリのログをすべて控える。パスワードがログの経路に渡っていないかを見るため。 */
-class CapturingLogger implements LoggerService {
-  readonly lines: string[] = [];
-  private capture(level: string, message: unknown, rest: unknown[]): void {
-    this.lines.push(`${level} ${JSON.stringify([message, ...rest], errorReplacer)}`);
-  }
-  log(message: unknown, ...rest: unknown[]): void {
-    this.capture('log', message, rest);
-  }
-  error(message: unknown, ...rest: unknown[]): void {
-    this.capture('error', message, rest);
-  }
-  warn(message: unknown, ...rest: unknown[]): void {
-    this.capture('warn', message, rest);
-  }
-  debug(message: unknown, ...rest: unknown[]): void {
-    this.capture('debug', message, rest);
-  }
-  verbose(message: unknown, ...rest: unknown[]): void {
-    this.capture('verbose', message, rest);
-  }
-}
-
-/** Error はそのままでは JSON にならない。メッセージとスタックを残す。 */
-function errorReplacer(_key: string, value: unknown): unknown {
-  return value instanceof Error ? { message: value.message, stack: value.stack } : value;
-}
 
 /** OWASP Password Storage Cheat Sheet の Argon2id の最小構成（m=19456 (19 MiB), t=2, p=1）。 */
 const OWASP_MINIMUM = { algorithm: 'argon2id', version: '19', m: '19456', t: '2', p: '1' };
@@ -78,9 +52,6 @@ async function startApp(logger: LoggerService): Promise<{ app: INestApplication;
   return { app, base: `http://127.0.0.1:${port}` };
 }
 
-/** 繋がらない Valkey の宛先。レート制限はメモリへ迂回する。 */
-const UNREACHABLE_REDIS_URL = 'redis://127.0.0.1:9';
-
 let ipSequence = 0;
 /**
  * 要求ごとに違う発信元を作る（文書用の IPv6 の範囲 2001:db8::/32）。
@@ -113,11 +84,11 @@ describe('POST /api/auth/register（F-01 / F-03 / F-37）', () => {
     container = await startMigratedPostgres();
     const started = await startValkey();
     valkey = started.container;
-    vi.stubEnv('DATABASE_URL', container.getConnectionUri());
-    vi.stubEnv('REDIS_URL', started.url);
-    vi.stubEnv('TRUST_PROXY_HOPS', '1');
-    vi.stubEnv('API_TASK_COUNT', undefined);
-    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    stubApiEnv({
+      DATABASE_URL: container.getConnectionUri(),
+      REDIS_URL: started.url,
+      TRUST_PROXY_HOPS: '1',
+    });
     ({ app, base } = await startApp(logger));
     prisma = app.get(PrismaService);
   }, POSTGRES_STARTUP_TIMEOUT_MS);
@@ -318,10 +289,11 @@ describe('新規登録の停止（REGISTRATION_ENABLED=false。要件定義書 5
 
   beforeAll(async () => {
     container = await startMigratedPostgres();
-    vi.stubEnv('DATABASE_URL', container.getConnectionUri());
-    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
-    vi.stubEnv('TRUST_PROXY_HOPS', '1');
-    vi.stubEnv('REGISTRATION_ENABLED', 'false');
+    stubApiEnv({
+      DATABASE_URL: container.getConnectionUri(),
+      TRUST_PROXY_HOPS: '1',
+      REGISTRATION_ENABLED: 'false',
+    });
     ({ app, base } = await startApp(new CapturingLogger()));
   }, POSTGRES_STARTUP_TIMEOUT_MS);
 
@@ -354,11 +326,7 @@ describe('中継の段数が 0 のとき（X-Forwarded-For を信じない）', 
 
   beforeAll(async () => {
     // 停止中の 403 もレート制限の回数に数える（ガードはハンドラより前）。DB と Valkey は要らない。
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
-    vi.stubEnv('TRUST_PROXY_HOPS', '0');
-    vi.stubEnv('API_TASK_COUNT', undefined);
-    vi.stubEnv('REGISTRATION_ENABLED', 'false');
+    stubApiEnv({ TRUST_PROXY_HOPS: '0', REGISTRATION_ENABLED: 'false' });
     ({ app, base } = await startApp(new CapturingLogger()));
   });
 
@@ -384,10 +352,7 @@ describe('DB に繋がらないとき', () => {
   const logger = new CapturingLogger();
 
   beforeAll(async () => {
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
-    vi.stubEnv('TRUST_PROXY_HOPS', '1');
-    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    stubApiEnv({ TRUST_PROXY_HOPS: '1' });
     ({ app, base } = await startApp(logger));
   });
 
@@ -428,10 +393,7 @@ describe('本体を読み取れないとき', () => {
 
   beforeAll(async () => {
     // どの要求もハンドラに届かないため、DB・Valkey は繋がらない宛先でよい。
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
-    vi.stubEnv('TRUST_PROXY_HOPS', '1');
-    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    stubApiEnv({ TRUST_PROXY_HOPS: '1' });
     ({ app, base } = await startApp(logger));
   });
 
@@ -512,11 +474,12 @@ describe('新規登録のレート制限（発信元単位）', () => {
     postgres = await startMigratedPostgres();
     const started = await startValkey();
     valkey = started.container;
-    vi.stubEnv('DATABASE_URL', postgres.getConnectionUri());
-    vi.stubEnv('REDIS_URL', started.url);
-    vi.stubEnv('TRUST_PROXY_HOPS', '1');
-    vi.stubEnv('API_TASK_COUNT', '2');
-    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    stubApiEnv({
+      DATABASE_URL: postgres.getConnectionUri(),
+      REDIS_URL: started.url,
+      TRUST_PROXY_HOPS: '1',
+      API_TASK_COUNT: '2',
+    });
     // 同じ Valkey に繋ぐ2つのアプリ。本番の2タスク（tech-stack.md）の代わり。
     taskA = await startApp(new CapturingLogger());
     taskB = await startApp(new CapturingLogger());
@@ -574,11 +537,11 @@ describe('Valkey に繋がらないときの新規登録のレート制限', () 
 
   beforeAll(async () => {
     postgres = await startMigratedPostgres();
-    vi.stubEnv('DATABASE_URL', postgres.getConnectionUri());
-    vi.stubEnv('REDIS_URL', UNREACHABLE_REDIS_URL);
-    vi.stubEnv('TRUST_PROXY_HOPS', '1');
-    vi.stubEnv('API_TASK_COUNT', '2');
-    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    stubApiEnv({
+      DATABASE_URL: postgres.getConnectionUri(),
+      TRUST_PROXY_HOPS: '1',
+      API_TASK_COUNT: '2',
+    });
     ({ app, base } = await startApp(logger));
   }, POSTGRES_STARTUP_TIMEOUT_MS);
 

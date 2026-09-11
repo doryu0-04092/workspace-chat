@@ -21,7 +21,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない）。**固定するのは「新しい版が出たから上げる」だけであり、脆弱性を塞ぐ更新は取り込む**（下記「依存の版を上げない方針」） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Valkey。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
-| Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#42） |
+| Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#40） |
 | 実装 | 実装中 |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する
@@ -109,9 +109,10 @@ bash scripts/check-docs.test.sh
 （`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
 この1行だけ飛ばす）
 
-`scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる。
+`scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる
+（**番号は付けない**——下記の出力の見出し `1.`〜`3.` と桁が揃わず、別のものを指してしまう）。
 
-**1. 走査範囲** — ESLint と Prettier が `.claude/`（エージェントが作る git のワークツリーが
+**走査範囲** — ESLint と Prettier が `.claude/`（エージェントが作る git のワークツリーが
 入る）を走査しないこと。
 
 `.claude/` は CI のチェックアウトに無い。そのため除外が消えても、
@@ -121,7 +122,7 @@ bash scripts/check-docs.test.sh
 手元で回す意味は、**症状（自分の環境で lint が落ちる）が出るより先に、
 原因（除外が消えた）に気づけること**にある。
 
-**2. react-hooks のルールが実際に効いていること** — `react-hooks/rules-of-hooks` と
+**react-hooks のルールの配線** — `react-hooks/rules-of-hooks` と
 `react-hooks/exhaustive-deps` が配線されており、**重大度が `error` であること**。
 
 `eslint.config.js` の `files` のパターンが壊れても、走査範囲の判定は他のルール
@@ -132,13 +133,14 @@ bash scripts/check-docs.test.sh
 区別できないためである。
 
 **この2つ目があるため、このスクリプトが落ちた原因は走査範囲とは限らない。**
-出力の見出し（`1. ESLint` / `2. Prettier` / `3. react-hooks のルール`）で切り分ける。
+出力の見出し（`ESLint` / `Prettier` / `react-hooks のルール`。番号は begin_check が呼び出し順に
+振るため、ここでは書かない）で切り分ける。
 
 このほかに CI は次を回す。
 
 | ワークフロー | 内容 |
 |---|---|
-| [docs.yml](.github/workflows/docs.yml) | ドキュメントの検査（`scripts/check-docs.sh`）と、**その検査自身が壊れたら落ちることの確認**（`scripts/check-docs.test.sh`、73通り） |
+| [docs.yml](.github/workflows/docs.yml) | ドキュメントの検査（`scripts/check-docs.sh`）と、**その検査自身が壊れたら落ちることの確認**（`scripts/check-docs.test.sh`、69通り） |
 | [audit.yml](.github/workflows/audit.yml) | 依存の脆弱性検査と、**秘密の値がソースに書かれていないかの検査**（gitleaks）。PR・push に加えて**毎週月曜に定期実行する**（**gitleaks が全履歴を見るのは、この定期実行と手動実行だけである。PR と push では差分しか見ない**）（要件定義書 4.3 の「継続的に」） |
 | [claude_code_review.yml](.github/workflows/claude_code_review.yml) | AI コードレビュー（下記） |
 
@@ -236,6 +238,10 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 > 止まっても通知は来ない。**Actions の画面から手動で再有効化する。**
 > 実装が長く止まる見込みなら、活動に依存しない経路を別途考える。
 
+**同じ週次実行に gitleaks（秘密の値の検査）も乗っている。** 止まると、
+`npm audit` だけでなく、過去に残った秘密を見る経路も同時に止まる
+（詳細と帰結は [docs/requirements.md](docs/requirements.md) の秘密の露出の行）。
+
 **検知そのものは [audit.yml](.github/workflows/audit.yml) が毎週続ける。**
 `high` 以上なら落ちる。落ちたら、そのとき直す版を人が選ぶ——
 **塞げる版が無い場合の扱いは、上の「塞ぎ方」の表による。**
@@ -324,9 +330,9 @@ Docker は同じ名前のイメージが手元にあればレジストリを見�
 
 **redis は `build --pull` の対象にならない。** `build` が触るのは `build:` を持つサービスだけで、
 redis は既製のイメージをそのまま使う。**`docker compose pull redis` が要る。**
-これを叩かない限り、**最初に `up` した日の 7.2.x のまま動き続ける。**
+これを叩かない限り、**最初に `up` した日の 8.x のまま動き続ける。**
 
-**接続先の組み立て方**（`DATABASE_URL` を含め、以後この形式を「接続先の組み立て方」として参照する）。
+**接続先の組み立て方**（この節を「接続先の組み立て方」と呼ぶ。`DATABASE_URL` を含む）。
 `.env` に書いた値から組み立てる。
 
 ```
@@ -351,7 +357,7 @@ redis://127.0.0.1:<REDIS_PORT>
 |---|---|
 | ホストの `127.0.0.1:<POSTGRES_PORT>` / `<REDIS_PORT>` に TCP が通る | 両方とも通った |
 | 上の接続 URL の形で `SELECT version()` | `PostgreSQL 17.x` が返った（**確認した時点は 17.11**。土台はタグ指定なので `--pull` で動く） |
-| Redis に `ping` | `PONG` |
+| Valkey に `ping` | `PONG` |
 | **パスワードを誤った接続 URL** | `password authentication failed` で**拒否された** |
 
 #### pg_bigm
@@ -382,14 +388,14 @@ docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CRE
 `docker compose exec db psql -U "$POSTGRES_USER"` と書くと、
 **手元のシェルが空文字に展開してから** `docker` に渡す。
 
-#### DATABASE_URL（Prisma。#42）
+#### DATABASE_URL（Prisma。#40）
 
-**`prisma generate` を除くすべての `prisma` コマンド**（`migrate dev` / `migrate deploy` /
-`migrate diff` / `db execute` 等）に、環境変数 `DATABASE_URL` が要る。
+**`prisma generate` を除くすべての `prisma` コマンドに、環境変数 `DATABASE_URL` が要る**
+（対象コマンドの列挙は [prisma.config.ts](prisma.config.ts) を参照）。
 
 読むのは docker compose ではなく、根の [prisma.config.ts](prisma.config.ts) が
 `process.loadEnvFile()` で直接読む。**`.env.example` にも値は書かない**（`.env.example` の
-「Prisma」節を参照）。値は「接続先の組み立て方」と同じ形（`postgresql://` の URL）で
+「Prisma（prisma.config.ts。#40）」節を参照）。値は「接続先の組み立て方」と同じ形（`postgresql://` の URL）で
 `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_PORT` / `POSTGRES_DB` から組み立てる
 （`127.0.0.1` に固定し `localhost` と書かない理由も「接続先の組み立て方」を参照）。
 
@@ -446,16 +452,19 @@ Vite も設定ファイルを評価する時点では `.env` を読まず、そ�
 受理するため、**結果だけを見ていると設定ミスを取り逃がす。**
 
 **api の起動には環境変数 `DATABASE_URL` が要る。** 未設定・空は起動時に落ちる（`apps/api/src/config/api-config.ts`）。
-値は上の「DATABASE_URL（Prisma。#42）」で `.env` に書いたものと同じだが、**api は `.env` を読まない**ため、
+値は上の「DATABASE_URL（Prisma。#40）」で `.env` に書いたものと同じだが、**api は `.env` を読まない**ため、
 `PORT` と同じく api を起動する端末の環境変数として渡す。
 
 **api の起動には環境変数 `REDIS_URL`（Valkey の接続先）も要る。** 未設定・空は起動時に落ちる。
 手元では `redis://127.0.0.1:<REDIS_PORT>`（`REDIS_PORT` は `.env` に書いた compose の値）。
 **Valkey が動いていなくても api は起動し、レート制限は各タスクのメモリで数える**（起動時と切り替え時に warn のログが出る）。
 
+**api の起動には環境変数 `JWT_SECRET`（アクセストークンの署名の鍵）も要る。** 未設定・32 バイト未満は起動時に落ちる。
+手元では `openssl rand -base64 32` などで作った乱数を渡す。**値をリポジトリ・ログ・チャットに出さない。**
+
 | 環境変数 | 既定 | 意味 |
 |---|---|---|
-| `TRUST_PROXY_HOPS` | **必須**（未設定は起動時に落ちる） | 信頼する中継の段数（Express の `trust proxy`）。**レート制限の発信元はこれで決まる。** **手元で直接叩くなら `TRUST_PROXY_HOPS=0` を明示して渡す。** 必須にしているのは、本番で渡し忘れて 0 になると全員が ALB の IP で数えられ、エラーもログも出ないまま正規の利用者だけが 429 を受けるためである（決定・2026-09-11・依頼側。#252）。本番（CloudFront → ALB）は 2 で、**ALB に CloudFront を経ずに届く経路を塞いでいることが前提**（塞いでいないと X-Forwarded-For で発信元を偽れる）。多すぎると偽の発信元を名乗れ、少なすぎると全員が1つの発信元として数えられる |
+| `TRUST_PROXY_HOPS` | **必須**（未設定は起動時に落ちる） | 信頼する中継の段数（Express の `trust proxy`）。**レート制限の発信元はこれで決まる。** **手元で直接叩くなら `TRUST_PROXY_HOPS=0` を明示して渡す。web の開発サーバー（Vite）の `server.proxy` 経由で叩く場合も 0 のままでよい**（`apps/web/vite.config.ts` は `xfwd` を指定しておらず、既定では X-Forwarded-For を付けずに中継するため、api から見た接続元は直接叩いたときと変わらない）。必須にしているのは、本番で渡し忘れて 0 になると全員が ALB の IP で数えられ、エラーもログも出ないまま正規の利用者だけが 429 を受けるためである（決定・2026-09-11・依頼側。#252）。本番（CloudFront → ALB）は 2 で、**ALB に CloudFront を経ずに届く経路を塞いでいることが前提**（塞いでいないと X-Forwarded-For で発信元を偽れる）。多すぎると偽の発信元を名乗れ、少なすぎると全員が1つの発信元として数えられる |
 | `API_TASK_COUNT` | 1 | api のタスク数。Valkey が止まっている間、各タスクのメモリで数えるときに上限をこの数で割る |
 
 いずれも 0 以上（`API_TASK_COUNT` は 1 以上）の10進の整数だけを受け付け、それ以外は起動時に落ちる。

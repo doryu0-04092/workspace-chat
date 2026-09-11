@@ -4,6 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app-setup';
 import { HealthController } from './health.controller';
+import { stubApiEnv } from './testing/api-env';
 
 // 死活確認（F-39。機能一覧 14.1）。ALB のヘルスチェックが叩く経路である。
 //
@@ -16,9 +17,7 @@ describe('GET /api/health（F-39）', () => {
   beforeAll(async () => {
     // アプリの組み立てには接続先が要る（config/api-config.ts）。**繋がらない宛先を渡す**——
     // 死活確認が DB に問い合わせれば、ここで失敗する。
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
-    vi.stubEnv('TRUST_PROXY_HOPS', '0');
+    stubApiEnv();
     app = await createApp({ logger: false });
     await app.listen(0, '127.0.0.1');
     const { port } = app.getHttpServer().address() as AddressInfo;
