@@ -1,9 +1,12 @@
-import { execFileSync } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  POSTGRES_STARTUP_TIMEOUT_MS,
+  runPrisma,
+  schemaPath,
+  startMigratedPostgres,
+} from './testing/postgres';
 
 /**
  * Prisma のスキーマとマイグレーションを、**実際の PostgreSQL に対して**検証する。
@@ -12,73 +15,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 「一意制約が本当に効くか」「検査制約が本当に拒否するか」であり、
  * それは実際の DB エンジンでしか分からない（#34）。
  *
- * ## 実行の前提: **Docker のデーモンが動いていること**
- *
- * このファイルは Testcontainers で `postgres:17` のコンテナを起動する。
- * そのため **`npm test` は Docker が動いていることを前提とする。**
- * 動いていない環境では `beforeAll` がコンテナを起動できず、
- * **このファイルのテストが一式落ちる。スキーマともマイグレーションとも無関係な理由で
- * 赤くなるため、原因を取り違えやすい。**
- * 落ちたメッセージに `docker` / `Could not find a working container runtime` が
- * 出ているなら、疑うのはスキーマではなく Docker である。
- *
- * （下の 600 秒はイメージの取得を待つための猶予であり、
- * 「待たされる理由」であって「動かない理由」ではない。）
+ * コンテナの起動・マイグレーションの適用・実行の前提（Docker）は `./testing/postgres.ts` が持つ。
  *
  * ## Prisma のクライアントを使わない理由
  *
- * Prisma 7 のクライアントは**ドライバアダプタ（`@prisma/adapter-pg`）を必須とする**。
- * これは未承認の依存であり、このイシューの範囲でもない。
- * この PR が成果物とするのは**スキーマとマイグレーション**であって、
+ * このファイルが検証するのは**スキーマとマイグレーション**であって、
  * クライアントの使い方ではない。よって
  *
  * - マイグレーションの適用と差分の検出 → `prisma` の CLI
  * - 表に対する問い合わせと制約の検証   → コンテナ内の `psql`
  *
  * の2つだけで検証する。**どちらも検証しているのは DB の実際の状態である。**
- *
- * ## イメージに pg_bigm を含めない理由
- *
- * 全文検索（F-30）は別のイシューで扱う。このイシューのモデルは検索を含まないため、
- * 素の `postgres:17` で足りる。**検索のモデルが入る時点で、pg_bigm を同梱した
- * イメージが別途必要になる**（イシュー #34 に代償として記録した）。
  */
-
-const POSTGRES_IMAGE = 'postgres:17';
-
-/** リポジトリの根（`node_modules/prisma` を持つディレクトリ）を、cwd から遡って探す。 */
-function findRepositoryRoot(): string {
-  let dir = process.cwd();
-  for (;;) {
-    if (existsSync(join(dir, 'node_modules', 'prisma', 'build', 'index.js'))) return dir;
-    const parent = dirname(dir);
-    // 根に着いても見つからなければ、探し方が間違っている。黙って進むと
-    // 後続の失敗が「prisma が壊れている」ように見える。
-    if (parent === dir) throw new Error('prisma の CLI が見つからない');
-    dir = parent;
-  }
-}
-
-const repositoryRoot = findRepositoryRoot();
-const prismaCli = join(repositoryRoot, 'node_modules', 'prisma', 'build', 'index.js');
-const schemaPath = join(repositoryRoot, 'apps', 'api', 'prisma', 'schema.prisma');
-
-/**
- * prisma の CLI を実行する。
- *
- * `npx` を介さない。Windows では `npx` が `npx.cmd` になり、`execFile` で
- * 直接起動できない。**手元と CI で起動の仕方を変えると、片方でしか通らない
- * テストになる。** Node で CLI の実体を直接動かせば、どちらも同じ経路になる。
- */
-function runPrisma(args: string[], databaseUrl: string): string {
-  return execFileSync(process.execPath, [prismaCli, ...args], {
-    cwd: repositoryRoot,
-    // Prisma 7 は .env を自動で読み込まない。接続先はここで明示的に渡す。
-    env: { ...process.env, DATABASE_URL: databaseUrl },
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
 
 describe('Prisma のスキーマとマイグレーション', () => {
   let container: StartedPostgreSqlContainer;
@@ -182,10 +130,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
   }
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
-    // 空の DB にマイグレーションを適用する。ここが落ちるなら、
-    // マイグレーションが実際の PostgreSQL に適用できていない。
-    runPrisma(['migrate', 'deploy', '--schema', schemaPath], container.getConnectionUri());
+    container = await startMigratedPostgres();
 
     // 前提データはここで揃える。**どれか1つの describe の中に置かない。**
     // 置くと、describe の並べ替え・`.only`・`-t` での絞り込みのいずれでも
@@ -229,14 +174,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
         ('00000000-0000-7000-8000-0000000000d1', '00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002'),
         ('00000000-0000-7000-8000-0000000000d2', '00000000-0000-7000-8000-0000000000c2', '00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-000000000002');
     `);
-    // 10 分。初回はイメージの取得が入る。
-    //
-    // **ci.yml の timeout-minutes（15）より小さくする。** あちらはジョブ全体に掛かる。
-    // ここに大きい値を置くと、先に GitHub Actions がジョブごと打ち切り、
-    // **Vitest のメッセージも junit レポートも残らない**（reports/ が無いので
-    // 保存のステップも飛ぶ）。落ちた人が、イメージの取得で待たされたのか
-    // 制約の検証で落ちたのかを区別できなくなる。
-  }, 600_000);
+  }, POSTGRES_STARTUP_TIMEOUT_MS);
 
   afterAll(async () => {
     await container?.stop();
