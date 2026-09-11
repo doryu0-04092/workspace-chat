@@ -1,6 +1,6 @@
 /**
- * Valkey の接続先（環境変数 `REDIS_URL`）。**未設定・空は起動時に落とす。** 例外のメッセージに値を載せない
- * （接続先には資格情報が入りうる）。
+ * Valkey の接続先（環境変数 `REDIS_URL`）。**未設定・空は起動時に落とす。**
+ * **値には資格情報が入りうる**（api-config.ts の API_SETTINGS で `secret: true`。不正なときのメッセージは集約が伏せる）。
  */
 export function resolveRedisUrl(raw: string | undefined): string {
   if (raw === undefined || raw === '') {
