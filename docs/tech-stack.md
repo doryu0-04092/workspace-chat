@@ -334,8 +334,9 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 >
 > **`DATABASE_URL` の変数名は README と `.env.example` に記載した**（値は書かない。
 > CLAUDE.md 禁止事項）。**コードの中で**この変数名を参照しているのは、
-> 現時点では `prisma.config.ts` と
-> [prisma-schema.test.ts](../apps/api/src/prisma-schema.test.ts) である。
+> 現時点では `prisma.config.ts`・api の [prisma.service.ts](../apps/api/src/prisma.service.ts)
+> （#245）・テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts) と、
+> アプリを組み立てるテスト（接続しない宛先を渡す）である。
 
 #### 追加で確認した項目 — REST の型の生成（2026-09-11。#243）
 
@@ -345,6 +346,16 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 | 対象 | 採用 | 判断 |
 |---|---|---|
 | **openapi-typescript** | **^7.13.0** | 最新。型だけを生成する（実行時のコードを出さない）。**採らなかったもの**: `@nestjs/swagger`（デコレーターから仕様を作るため、仕様を唯一の正とする向きと逆）／`@hey-api/openapi-ts`（型に加えて SDK などを出し、型の生成に対して機能が多い） |
+
+#### 追加で確認した項目 — 新規登録（2026-09-11。#245）
+
+F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の dependencies）。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **argon2** | **^0.45.1** | 最新。パスワードとリカバリーコードの Argon2id のハッシュ化（上表「パスワード」）。パラメータは OWASP Password Storage Cheat Sheet の最小構成「m=19456 (19 MiB), t=2, p=1」を**コードで明示する**（ライブラリの既定値 m=65536, t=3, p=4 に寄りかからない。`apps/api/src/auth/secret-hash.ts`）。**ペッパーは使わない**——同シートはペッパーを「secrets vaults」や HSM に置くとしており、この構成にはまだその置き場が無い。**代償: DB のハッシュが漏れたとき、オフラインの総当たりをペッパーで遅らせられない**（Argon2id のコストだけが頼りになる） |
+| **@prisma/adapter-pg** | **^7.10.0** | `prisma` と同じ版。**Prisma 7 のクライアントはドライバアダプタを必須とする**。`pg` を依存として引く |
+| **express-openapi-validator** | **^5.6.2** | 最新。要求を REST の仕様どおりか確かめる（要件定義書 4.7 の「仕様を唯一の正とする」をサーバーの入力の側に当てる）。OpenAPI 3.1 は 5.4.0 以降、Express 5（NestJS 11 の既定）は 5.5.0 以降で対応と README が明記している。**`fileUploader: false` で使う**——この依存は `multer` を引き（`@nestjs/platform-express` が完全固定する 2.2.0 に重なる）、multipart を受け取らせると [scripts/audit-allowlist.json](../scripts/audit-allowlist.json) の until「サーバーが multipart を受け取る経路を実装するまで」の前提が崩れる。**採らなかったもの**: `ajv` を直接使って Pipe を自作する（パス・メソッド・メディア型の突き合わせを自前で書くことになる）／`openapi-backend`（NestJS への組み込みの公式の例が無い） |
 
 #### TypeScript 7 を採らない理由
 

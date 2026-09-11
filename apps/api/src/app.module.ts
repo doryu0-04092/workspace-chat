@@ -1,15 +1,27 @@
-import { Module } from '@nestjs/common';
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
+import { AuthModule } from './auth/auth.module';
 import { HealthController } from './health.controller';
+import { OpenApiValidationErrorFilter, OpenApiValidationMiddleware } from './openapi-validation';
+import { PrismaModule } from './prisma.service';
 
 /**
  * **公開するエンドポイントを、要件に記録しないまま足さない**（CLAUDE.md 1）。
  * 死活確認（`GET /api/health`）の区分と根拠は、機能一覧の F-39 の行と要件定義書 3.2 の派-10 にある。
+ * **REST の仕様（packages/shared/openapi/openapi.yaml）にも載せる。** 載っていないパスは、
+ * openapi-validation.ts の検証が 404 で落とす。
  *
  * **全ルートの前置き `/api` は app-setup.ts の createApp が付ける**（#77 の決定。理由はそちら）。
  * **WebSocket も同じで、Socket.IO の `path` は `/api/socket.io/` である**
  * （サーバー・クライアントの両方で設定する。機能一覧 5.2）。
  */
 @Module({
+  imports: [PrismaModule, AuthModule],
   controllers: [HealthController],
+  providers: [{ provide: APP_FILTER, useClass: OpenApiValidationErrorFilter }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(OpenApiValidationMiddleware).forRoutes('{*splat}');
+  }
+}
