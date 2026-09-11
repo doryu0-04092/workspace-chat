@@ -6,6 +6,7 @@
 # 3. 実行用のイメージのログが、1行1件の JSON で標準出力に出る（要件定義書 4.6）。標準エラーには何も出さない
 # 4. 実行用のイメージに、秘密を置くファイル（.env と .env.*。.env.example を除く）とテストのコードが入っていない。マイグレーション用のイメージにも入っていない
 # 5. 実行用のイメージは root で動かない
+# 6. 実行用のイメージの中で api の依存が解決される版が、package-lock.json の版と同じである
 #
 # Docker が動いていることが前提。作ったコンテナとネットワークは終わりに消す（イメージは残す）。
 set -euo pipefail
@@ -93,10 +94,10 @@ done <<<"$stdout"
 
 echo "== 4. 実行用のイメージに .env とテストのコードが入っていない"
 leaked=$(docker run --rm --entrypoint sh "$runtime_image" -c \
-  'find /app -path /app/node_modules -prune -o \( \( -name ".env*" ! -name ".env.example" \) -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print' |
+  'find /app -name node_modules -prune -o \( \( -name ".env*" ! -name ".env.example" \) -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print' |
   head -n 5)
 [ -z "$leaked" ] || fail "イメージに入れないはずのファイルがある: $leaked"
-leaked_env=$(docker run --rm --entrypoint sh "$migrate_image" -c 'find /app -path /app/node_modules -prune -o \( -name ".env*" ! -name ".env.example" \) -print' | head -n 5)
+leaked_env=$(docker run --rm --entrypoint sh "$migrate_image" -c 'find /app -name node_modules -prune -o \( -name ".env*" ! -name ".env.example" \) -print' | head -n 5)
 [ -z "$leaked_env" ] || fail "マイグレーション用のイメージに .env がある: $leaked_env"
 
 echo "== 5. 実行用のイメージは root で動かない"
@@ -104,5 +105,32 @@ user=$(docker inspect --format "{{.Config.User}}" "$runtime_image")
 if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "0" ]; then
   fail "実行用のイメージの利用者が root である（${user:-未指定}）"
 fi
+
+echo "== 6. イメージの中で api の依存が解決される版が、package-lock.json と同じ"
+# 名前の一覧は apps/api/package.json の dependencies（ワークスペースの @workspace-chat/* を除く）。
+# 期待する版は lock の apps/api/node_modules/<名前>、無ければ node_modules/<名前>（Node が api から探す順）。
+# イメージの中では、api の入口（apps/api/dist/main.js）から Node が探す順に package.json を探す。
+# 引数の JavaScript はテンプレートリテラルを使い、シェルに展開させない（SC2016 は意図どおり）。
+# shellcheck disable=SC2016
+expected=$(node -e '
+  const lock = require("./package-lock.json").packages;
+  const names = Object.keys(require("./apps/api/package.json").dependencies).filter((n) => !n.startsWith("@workspace-chat/"));
+  console.log(names.map((n) => `${n}@${(lock[`apps/api/node_modules/${n}`] ?? lock[`node_modules/${n}`]).version}`).sort().join("\n"));
+')
+# shellcheck disable=SC2016
+actual=$(docker run --rm --entrypoint node "$runtime_image" -e '
+  const { existsSync, readFileSync } = require("node:fs");
+  const { createRequire } = require("node:module");
+  const { join } = require("node:path");
+  const api = "/app/apps/api";
+  const fromApi = createRequire(join(api, "dist", "main.js"));
+  const names = Object.keys(JSON.parse(readFileSync(join(api, "package.json"), "utf8")).dependencies).filter((n) => !n.startsWith("@workspace-chat/"));
+  console.log(names.map((n) => {
+    const dir = fromApi.resolve.paths(n).find((p) => existsSync(join(p, n, "package.json")));
+    return `${n}@${dir === undefined ? "（無い）" : JSON.parse(readFileSync(join(dir, n, "package.json"), "utf8")).version}`;
+  }).sort().join("\n"));
+')
+[ "$expected" = "$actual" ] ||
+  fail "イメージの中の依存の版が package-lock.json と違う: $(diff <(echo "$expected") <(echo "$actual") | grep '^[<>]' | tr '\n' ' ')"
 
 echo "すべての確認を通過しました"

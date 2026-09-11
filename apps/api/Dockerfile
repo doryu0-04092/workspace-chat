@@ -15,7 +15,9 @@
 # **土台はダイジェストではなくタグで指す**（docker/postgres/Dockerfile と同じ扱い）。
 # 代償: タグの指す先が変わると、同じ Dockerfile から違うイメージができる。
 # それでもタグにするのは、依存の自動更新（dependabot.yml）が Dockerfile を見ておらず（#38）、
-# ダイジェストで固定すると誰かが手で上げるまで Node のパッチが届かないためである。
+# ダイジェストで固定すると誰かが手で上げるまで古いままになるためである。
+# **ただしタグにしただけでは、手元には届かない。** Docker は同じ名前のイメージが手元にあればレジストリを見ないため、
+# 取り直すには `docker build --pull` が要る。
 ARG NODE_IMAGE=node:24-bookworm-slim
 
 FROM ${NODE_IMAGE} AS deps
@@ -49,13 +51,12 @@ CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
 FROM ${NODE_IMAGE} AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=prod-deps /app/node_modules node_modules
-COPY --from=prod-deps /app/package.json package.json
-COPY --from=build /app/packages/shared/package.json packages/shared/package.json
+# prod-deps の /app をまるごと持ち込む。npm は版がぶつかる依存をワークスペースの下（apps/api/node_modules など）に置くため、
+# 根の node_modules だけを複写すると、イメージの中だけ package-lock.json と違う版に解決される。
+COPY --from=prod-deps /app ./
 COPY --from=build /app/packages/shared/dist packages/shared/dist
 # api は起動時に REST の仕様を読む（apps/api/src/openapi-validation.ts）。
 COPY --from=build /app/packages/shared/openapi packages/shared/openapi
-COPY --from=build /app/apps/api/package.json apps/api/package.json
 COPY --from=build /app/apps/api/dist apps/api/dist
 USER node
 EXPOSE 3000
