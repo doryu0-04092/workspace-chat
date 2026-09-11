@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { bootstrap, installFatalHandlers, reportFatal } from './bootstrap';
+import { installFatalHandlers, reportFatal, start } from './bootstrap';
 
 type LogLine = { level?: string; message?: unknown; stack?: unknown; context?: string };
 
@@ -37,7 +37,9 @@ describe('起動の失敗の報告', () => {
     const written = captureStreams();
     const exit = vi.fn();
 
-    await bootstrap().catch((error: unknown) => reportFatal(error, exit));
+    await start(new EventEmitter() as unknown as NodeJS.Process, (error) =>
+      reportFatal(error, exit),
+    );
 
     const errors = jsonLines(written.stdout).filter((line) => line.level === 'error');
     expect(errors).toHaveLength(1);
@@ -58,5 +60,30 @@ describe('起動の失敗の報告', () => {
 
     expect(report).toHaveBeenNthCalledWith(1, thrown);
     expect(report).toHaveBeenNthCalledWith(2, 'rejected');
+  });
+
+  // 本番の起動（main.ts）は start だけを呼ぶ。購読と失敗の報告を start の外で個別に組むと、
+  // 当て忘れてもテストが落ちない（app-setup.ts の createApp と同じ理由。PR #255 第2巡）。
+  it('start は、起動より前に購読を付け、起動の失敗を報告に渡す', async () => {
+    const proc = new EventEmitter();
+    const report = vi.fn();
+    const failure = new Error('起動に失敗した');
+    let listenersAtRun = -1;
+    const run = vi.fn(async () => {
+      listenersAtRun =
+        proc.listenerCount('uncaughtException') + proc.listenerCount('unhandledRejection');
+      throw failure;
+    });
+
+    await start(proc as unknown as NodeJS.Process, report, run);
+
+    expect(listenersAtRun).toBe(2);
+    expect(report).toHaveBeenCalledExactlyOnceWith(failure);
+  });
+
+  it('起動に成功したら報告しない', async () => {
+    const report = vi.fn();
+    await start(new EventEmitter() as unknown as NodeJS.Process, report, async () => undefined);
+    expect(report).not.toHaveBeenCalled();
   });
 });

@@ -36,3 +36,20 @@ export function installFatalHandlers(
   proc.on('uncaughtException', (error) => report(error));
   proc.on('unhandledRejection', (reason) => report(reason));
 }
+
+/**
+ * 本番の起動の入口（main.ts はこれだけを呼ぶ）。**購読と失敗の報告をここで組む**——main.ts で個別に組むと、
+ * 当て忘れてもテストが落ちない（app-setup.ts の createApp と同じ理由）。
+ */
+export async function start(
+  proc: NodeJS.Process = process,
+  report: (error: unknown) => void = reportFatal,
+  run: () => Promise<unknown> = bootstrap,
+): Promise<void> {
+  installFatalHandlers(proc, report);
+  try {
+    await run();
+  } catch (error) {
+    report(error);
+  }
+}
