@@ -252,6 +252,7 @@ model User {
 
   memberships   Membership[]
   recoveryCodes RecoveryCode[]
+  refreshTokens RefreshToken[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -296,6 +297,34 @@ model RecoveryCode {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /// 照合は userId で絞り込む。索引が無いと利用者数に比例して遅くなる。
+  @@index([userId])
+}
+
+/// リフレッシュトークン（F-02。機能一覧 1.2）。ログインで系列（`familyId`）を1つ作り、リフレッシュのたびに
+/// 同じ系列の新しい行へ入れ替える。**入れ替え済みのトークンが出されたら、その系列をすべて失効させる**（RFC 9700 4.14.2）。
+model RefreshToken {
+  id     String @id @default(uuid(7)) @db.Uuid
+  userId String @db.Uuid
+
+  /// ログイン1回ごとの系列。再利用を検知したときに、この値で系列ごと失効させる。
+  /// **ログインでは渡さず、この既定値（UUIDv7。要件定義書 3.5.2）で作る。** 入れ替えでは元の行の値を引き継ぐ。
+  familyId String @default(uuid(7)) @db.Uuid
+
+  /// **トークンの SHA-256（16進 64 文字）だけを入れる列。** トークン自体は保存しない。
+  /// 32 バイトの乱数であり総当たりが成り立たないため、パスワードと違って遅いハッシュ（Argon2id）を使わず、
+  /// 値で引けるように一意にする（リクエストごとに照合するため）。
+  tokenHash String @unique @db.Char(64)
+
+  expiresAt DateTime @db.Timestamptz(3)
+
+  /// 失効させた時刻（入れ替え・ログアウト・再利用の検知・退会）。**埋まっていれば使えない。**
+  revokedAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
   @@index([userId])
 }
 

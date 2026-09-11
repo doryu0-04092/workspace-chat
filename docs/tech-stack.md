@@ -361,6 +361,14 @@ F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の 
 | **ioredis** | **^5.11.1** | 上の保存先が要求する接続（peerDependencies の >=5.0.0）。**`enableOfflineQueue: false`・`commandTimeout` で、Valkey が止まっているときにすぐ失敗させる**（既定は接続が切れている間のコマンドを溜め、要求が詰まる） |
 | **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動する（`GenericContainer`）。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
 
+#### 追加で確認した項目 — ログイン（2026-09-11。#257）
+
+F-02 で追加した依存（`apps/api` の dependencies）。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **@nestjs/jwt** | **^11.0.2** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（11.0.2 の peerDependencies は `@nestjs/common` の ^11.0.0 を受け入れる）。`jsonwebtoken` 9.0.3 を包む。**署名も検証も HS256 だけにする**（`verifyOptions.algorithms`。RFC 8725 3.1「Libraries MUST enable the caller to specify a supported set of algorithms」）。鍵は環境変数 `JWT_SECRET`（32 バイト以上。RFC 7518 3.2「A key of the same size as the hash output (for instance, 256 bits for "HS256") or larger MUST be used」） |
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。

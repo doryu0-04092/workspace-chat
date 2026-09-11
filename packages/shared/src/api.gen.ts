@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ログイン（F-02）
+         * @description 認証を要さない。成功するとアクセストークン（JWT・15分）を本体で返し、リフレッシュトークン（14日）を Cookie（refresh_token。HttpOnly; Secure; SameSite=Strict; Path=/api/auth）で渡す（機能一覧 1.2）。 発信元単位のレート制限は15分に20回。加えてユーザーID（大文字小文字を区別しない。存在しない ID も同じ）ごとに、 連続して失敗した回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す。成功で数え直す。
+         */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -53,7 +73,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -70,14 +90,30 @@ export interface components {
             displayName: string;
         };
         RegisterResponse: {
-            user: {
-                /** Format: uuid */
-                id: string;
-                userId: string;
-                displayName: string;
-            };
+            user: components["schemas"]["UserSummary"];
             /** @description Crockford の Base32 で16文字（80ビット）を4文字ずつハイフンで区切る */
             recoveryCode: string;
+        };
+        LoginRequest: {
+            /** @description 英数字とアンダースコアのみ、3〜30文字（RegisterRequest と同じ） */
+            userId: string;
+            /** @description 1〜128文字。下限を登録（8文字）に揃えないのは、下限を変えたときに既存の利用者がログインできなくならないようにするため */
+            password: string;
+        };
+        LoginResponse: {
+            /** @description JWT（HS256）。Authorization ヘッダーに Bearer で付ける */
+            accessToken: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+            /** @description アクセストークンの有効期間（秒） */
+            expiresIn: number;
+            user: components["schemas"]["UserSummary"];
+        };
+        UserSummary: {
+            /** Format: uuid */
+            id: string;
+            userId: string;
+            displayName: string;
         };
         HealthResponse: {
             /** @enum {string} */
@@ -213,6 +249,47 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description ログインした */
+            200: {
+                headers: {
+                    /** @description リフレッシュトークン（refresh_token） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description ユーザーID かパスワードが違う、または退会済み（invalid_credentials）。どれに当たったかは区別しない（機能一覧 1.2） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["TooManyRequests"];

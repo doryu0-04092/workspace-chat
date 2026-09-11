@@ -4,6 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app-setup';
+import { stubApiEnv } from './testing/api-env';
 
 // 型は仕様の各パスの応答から引く。仕様に 405 / 415 を載せ忘れると、型検査で落ちる。
 type RegisterResponses = paths['/auth/register']['post']['responses'];
@@ -19,9 +20,7 @@ describe('REST の仕様による要求の検証', () => {
 
   beforeAll(async () => {
     // ここで叩く要求はどれもハンドラに届かないため、繋がらない宛先でよい。
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
-    vi.stubEnv('TRUST_PROXY_HOPS', '0');
+    stubApiEnv();
     app = await createApp({ logger: false });
     await app.listen(0, '127.0.0.1');
     const { port } = app.getHttpServer().address() as AddressInfo;

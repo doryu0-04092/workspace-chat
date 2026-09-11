@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { randomBytes } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -29,6 +30,7 @@ describe('AppModule', () => {
           trustProxyHops: 0,
           apiTaskCount: 1,
           registrationEnabled: true,
+          jwtSecret: randomBytes(32).toString('base64url'),
         }),
       ],
     }).compile();

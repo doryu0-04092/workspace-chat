@@ -79,6 +79,53 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /auth/login:
+    post:
+      operationId: login
+      summary: ログイン（F-02）
+      description: >-
+        認証を要さない。成功するとアクセストークン（JWT・15分）を本体で返し、リフレッシュトークン（14日）を
+        Cookie（refresh_token。HttpOnly; Secure; SameSite=Strict; Path=/api/auth）で渡す（機能一覧 1.2）。
+        発信元単位のレート制限は15分に20回。加えてユーザーID（大文字小文字を区別しない。存在しない ID も同じ）ごとに、
+        連続して失敗した回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す。成功で数え直す。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: ログインした
+          headers:
+            Set-Cookie:
+              description: リフレッシュトークン（refresh_token）
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: >-
+            ユーザーID かパスワードが違う、または退会済み（invalid_credentials）。どれに当たったかは区別しない（機能一覧 1.2）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
   # 複数のパスに共通のエラーの応答。パスに固有の意味を持つもの（403・409 など）はパスに書く。
   responses:
@@ -148,6 +195,7 @@ components:
             - too_many_requests
             - user_id_taken
             - registration_disabled
+            - invalid_credentials
             - request_rejected
             - internal_error
         message:
@@ -198,24 +246,64 @@ components:
         - recoveryCode
       properties:
         user:
-          type: object
-          additionalProperties: false
-          required:
-            - id
-            - userId
-            - displayName
-          properties:
-            id:
-              type: string
-              format: uuid
-            userId:
-              type: string
-            displayName:
-              type: string
+          $ref: '#/components/schemas/UserSummary'
         recoveryCode:
           description: Crockford の Base32 で16文字（80ビット）を4文字ずつハイフンで区切る
           type: string
           pattern: '^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$'
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+        - password
+      properties:
+        userId:
+          description: 英数字とアンダースコアのみ、3〜30文字（RegisterRequest と同じ）
+          type: string
+          pattern: '^[A-Za-z0-9_]{3,30}$'
+        password:
+          description: >-
+            1〜128文字。下限を登録（8文字）に揃えないのは、下限を変えたときに既存の利用者がログインできなくならないようにするため
+          type: string
+          minLength: 1
+          maxLength: 128
+    LoginResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - accessToken
+        - tokenType
+        - expiresIn
+        - user
+      properties:
+        accessToken:
+          description: JWT（HS256）。Authorization ヘッダーに Bearer で付ける
+          type: string
+        tokenType:
+          type: string
+          enum:
+            - Bearer
+        expiresIn:
+          description: アクセストークンの有効期間（秒）
+          type: integer
+        user:
+          $ref: '#/components/schemas/UserSummary'
+    UserSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - userId
+        - displayName
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+        displayName:
+          type: string
     HealthResponse:
       type: object
       additionalProperties: false
