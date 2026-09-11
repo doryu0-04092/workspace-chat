@@ -367,6 +367,12 @@ F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の 
 | **ioredis** | **^5.11.1** | 上の保存先が要求する接続（peerDependencies の >=5.0.0）。**`enableOfflineQueue: false`・`commandTimeout` で、Valkey が止まっているときにすぐ失敗させる**（既定は接続が切れている間のコマンドを溜め、要求が詰まる） |
 | **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動する（`GenericContainer`）。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
 
+#### 追加で確認した項目 — api のコンテナイメージ（2026-09-12。#271）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **土台のイメージ** | **node:24-bookworm-slim** | Node.js 24 LTS（上表）の Debian 12 の slim。**Alpine（musl）にしない**——argon2 はビルド済みのネイティブモジュールを使い、musl では入れ方が変わる。段は実行用（`runtime`。本番の依存だけ・`USER node`）とマイグレーション用（`migrate`。`prisma migrate deploy` を1回流す。ECS の一回きりのタスクで使う）に分ける（[apps/api/Dockerfile](../apps/api/Dockerfile)）。CI の `code` が [scripts/api-image.test.sh](../scripts/api-image.test.sh) で作って動かす。**版はダイジェストで固定していない**（固定しない理由と代償は [Dockerfile](../apps/api/Dockerfile) に記した） |
+
 #### 追加で確認した項目 — ログイン（2026-09-11。#257）
 
 F-02 で追加した依存（`apps/api` の dependencies）。
