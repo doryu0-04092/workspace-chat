@@ -20,10 +20,30 @@ export interface ApiConfig {
   readonly trustProxyHops: number;
   readonly apiTaskCount: number;
   readonly registrationEnabled: boolean;
+  readonly jwtSecret: string;
 }
 
 /** ApiConfig を注入するトークン。 */
 export const API_CONFIG = Symbol('API_CONFIG');
+
+/** JWT_SECRET の下限（バイト）。RFC 7518 3.2: HS256 の鍵はハッシュの出力（256 ビット）以上でなければならない（MUST）。 */
+const JWT_SECRET_MIN_BYTES = 32;
+
+/**
+ * アクセストークン（HS256）の署名の鍵。**必須。32 バイト未満は起動時に落とす。** 文字数ではなく UTF-8 のバイト数で数える。
+ * **値は鍵そのものである**（API_SETTINGS で `secret: true`。不正なときのメッセージは集約が伏せる）。
+ */
+export function resolveJwtSecret(raw: string | undefined): string {
+  if (raw === undefined || raw === '') {
+    throw new Error(
+      `JWT_SECRET が設定されていません（アクセストークンの署名の鍵。${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す）`,
+    );
+  }
+  if (Buffer.byteLength(raw, 'utf8') < JWT_SECRET_MIN_BYTES) {
+    throw new Error(`JWT_SECRET が短すぎます（${JWT_SECRET_MIN_BYTES} バイト以上を渡す）`);
+  }
+  return raw;
+}
 
 /**
  * 設定1つの読み方。**`secret` はすべての行に必ず書く**（書かないと型検査で落ちる）——値に秘密（資格情報・鍵）が入るなら
@@ -55,6 +75,12 @@ export const API_SETTINGS: ApiSettings = {
     env: 'REGISTRATION_ENABLED',
     resolve: resolveRegistrationEnabled,
     secret: false,
+  },
+  jwtSecret: {
+    env: 'JWT_SECRET',
+    resolve: resolveJwtSecret,
+    secret: true,
+    hint: `${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す`,
   },
 };
 
