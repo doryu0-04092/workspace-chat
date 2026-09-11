@@ -92,12 +92,8 @@ services:
       start_period: 30s
 
   redis:
-    # サービス名は redis のまま変えていない（#24 が変えたのはイメージだけ。docs/tech-stack.md
-    # 「Valkey の版（ローカル）」）。ElastiCache for Redis から ElastiCache for Valkey へ移す決定を
-    # 受けて、イメージを valkey/valkey へ切り替えた。ElastiCache の Redis OSS は 7.1 が上限で、
-    # 7.2 以降は Valkey のみという事情はこの決定の背景であり、docs/tech-stack.md に理由と
-    # 価格の根拠、代償（Valkey は Redis のフォークであり、Redis 8 以降の独自機能が要るように
-    # なったら戻れない）を記した。
+    # サービス名は redis のまま変えていない（#24 が変えたのはイメージだけ）。
+    # 理由・価格の根拠・代償は docs/tech-stack.md「Valkey の版（ローカル）」に記した。
     #
     # このイメージは build: を持たないため、`build --pull` の対象にならない。
     # パッチ修正を受け取るには `docker compose pull redis` が要る（README.md の操作表）。
@@ -124,11 +120,10 @@ services:
       - ''
       - --appendonly
       - 'no'
-    # /data に tmpfs を当てる。**書き込みを止めるだけでは足りない。**
-    # 匿名ボリュームを作るのは redis の設定ではなくイメージの `VOLUME /data` 宣言であり、
-    # その位置にマウントが無いと**コンテナを作るたびに Docker が匿名ボリュームを作る**。
-    # `docker compose down`（-v 無し）は匿名ボリュームを消さないため、
-    # down -> up を繰り返すだけで積み上がる（実際に増えることを確認した）。
+    # /data に tmpfs を当てる。匿名ボリュームの対策として要るわけではない
+    # （`docker image inspect valkey/valkey:8-alpine --format '{{.Config.Volumes}}'` は null で、
+    # このイメージは /data を VOLUME 宣言していない。作成・削除を繰り返しても匿名ボリュームは増えない
+    # ことも確認した）。イメージの版が変わって VOLUME 宣言が付いても永続化させないための保証。
     tmpfs:
       - /data
     ports:

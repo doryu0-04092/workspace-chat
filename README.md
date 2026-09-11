@@ -324,7 +324,7 @@ Docker は同じ名前のイメージが手元にあればレジストリを見�
 
 **redis は `build --pull` の対象にならない。** `build` が触るのは `build:` を持つサービスだけで、
 redis は既製のイメージをそのまま使う。**`docker compose pull redis` が要る。**
-これを叩かない限り、**最初に `up` した日の 7.2.x のまま動き続ける。**
+これを叩かない限り、**最初に `up` した日の 8.x のまま動き続ける。**
 
 **接続先の組み立て方**（`DATABASE_URL` を含め、以後この形式を「接続先の組み立て方」として参照する）。
 `.env` に書いた値から組み立てる。
@@ -351,7 +351,7 @@ redis://127.0.0.1:<REDIS_PORT>
 |---|---|
 | ホストの `127.0.0.1:<POSTGRES_PORT>` / `<REDIS_PORT>` に TCP が通る | 両方とも通った |
 | 上の接続 URL の形で `SELECT version()` | `PostgreSQL 17.x` が返った（**確認した時点は 17.11**。土台はタグ指定なので `--pull` で動く） |
-| Redis に `ping` | `PONG` |
+| Valkey に `ping` | `PONG` |
 | **パスワードを誤った接続 URL** | `password authentication failed` で**拒否された** |
 
 #### pg_bigm
