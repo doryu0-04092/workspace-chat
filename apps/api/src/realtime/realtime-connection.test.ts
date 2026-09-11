@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { type INestApplication, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { REALTIME_PATH } from '@workspace-chat/shared';
+import { REALTIME_PATH, REALTIME_TRANSPORTS } from '@workspace-chat/shared';
 import { io, type Socket } from 'socket.io-client';
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -33,22 +33,19 @@ function nextIp(): string {
   return `2001:db8::9:${ipSequence.toString(16)}`;
 }
 
-/** 接続できれば Socket を、断られれば connect_error の Error を返す。 */
+/**
+ * 接続できれば Socket を、断られれば connect_error の Error を返す。
+ * transports の既定はクライアントが使う形（REALTIME_TRANSPORTS）。transport はそれ以外の経路を確かめるときにだけ指定する。
+ */
 function connect(
   base: string,
-  {
-    origin = TEST_WEB_ORIGIN,
-    token,
-    cookie,
-    transport = 'websocket',
-    path = REALTIME_PATH,
-  }: ConnectOptions,
+  { origin = TEST_WEB_ORIGIN, token, cookie, transport, path = REALTIME_PATH }: ConnectOptions,
 ): Promise<
   { socket: Socket; error?: undefined } | { socket: Socket; error: Error & { data?: unknown } }
 > {
   const socket = io(base, {
     path,
-    transports: [transport],
+    transports: transport === undefined ? [...REALTIME_TRANSPORTS] : [transport],
     reconnection: false,
     forceNew: true,
     timeout: 5_000,

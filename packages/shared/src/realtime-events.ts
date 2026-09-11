@@ -18,6 +18,12 @@
  * 既定の `/socket.io/` のままだと、CloudFront が `/api/*` だけを ALB へ振り分けるため ALB に届かず、
  * **アプリ側のログには何も出ない**（`apps/api/src/app.module.ts` の注記と同じ理由）。
  *
+ * **踏むと壊れる: クライアントは `transports` を下の `REALTIME_TRANSPORTS`（WebSocket だけ）にする。** socket.io-client の既定は
+ * polling（XHR の GET）でハンドシェイクを始めるが、**ブラウザは同一 origin の GET に `Origin` を付けず**（Fetch 標準。付けるのは CORS・
+ * WebSocket・GET と HEAD 以外のとき）、サーバーは `Origin` を持たない要求を断る（要件定義書 4.3。CSWSH の対処）。
+ * web と api は同じ origin（#77）なので、既定のまま繋ぐとハンドシェイクが 403 で断られ、polling から WebSocket へは落ちない。
+ * **代償: polling へのフォールバックが無い**（WebSocket を通さない経路からは繋がらない。機能一覧 5.2）。
+ *
  * 配信内容（payload）の型はここに置いていない。**それぞれの機能を実装するときに、
  * その機能と一緒に足す。** 先に決めると、要件に無い形を作り込むことになる。
  *
@@ -29,6 +35,9 @@
 
 /** ハンドシェイクの `path`（上の「踏むと壊れる」）。サーバーとクライアントはこれを読む。 */
 export const REALTIME_PATH = '/api/socket.io/';
+
+/** クライアントの `transports`（上の「踏むと壊れる」）。ブラウザが `Origin` を必ず付ける WebSocket だけで繋ぐ。 */
+export const REALTIME_TRANSPORTS = ['websocket'] as const;
 
 /** 配信する変化の種類。文書が「N種類」と数えている単位。 */
 export const REALTIME_EVENT_KINDS = [
