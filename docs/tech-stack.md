@@ -190,7 +190,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 |---|---|---|
 | IaC | **Terraform** 1.x | 既存プロジェクトで実績あり |
 | フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77） |
-| ロードバランサ | **ALB** | WebSocket にネイティブ対応。TLS 終端。**ブラウザ通知に必要な HTTPS を提供する** |
+| ロードバランサ | **ALB** | WebSocket にネイティブ対応。TLS 終端。**ブラウザ通知に必要な HTTPS を提供する**。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB を直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
 | **配信の共有・レート制限の回数** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。**レート制限の回数も置く**（`@nest-lab/throttler-storage-redis` が `ioredis` の接続で Lua の `eval` を使う。#245）。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
