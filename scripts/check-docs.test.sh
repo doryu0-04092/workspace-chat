@@ -48,14 +48,17 @@ probe=$(mktemp -d)
 probe_dirs=(.git .claude node_modules .pnp dist build .vite coverage .nyc_output
             playwright-report test-results blob-report reports generated uploads tmp
             .terraform .vscode .idea)
-probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json')
+probe_prune_files=('.env' '.env.*' '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json'
+                   '*.log' 'crash.log' 'npm-debug.log*' 'yarn-debug.log*' 'yarn-error.log*'
+                   'pnpm-debug.log*' 'override.tf' 'override.tf.json' '*.swp' '*.swo')
 probe_keep_files=('.env.example')
 # 現実に出てくる綴り。0a（木を作る）と 0c（.gitignore に問う）が同じものを見る。
 # 導出（${g//\*/x}）は1パターンにつき代表1名しか作らないため、
 # secrets.auto.tfvars.json のようなドットを複数含む綴りはこの一覧にしか依存しない。
 # 0a と 0c で別々に書き写すと、片方に足したときもう片方が静かに狭くなる。
 probe_real_names=(.env.local terraform.tfstate terraform.tfstate.backup
-                  prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json)
+                  prod.tfvars terraform.tfvars.json secrets.auto.tfvars.json
+                  crash.log npm-debug.log.1 override.tf .env.swp)
 # 一致しては困る対（末尾一致であることの裏打ち）。
 # *.tfvars / *.tfvars.json はいずれも末尾一致であり、例示ファイルには一致しない。
 # この対を置かないと、末尾一致でない形へ崩しても 0a・0c が緑で通る。
@@ -78,6 +81,31 @@ same DOC_PRUNE_FILES \
   "$(printf '%s\n' "${probe_prune_files[@]}" | sort)" "$(printf '%s\n' "${DOC_PRUNE_FILES[@]}" | sort)"
 same DOC_KEEP_FILES \
   "$(printf '%s\n' "${probe_keep_files[@]}"  | sort)" "$(printf '%s\n' "${DOC_KEEP_FILES[@]}"  | sort)"
+# **ファイル名の一覧に、スラッシュを含むパターンを入れない。**
+# doc_find は `find -name "$g"`、doc_excluded_name は `case "$base" in $g)` であり、
+# **どちらも basename にだけ当たる。** スラッシュを含むパターンを足しても**永久に一致しない。**
+#
+# **一方 0c-3 は一覧と文字列として照合するため、足した時点で緑になる**——
+# 「分類は済んだ／除外は効いていない」という偽の緑が作れる（#44 第4巡の指摘）。
+# **指示を読み違えても、ここで止まる。**
+no_slash() { # $1=一覧の名前 $2...=要素
+  local name="$1" g
+  shift
+  for g in "$@"; do
+    case "$g" in
+      */*)
+        echo "  NG: $name の「$g」がスラッシュを含む（basename にしか当たらないため、永久に一致しない）"
+        echo "        パスで絞るなら、先頭のディレクトリ名を DOC_PRUNE_DIRS へ足す"
+        fail=1
+        ;;
+    esac
+  done
+}
+no_slash DOC_PRUNE_FILES "${DOC_PRUNE_FILES[@]}"
+no_slash DOC_KEEP_FILES "${DOC_KEEP_FILES[@]}"
+# **DOC_NO_VALUE_IGNORES にも当てる。** ここに入れた行も 0c-3 の照合を通るため、
+# スラッシュを含む綴りを足すと「分類は済んだ」の側で緑になる（#44 第8巡）。
+no_slash DOC_NO_VALUE_IGNORES "${DOC_NO_VALUE_IGNORES[@]}"
 for d in "${probe_dirs[@]}"; do
   mkdir -p "$probe/$d" && : > "$probe/$d/x.md"
 done
@@ -95,7 +123,7 @@ for f in "${probe_real_keeps[@]}"; do : > "$probe/$f"; done
 expected=$(printf '%s\n' keep.md "${probe_real_keeps[@]}" "${probe_keep_files[@]//\*/x}" | sort | tr '\n' ' ')
 got=$( (cd "$probe" && doc_find -type f -print) | sed 's|^\./||' | sort | tr '\n' ' ')
 if [ "$got" = "$expected" ]; then
-  echo "  OK（残るのは $expected）"
+  echo "  OK: doc_find の結果は想定どおり（残るのは $expected）"
 else
   echo "  NG: 除外の範囲が想定と違う → $got"
   fail=1
@@ -717,6 +745,145 @@ elif [ "${#gi_read[@]}" -ne 1 ] ||
 else
   echo "  OK"
 fi
+
+
+# --- 前提: .gitignore のファイル名のパターンが、値を持つかどうか判断されていること（#44）---
+# **0c の突き合わせは一方向だった。** DOC_PRUNE_FILES を起点に「.gitignore に無いもの」は
+# 見ていたが、**逆向き（.gitignore にあるが DOC_PRUNE_FILES に無い）は素通りしていた。**
+# 実際に `*.log` と `crash.log` が片側だけになっており、**値を持つログが複製に含まれていた。**
+#
+# **判断そのものは機械にできない。** 「そのファイルが値を持つか」は人が決める。
+# **できるのは「判断されていない行を残さないこと」だけである。**
+# DOC_PRUNE_FILES（値を持つ）にも DOC_NO_VALUE_IGNORES（値を持たないと判断した）にも
+# 無いパターンが .gitignore に現れたら落とす。**新しい行を足した人に、1回だけ判断させる。**
+#
+# **ファイルを引数で受ける**（0c-2b・0c と同じ形）。実物には何も置かずに、
+# 分類の抜けを拾えることを確かめられる。
+echo "0c-3. .gitignore の行が、どの一覧で扱うか決まっていること"
+
+# 5つの向きを見る。**「あちらで扱う」と書いた先が、実際に照合されていること**まで含む。
+#
+#   ファイル名の行  → DOC_PRUNE_FILES（値を持つ）か DOC_NO_VALUE_IGNORES（持たないと判断した）
+#   ディレクトリ行  → DOC_PRUNE_DIRS
+#   打ち消し（!）   → DOC_KEEP_FILES（DOC_PRUNE_DIRS の配下を指すものは対象外）
+#   逆向き          → DOC_NO_VALUE_IGNORES の各行が .gitignore に現に在ること
+#
+# **判断そのものは機械にできない。** できるのは「判断されていない行を残さないこと」だけである。
+#
+# **壊す確認を先に置く**（0c-2b と同じ理由。後に置くと、本体の指し先を取り違えても
+# その時点では空で緑になり、実物を一度も見ないまま通る）。
+gi3_ng=0
+gi3_probe=''
+gi3_probe2=''
+gi3_probe3=''
+gi3_probe4=''
+gi3_dir=''
+if ! gi3_probe=$(mktemp) || ! gi3_probe2=$(mktemp) || ! gi3_probe3=$(mktemp) ||
+  ! gi3_probe4=$(mktemp) || ! gi3_dir=$(mktemp -d); then
+  echo "  NG: 分類の確認用の一時ファイルを作れなかった（TMPDIR を確かめる）"
+  gi3_ng=1
+elif ! printf '%s\n' '# コメント' 'node_modules/' '!.env.example' '.env' \
+  '*.unclassified-probe' 'probe-unlisted-dir/' '!probe-unlisted-keep' \
+  '!.vscode/extensions.json' '!node_modules/keep-me' >"$gi3_probe"; then
+  echo "  NG: 分類の確認用の .gitignore を書けなかった（$gi3_probe）"
+  gi3_ng=1
+elif ! printf '%s\n' "${DOC_NO_VALUE_IGNORES[@]:1}" >"$gi3_probe2"; then
+  # 先頭の1件だけを落とした .gitignore。逆向きがその1件を拾えるはず。
+  echo "  NG: 逆向きの確認用の .gitignore を書けなかった（$gi3_probe2）"
+  gi3_ng=1
+elif ! printf '%s\n' '**/probe-prefixed/' '!probe-prefixed/keep-me' \
+  'probe-bare' '!probe-bare/keep-me' >"$gi3_probe3"; then
+  # **ディレクトリ除外の綴りを2通り置く。** 上の probe とは別のファイルにする——
+  # 混ぜると、他の3つの期待値（1件ずつ）が壊れて何を見ているのか読めなくなる。
+  echo "  NG: 綴りの確認用の .gitignore を書けなかった（$gi3_probe3）"
+  gi3_ng=1
+else
+  gi3_expect() { # $1=説明 $2...=期待する件（最後の引数の後ろが実際の値。-- で区切る）
+    local desc="$1" gi3_w=() gi3_r=()
+    shift
+    while [ "$#" -gt 0 ] && [ "$1" != '--' ]; do gi3_w+=("$1"); shift; done
+    shift
+    gi3_r=("$@")
+    [ "${gi3_w[*]}" = "${gi3_r[*]}" ] && [ "${#gi3_w[@]}" -eq "${#gi3_r[@]}" ] && return 0
+    echo "  NG: $desc（期待 ${#gi3_w[@]} 件「${gi3_w[*]}」/ 実際 ${#gi3_r[@]} 件「${gi3_r[*]}」）"
+    gi3_ng=1
+  }
+  mapfile -t gi3_g < <(doc_unclassified_ignores "$gi3_probe")
+  gi3_expect "分類の抜けを拾えていない" '*.unclassified-probe' -- "${gi3_g[@]}"
+  mapfile -t gi3_g < <(doc_unlisted_ignore_dirs "$gi3_probe")
+  gi3_expect "一覧に無いディレクトリ行を拾えていない" 'probe-unlisted-dir/' -- "${gi3_g[@]}"
+  # `!.vscode/extensions.json` は DOC_PRUNE_DIRS の配下なので落ちるはず。
+  mapfile -t gi3_g < <(doc_unlisted_ignore_keeps "$gi3_probe")
+  gi3_expect "一覧に無い打ち消し行を拾えていない" '!probe-unlisted-keep' -- "${gi3_g[@]}"
+  mapfile -t gi3_g < <(doc_groundless_no_value "$gi3_probe2")
+  gi3_expect "根拠を失った DOC_NO_VALUE_IGNORES を拾えていない" "${DOC_NO_VALUE_IGNORES[0]}" -- "${gi3_g[@]}"
+  # 親が丸ごと除外されている打ち消し。probe には `node_modules/` があるため、
+  # その配下の打ち消しは**永久に効かない**。
+  # **`!.vscode/extensions.json` は落ちるはず**——probe に `.vscode/` の行が無いためである。
+  mapfile -t gi3_g < <(doc_unreachable_keeps "$gi3_probe")
+  gi3_expect "届かない打ち消しを拾えていない" '!node_modules/keep-me' -- "${gi3_g[@]}"
+  # **ディレクトリ除外の綴りは1通りではない。** どちらも拾えること（#44 第7巡）。
+  #   **/probe-prefixed/ … 接頭辞が付く（.gitignore の `**/generated/` がこの形）
+  #   probe-bare        … 末尾の / が無い（gitignore(5) ではディレクトリにも一致する）
+  mapfile -t gi3_g < <(doc_unreachable_keeps "$gi3_probe3")
+  gi3_expect "ディレクトリ除外の綴り違いを拾えていない" \
+    '!probe-prefixed/keep-me' '!probe-bare/keep-me' -- "${gi3_g[@]}"
+  # 裸の名前が、実在するディレクトリを指しているとき（#44 第8巡）。
+  # **probe のディレクトリを実際に作る。** 綴りだけでは判定できないため、
+  # この関数はファイルシステムを見る。
+  if mkdir -p "$gi3_dir/probe-bare-dir" &&
+    printf '%s\n' 'probe-bare-dir' >"$gi3_probe4"; then
+    mapfile -t gi3_g < <(doc_bare_dirs_unlisted "$gi3_probe4" "$gi3_dir")
+    gi3_expect "実在するディレクトリを指す裸の名前を拾えていない" 'probe-bare-dir' -- "${gi3_g[@]}"
+  else
+    echo "  NG: 裸のディレクトリの確認用のファイルを作れなかった（$gi3_dir）"
+    gi3_ng=1
+  fi
+fi
+
+gi3_check() { # $1=関数名 $2=NG の文言 $3=直し方
+  local got
+  # **指し先が無ければ名指しで落とす。** 開けないファイルを渡すと出力が空になり、
+  # mapfile は 0 件、この関数は何も言わずに通る——**取り違えが緑で通る。**
+  if [ ! -f "$repo/.gitignore" ]; then
+    echo "  NG: $repo/.gitignore を読めない。この節の結果は信用できない"
+    gi3_ng=1
+    return
+  fi
+  mapfile -t got < <("$1" "$repo/.gitignore")
+  if [ "${#got[@]}" -gt 0 ]; then
+    echo "  NG: $2: ${got[*]}"
+    echo "        $3"
+    gi3_ng=1
+  fi
+}
+gi3_check doc_unclassified_ignores \
+  '.gitignore のパターンが、値を持つかどうか判断されていない' \
+  '値を持つなら DOC_PRUNE_FILES へ、持たないなら DOC_NO_VALUE_IGNORES へ足す（scripts/doc-scope.sh）。スラッシュを含む行は、先頭のディレクトリ名を DOC_PRUNE_DIRS へ足す（.gitignore の行は書き換えない）'
+gi3_check doc_unlisted_ignore_dirs \
+  '.gitignore のディレクトリ行が DOC_PRUNE_DIRS に無い' \
+  '足さないと、その配下の Markdown が複製され、検査の対象に入る（scripts/doc-scope.sh）'
+gi3_check doc_unlisted_ignore_keeps \
+  '.gitignore の打ち消し行が DOC_KEEP_FILES に無い' \
+  '除外から戻すなら DOC_KEEP_FILES へ足す（scripts/doc-scope.sh）。DOC_PRUNE_DIRS の配下を指すものは足さない——ディレクトリ側で先に除外されるため KEEP は届かない'
+gi3_check doc_groundless_no_value \
+  'DOC_NO_VALUE_IGNORES の項目が .gitignore に無い' \
+  '.gitignore から消えたなら、この一覧からも消す（判断の記録が根拠を失う。scripts/doc-scope.sh）'
+gi3_check doc_unreachable_keeps \
+  '打ち消し（!）の親ディレクトリが丸ごと除外されていて、永久に効かない' \
+  '親を dir/ ではなく dir/* にする。git は除外したディレクトリの中を列挙しないため、! で戻せない'
+# **裸の名前が、実在するディレクトリを指しているとき。** gi3_check は引数を1つしか渡さないため、
+# ここだけ直に呼ぶ（この関数はリポジトリのルートも要る）。
+mapfile -t gi3_bare < <(doc_bare_dirs_unlisted "$repo/.gitignore" "$repo")
+if [ "${#gi3_bare[@]}" -gt 0 ]; then
+  echo "  NG: .gitignore の裸の名前が、実在するディレクトリを指していて DOC_PRUNE_DIRS に無い: ${gi3_bare[*]}"
+  echo "        DOC_PRUNE_DIRS へ足す。あわせて .gitignore 側も末尾に / を付けて、ディレクトリだと分かる形にする"
+  gi3_ng=1
+fi
+# **後片付けは本体の後に行う。** 先に消すと、上の注記が言う「本体の指し先の取り違え」を
+# 塞げない——**消えたファイルを指しても、出力が空になって緑で通る。**
+rm -f "$gi3_probe" "$gi3_probe2" "$gi3_probe3" "$gi3_probe4"
+if [ "$gi3_ng" = 0 ]; then echo "  OK"; else fail=1; fi
 
 # --- 前提: 壊す前は通ること -------------------------------------------------
 # これが通らないと、以降の「落ちた」は壊したせいではなく複製の不備によるものになる。

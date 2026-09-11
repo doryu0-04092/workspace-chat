@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # このファイルは実行せず、他のスクリプトから読み込む（shebang を持たない）。
-# check-docs.sh と check-docs.test.sh が共有する定義。2つのものを置く。
+# check-docs.sh と check-docs.test.sh が共有する定義。3つのものを置く。
 #   1. 検査の対象範囲（DOC_PRUNE_DIRS / DOC_PRUNE_FILES / DOC_KEEP_FILES と doc_find）
 #   2. 宣言から数を読み取る規則（decls / decls_in）
+#   3. .gitignore との突き合わせ（DOC_NO_VALUE_IGNORES と doc_unclassified_ignores 等の4つ）
 #
 # なぜ1箇所に置くか。片方だけに書くと「本物の検査が見ている範囲」と
 # 「テストが検査させる範囲」が黙ってずれる。ずれても失敗にはならず、
@@ -16,6 +17,8 @@
 # 除外は .gitignore から導出しない。check-docs.sh は「git の追跡状態に依存しない
 # （未コミットのファイルも検査対象にする）」方針であり、除外だけを git に委ねると
 # 方針が二重になる。**.gitignore に足しただけでは除外されない。この一覧にも足す。**
+# **ただしファイル名の一覧（DOC_PRUNE_FILES / DOC_KEEP_FILES）は basename にしか当たらない。**
+# スラッシュを含むパターンを足しても永久に一致しない。**パスで絞るなら DOC_PRUNE_DIRS を使う。**
 #
 # ■ 制約: 次のどちらかに当たるファイルを、Markdown のリンク先にしてはならない。
 #     1. DOC_PRUNE_DIRS 配下のファイル
@@ -72,7 +75,220 @@ DOC_PRUNE_DIRS=(
 DOC_PRUNE_FILES=(
   '.env' '.env.*'
   '*.tfstate' '*.tfstate.*' '*.tfvars' '*.tfvars.json'
+  # ログ。**値を持つ。** Terraform の crash.log は「プロバイダとの入出力を含む」と
+  # 公式が明記しており（クラッシュ時のダンプ）、npm / yarn / pnpm の debug ログも
+  # 実行時の引数と環境を書き出す。**複製すると一時ディレクトリに残り続ける。**
+  # `*.log` だけでは足りない——.gitignore 側は `npm-debug.log*` のように末尾に * を持ち、
+  # `npm-debug.log.1` のような回転後の名前に一致する。**同じ形で写す。**
+  #
+  # **crash.log は `*.log` に一致するが、それでも書く。** 下の突き合わせ（0c-3）は
+  # .gitignore のパターンと**文字列として**照合する。パターンどうしの包含は見ない——
+  # 見ようとすると `*.log` が `crash.log` を覆うかの判定が要り、
+  # **その判定自身が glob の解釈になって、検査が検査を必要とする。**
+  # **1対1で写すほうが、機械的で読み違えようがない。**
+  '*.log' 'crash.log' 'npm-debug.log*' 'yarn-debug.log*' 'yarn-error.log*' 'pnpm-debug.log*'
+  # Terraform の設定の上書き。**値を持ちうる**——プロバイダの認証情報を直接書ける。
+  'override.tf' 'override.tf.json'
+  # エディタのスワップ。**編集中のファイルの中身をそのまま持つ。**
+  # .env を開いている最中に落ちれば、その中身が入る。
+  '*.swp' '*.swo'
 )
+
+# .gitignore にあるファイル名のパターンのうち、**値を持たないと判断したもの。**
+#
+# **これは「無視してよい」の一覧ではない。「値を持たないと人が判断した」の記録である。**
+# 下の突き合わせ（check-docs.test.sh の 0c-3）は、.gitignore のファイル名パターンが
+# **DOC_PRUNE_FILES にも、この一覧にも無い**とき NG を出す。
+# **.gitignore に新しい行を足した人に、「値を持つか」を1回だけ判断させるための仕掛けである。**
+#
+# **突き合わせが一方向だった**（#44）。0c は DOC_PRUNE_FILES を起点に
+# 「.gitignore に無いもの」を検出していたが、**逆向きは素通りしていた。**
+# 実際に `*.log` と `crash.log` が片側だけになっていた。
+DOC_NO_VALUE_IGNORES=(
+  '.pnp.js'           # 依存の解決結果。値を持たない
+  '*.tsbuildinfo'     # 型検査の増分情報。値を持たない
+  '.DS_Store'         # macOS のフォルダ表示設定
+  'Thumbs.db'         # Windows のサムネイルの索引
+  'desktop.ini'       # Windows のフォルダ表示設定
+  'audit-report.json' # npm audit の出力。依存の脆弱性の一覧であり、秘密は持たない
+)
+
+# .gitignore のパターンのうち、値を持つかどうかが**判断されていない**ものを1行ずつ返す。
+#
+# **この関数をここに置くのは、`DOC_NO_VALUE_IGNORES` を使う側だからである。**
+# 冒頭に書いたとおり、**両方のスクリプトが同じ結論を出さなければならない規則は、
+# 範囲であるかによらずここに置く。** 分類の規則はまさにそれである。
+#
+# **加えて、外にあると shellcheck が SC2034（未使用）で落とす**——
+# 一覧だけをここに置き、読む側を別ファイルにすると、このファイルの中では使われていない。
+# **実際に CI の docs で落ちた**（2026-09-10）。
+#
+# 読み飛ばすもの:
+#   - 空行とコメント
+#   - `!` の打ち消し（DOC_KEEP_FILES 側で扱う）
+#   - 末尾が `/` のディレクトリ形（DOC_PRUNE_DIRS 側で扱う）
+#   - `dir/...` の形で、先頭が DOC_PRUNE_DIRS にあるもの（.vscode/* など）
+doc_unclassified_ignores() { # $1=.gitignore のパス
+  local pat d x
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    # 末尾の CR を落とす。Windows で編集された .gitignore を読んでも同じ結果にする。
+    pat=${pat%$'\r'}
+    case "$pat" in
+      '' | '#'*) continue ;;
+      '!'*) continue ;;
+      */) continue ;;
+    esac
+    case "$pat" in
+      */*)
+        d=${pat%%/*}
+        for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$d" ] && continue 2; done
+        ;;
+    esac
+    for x in "${DOC_PRUNE_FILES[@]}" "${DOC_NO_VALUE_IGNORES[@]}"; do
+      [ "$x" = "$pat" ] && continue 2
+    done
+    printf '%s\n' "$pat"
+  done <"$1"
+}
+
+# .gitignore のディレクトリ行（末尾が `/`）のうち、DOC_PRUNE_DIRS に無いものを返す。
+#
+# **これが無いと、ディレクトリ軸に同じ抜けが残る。** `secrets/` のような行を足しても
+# DOC_PRUNE_DIRS に届かなければ、check-docs.test.sh の複製ループがその配下の Markdown を
+# 複製し、check-docs.sh がそれを検査対象にする——**#44 が塞いだのとまったく同じ形である。**
+#
+# `**/generated/` のような接頭辞は落とす。DOC_PRUNE_DIRS は名前で持つ（-name で指定するため）。
+doc_unlisted_ignore_dirs() { # $1=.gitignore のパス
+  local pat d x
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in
+      '' | '#'* | '!'*) continue ;;
+      */) ;;
+      *) continue ;;
+    esac
+    d=${pat%/}       # 末尾の / を落とす
+    d=${d##*/}       # **/generated → generated
+    for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$d" ] && continue 2; done
+    printf '%s\n' "$pat"
+  done <"$1"
+}
+
+# .gitignore の打ち消し行（`!`）のうち、DOC_KEEP_FILES に無いものを返す。
+#
+# **DOC_PRUNE_DIRS の配下を指す打ち消しは対象外である。** 冒頭の制約に書いたとおり、
+# `doc_excluded` はディレクトリ側で先に返すため、**KEEP はそこまで届かない**
+# （`!.vscode/extensions.json` がこれに当たる。KEEP に入れていないのは意図である）。
+doc_unlisted_ignore_keeps() { # $1=.gitignore のパス
+  local pat n d x
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in '!'*) ;; *) continue ;; esac
+    n=${pat#!}
+    case "$n" in
+      */*)
+        d=${n%%/*}
+        for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$d" ] && continue 2; done
+        ;;
+    esac
+    for x in "${DOC_KEEP_FILES[@]}"; do [ "$x" = "$n" ] && continue 2; done
+    printf '%s\n' "$pat"
+  done <"$1"
+}
+
+# DOC_NO_VALUE_IGNORES のうち、.gitignore に現れないものを返す。
+#
+# **DOC_PRUNE_FILES と DOC_KEEP_FILES は両方向を持っている**（前者は「.gitignore で無視されるか」、
+# 後者は「`!` に一致するか」を問い返される）。**この一覧だけが片方向だった。**
+# .gitignore から行が消えても、判断の記録が根拠を失ったまま残る。
+#
+# **DOC_PRUNE_DIRS には、この形の逆向きを持たせられない。** 集合として比較すると偽の NG が出る。
+#   - `.git` は .gitignore に1行も無い（git が本来的に除外するため、書く必要が無い）
+#   - `.vscode` は `.vscode/*`、`generated` は `**/generated/` と、別の綴りで現れる
+# **あちら側の守りは 0a の `same DOC_PRUNE_DIRS`**（probe_dirs との一致）である。
+doc_groundless_no_value() { # $1=.gitignore のパス
+  local x pat found
+  for x in "${DOC_NO_VALUE_IGNORES[@]}"; do
+    found=0
+    while IFS= read -r pat || [ -n "$pat" ]; do
+      pat=${pat%$'\r'}
+      [ "$pat" = "$x" ] && { found=1; break; }
+    done <"$1"
+    [ "$found" = 0 ] && printf '%s\n' "$x"
+  done
+  return 0
+}
+
+# 打ち消し（`!`）のうち、**親ディレクトリが丸ごと除外されていて永久に効かないもの**を返す。
+#
+# **git は除外されたディレクトリの中を列挙しない。** `dir/` で丸ごと無視したうえで
+# `!dir/x` と書いても、**その打ち消しは効かない**（gitignore(5) の明記）。
+# `.gitignore` の `.vscode/*` が `*` 付きで書かれているのは、この制約を避けるためである。
+#
+# **文書だけでは守れないので、機械で落とす。** `.vscode/*` を `.vscode/` に書き換えても、
+# **だからこの関数を足した。** 上の3つ（doc_unclassified_ignores / doc_unlisted_ignore_dirs / doc_unlisted_ignore_keeps）は
+# **すべて読み飛ばして緑になる**（#44 第5巡の指摘）。
+doc_unreachable_keeps() { # $1=.gitignore のパス
+  local pat n d line c
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in '!'*) ;; *) continue ;; esac
+    n=${pat#!}
+    case "$n" in */*) d=${n%%/*} ;; *) continue ;; esac
+    # 同じ .gitignore に、その親ディレクトリを丸ごと除外する行があれば、この打ち消しは届かない。
+    #
+    # **綴りを正規化して比べる。** `d/` との完全一致だけでは足りない（#44 第7巡）:
+    #   - `**/generated/` … 接頭辞が付く。**現に .gitignore に在る形である**
+    #   - `node_modules`  … 末尾の `/` が無くても、gitignore(5) ではディレクトリに一致する
+    # **裸の名前をディレクトリとして読むのは、この関数だけである。** 下の
+    # doc_bare_dirs_unlisted の注記に、3つの関数が同じ行をどう読むかと、その理由を書いた。
+    while IFS= read -r line || [ -n "$line" ]; do
+      line=${line%$'\r'}
+      case "$line" in
+        '' | '#'* | '!'*) continue ;;
+        */) c=${line%/}; c=${c##*/} ;;   # generated/ → generated / **/generated/ → generated
+        *[*?[]*) continue ;;             # glob を含む行は、ディレクトリを丸ごと除外しない
+        */*) continue ;;                 # パスを含み `/` で終わらない → ファイルの指定
+        *) c=$line ;;                    # node_modules のような裸の名前
+      esac
+      [ "$c" = "$d" ] && { printf '%s\n' "$pat"; break; }
+    done <"$1"
+  done <"$1"
+}
+
+# **裸の名前（`/` も glob も含まない行）は、gitignore(5) ではファイルにもディレクトリにも一致する。**
+# **綴りからは、どちらのつもりで書かれたか決まらない。**
+#
+# 3つの関数は、この行を**違うものとして読む。そうでなければならない**——問いが違うためである。
+#
+#   doc_unclassified_ignores  ファイル名のパターンとして DOC_PRUNE_FILES / DOC_NO_VALUE_IGNORES と照合する
+#   doc_unlisted_ignore_dirs  見ない（末尾 `/` の行だけを見る。裸の名前はディレクトリと決まらない）
+#   doc_unreachable_keeps     **ディレクトリとして読む。** `!<その名前>/…` の親を問うており、
+#                             その打ち消しが在ること自体が「ディレクトリのつもり」の証拠である
+#
+# **残る穴を、ファイルシステムで塞ぐ。** 綴りから決まらないなら、**実際にそのディレクトリが在るかを見る。**
+# 在れば、その配下の Markdown が複製ループで一時ディレクトリに複製され、検査対象に入る——
+# **#44 が塞ごうとしている状態そのものである。**
+#
+# **DOC_PRUNE_DIRS を無条件に求めない。** いまの `.gitignore` の裸の名前は9件あり、
+# **すべてファイルである**（`.env` / `crash.log` / `.DS_Store` など）。
+# 無条件に求めると偽の NG が9件出る。**在るディレクトリだけを問う。**
+doc_bare_dirs_unlisted() { # $1=.gitignore のパス $2=リポジトリのルート
+  local pat x found
+  while IFS= read -r pat || [ -n "$pat" ]; do
+    pat=${pat%$'\r'}
+    case "$pat" in
+      '' | '#'* | '!'*) continue ;;
+      */* | *[*?[]*) continue ;;   # パスか glob を含む → 裸の名前ではない
+    esac
+    # そのディレクトリが実在するときだけ問う。
+    [ -d "$2/$pat" ] || continue
+    found=0
+    for x in "${DOC_PRUNE_DIRS[@]}"; do [ "$x" = "$pat" ] && { found=1; break; }; done
+    [ "$found" = 0 ] && printf '%s\n' "$pat"
+  done <"$1"
+  return 0
+}
 
 # 上に一致しても除外しないもの。.gitignore が `!` で追跡対象に戻しているファイルで、
 # 値ではなく変数名しか持たない。除外すると、文書がそこへリンクした時点で
