@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import type { ErrorResponse } from './error-response';
+import { type ErrorResponse, errorBodyForStatus } from './error-response';
 
 /** 本体の読み取り（body-parser）の失敗。`http-errors` の形で、`type` に種類が入る。 */
 type BodyReadError = { status: number; type: string };
@@ -14,10 +14,12 @@ function isBodyReadError(error: unknown): error is BodyReadError {
   );
 }
 
-const CODES: Record<string, ErrorResponse> = {
-  'entity.parse.failed': { code: 'invalid_body', message: '本体を JSON として読めません' },
-  'entity.too.large': { code: 'payload_too_large', message: '要求が大きすぎます' },
-};
+/**
+ * 本体の読み取りの 400（壊れた JSON・途中で切れた本体など）は、入力の検証の失敗（validation_failed）と分けて invalid_body。
+ * それ以外の状態（413 の大きすぎる本体・415 の扱えない文字集合や内容符号化・5xx のストリームの異常）は、
+ * 状態コードごとの既定の本体（error-response.ts）を引く——仕様がその状態に宣言した `code` と揃えるため。
+ */
+const INVALID_BODY: ErrorResponse = { code: 'invalid_body', message: '本体を読めません' };
 
 /**
  * 本体の読み取りの失敗を、送られた値を載せない ErrorResponse で返す Express のエラーミドルウェア。
@@ -43,5 +45,5 @@ export function bodyReadErrorHandler(
   }
   res
     .status(error.status)
-    .json(CODES[error.type] ?? { code: 'invalid_body', message: '本体を読めません' });
+    .json(error.status === 400 ? INVALID_BODY : errorBodyForStatus(error.status));
 }

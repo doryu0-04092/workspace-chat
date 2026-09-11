@@ -16,7 +16,10 @@ import * as OpenApiValidator from 'express-openapi-validator';
  */
 export type ErrorResponse = components['schemas']['ErrorResponse'];
 
-/** 状態コードごとの既定の本体。`code` を持たない例外（Nest の既定の 404 など）と、要求の検証の失敗に使う。 */
+/**
+ * 状態コードごとの既定の本体。**同じ状態コードの本体はここにだけ書く**（仕様がその状態に宣言した `code` に揃える）。
+ * `code` を持たない例外（Nest の既定の 404 など）・要求の検証の失敗・本体の読み取りの失敗・レート制限が引く。
+ */
 const BY_STATUS: Partial<Record<number, ErrorResponse>> = {
   400: { code: 'validation_failed', message: '入力が仕様に合いません' },
   404: { code: 'not_found', message: '見つかりません' },
@@ -30,6 +33,12 @@ const BY_STATUS: Partial<Record<number, ErrorResponse>> = {
 };
 const REJECTED: ErrorResponse = { code: 'request_rejected', message: '要求を受け付けられません' };
 const INTERNAL: ErrorResponse = { code: 'internal_error', message: '想定外のエラーが起きました' };
+
+/** 状態コードに対応する本体。5xx は internal_error、表に無い 4xx は request_rejected。 */
+export function errorBodyForStatus(status: number): ErrorResponse {
+  if (status >= 500) return INTERNAL;
+  return BY_STATUS[status] ?? REJECTED;
+}
 
 const VALIDATOR_ERRORS = Object.values(OpenApiValidator.error);
 
@@ -69,7 +78,7 @@ export class ErrorResponseFilter implements ExceptionFilter {
 
     if (isValidatorError(exception)) {
       const body: ErrorResponse = {
-        ...(BY_STATUS[exception.status] ?? REJECTED),
+        ...errorBodyForStatus(exception.status),
         ...(exception.status === 400
           ? { errors: exception.errors.map(({ path, message }) => ({ path, message })) }
           : {}),
@@ -81,6 +90,8 @@ export class ErrorResponseFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const given = exception.getResponse();
+      // 5xx を投げた HttpException も想定外の失敗として残す（本体には載せない）。
+      if (status >= 500) this.logger.error(exception.message, exception.stack);
       response
         .status(status)
         .json(isErrorResponse(given) ? given : (BY_STATUS[status] ?? REJECTED));
