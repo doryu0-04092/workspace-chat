@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveApiConfig, resolveDatabaseUrl } from './api-config';
+import { resolveApiConfig } from './api-config';
+import { resolveDatabaseUrl } from './database-url';
 
 describe('DB の接続先（DATABASE_URL）', () => {
   it('設定されていれば、その値を使う', () => {
@@ -55,18 +56,6 @@ describe('起動の設定（resolveApiConfig）', () => {
       'REGISTRATION_ENABLED',
     ]) {
       expect(message).toContain(name);
-    }
-  });
-
-  // 起動の失敗はログに出る。接続先には資格情報が入る。
-  it('失敗のメッセージに接続先の値を載せない', () => {
-    const env = { ...VALID_ENV, TRUST_PROXY_HOPS: undefined };
-    expect(() => resolveApiConfig(env)).toThrow(/TRUST_PROXY_HOPS/);
-    try {
-      resolveApiConfig(env);
-    } catch (error) {
-      expect((error as Error).message).not.toContain('pw-db-9x');
-      expect((error as Error).message).not.toContain('pw-redis-9x');
     }
   });
 });

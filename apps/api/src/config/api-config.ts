@@ -5,11 +5,13 @@ import {
   resolveRedisUrl,
   resolveTrustProxyHops,
 } from '../rate-limit/rate-limit-config';
+import { resolveDatabaseUrl } from './database-url';
 
 /**
- * api の起動に要る設定。**環境変数はここで1回だけ読み、組み立ての前にすべて検証する**（createApp）。
+ * アプリの組み立てに要る設定。createApp が環境変数から resolveApiConfig で作り、組み立ての前にすべて検証する。
  * モジュールは `process.env` を読まず、`API_CONFIG` を注入して使う。
- * 起動を止める設定を足すときは、この型と resolveApiConfig に足す（PORT は listen にしか使わず、bootstrap が読む）。
+ * **組み立てに要る設定を足すときは、この型と resolveApiConfig に足す。** PORT は組み立てに要らず（listen だけが使う）、
+ * bootstrap.ts が組み立ての前に別に検証する——**PORT と他の設定が同時に不正なら、PORT だけを先に知らせる。**
  */
 export interface ApiConfig {
   readonly databaseUrl: string;
@@ -23,40 +25,43 @@ export interface ApiConfig {
 export const API_CONFIG = Symbol('API_CONFIG');
 
 /**
- * DB の接続先を決める。**未設定・空は起動時に落とす。**
- * 見逃すと最初の問い合わせで原因の分かりにくいエラーになる。
- * **例外のメッセージに値を載せない**——接続先には資格情報が入り、起動の失敗はログに出る。
+ * **値に秘密（資格情報・鍵）が入る設定と、不正なときに代わりに示す手がかり。** 起動の失敗はログに出るため、
+ * 値が空でないのに不正なときは、resolve 関数のメッセージを使わずこの手がかりだけを出す——resolve 関数が値を
+ * メッセージに埋めても（`… の値が不正です: ${raw}` はこのコードベースの他の設定の書き方である）漏れないようにする。
  */
-export function resolveDatabaseUrl(raw: string | undefined): string {
-  if (raw === undefined || raw === '') {
-    throw new Error(
-      'DATABASE_URL が設定されていません（開発用データベースの接続 URL を環境変数で渡す）',
-    );
-  }
-  return raw;
-}
+const SECRET_SETTING_HINTS: Readonly<Record<string, string>> = {
+  DATABASE_URL: '接続 URL を渡す',
+  REDIS_URL: 'Valkey の接続 URL を渡す',
+};
 
 /**
  * 環境変数から ApiConfig を組み立てる。**不正な設定が複数あれば、すべてを1つの例外で知らせる**
  * （1つ直して起動し直すたびに次が見つかる形にしない）。
- * メッセージは各 resolve 関数のものをそのまま並べる（接続先の値を載せないのは各関数が守る）。
  */
 export function resolveApiConfig(env: Readonly<Record<string, string | undefined>>): ApiConfig {
   const problems: string[] = [];
-  const read = <T>(resolve: () => T): T => {
+  const read = <T>(name: string, resolve: (raw: string | undefined) => T): T => {
+    const raw = env[name];
     try {
-      return resolve();
+      return resolve(raw);
     } catch (error) {
-      problems.push(error instanceof Error ? error.message : String(error));
+      const hint = SECRET_SETTING_HINTS[name];
+      problems.push(
+        hint !== undefined && raw !== undefined && raw !== ''
+          ? `${name} の値が不正です（${hint}。値は秘密を含むため載せない）`
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      );
       return undefined as T;
     }
   };
   const config: ApiConfig = {
-    databaseUrl: read(() => resolveDatabaseUrl(env.DATABASE_URL)),
-    redisUrl: read(() => resolveRedisUrl(env.REDIS_URL)),
-    trustProxyHops: read(() => resolveTrustProxyHops(env.TRUST_PROXY_HOPS)),
-    apiTaskCount: read(() => resolveApiTaskCount(env.API_TASK_COUNT)),
-    registrationEnabled: read(() => resolveRegistrationEnabled(env.REGISTRATION_ENABLED)),
+    databaseUrl: read('DATABASE_URL', resolveDatabaseUrl),
+    redisUrl: read('REDIS_URL', resolveRedisUrl),
+    trustProxyHops: read('TRUST_PROXY_HOPS', resolveTrustProxyHops),
+    apiTaskCount: read('API_TASK_COUNT', resolveApiTaskCount),
+    registrationEnabled: read('REGISTRATION_ENABLED', resolveRegistrationEnabled),
   };
   if (problems.length > 0) {
     throw new Error(`起動の設定が不正です:\n${problems.join('\n')}`);
