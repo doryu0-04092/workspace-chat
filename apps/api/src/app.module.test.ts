@@ -4,6 +4,7 @@ import type { INestApplication } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { REALTIME_EVENT_KINDS } from '@workspace-chat/shared';
 import { AppModule } from './app.module';
+import { API_SETTINGS } from './config/api-config';
 
 describe('AppModule', () => {
   let app: INestApplication;
@@ -14,10 +15,23 @@ describe('AppModule', () => {
     // コンストラクタインジェクションが成立することは、変換の設定に対する
     // 検査として dependency-injection.test.ts が持つ（#14）。
     //
-    // 組み立てには接続先が要る（prisma.service.ts）。接続は最初の問い合わせまで張られないため、繋がらない宛先でよい。
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    // **組み立ては、渡された設定だけを使い、環境変数を読まない**（#256。検証は createApp が組み立ての前に済ませる）。
+    // 環境変数を不正な値にしておき、どこかのモジュールが読めばここで落ちるようにする。
+    for (const name of Object.values(API_SETTINGS).map((setting) => setting.env)) {
+      vi.stubEnv(name, '');
+    }
+    // 接続は最初の問い合わせまで張られないため、繋がらない宛先でよい。
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        AppModule.forRoot({
+          databaseUrl: 'postgresql://unused:unused@127.0.0.1:9/unused',
+          redisUrl: 'redis://127.0.0.1:9',
+          trustProxyHops: 0,
+          apiTaskCount: 1,
+          registrationEnabled: true,
+        }),
+      ],
+    }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
   });

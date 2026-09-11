@@ -14,7 +14,7 @@ describe('GET /api/health（F-39）', () => {
   let base: string;
 
   beforeAll(async () => {
-    // アプリの組み立てには接続先が要る（prisma.service.ts）。**繋がらない宛先を渡す**——
+    // アプリの組み立てには接続先が要る（config/api-config.ts）。**繋がらない宛先を渡す**——
     // 死活確認が DB に問い合わせれば、ここで失敗する。
     vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
     vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
