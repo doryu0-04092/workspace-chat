@@ -31,6 +31,6 @@ describe('LoginService（利用者が見つからないとき）', () => {
     );
 
     expect(verifySecret).toHaveBeenCalledExactlyOnceWith('dummy-argon2id-hash', 'pw-1');
-    expect(backoff.recordFailure).toHaveBeenCalledWith('nobody_here', expect.any(Number));
+    expect(backoff.recordFailure).toHaveBeenCalledWith('login:nobody_here', expect.any(Number));
   });
 });

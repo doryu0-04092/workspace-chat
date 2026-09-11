@@ -1,8 +1,6 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { Response } from 'express';
 import { RateLimitGuard } from '../rate-limit/rate-limit.module';
-import { LoginBackoffException } from './login.service';
 import { RecoveryService, type RecoveryRequest, type RecoveryResponse } from './recovery.service';
 
 /**
@@ -22,17 +20,7 @@ export class RecoveryController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(RateLimitGuard)
   @Throttle({ default: { limit: 10, ttl: 60 * 60 * 1000 } })
-  async recover(
-    @Body() body: RecoveryRequest,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<RecoveryResponse> {
-    try {
-      return await this.recoveryService.recover(body);
-    } catch (error) {
-      if (error instanceof LoginBackoffException) {
-        res.setHeader('Retry-After', String(error.retryAfterSeconds));
-      }
-      throw error;
-    }
+  recover(@Body() body: RecoveryRequest): Promise<RecoveryResponse> {
+    return this.recoveryService.recover(body);
   }
 }

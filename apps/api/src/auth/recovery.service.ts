@@ -1,9 +1,9 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
-import type { ErrorResponse } from '../error-response';
+import { type ErrorResponse, RetryAfterException } from '../error-response';
 import { PrismaService } from '../prisma.service';
-import type { LoginBackoffStore } from './login-backoff';
-import { LOGIN_BACKOFF_STORE, LoginBackoffException } from './login.service';
+import { accountBackoffKey, type LoginBackoffStore } from './login-backoff';
+import { LOGIN_BACKOFF_STORE } from './login.service';
 import { canonicalRecoveryCode, generateRecoveryCode } from './recovery-code';
 import { dummySecretHash, hashSecret, verifySecret } from './secret-hash';
 
@@ -28,17 +28,17 @@ export class RecoveryService {
   /**
    * リカバリーコードでパスワードを再設定する（F-37。機能一覧 1.1）。
    *
-   * - **アカウント単位の制限はログインとは別のキーで数える**（`recovery:` ＋ 小文字のユーザーID）
+   * - **アカウント単位の制限はログインとは別のキーで数える**（`accountBackoffKey('recovery', …)`）
    * - 利用者は `lower("userId")` と `"deletedAt" IS NULL` で引き、未使用のコードは1つ（`RecoveryCode_single_unused_per_user`）
    * - **利用者やコードが見つからなくても照合を1回行う**（応答時間で登録済みの ID を見分けさせない）
    * - **コードの無効化・パスワードの入れ替え・新しいコードの発行・リフレッシュトークンの失効を1つのトランザクションで行う。**
    *   無効化は「まだ使われていない行」だけに当て、0 件（同時の再設定・退会の処理と重なった）なら何も変えずに 401
    */
   async recover(input: RecoveryRequest): Promise<RecoveryResponse> {
-    const key = `recovery:${input.userId.toLowerCase()}`;
+    const key = accountBackoffKey('recovery', input.userId);
     const started = await this.backoff.begin(key, Date.now());
     if (!started.allowed) {
-      throw new LoginBackoffException(Math.ceil(started.retryAfterMs / 1000));
+      throw new RetryAfterException(Math.ceil(started.retryAfterMs / 1000));
     }
 
     const rows = await this.prisma.$queryRaw<UserCodeRow[]>`

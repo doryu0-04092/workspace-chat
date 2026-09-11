@@ -1,12 +1,21 @@
 import { type ArgumentsHost, HttpException, Logger } from '@nestjs/common';
 import * as OpenApiValidator from 'express-openapi-validator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ErrorResponseFilter } from './error-response';
+import { ErrorResponseFilter, RetryAfterException } from './error-response';
 
 /** フィルタに渡す ArgumentsHost の代わり。応答の状態コードと本体を控える。 */
-function fakeHost(): { host: ArgumentsHost; sent: { status?: number; body?: unknown } } {
-  const sent: { status?: number; body?: unknown } = {};
+function fakeHost(): {
+  host: ArgumentsHost;
+  sent: { status?: number; body?: unknown; headers: Record<string, string> };
+} {
+  const sent: { status?: number; body?: unknown; headers: Record<string, string> } = {
+    headers: {},
+  };
   const response = {
+    setHeader(name: string, value: string) {
+      sent.headers[name] = value;
+      return this;
+    },
     status(code: number) {
       sent.status = code;
       return this;
@@ -63,5 +72,17 @@ describe('例外フィルタの 5xx', () => {
     expect(sent.status).toBe(409);
     expect(sent.body).toEqual(body);
     expect(logged).not.toHaveBeenCalled();
+  });
+});
+
+// アカウント単位の制限（ログイン・リカバリーコードの照合）は、どの経路から投げても同じ形で返す（PR #275 第1巡）。
+describe('例外フィルタの RetryAfterException', () => {
+  it('429（too_many_requests）と、秒の Retry-After を返す', () => {
+    const { host, sent } = fakeHost();
+    new ErrorResponseFilter().catch(new RetryAfterException(7), host);
+
+    expect(sent.status).toBe(429);
+    expect((sent.body as { code: string }).code).toBe('too_many_requests');
+    expect(sent.headers['Retry-After']).toBe('7');
   });
 });
