@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
+import { API_CONFIG, type ApiConfig } from '../config/api-config';
 import { RateLimitModule } from '../rate-limit/rate-limit.module';
-import { REGISTRATION_ENABLED, resolveRegistrationEnabled } from './registration-enabled';
+import { REGISTRATION_ENABLED } from './registration-enabled';
 import { RegisterController } from './register.controller';
 import { RegisterService } from './register.service';
 
@@ -11,8 +12,8 @@ import { RegisterService } from './register.service';
     RegisterService,
     {
       provide: REGISTRATION_ENABLED,
-      // 起動時に1回だけ読む。不正な値ならここで落ち、アプリが起動しない。
-      useFactory: () => resolveRegistrationEnabled(process.env.REGISTRATION_ENABLED),
+      inject: [API_CONFIG],
+      useFactory: (config: ApiConfig) => config.registrationEnabled,
     },
   ],
 })

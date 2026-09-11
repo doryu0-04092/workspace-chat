@@ -9,9 +9,9 @@ import {
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import Redis from 'ioredis';
+import { API_CONFIG, type ApiConfig } from '../config/api-config';
 import { errorBodyForStatus } from '../error-response';
 import { MemoryRateLimitStorage } from './memory-rate-limit-storage';
-import { resolveApiTaskCount, resolveRedisUrl } from './rate-limit-config';
 import { ResilientRateLimitStorage } from './resilient-rate-limit-storage';
 
 /** Valkey（ElastiCache for Valkey / ローカルは compose の redis）への接続を注入するトークン。 */
@@ -30,8 +30,8 @@ const VALKEY_READY_TIMEOUT_MS = 3_000;
  * - `maxRetriesPerRequest: 0`: 1つのコマンドを再送しない
  * 再接続そのものは ioredis が裏で続ける。**`error` を受ける処理を必ず付ける**（無いと未処理の error でプロセスが落ちる）。
  */
-async function createValkeyClient(logger: Logger): Promise<Redis> {
-  const client = new Redis(resolveRedisUrl(process.env.REDIS_URL), {
+async function createValkeyClient(redisUrl: string, logger: Logger): Promise<Redis> {
+  const client = new Redis(redisUrl, {
     enableOfflineQueue: false,
     commandTimeout: 500,
     maxRetriesPerRequest: 0,
@@ -75,7 +75,8 @@ class ValkeyClientCloser implements OnApplicationShutdown {
   providers: [
     {
       provide: VALKEY_CLIENT,
-      useFactory: () => createValkeyClient(new Logger('Valkey')),
+      inject: [API_CONFIG],
+      useFactory: (config: ApiConfig) => createValkeyClient(config.redisUrl, new Logger('Valkey')),
     },
     {
       provide: ValkeyClientCloser,
@@ -110,15 +111,15 @@ export class RateLimitGuard extends ThrottlerGuard {
   imports: [
     ThrottlerModule.forRootAsync({
       imports: [ValkeyModule],
-      inject: [VALKEY_CLIENT],
-      useFactory: (client: Redis) => ({
+      inject: [VALKEY_CLIENT, API_CONFIG],
+      useFactory: (client: Redis, config: ApiConfig) => ({
         // ルートが @Throttle を付け忘れたときの値。付け忘れても無制限にはしない。
         throttlers: [{ name: 'default', ttl: 60_000, limit: 10 }],
         storage: new ResilientRateLimitStorage(
           new ThrottlerStorageRedisService(client),
           new MemoryRateLimitStorage(),
           {
-            taskCount: resolveApiTaskCount(process.env.API_TASK_COUNT),
+            taskCount: config.apiTaskCount,
             retryIntervalMs: VALKEY_RETRY_INTERVAL_MS,
             logger: new Logger('RateLimit'),
           },
