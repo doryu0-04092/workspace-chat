@@ -12,11 +12,16 @@ export const REFRESH_TOKEN_COOKIE = 'refresh_token';
  * リフレッシュトークンの Cookie の属性（機能一覧 1.2「HttpOnly; Secure; SameSite=Strict; Path=/api/auth」）。
  * **Cookie を送るのは /api/auth の下だけ**——他の API は Authorization ヘッダーで認証し、CSRF が成立しない（要件定義書 4.3）。
  */
-export const REFRESH_TOKEN_COOKIE_OPTIONS = {
+export const REFRESH_TOKEN_CLEAR_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: true,
   sameSite: 'strict',
   path: '/api/auth',
+} as const;
+
+/** 発行するときの属性。消すとき（REFRESH_TOKEN_CLEAR_COOKIE_OPTIONS）と Path を揃える——違うと、ブラウザは元の Cookie を消さない。 */
+export const REFRESH_TOKEN_COOKIE_OPTIONS = {
+  ...REFRESH_TOKEN_CLEAR_COOKIE_OPTIONS,
   maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
 } as const;
 
