@@ -222,7 +222,7 @@ if [ "$routes" -eq 0 ]; then
 else
   # 「N経路」は数字の直後の語が場所ごとに違う。requirements.md の「残る2経路」は
   # 4のうち2という別の数であり、まとめて拾うと正しい記述が NG になる。
-  # 宣言の行にしか無い後続語まで含めて一意にする（検査4と同じ方針）。
+  # 宣言の行にしか無い後続語まで含めて一意にする。
   # requirements.md は強調記号が数字と後続語の間に入る（4経路**すべてを塞いで）ため \** を挟む。
   compare_decls "$(decls REVIEW.md          '[0-9][0-9]*経路すべてを塞ぐ')"       "$routes" "REVIEW.md の「N経路すべてを塞ぐ」"
   compare_decls "$(decls REVIEW.md          '経路は[0-9][0-9]*つある')"           "$routes" "REVIEW.md の「経路はNつある」"
