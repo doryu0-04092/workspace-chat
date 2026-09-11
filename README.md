@@ -109,9 +109,10 @@ bash scripts/check-docs.test.sh
 （`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
 この1行だけ飛ばす）
 
-`scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる。
+`scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる
+（**番号は付けない**——下記の出力の見出し `1.`〜`3.` と桁が揃わず、別のものを指してしまう）。
 
-**1. 走査範囲** — ESLint と Prettier が `.claude/`（エージェントが作る git のワークツリーが
+**走査範囲** — ESLint と Prettier が `.claude/`（エージェントが作る git のワークツリーが
 入る）を走査しないこと。
 
 `.claude/` は CI のチェックアウトに無い。そのため除外が消えても、
@@ -121,7 +122,7 @@ bash scripts/check-docs.test.sh
 手元で回す意味は、**症状（自分の環境で lint が落ちる）が出るより先に、
 原因（除外が消えた）に気づけること**にある。
 
-**2. react-hooks のルールが実際に効いていること** — `react-hooks/rules-of-hooks` と
+**react-hooks のルールの配線** — `react-hooks/rules-of-hooks` と
 `react-hooks/exhaustive-deps` が配線されており、**重大度が `error` であること**。
 
 `eslint.config.js` の `files` のパターンが壊れても、走査範囲の判定は他のルール
@@ -132,7 +133,8 @@ bash scripts/check-docs.test.sh
 区別できないためである。
 
 **この2つ目があるため、このスクリプトが落ちた原因は走査範囲とは限らない。**
-出力の見出し（`1. ESLint` / `2. Prettier` / `3. react-hooks のルール`）で切り分ける。
+出力の見出し（`ESLint` / `Prettier` / `react-hooks のルール`。番号は begin_check が呼び出し順に
+振るため、ここでは書かない）で切り分ける。
 
 このほかに CI は次を回す。
 
@@ -235,6 +237,10 @@ Dependabot の「security updates」は版更新とは別の仕組みで、`depe
 
 > 止まっても通知は来ない。**Actions の画面から手動で再有効化する。**
 > 実装が長く止まる見込みなら、活動に依存しない経路を別途考える。
+
+**同じ週次実行に gitleaks（秘密の値の検査）も乗っている。** 止まると、
+`npm audit` だけでなく、過去に残った秘密を見る経路も同時に止まる
+（詳細と帰結は [docs/requirements.md](docs/requirements.md) の秘密の露出の行）。
 
 **検知そのものは [audit.yml](.github/workflows/audit.yml) が毎週続ける。**
 `high` 以上なら落ちる。落ちたら、そのとき直す版を人が選ぶ——
@@ -455,7 +461,7 @@ Vite も設定ファイルを評価する時点では `.env` を読まず、そ�
 
 | 環境変数 | 既定 | 意味 |
 |---|---|---|
-| `TRUST_PROXY_HOPS` | **必須**（未設定は起動時に落ちる） | 信頼する中継の段数（Express の `trust proxy`）。**レート制限の発信元はこれで決まる。** **手元で直接叩くなら `TRUST_PROXY_HOPS=0` を明示して渡す。** 必須にしているのは、本番で渡し忘れて 0 になると全員が ALB の IP で数えられ、エラーもログも出ないまま正規の利用者だけが 429 を受けるためである（決定・2026-09-11・依頼側。#252）。本番（CloudFront → ALB）は 2 で、**ALB に CloudFront を経ずに届く経路を塞いでいることが前提**（塞いでいないと X-Forwarded-For で発信元を偽れる）。多すぎると偽の発信元を名乗れ、少なすぎると全員が1つの発信元として数えられる |
+| `TRUST_PROXY_HOPS` | **必須**（未設定は起動時に落ちる） | 信頼する中継の段数（Express の `trust proxy`）。**レート制限の発信元はこれで決まる。** **手元で直接叩くなら `TRUST_PROXY_HOPS=0` を明示して渡す。web の開発サーバー（Vite）の `server.proxy` 経由で叩く場合も 0 のままでよい**（`apps/web/vite.config.ts` は `xfwd` を指定しておらず、既定では X-Forwarded-For を付けずに中継するため、api から見た接続元は直接叩いたときと変わらない）。必須にしているのは、本番で渡し忘れて 0 になると全員が ALB の IP で数えられ、エラーもログも出ないまま正規の利用者だけが 429 を受けるためである（決定・2026-09-11・依頼側。#252）。本番（CloudFront → ALB）は 2 で、**ALB に CloudFront を経ずに届く経路を塞いでいることが前提**（塞いでいないと X-Forwarded-For で発信元を偽れる）。多すぎると偽の発信元を名乗れ、少なすぎると全員が1つの発信元として数えられる |
 | `API_TASK_COUNT` | 1 | api のタスク数。Valkey が止まっている間、各タスクのメモリで数えるときに上限をこの数で割る |
 
 いずれも 0 以上（`API_TASK_COUNT` は 1 以上）の10進の整数だけを受け付け、それ以外は起動時に落ちる。
