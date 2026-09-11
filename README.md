@@ -109,9 +109,10 @@ bash scripts/check-docs.test.sh
 （`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
 この1行だけ飛ばす）
 
-`scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる。
+`scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる
+（**番号は付けない**——下記の出力の見出し `1.`〜`3.` と桁が揃わず、別のものを指してしまう）。
 
-**1. 走査範囲** — ESLint と Prettier が `.claude/`（エージェントが作る git のワークツリーが
+**走査範囲** — ESLint と Prettier が `.claude/`（エージェントが作る git のワークツリーが
 入る）を走査しないこと。
 
 `.claude/` は CI のチェックアウトに無い。そのため除外が消えても、
@@ -121,7 +122,7 @@ bash scripts/check-docs.test.sh
 手元で回す意味は、**症状（自分の環境で lint が落ちる）が出るより先に、
 原因（除外が消えた）に気づけること**にある。
 
-**2. react-hooks のルールが実際に効いていること** — `react-hooks/rules-of-hooks` と
+**react-hooks のルールの配線** — `react-hooks/rules-of-hooks` と
 `react-hooks/exhaustive-deps` が配線されており、**重大度が `error` であること**。
 
 `eslint.config.js` の `files` のパターンが壊れても、走査範囲の判定は他のルール
@@ -132,7 +133,8 @@ bash scripts/check-docs.test.sh
 区別できないためである。
 
 **この2つ目があるため、このスクリプトが落ちた原因は走査範囲とは限らない。**
-出力の見出し（`1. ESLint` / `2. Prettier` / `3. react-hooks のルール`）で切り分ける。
+出力の見出し（`ESLint` / `Prettier` / `react-hooks のルール`。番号は begin_check が呼び出し順に
+振るため、ここでは書かない）で切り分ける。
 
 このほかに CI は次を回す。
 
