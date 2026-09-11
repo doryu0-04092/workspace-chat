@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import {
   HttpException,
   HttpStatus,
@@ -10,7 +9,7 @@ import type { paths } from '@workspace-chat/shared';
 import { type ErrorResponse, errorBodyForStatus } from '../error-response';
 import { PrismaService } from '../prisma.service';
 import type { LoginBackoffStore } from './login-backoff';
-import { hashSecret, verifySecret } from './secret-hash';
+import { dummySecretHash, verifySecret } from './secret-hash';
 import { SessionService } from './session.service';
 
 type LoginOperation = paths['/auth/login']['post'];
@@ -36,9 +35,6 @@ type UserRow = { id: string; userId: string; displayName: string; passwordHash: 
 
 @Injectable()
 export class LoginService {
-  /** 利用者が見つからないときに照合する、捨てるためのハッシュ。起動後の最初の失敗で1回だけ作る。 */
-  private dummyHash: Promise<string> | undefined;
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
@@ -67,7 +63,7 @@ export class LoginService {
     `;
     const user = rows[0];
     const matched = await verifySecret(
-      user?.passwordHash ?? (await this.getDummyHash()),
+      user?.passwordHash ?? (await dummySecretHash()),
       input.password,
     );
     if (!user || !matched) {
@@ -86,10 +82,5 @@ export class LoginService {
       },
       refreshToken: tokens.refreshToken,
     };
-  }
-
-  private getDummyHash(): Promise<string> {
-    this.dummyHash ??= hashSecret(randomBytes(32).toString('base64url'));
-    return this.dummyHash;
   }
 }
