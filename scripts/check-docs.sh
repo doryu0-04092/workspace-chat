@@ -182,20 +182,13 @@ req_items=$(items docs/requirements.md '^#+ 必ずテストを書く箇所')
 rev_items=$(items REVIEW.md '^#+ テストが必須の箇所')
 cla_items=$(items CLAUDE.md '^#+ 必ずテストを書く箇所')
 req=$(printf '%s\n' "$req_items" | grep -c .)
-rev=$(printf '%s\n' "$rev_items" | grep -c .)
 [ "$req" -gt 0 ] || note "requirements.md から一覧を読み取れない"
 # 件数ではなく本文で突き合わせる。守りたいのは「どれを必ずテストするか」の合意であり、
-# 件数の一致はその代理指標にすぎない。8件のまま1項目だけ書き換えられても件数では気づけない。
+# 件数の一致はその代理指標にすぎない。1項目だけ書き換えられても件数では気づけない。
 [ "$req_items" = "$rev_items" ] || note "requirements.md と REVIEW.md で一覧の内容が違う"
 [ "$req_items" = "$cla_items" ] || note "requirements.md と CLAUDE.md で一覧の内容が違う"
-# 本文が「N項目である」と数を宣言している箇所も、一覧の実数と突き合わせる。
-# 宣言は複数の文書にある。1つだけ検査すると、検査していない側を直し忘れて同じ見落としが再発する。
-# 読み取れなかった場合は NG とする。黙って通すと、言い回しを変えた時点で検査が消える。
-# 宣言の照合は3章の compare_decls に寄せる。同じ欠陥（先頭1件だけを見る）を
-# 1箇所だけ直して他に残す、という事態を避けるため、読み取りの経路は1つにする。
-# パターンは宣言の行にしか無い後続語まで含めて一意にする。
-compare_decls "$(decls docs/requirements.md "「必ずテストを書く箇所」の *[0-9][0-9]* *項目")" "$req" "requirements.md の「N項目」の宣言"
-compare_decls "$(decls REVIEW.md "下記の *[0-9][0-9]* *項目に該当する変更")"                  "$rev" "REVIEW.md の「N項目」の宣言"
+# 本文の「N項目」宣言との突き合わせは行わない。件数の言い回し自体を文書側から外した
+# ため（#85・#226）、宣言を読み取る対象が無い。
 echo "  完了（$req 項目）"
 
 # 「N経路」「N種類」も同じ形の宣言である。どちらも実体は表であり、機械的に数えられる。
@@ -229,7 +222,7 @@ if [ "$routes" -eq 0 ]; then
 else
   # 「N経路」は数字の直後の語が場所ごとに違う。requirements.md の「残る2経路」は
   # 4のうち2という別の数であり、まとめて拾うと正しい記述が NG になる。
-  # 宣言の行にしか無い後続語まで含めて一意にする（検査4と同じ方針）。
+  # 宣言の行にしか無い後続語まで含めて一意にする。
   # requirements.md は強調記号が数字と後続語の間に入る（4経路**すべてを塞いで）ため \** を挟む。
   compare_decls "$(decls REVIEW.md          '[0-9][0-9]*経路すべてを塞ぐ')"       "$routes" "REVIEW.md の「N経路すべてを塞ぐ」"
   compare_decls "$(decls REVIEW.md          '経路は[0-9][0-9]*つある')"           "$routes" "REVIEW.md の「経路はNつある」"

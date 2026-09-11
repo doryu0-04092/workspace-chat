@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { API_SETTINGS, resolveApiConfig } from './api-config';
+import { API_SETTINGS, resolveApiConfig, resolveJwtSecret } from './api-config';
 import { resolveDatabaseUrl } from './database-url';
+
+// RFC 7518 3.2「A key of the same size as the hash output (for instance, 256 bits for "HS256") or larger MUST be used」。
+describe('アクセストークンの署名の鍵（JWT_SECRET）', () => {
+  it('32 バイト以上なら、その値を使う', () => {
+    const secret = 'k'.repeat(32);
+    expect(resolveJwtSecret(secret)).toBe(secret);
+  });
+
+  it.each([undefined, ''])('%j は起動時に落とす', (raw) => {
+    expect(() => resolveJwtSecret(raw)).toThrow(/JWT_SECRET/);
+  });
+
+  // 文字数ではなくバイト数で数える（「あ」は UTF-8 で 3 バイト）。
+  it.each([
+    ['31 バイトの ASCII', 'k'.repeat(31)],
+    ['30 バイトの「あ」10 文字', 'あ'.repeat(10)],
+  ])('%s は短すぎるため起動時に落とし、値を載せない', (_label, raw) => {
+    expect(() => resolveJwtSecret(raw)).toThrow(/JWT_SECRET/);
+    try {
+      resolveJwtSecret(raw);
+    } catch (error) {
+      expect((error as Error).message).not.toContain(raw);
+    }
+  });
+
+  it('11 文字でも 33 バイトの「あ」なら通す', () => {
+    expect(resolveJwtSecret('あ'.repeat(11))).toBe('あ'.repeat(11));
+  });
+});
 
 describe('DB の接続先（DATABASE_URL）', () => {
   it('設定されていれば、その値を使う', () => {
@@ -21,6 +50,7 @@ const VALID_ENV = {
   TRUST_PROXY_HOPS: '2',
   API_TASK_COUNT: '3',
   REGISTRATION_ENABLED: 'false',
+  JWT_SECRET: 'jwt-key-9x'.repeat(4),
 };
 
 describe('起動の設定（resolveApiConfig）', () => {
@@ -31,6 +61,7 @@ describe('起動の設定（resolveApiConfig）', () => {
       trustProxyHops: 2,
       apiTaskCount: 3,
       registrationEnabled: false,
+      jwtSecret: VALID_ENV.JWT_SECRET,
     });
   });
 
