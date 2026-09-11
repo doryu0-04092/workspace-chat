@@ -4,7 +4,7 @@
 # 1. マイグレーション用（migrate）のイメージを、空の PostgreSQL 17 に適用できる
 # 2. 実行用（runtime）のイメージが起動し、/api/health が 200 を返す
 # 3. 実行用のイメージのログが、1行1件の JSON で標準出力に出る（要件定義書 4.6）。標準エラーには何も出さない
-# 4. 実行用のイメージに、秘密を置くファイル（.env）とテストのコードが入っていない。マイグレーション用のイメージにも .env が入っていない
+# 4. 実行用のイメージに、秘密を置くファイル（.env と .env.*。.env.example を除く）とテストのコードが入っていない。マイグレーション用のイメージにも入っていない
 # 5. 実行用のイメージは root で動かない
 #
 # Docker が動いていることが前提。作ったコンテナとネットワークは終わりに消す（イメージは残す）。
@@ -30,6 +30,10 @@ fail() {
   exit 1
 }
 
+# テストで使う PostgreSQL のイメージは apps/api/src/testing/postgres.ts の POSTGRES_IMAGE の1箇所で決める（差し替えの時期は #34）。
+postgres_image=$(sed -n "s/^export const POSTGRES_IMAGE = '\([^']*\)';$/\1/p" apps/api/src/testing/postgres.ts)
+[ -n "$postgres_image" ] || fail "apps/api/src/testing/postgres.ts から POSTGRES_IMAGE を読めない"
+
 echo "== イメージを作る"
 docker build --file apps/api/Dockerfile --target migrate --tag "$migrate_image" . >/dev/null
 docker build --file apps/api/Dockerfile --target runtime --tag "$runtime_image" . >/dev/null
@@ -38,7 +42,7 @@ echo "== 1. マイグレーション用のイメージを空の PostgreSQL に�
 docker network create "$network" >/dev/null
 # 値はこの検査の中だけで使う使い捨ての資格情報である。
 docker run --detach --name "$postgres" --network "$network" \
-  --env POSTGRES_PASSWORD=image-test --env POSTGRES_DB=chat postgres:17 >/dev/null
+  --env POSTGRES_PASSWORD=image-test --env POSTGRES_DB=chat "$postgres_image" >/dev/null
 for _ in $(seq 1 60); do
   if docker exec "$postgres" pg_isready --username postgres --dbname chat >/dev/null 2>&1; then
     break
@@ -89,10 +93,10 @@ done <<<"$stdout"
 
 echo "== 4. 実行用のイメージに .env とテストのコードが入っていない"
 leaked=$(docker run --rm --entrypoint sh "$runtime_image" -c \
-  'find /app -path /app/node_modules -prune -o \( -name ".env" -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print' |
+  'find /app -path /app/node_modules -prune -o \( \( -name ".env*" ! -name ".env.example" \) -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print' |
   head -n 5)
 [ -z "$leaked" ] || fail "イメージに入れないはずのファイルがある: $leaked"
-leaked_env=$(docker run --rm --entrypoint sh "$migrate_image" -c 'find /app -path /app/node_modules -prune -o -name ".env" -print' | head -n 5)
+leaked_env=$(docker run --rm --entrypoint sh "$migrate_image" -c 'find /app -path /app/node_modules -prune -o \( -name ".env*" ! -name ".env.example" \) -print' | head -n 5)
 [ -z "$leaked_env" ] || fail "マイグレーション用のイメージに .env がある: $leaked_env"
 
 echo "== 5. 実行用のイメージは root で動かない"

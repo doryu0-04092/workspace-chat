@@ -11,6 +11,11 @@
 # （.dockerignore が .env を文脈から外す）。scripts/api-image.test.sh が、実際に作って動かして確かめる。
 
 # glibc の土台にする。argon2 はビルド済みのネイティブモジュールを使い、Alpine（musl）では入れ方が変わる。
+#
+# **土台はダイジェストではなくタグで指す**（docker/postgres/Dockerfile と同じ扱い）。
+# 代償: タグの指す先が変わると、同じ Dockerfile から違うイメージができる。
+# それでもタグにするのは、依存の自動更新（dependabot.yml）が Dockerfile を見ておらず（#38）、
+# ダイジェストで固定すると誰かが手で上げるまで Node のパッチが届かないためである。
 ARG NODE_IMAGE=node:24-bookworm-slim
 
 FROM ${NODE_IMAGE} AS deps
