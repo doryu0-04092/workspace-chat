@@ -17,6 +17,8 @@ import {
 import { AccessTokenGuard } from './access-token.guard';
 import { LoginController } from './login.controller';
 import { LOGIN_BACKOFF_STORE, LoginService } from './login.service';
+import { RecoveryController } from './recovery.controller';
+import { RecoveryService } from './recovery.service';
 import { CsrfGuard } from './csrf.guard';
 import { SessionController } from './session.controller';
 import { SessionService } from './session.service';
@@ -39,10 +41,11 @@ import { ACCESS_TOKEN_TTL_SECONDS } from './session-tokens';
       }),
     }),
   ],
-  controllers: [RegisterController, LoginController, SessionController],
+  controllers: [RegisterController, LoginController, SessionController, RecoveryController],
   providers: [
     RegisterService,
     LoginService,
+    RecoveryService,
     SessionService,
     CsrfGuard,
     // すべてのルートに既定でアクセストークンを求める（外すのは @Public() のルートだけ。機能一覧 1.4）。

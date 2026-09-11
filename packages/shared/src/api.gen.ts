@@ -104,6 +104,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * リカバリーコードによるパスワードの再設定（F-37）
+         * @description 認証を要さない。ユーザーID とリカバリーコードでパスワードを再設定し、使ったコードを無効化して新しいコードを発行する （新しいコードはこの応答でだけ返す）。その利用者のリフレッシュトークンをすべて失効させる（機能一覧 1.1）。 発信元単位のレート制限は1時間に10回。加えてユーザーID（大文字小文字を区別しない。存在しない ID も同じ）ごとに、 連続して失敗した回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える）。
+         */
+        post: operations["recover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users/me": {
         parameters: {
             query?: never;
@@ -152,6 +172,18 @@ export interface components {
             password: string;
             /** @description 1〜50文字。空白だけは不可（機能一覧 1.1。決定・2026-09-11・依頼側。列の型にも入れてある） */
             displayName: string;
+        };
+        RecoveryRequest: {
+            /** @description 英数字とアンダースコアのみ、3〜30文字（RegisterRequest と同じ） */
+            userId: string;
+            /** @description 登録で受け取ったコード。英小文字・ハイフンの有無を問わない（照合の前に正規形へ寄せる。O は 0、I・L は 1 と読む） */
+            recoveryCode: string;
+            /** @description 8〜128文字（RegisterRequest の password と同じ） */
+            newPassword: string;
+        };
+        RecoveryResponse: {
+            /** @description 新しいリカバリーコード。Crockford の Base32 で16文字（80ビット）を4文字ずつハイフンで区切る */
+            recoveryCode: string;
         };
         RegisterResponse: {
             user: components["schemas"]["UserSummary"];
@@ -468,6 +500,45 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             403: components["responses"]["CsrfRejected"];
             405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    recover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description 再設定した */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description ユーザーID かリカバリーコードが違う、コードが使用済み、または退会済み（invalid_credentials）。どれに当たったかは区別しない */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };

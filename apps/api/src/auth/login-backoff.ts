@@ -1,16 +1,27 @@
 import type Redis from 'ioredis';
 
 /**
- * ログインのアカウント単位の制限: **連続して失敗した回数 n に対し、2^(n-1) 秒（上限 15 分）の間は照合しない**
- * （機能一覧 1.2。決定・2026-09-11・依頼側）。OWASP Authentication Cheat Sheet の
+ * アカウント単位の制限: **連続して失敗した回数 n に対し、2^(n-1) 秒（上限 15 分）の間は照合しない**
+ * （機能一覧 1.2。決定・2026-09-11・依頼側。1.1 のリカバリーコードの照合にも当てる）。OWASP Authentication Cheat Sheet の
  * 「the lockout duration starts as a very short period (e.g., one second), but doubles after each failed login attempt」。
  *
  * 締め出し（一定回数でアカウントを止める）を採らないのは、他人がパスワードを誤り続けるだけで本人を締め出せるため。
  * **代償**: 他人が失敗を送り続けると、本人も待たされる（最大 15 分）。上限に達した後は 15 分に1回、1日およそ 96 回まで試せる。
  *
- * キーはユーザーID を小文字にしたもの（大文字小文字を区別しない照合に合わせる）。**存在しない ID も同じに数える**
+ * キーは accountBackoffKey で作る。**存在しない ID も同じに数える**
  * ——存在する ID だけを止めると、止まるかどうかで登録済みの ID を調べられる。
  */
+
+/** アカウント単位の制限を掛ける用途（ログイン・リカバリーコードの照合。機能一覧 1.1・1.2）。 */
+export type AccountBackoffPurpose = 'login' | 'recovery';
+
+/**
+ * アカウント単位の制限のキー。**用途ごとに前置きを分ける**——同じキーで数えると、一方の失敗で他方も待たされる。
+ * ユーザーID は小文字にする（大文字小文字を区別しない照合に合わせる）。
+ */
+export function accountBackoffKey(purpose: AccountBackoffPurpose, userId: string): string {
+  return `${purpose}:${userId.toLowerCase()}`;
+}
 
 /** 待ち時間の上限（15 分）。 */
 export const LOGIN_BACKOFF_MAX_MS = 15 * 60 * 1000;
@@ -203,13 +214,15 @@ export class ResilientLoginBackoffStore implements LoginBackoffStore {
       const result = await operation(this.primary);
       if (this.degraded) {
         this.degraded = false;
-        this.options.logger.log('Valkey に戻ったため、ログインの失敗の回数を Valkey で数える');
+        this.options.logger.log(
+          'Valkey に戻ったため、アカウント単位の失敗の回数を Valkey で数える',
+        );
       }
       return result;
     } catch (error) {
       if (!this.degraded) {
         this.options.logger.warn(
-          `Valkey に書けないため、ログインの失敗の回数を各タスクのメモリで数える: ${describe(error)}`,
+          `Valkey に書けないため、アカウント単位の失敗の回数を各タスクのメモリで数える: ${describe(error)}`,
         );
       }
       this.degraded = true;

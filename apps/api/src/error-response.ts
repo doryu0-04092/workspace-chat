@@ -55,6 +55,13 @@ function isErrorResponse(value: unknown): value is ErrorResponse {
   return typeof code === 'string' && typeof message === 'string';
 }
 
+/** 429 と `Retry-After`（秒）を返す例外。**ヘッダーは ErrorResponseFilter が付ける**（投げる経路ごとに付けない）。 */
+export class RetryAfterException extends HttpException {
+  constructor(readonly retryAfterSeconds: number) {
+    super(errorBodyForStatus(HttpStatus.TOO_MANY_REQUESTS), HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
+
 /**
  * **すべての例外を ErrorResponse で返す**（横断的な例外処理で揃える。機能一覧 1.4）。
  *
@@ -100,6 +107,9 @@ export class ErrorResponseFilter implements ExceptionFilter {
       }
       // 404 は、投げた側が何を載せても「見つかりません」にする（機能一覧 1.4。本体の文言で存在を認めない）。
       const body = status !== 404 && isErrorResponse(given) ? given : errorBodyForStatus(status);
+      if (exception instanceof RetryAfterException) {
+        response.setHeader('Retry-After', String(exception.retryAfterSeconds));
+      }
       response.status(status).json(body);
       return;
     }

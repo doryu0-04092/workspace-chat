@@ -191,6 +191,48 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /auth/recovery:
+    post:
+      operationId: recover
+      summary: リカバリーコードによるパスワードの再設定（F-37）
+      description: >-
+        認証を要さない。ユーザーID とリカバリーコードでパスワードを再設定し、使ったコードを無効化して新しいコードを発行する
+        （新しいコードはこの応答でだけ返す）。その利用者のリフレッシュトークンをすべて失効させる（機能一覧 1.1）。
+        発信元単位のレート制限は1時間に10回。加えてユーザーID（大文字小文字を区別しない。存在しない ID も同じ）ごとに、
+        連続して失敗した回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える）。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecoveryRequest'
+      responses:
+        '200':
+          description: 再設定した
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecoveryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: >-
+            ユーザーID かリカバリーコードが違う、コードが使用済み、または退会済み（invalid_credentials）。どれに当たったかは区別しない
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /users/me:
     get:
       operationId: getMyProfile
@@ -396,6 +438,38 @@ components:
           minLength: 1
           maxLength: 50
           pattern: '\S'
+    RecoveryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+        - recoveryCode
+        - newPassword
+      properties:
+        userId:
+          description: 英数字とアンダースコアのみ、3〜30文字（RegisterRequest と同じ）
+          type: string
+          pattern: '^[A-Za-z0-9_]{3,30}$'
+        recoveryCode:
+          description: >-
+            登録で受け取ったコード。英小文字・ハイフンの有無を問わない（照合の前に正規形へ寄せる。O は 0、I・L は 1 と読む）
+          type: string
+          pattern: '^[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}-?[0-9A-Za-z]{4}$'
+        newPassword:
+          description: 8〜128文字（RegisterRequest の password と同じ）
+          type: string
+          minLength: 8
+          maxLength: 128
+    RecoveryResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - recoveryCode
+      properties:
+        recoveryCode:
+          description: 新しいリカバリーコード。Crockford の Base32 で16文字（80ビット）を4文字ずつハイフンで区切る
+          type: string
+          pattern: '^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$'
     RegisterResponse:
       type: object
       additionalProperties: false

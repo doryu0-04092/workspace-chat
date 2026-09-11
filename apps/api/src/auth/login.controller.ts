@@ -3,12 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { RateLimitGuard } from '../rate-limit/rate-limit.module';
 import { Public } from './access-token.guard';
-import {
-  LoginBackoffException,
-  LoginService,
-  type LoginRequest,
-  type LoginResponse,
-} from './login.service';
+import { LoginService, type LoginRequest, type LoginResponse } from './login.service';
 import { REFRESH_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE_OPTIONS } from './session-tokens';
 
 /**
@@ -33,15 +28,8 @@ export class LoginController {
     @Body() body: LoginRequest,
     @Res({ passthrough: true }) res: Response,
   ): Promise<LoginResponse> {
-    try {
-      const result = await this.loginService.login(body);
-      res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
-      return result.body;
-    } catch (error) {
-      if (error instanceof LoginBackoffException) {
-        res.setHeader('Retry-After', String(error.retryAfterSeconds));
-      }
-      throw error;
-    }
+    const result = await this.loginService.login(body);
+    res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
+    return result.body;
   }
 }
