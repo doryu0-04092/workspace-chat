@@ -4,7 +4,7 @@ import { JsonLogger } from './logging/json-logger';
 import { resolvePort } from './port';
 
 /**
- * api を起動する（main.ts が呼ぶ。main.ts は読み込むと起動処理が走るため、中身をここに置いてテストから呼ぶ）。
+ * api を起動する（start が呼ぶ）。
  */
 export async function bootstrap(): Promise<INestApplication> {
   // 設定の検証はアプリを組み立てる前に済ませる。後に置くと、
@@ -28,7 +28,7 @@ export function reportFatal(error: unknown, exit: (code: number) => void = proce
   exit(1);
 }
 
-/** プロセス全体で捕まえられなかった例外と拒否を、reportFatal に渡す。main.ts で起動より前に呼ぶ。 */
+/** プロセス全体で捕まえられなかった例外と拒否を、reportFatal に渡す。 */
 export function installFatalHandlers(
   proc: NodeJS.Process = process,
   report: (error: unknown) => void = reportFatal,
