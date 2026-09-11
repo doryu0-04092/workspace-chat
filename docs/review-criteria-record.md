@@ -465,6 +465,17 @@ SHA: `19718de` `2656190` `8bf7a2b` `2d44653` `4883d21`（ブランチ `docs/#93-
 **それまでの記録は「ワークフロー自身を変える PR では動かない」までで、
 既存のブランチが巻き添えになることは書かれていなかった。**
 
+**2件目: ブランチ名に非 ASCII を含むと、`claude-code-action` が拒否する。**
+
+> ##[error]Action failed with error: Invalid branch name: "feature/#77-apiパスのプレフィックス".
+> Branch names must start with an alphanumeric character, underscore, or '@' and contain only
+> alphanumeric characters, forward slashes, hyphens, underscores, periods, hashes (#),
+> plus signs (+), commas (,), at signs (@), or parentheses.
+
+**経緯**: 2026-09-10、同日に立てた5本の PR（#200〜#204）で `review` が 12〜14 秒 fail した（#210）。
+同じ日の ASCII ブランチ名の PR（#193・#197・#198）は通っており、その対比で切り分けが付いた。
+**発生条件・見分け方は [README](../README.md) の「既知の制約」にある。ここでは繰り返さない。**
+
 ## 15. この文書自身の置き場（解消済み）
 
 **イシュー #109 は暫定の置き場だった。** 追跡下のこのファイルへ移したことで、
