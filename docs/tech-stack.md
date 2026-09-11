@@ -428,7 +428,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
      `psql` の実問い合わせで3つとも赤にするところまで作ってあるが、
      **符号化と照合順序はその対象外である。緑のまま、2-gram 索引の挙動だけが環境ごとに変わる。**
      露見するのは検索を実装したあとであり、**本書が繰り返し避けてきた「最も遅い段階」**にあたる
-- **その前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
+- **`CREATE EXTENSION` の前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
   pg_bigm は共有ライブラリの事前読み込みを必須としている（公式ドキュメント）。
   **ローカルは `compose.yaml` が `postgres -c shared_preload_libraries=pg_bigm` で渡しているが、
   RDS には同じ指定が無い。** RDS では DB パラメータグループに書く必要があり、
