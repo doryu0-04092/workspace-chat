@@ -7,7 +7,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 
 ## 現在の状態
 
-**要件定義フェーズは完了。** 実装は未着手。
+**要件定義フェーズは完了。** 実装は進行中。
 
 | フェーズ | 状態 |
 |---|---|
@@ -22,7 +22,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Valkey。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
 | Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#42） |
-| 実装 | 未着手（次の作業） |
+| 実装 | 実装中 |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する
 （[要件定義書](docs/requirements.md) 4.8）。
