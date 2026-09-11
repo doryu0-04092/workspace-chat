@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import * as argon2 from 'argon2';
 
 /**
@@ -28,4 +29,15 @@ export function hashSecret(secret: string): Promise<string> {
 
 export function verifySecret(hash: string, secret: string): Promise<boolean> {
   return argon2.verify(hash, secret.normalize('NFC'));
+}
+
+let dummyHash: Promise<string> | undefined;
+
+/**
+ * 照合する相手（利用者・コード）が見つからないときに照合する、捨てるためのハッシュ（同じパラメータの Argon2id）。
+ * **見つからないときに照合を飛ばすと、応答までの時間で登録済みの ID を見分けられる。** 最初に要ったときに1回だけ作る。
+ */
+export function dummySecretHash(): Promise<string> {
+  dummyHash ??= hashSecret(randomBytes(32).toString('base64url'));
+  return dummyHash;
 }

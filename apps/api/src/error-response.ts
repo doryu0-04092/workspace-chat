@@ -55,6 +55,13 @@ function isErrorResponse(value: unknown): value is ErrorResponse {
   return typeof code === 'string' && typeof message === 'string';
 }
 
+/** 429 と `Retry-After`（秒）を返す例外。**ヘッダーは ErrorResponseFilter が付ける**（投げる経路ごとに付けない）。 */
+export class RetryAfterException extends HttpException {
+  constructor(readonly retryAfterSeconds: number) {
+    super(errorBodyForStatus(HttpStatus.TOO_MANY_REQUESTS), HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
+
 /**
  * **すべての例外を ErrorResponse で返す**（横断的な例外処理で揃える。機能一覧 1.4）。
  *
@@ -96,6 +103,9 @@ export class ErrorResponseFilter implements ExceptionFilter {
         this.logger.error(exception.message, exception.stack);
         response.status(status).json(errorBodyForStatus(status));
         return;
+      }
+      if (exception instanceof RetryAfterException) {
+        response.setHeader('Retry-After', String(exception.retryAfterSeconds));
       }
       response.status(status).json(isErrorResponse(given) ? given : errorBodyForStatus(status));
       return;

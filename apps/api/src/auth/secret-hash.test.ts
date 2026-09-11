@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hashSecret, verifySecret } from './secret-hash';
+import { dummySecretHash, hashSecret, verifySecret } from './secret-hash';
 
 const DECOMPOSED = 'café-password'; // e + 結合用アキュート（NFD）
 const COMPOSED = 'café-password'; // é（NFC）
@@ -18,5 +18,15 @@ describe('秘密のハッシュ化と照合（F-03）', () => {
 
   it('違う秘密は照合に通らない', async () => {
     expect(await verifySecret(await hashSecret(COMPOSED), 'cafe-password')).toBe(false);
+  });
+});
+
+// 照合する相手が見つからないときに照合する捨てるためのハッシュ。要求のたびに作ると、見つからないときだけ Argon2id を2回走らせることになる。
+describe('捨てるためのハッシュ（dummySecretHash）', () => {
+  it('同じパラメータの Argon2id で、1回だけ作る', async () => {
+    const first = await dummySecretHash();
+    // パラメータの並び順はライブラリが決める（argon2 0.45.1 は m,p,t）。
+    expect(first).toMatch(/^[$]argon2id[$]v=19[$]m=19456,p=1,t=2[$]/);
+    expect(await dummySecretHash()).toBe(first);
   });
 });
