@@ -518,7 +518,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 のとおり、このメトリクスは `INFO` コマンドの `connected_clients` から作られるため、
 **上の 5xx 率と同じ理由で、エンジンに到達できない間は発行そのものが止まり、
 値は 0 ではなく欠損になる。** そこで CloudWatch アラーム側の「欠測を breaching として扱う」設定
-（`missingDataTreatment: breaching`。
+（Terraform の `aws_cloudwatch_metric_alarm` では `treat_missing_data = "breaching"`。
 [AWS のドキュメント](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/alarms-and-missing-data.html)）
 を使い、**欠損そのものを発火条件にする。** 値の閾値は使わない。
 
