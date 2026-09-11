@@ -337,6 +337,15 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 > 現時点では `prisma.config.ts` と
 > [prisma-schema.test.ts](../apps/api/src/prisma-schema.test.ts) である。
 
+#### 追加で確認した項目 — REST の型の生成（2026-09-11。#243）
+
+[要件定義書](requirements.md) 4.7「REST API の仕様を唯一の正とし、そこから型を生成する」の道具。
+仕様は `packages/shared/openapi/openapi.yaml`、生成物は `packages/shared/src/api.gen.ts`（コミットし、CI で再生成して差分を見る）。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **openapi-typescript** | **^7.13.0** | 最新。型だけを生成する（実行時のコードを出さない）。**採らなかったもの**: `@nestjs/swagger`（デコレーターから仕様を作るため、仕様を唯一の正とする向きと逆）／`@hey-api/openapi-ts`（型に加えて SDK などを出し、型の生成に対して機能が多い） |
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。
