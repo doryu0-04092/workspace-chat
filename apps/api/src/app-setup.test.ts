@@ -21,6 +21,7 @@ describe('createApp の設定の検証', () => {
     ['API_TASK_COUNT', '0'],
     ['REGISTRATION_ENABLED', 'FALSE'],
     ['JWT_SECRET', 'short'],
+    ['WEB_ORIGIN', 'https://chat.example.com/'],
   ];
 
   it('不正な値の表は、起動の設定のすべてを持つ', () => {

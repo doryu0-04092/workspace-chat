@@ -8,6 +8,9 @@ import { vi } from 'vitest';
 
 /** 繋がらない DB の宛先。接続は最初の問い合わせまで張られないため、問い合わせないテストはこれでよい。 */
 export const UNREACHABLE_DATABASE_URL = 'postgresql://unused:unused@127.0.0.1:9/unused';
+/** テストの web の origin（CSRF の対処で Origin / Referer と突き合わせる）。 */
+export const TEST_WEB_ORIGIN = 'http://web.test';
+
 /** 繋がらない Valkey の宛先。レート制限はメモリへ迂回する。 */
 export const UNREACHABLE_REDIS_URL = 'redis://127.0.0.1:9';
 
@@ -17,7 +20,8 @@ type ApiEnvName =
   | 'TRUST_PROXY_HOPS'
   | 'API_TASK_COUNT'
   | 'REGISTRATION_ENABLED'
-  | 'JWT_SECRET';
+  | 'JWT_SECRET'
+  | 'WEB_ORIGIN';
 
 /**
  * 起動の設定（config/api-config.ts）の環境変数を、既定のテスト用の値に `overrides` を重ねて差し替える。
@@ -34,6 +38,7 @@ export function stubApiEnv(overrides: Partial<Record<ApiEnvName, string | undefi
     API_TASK_COUNT: undefined,
     REGISTRATION_ENABLED: undefined,
     JWT_SECRET: randomBytes(32).toString('base64url'),
+    WEB_ORIGIN: TEST_WEB_ORIGIN,
     ...overrides,
   };
   for (const [name, value] of Object.entries(env)) {
