@@ -1,7 +1,5 @@
-import type { components } from '@workspace-chat/shared';
 import type { NextFunction, Request, Response } from 'express';
-
-type ErrorResponse = components['schemas']['ErrorResponse'];
+import type { ErrorResponse } from './error-response';
 
 /** 本体の読み取り（body-parser）の失敗。`http-errors` の形で、`type` に種類が入る。 */
 type BodyReadError = { status: number; type: string };

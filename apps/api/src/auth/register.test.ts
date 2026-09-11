@@ -14,7 +14,8 @@ import { canonicalRecoveryCode } from './recovery-code';
 
 type RegisterResponses = paths['/auth/register']['post']['responses'];
 type RegisterResponse = RegisterResponses[201]['content']['application/json'];
-type ErrorResponse = RegisterResponses[400 | 403 | 409]['content']['application/json'];
+type ErrorResponse = RegisterResponses[400 | 403 | 409 | 413 | 429]['content']['application/json'];
+type InternalErrorResponse = RegisterResponses[500]['content']['application/json'];
 
 /** アプリのログをすべて控える。パスワードがログの経路に渡っていないかを見るため。 */
 class CapturingLogger implements LoggerService {
@@ -374,6 +375,9 @@ describe('DB に繋がらないとき', () => {
     const text = await res.text();
 
     expect(res.status).toBe(500);
+    // 本体は ErrorResponse（internal_error）で、例外のメッセージ（呼び出し箇所のソースの抜き出しなど）を載せない。
+    expect((JSON.parse(text) as InternalErrorResponse).code).toBe('internal_error');
+    expect(text).not.toContain('prisma');
     // 例外がログに出ていることを先に見る。出ていなければ「含まれない」を見ても意味が無い。
     expect(logger.lines.some((line) => line.startsWith('error '))).toBe(true);
     const all = `${logger.lines.join('\n')}\n${text}`;

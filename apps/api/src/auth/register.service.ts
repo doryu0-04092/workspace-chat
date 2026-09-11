@@ -1,5 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
+import type { ErrorResponse } from '../error-response';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
 import { canonicalRecoveryCode, generateRecoveryCode } from './recovery-code';
@@ -46,7 +47,7 @@ export class RegisterService {
         throw new ConflictException({
           code: 'user_id_taken',
           message: 'このユーザーID は使えません',
-        });
+        } satisfies ErrorResponse);
       }
       throw error;
     }

@@ -35,7 +35,7 @@ export interface paths {
         put?: never;
         /**
          * 新規登録（F-01 / F-03 / F-37）
-         * @description 認証を要さない。登録と同時にログイン状態にはしない（トークンは返さない）。 リカバリーコードはこの応答でだけ返し、以後は再表示できない（機能一覧 1.1）。
+         * @description 認証を要さない。登録と同時にログイン状態にはしない（トークンは返さない）。 リカバリーコードはこの応答でだけ返し、以後は再表示できない（機能一覧 1.1）。 発信元単位のレート制限は1時間に10回（機能一覧 1.1）。201・403・409 の要求も1回として数え、 入力の検証で落ちた要求（400）は数えない。
          */
         post: operations["register"];
         delete?: never;
@@ -49,7 +49,11 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         ErrorResponse: {
-            code: string;
+            /**
+             * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
+             * @enum {string}
+             */
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -80,7 +84,64 @@ export interface components {
             status: "ok";
         };
     };
-    responses: never;
+    responses: {
+        /** @description 入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。 どちらも送られた値を応答に載せない */
+        BadRequest: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 仕様に無いメソッド（method_not_allowed） */
+        MethodNotAllowed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 本体が大きすぎる（payload_too_large。上限は Nest の JSON の読み取りの既定の 100kb） */
+        PayloadTooLarge: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 仕様に無いメディア型の本体（unsupported_media_type） */
+        UnsupportedMediaType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description レート制限を超えた（too_many_requests。上限はパスの説明に書く） */
+        TooManyRequests: {
+            headers: {
+                /** @description 再び受け付けるまでの秒数 */
+                "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description 想定外の失敗（internal_error）。例外のメッセージは載せない */
+        InternalServerError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+    };
     parameters: never;
     requestBodies: never;
     headers: never;
@@ -106,6 +167,8 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     register: {
@@ -130,16 +193,8 @@ export interface operations {
                     "application/json": components["schemas"]["RegisterResponse"];
                 };
             };
-            /** @description 入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。 どちらも送られた値を応答に載せない */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 新規登録を停止している（要件定義書 5.1） */
+            400: components["responses"]["BadRequest"];
+            /** @description 新規登録を停止している（registration_disabled。要件定義書 5.1） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -148,7 +203,8 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description ユーザーID が既に使われている（大文字小文字だけの違いも同じ ID と見なす）。 代償: どのユーザーID が登録済みかがこの応答で分かり、列挙に使える（ログインは区別しない。機能一覧 1.2）。 利用者が別の ID を選び直せることを優先した。列挙は発信元単位のレート制限（429。1時間に10回）で抑える */
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description ユーザーID が既に使われている（user_id_taken。大文字小文字だけの違いも同じ ID と見なす）。 代償: どのユーザーID が登録済みかがこの応答で分かり、列挙に使える（ログインは区別しない。機能一覧 1.2）。 利用者が別の ID を選び直せることを優先した。列挙は発信元単位のレート制限（429）で抑える */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -157,26 +213,10 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description 本体が大きすぎる（payload_too_large。上限は Nest の JSON の読み取りの既定の 100kb） */
-            413: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description 発信元単位のレート制限を超えた（1時間に10回。機能一覧 1.1）。201・403・409 の要求も1回として数える。 入力の検証で落ちた要求（400）は数えない */
-            429: {
-                headers: {
-                    /** @description 再び受け付けるまでの秒数 */
-                    "Retry-After"?: number;
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
         };
     };
 }
