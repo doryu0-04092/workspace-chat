@@ -17,6 +17,7 @@ export interface ApiConfig {
   readonly trustProxyHops: number;
   readonly apiTaskCount: number;
   readonly registrationEnabled: boolean;
+  readonly jwtSecret: string;
 }
 
 /** ApiConfig を注入するトークン。 */
@@ -32,6 +33,25 @@ export function resolveDatabaseUrl(raw: string | undefined): string {
     throw new Error(
       'DATABASE_URL が設定されていません（開発用データベースの接続 URL を環境変数で渡す）',
     );
+  }
+  return raw;
+}
+
+/** JWT_SECRET の下限（バイト）。RFC 7518 3.2: HS256 の鍵はハッシュの出力（256 ビット）以上でなければならない（MUST）。 */
+const JWT_SECRET_MIN_BYTES = 32;
+
+/**
+ * アクセストークン（HS256）の署名の鍵。**必須。32 バイト未満は起動時に落とす。**
+ * 文字数ではなく UTF-8 のバイト数で数える。**例外のメッセージに値を載せない**（鍵そのものである）。
+ */
+export function resolveJwtSecret(raw: string | undefined): string {
+  if (raw === undefined || raw === '') {
+    throw new Error(
+      `JWT_SECRET が設定されていません（アクセストークンの署名の鍵。${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す）`,
+    );
+  }
+  if (Buffer.byteLength(raw, 'utf8') < JWT_SECRET_MIN_BYTES) {
+    throw new Error(`JWT_SECRET が短すぎます（${JWT_SECRET_MIN_BYTES} バイト以上を渡す）`);
   }
   return raw;
 }
@@ -57,6 +77,7 @@ export function resolveApiConfig(env: Readonly<Record<string, string | undefined
     trustProxyHops: read(() => resolveTrustProxyHops(env.TRUST_PROXY_HOPS)),
     apiTaskCount: read(() => resolveApiTaskCount(env.API_TASK_COUNT)),
     registrationEnabled: read(() => resolveRegistrationEnabled(env.REGISTRATION_ENABLED)),
+    jwtSecret: read(() => resolveJwtSecret(env.JWT_SECRET)),
   };
   if (problems.length > 0) {
     throw new Error(`起動の設定が不正です:\n${problems.join('\n')}`);

@@ -18,7 +18,7 @@ import { ResilientRateLimitStorage } from './resilient-rate-limit-storage';
 export const VALKEY_CLIENT = Symbol('VALKEY_CLIENT');
 
 /** Valkey が失敗した後、試し直すまでの間隔。 */
-const VALKEY_RETRY_INTERVAL_MS = 30_000;
+export const VALKEY_RETRY_INTERVAL_MS = 30_000;
 /** 起動時に Valkey の準備を待つ上限。応答の無い宛先で起動が止まらないようにする。 */
 const VALKEY_READY_TIMEOUT_MS = 3_000;
 
