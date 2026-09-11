@@ -95,6 +95,11 @@ jobs:
         if: steps.test.outcome == 'success'
         run: test -s reports/vitest-junit.xml
 
+      # ECS Fargate で動かす api のイメージを実際に作って動かす（#271）。ソースが通ってもイメージの中で起動しない
+      # （仕様のファイルが入っていない・ネイティブモジュールが読めない等）事故は、イメージを動かさないと分からない。
+      - name: api のコンテナイメージの確認
+        run: bash scripts/api-image.test.sh
+
       # テストが失敗したときこそ残す。CI を実行した事実と結果を成果物として残すのが目的。
       # ただしレポートが実際に出ている場合に限る。前段で落ちたときや、テストの
       # ステップ自体が junit を書く前に落ちたときは reports/ が存在せず、

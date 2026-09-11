@@ -1,0 +1,15 @@
+# api のイメージ（apps/api/Dockerfile）のビルドの文脈から外すもの（#271）。
+# **秘密の値を置くファイル（.env）をイメージに入れない。** 依存と生成物は段の中で作り直す。
+.env
+.env.*
+!.env.example
+.git
+.github
+.claude
+**/node_modules
+**/dist
+**/generated
+**/coverage
+reports
+docs
+*.md
