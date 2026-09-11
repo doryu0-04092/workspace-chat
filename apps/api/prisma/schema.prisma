@@ -159,7 +159,9 @@ model User {
   displayName String @db.VarChar(50)
 
   /// **Argon2id のハッシュだけを入れる列**（要件定義書 4.3）。
-  /// 平文・可逆暗号の列は作らない。ハッシュ化は `apps/api/src/auth/secret-hash.ts`（#245）。
+  /// 平文・可逆暗号の列は作らない。ハッシュ化も照合も `apps/api/src/auth/secret-hash.ts` の
+  /// `hashSecret` / `verifySecret` を通す（#245。**NFC への正規化がその中にある**——`argon2.verify` を直接呼ぶと、
+  /// 端末によって登録と違うコードポイント列で送られた利用者がログインできなくなる）。
   passwordHash String
 
   /// プロフィール（機能一覧 1.3）。未設定を許すため任意にする。

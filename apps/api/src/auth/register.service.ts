@@ -16,16 +16,14 @@ export class RegisterService {
   /**
    * 利用者を作り、リカバリーコードを1つ発行する。
    *
-   * - **パスワードは NFC に正規化してからハッシュ化する**（NIST SP 800-63B-4 3.1.1.2 の SHOULD）。
-   *   **ログイン（F-02）の照合でも同じ正規化を当てること。** 片方だけだと、端末によって登録と違う
-   *   コードポイント列で送られたときに照合が外れる
+   * - パスワードの NFC への正規化は hashSecret が行う（照合の verifySecret も同じ正規化を通る。secret-hash.ts）
    * - **利用者とコードは1つの書き込み（ネストした create）で作る。** Prisma はこれを1トランザクションで行う。
    *   分けると、コードの無い利用者が残りうる——コードは唯一の復旧手段である（機能一覧 1.1）
    * - **ユーザーID の重複の判定は DB に任せる**（`User_userId_lower_key`。大文字小文字を区別しない）。
    *   先に SELECT で確かめる形にすると、同時の登録で両方が通る
    */
   async register(input: RegisterRequest): Promise<RegisterResponse> {
-    const passwordHash = await hashSecret(input.password.normalize('NFC'));
+    const passwordHash = await hashSecret(input.password);
     const recoveryCode = generateRecoveryCode();
     const codeHash = await hashSecret(canonicalRecoveryCode(recoveryCode));
 
