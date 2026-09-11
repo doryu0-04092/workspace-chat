@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { type ErrorResponse, errorBodyForStatus } from './error-response';
 
@@ -21,6 +22,8 @@ function isBodyReadError(error: unknown): error is BodyReadError {
  */
 const INVALID_BODY: ErrorResponse = { code: 'invalid_body', message: '本体を読めません' };
 
+const logger = new Logger('BodyRead');
+
 /**
  * 本体の読み取りの失敗を、送られた値を載せない ErrorResponse で返す Express のエラーミドルウェア。
  * **JSON の body-parser の直後に置く**（app-setup.ts）。
@@ -43,6 +46,9 @@ export function bodyReadErrorHandler(
     next(error);
     return;
   }
+  // 5xx は想定外の失敗としてログに残す。出すのは種類と状態コードだけ（メッセージは入力の断片を含みうる）。
+  if (error.status >= 500)
+    logger.error(`本体の読み取りに失敗した: ${error.type}（${error.status}）`);
   res
     .status(error.status)
     .json(error.status === 400 ? INVALID_BODY : errorBodyForStatus(error.status));
