@@ -21,6 +21,7 @@ describe('REST の仕様による要求の検証', () => {
     // ここで叩く要求はどれもハンドラに届かないため、繋がらない宛先でよい。
     vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
     vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
+    vi.stubEnv('TRUST_PROXY_HOPS', '0');
     app = await createApp({ logger: false });
     await app.listen(0, '127.0.0.1');
     const { port } = app.getHttpServer().address() as AddressInfo;

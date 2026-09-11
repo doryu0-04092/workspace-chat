@@ -14,8 +14,10 @@ describe('レート制限の設定', () => {
   // 発信元（req.ip）を X-Forwarded-For のどこから取るか。**多すぎると利用者が偽の発信元を名乗れ、
   // 少なすぎると全員が手前の中継（ALB）の IP で数えられて、1人の超過で全員が止まる。**
   describe('TRUST_PROXY_HOPS（信頼する中継の段数）', () => {
-    it('設定していなければ 0（X-Forwarded-For を信じない）', () => {
-      expect(resolveTrustProxyHops(undefined)).toBe(0);
+    // 必須（決定・2026-09-11・依頼側。#252）。本番で渡し忘れると全員が ALB の IP で数えられ、
+    // エラーもログも出ないまま、全利用者のレート制限が1つにまとまる。既定値に倒さず起動時に落とす。
+    it('設定していなければ起動時に落とす', () => {
+      expect(() => resolveTrustProxyHops(undefined)).toThrow(/TRUST_PROXY_HOPS/);
     });
     it.each([
       ['0', 0],
