@@ -11,7 +11,7 @@ export default defineConfig({
   // これが無いと `/api/...` は Vite の dev サーバーに当たり、NestJS には届かない。
   //
   // **Socket.IO の `path` も `/api/socket.io/` である**（既定の `/socket.io/` ではない）。
-  // クライアント側で `io(url, { path: '/api/socket.io/' })` と書くこと。
+  // クライアント側で `io(url, { path: REALTIME_PATH })`（@workspace-chat/shared）と書くこと。
   // **書き忘れると既定のまま CloudFront の既定ビヘイビアに落ちて静的配信へ向かい、
   // アプリ側のログには何も出ない**（機能一覧 5.2 / docs/tech-stack.md の CloudFront の行）。
   server: {
