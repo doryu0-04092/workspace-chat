@@ -101,9 +101,21 @@ function describeStore(name: string, create: () => LoginBackoffStore): void {
       const store = create();
       const k = key();
       for (let i = 0; i < 12; i++) await store.recordFailure(k, T);
-      expect(await store.begin(k, T + LOGIN_BACKOFF_MAX_MS)).toEqual({ allowed: true });
       const later = T + LOGIN_BACKOFF_RESET_MS;
+      // 照合へ通して、待ち時間の起点を 24 時間の直前へ動かす。
+      expect(await store.begin(k, later - 1_000)).toEqual({ allowed: true });
+      // それでも数え直しの起点は最後の失敗（T）であり、24 時間で数え直す（待ち時間の起点で見ると、ここで止まる）。
       expect(await store.begin(k, later)).toEqual({ allowed: true });
+      await store.recordFailure(k, later);
+      expect(await store.begin(k, later + 1_000)).toEqual({ allowed: true });
+    });
+
+    it('照合へ通した後に失敗しても、最後の失敗から 24 時間を過ぎていれば 1 回目として数える', async () => {
+      const store = create();
+      const k = key();
+      for (let i = 0; i < 12; i++) await store.recordFailure(k, T);
+      const later = T + LOGIN_BACKOFF_RESET_MS;
+      expect(await store.begin(k, later - 1_000)).toEqual({ allowed: true });
       await store.recordFailure(k, later);
       expect(await store.begin(k, later + 1_000)).toEqual({ allowed: true });
     });
