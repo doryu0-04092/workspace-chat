@@ -655,6 +655,7 @@ Range リクエストの再試行**をクライアントに実装することに
    **アバターの経路で確認できていないこと。** **`/avatars/*` が選ばれたあと、オリジンへ渡る正規化の前のパス（上の「確かめる URL の形」を含むもの）を、S3 がどのキーとして解釈するか。**
    S3 の[キーの命名の文書](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html)は、ドットだけのセグメントについて「**Different tools and SDKs might handle these patterns differently**」と述べるにとどまり、
    **REST API の要求のパスをどのキーとして解釈するかを定めた記述は見つからなかった。**
+   **`/avatars/` で始まる URL が正規化で `/files/*` のビヘイビアに当たる場合（`/avatars/../files/...` は正規化で `/files/...` になる）に、`/files/*` の署名の検査を `/avatars/*` の Cookie が通りうるかも確かめていない**——`Resource` の照合が正規化の前と後のどちらのパスで行われるかに依る（下の「正規化の前のパスについても確かめていない」と同じ一点）。
    **実装時に、上の「確かめる URL の形」の URL で配信して、`avatars/` の外のキー（添付の `workspace/...` と `quarantine/` を含む）が返らないことを確かめる。** 返った場合は、その場で直さず依頼側へ上げる。
 
    **S3 のキーは上表のとおり固定であり、実装時に決めるものではない。**
