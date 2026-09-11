@@ -14,7 +14,7 @@ import {
   ResilientLoginBackoffStore,
   ValkeyLoginBackoffStore,
 } from './login-backoff';
-import { AccessTokenGuard } from './access-token.guard';
+import { AccessTokenGuard, AccessTokenResolver } from './access-token.guard';
 import { LoginController } from './login.controller';
 import { LOGIN_BACKOFF_STORE, LoginService } from './login.service';
 import { RecoveryController } from './recovery.controller';
@@ -48,6 +48,7 @@ import { ACCESS_TOKEN_TTL_SECONDS } from './session-tokens';
     RecoveryService,
     SessionService,
     CsrfGuard,
+    AccessTokenResolver,
     // すべてのルートに既定でアクセストークンを求める（外すのは @Public() のルートだけ。機能一覧 1.4）。
     { provide: APP_GUARD, useClass: AccessTokenGuard },
     {
@@ -66,5 +67,6 @@ import { ACCESS_TOKEN_TTL_SECONDS } from './session-tokens';
         ),
     },
   ],
+  exports: [AccessTokenResolver],
 })
 export class AuthModule {}

@@ -48,7 +48,8 @@ export function resolveJwtSecret(raw: string | undefined): string {
 
 /**
  * web の origin（環境変数 `WEB_ORIGIN`。例: `https://chat.example.com`）。**必須。**
- * Cookie を使う要求の CSRF の対処で、Origin / Referer と突き合わせる（要件定義書 4.3。auth/same-origin.ts）。
+ * Cookie を使う要求の CSRF の対処で Origin / Referer と、WebSocket のハンドシェイクで Origin と突き合わせる
+ * （要件定義書 4.3。auth/same-origin.ts・realtime/realtime-io.adapter.ts）。
  * **origin の形（スキーム://ホスト[:ポート]）でなければ起動時に落とす**——末尾の / やパスが付くと、ブラウザが送る Origin と
  * 一致せず、正規の要求がすべて 403 になる。
  */

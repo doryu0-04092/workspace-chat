@@ -47,6 +47,38 @@ const BEARER = /^Bearer +([A-Za-z0-9\-._~+/]+=*)$/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * アクセストークンから利用者を解決する。**HTTP の入口（AccessTokenGuard）と WebSocket のハンドシェイク（realtime/）で同じものを使う**
+ * ——片方だけに退会済みの判定を置くと、もう片方から通る（機能一覧 1.4・5.2。#90）。
+ */
+@Injectable()
+export class AccessTokenResolver {
+  constructor(
+    private readonly jwt: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /** 署名（HS256 だけ。AuthModule の verifyOptions）・期限・`sub` の形を確かめ、退会していない利用者を返す。使えなければ null。 */
+  async resolve(token: string | undefined): Promise<AuthenticatedUser | null> {
+    const userId = await this.subject(token);
+    if (userId === undefined) return null;
+    return this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true },
+    });
+  }
+
+  private async subject(token: string | undefined): Promise<string | undefined> {
+    if (token === undefined) return undefined;
+    try {
+      const { sub } = await this.jwt.verifyAsync<{ sub?: unknown }>(token);
+      return typeof sub === 'string' && UUID.test(sub) ? sub : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/**
  * **すべてのルートに既定で掛かる**（AuthModule が APP_GUARD として登録する）。`@Public()` のルートだけを通す。
  *
  * - Authorization ヘッダーに Bearer のトークンが無い → 401（authentication_required。`WWW-Authenticate: Bearer`。
@@ -61,8 +93,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export class AccessTokenGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
-    private readonly jwt: JwtService,
-    private readonly prisma: PrismaService,
+    private readonly tokens: AccessTokenResolver,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -78,31 +109,13 @@ export class AccessTokenGuard implements CanActivate {
       throw new UnauthorizedException(AUTHENTICATION_REQUIRED);
     }
 
-    const userId = await this.subject(BEARER.exec(header)?.[1]);
-    const user =
-      userId === undefined
-        ? null
-        : await this.prisma.user.findFirst({
-            where: { id: userId, deletedAt: null },
-            select: { id: true },
-          });
+    const user = await this.tokens.resolve(BEARER.exec(header)?.[1]);
     if (!user) {
       response.setHeader('WWW-Authenticate', 'Bearer error="invalid_token"');
       throw new UnauthorizedException(INVALID_TOKEN);
     }
-    request[AUTHENTICATED_USER] = { id: user.id };
+    request[AUTHENTICATED_USER] = user;
     return true;
-  }
-
-  /** 署名（HS256 だけ。AuthModule の verifyOptions）と期限を確かめ、`sub`（User.id）を返す。使えなければ undefined。 */
-  private async subject(token: string | undefined): Promise<string | undefined> {
-    if (token === undefined) return undefined;
-    try {
-      const { sub } = await this.jwt.verifyAsync<{ sub?: unknown }>(token);
-      return typeof sub === 'string' && UUID.test(sub) ? sub : undefined;
-    } catch {
-      return undefined;
-    }
   }
 }
 

@@ -11,6 +11,7 @@ import { HealthController } from './health.controller';
 import { ErrorResponseFilter } from './error-response';
 import { OpenApiValidationMiddleware } from './openapi-validation';
 import { PrismaModule } from './prisma.service';
+import { RealtimeModule } from './realtime/realtime.module';
 import { UsersModule } from './users/users.module';
 
 /**
@@ -32,7 +33,13 @@ export class AppModule implements NestModule {
   static forRoot(config: ApiConfig): DynamicModule {
     return {
       module: AppModule,
-      imports: [ApiConfigModule.forRoot(config), PrismaModule, AuthModule, UsersModule],
+      imports: [
+        ApiConfigModule.forRoot(config),
+        PrismaModule,
+        AuthModule,
+        UsersModule,
+        RealtimeModule,
+      ],
     };
   }
 
