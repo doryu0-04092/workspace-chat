@@ -244,7 +244,7 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | S3 + CloudFront | 数ドル |
 | **合計** | **約 $55〜65 / 月** |
 
-**デモ後は `terraform destroy` する運用**を前提とし、実費を数ドルに抑える。
+**デモ後に `terraform destroy` する運用**（[要件定義書](requirements.md) 4.2 の決定。ここには書かない）により、実費を数ドルに抑える。
 
 ---
 
@@ -337,6 +337,12 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 > 現時点では `prisma.config.ts`・api の [config/](../apps/api/src/config/)
 > （#256）・テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts) と、
 > アプリを組み立てるテスト（接続しない宛先を渡す）である。
+
+#### 追加で確認した項目 — React hooks の lint ルール（2026-09-07。#18 / #76）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **eslint-plugin-react-hooks** | **^7.1.1** | 最新版。`peerDependencies` の `eslint` はこの版でも `^10.0.0` を含む広い範囲を受け入れる。**`configs.recommended` はそのまま使わない**——rules-of-hooks / exhaustive-deps に加え、React Compiler 向けの静的解析ルール（purity・refs・static-components など10件超）を丸ごと束ねており、#18 が挙げた問題（hooks の呼び出し規則の違反・useEffect の依存配列の漏れ）はこの2つだけで足りる。直下の `eslint.config.js`（`files: ['apps/web/**/*.{ts,tsx}']`）で2つに絞って有効化済み |
 
 #### 追加で確認した項目 — REST の型の生成（2026-09-11。#243）
 
