@@ -1,20 +1,15 @@
 import { Module } from '@nestjs/common';
+import { HealthController } from './health.controller';
 
 /**
- * 雛形の段階では何も持たない。
- *
  * **公開するエンドポイントを、要件に記録しないまま足さない**（CLAUDE.md 1）。
- * 死活確認のエンドポイントは ALB の構成に必要になる。区分と根拠は
- * F-39 として記録済み（機能一覧 14.1。#15）。実装（本体とテスト）は
- * API の最初の PR で足す。**パスは `/api/health` である**（下記の前置きによる）。
+ * 死活確認（`GET /api/health`）の区分と根拠は、機能一覧の F-39 の行と要件定義書 3.2 の派-10 にある。
  *
- * **踏むと壊れる: 全ルートの前置きは `/api` である**（#77 の決定）。
- * CloudFront は `/api/*` だけを ALB へ振り分け、それ以外は静的配信のバケットへ向かう。
- * **`/api` の外にルートを置くと ALB に届かず、静的配信側の応答が返る**——
- * アプリ側のログには何も出ないため、原因がエッジ側にあることに気づけない。
- * `main.ts` の `setGlobalPrefix('api')` がこれを担保する。
+ * **全ルートの前置き `/api` は app-setup.ts の createApp が付ける**（#77 の決定。理由はそちら）。
  * **WebSocket も同じで、Socket.IO の `path` は `/api/socket.io/` である**
  * （サーバー・クライアントの両方で設定する。機能一覧 5.2）。
  */
-@Module({})
+@Module({
+  controllers: [HealthController],
+})
 export class AppModule {}
