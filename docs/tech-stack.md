@@ -334,7 +334,7 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 >
 > **`DATABASE_URL` の変数名は README と `.env.example` に記載した**（値は書かない。
 > CLAUDE.md 禁止事項）。**コードの中で**この変数名を参照しているのは、
-> 現時点では `prisma.config.ts`・api の [config/api-config.ts](../apps/api/src/config/api-config.ts)
+> 現時点では `prisma.config.ts`・api の [config/](../apps/api/src/config/)
 > （#256）・テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts) と、
 > アプリを組み立てるテスト（接続しない宛先を渡す）である。
 

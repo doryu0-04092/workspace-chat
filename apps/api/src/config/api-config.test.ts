@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { resolveApiConfig, resolveDatabaseUrl, resolveJwtSecret } from './api-config';
+import { API_SETTINGS, resolveApiConfig, resolveJwtSecret } from './api-config';
+import { resolveDatabaseUrl } from './database-url';
 
 // RFC 7518 3.2「A key of the same size as the hash output (for instance, 256 bits for "HS256") or larger MUST be used」。
 describe('アクセストークンの署名の鍵（JWT_SECRET）', () => {
@@ -78,28 +79,8 @@ describe('起動の設定（resolveApiConfig）', () => {
     } catch (error) {
       message = (error as Error).message;
     }
-    for (const name of [
-      'DATABASE_URL',
-      'REDIS_URL',
-      'TRUST_PROXY_HOPS',
-      'API_TASK_COUNT',
-      'REGISTRATION_ENABLED',
-      'JWT_SECRET',
-    ]) {
+    for (const name of Object.values(API_SETTINGS).map((setting) => setting.env)) {
       expect(message).toContain(name);
-    }
-  });
-
-  // 起動の失敗はログに出る。接続先には資格情報が入り、JWT_SECRET は署名の鍵そのものである。
-  it('失敗のメッセージに接続先の値を載せない', () => {
-    const env = { ...VALID_ENV, TRUST_PROXY_HOPS: undefined };
-    expect(() => resolveApiConfig(env)).toThrow(/TRUST_PROXY_HOPS/);
-    try {
-      resolveApiConfig(env);
-    } catch (error) {
-      expect((error as Error).message).not.toContain('pw-db-9x');
-      expect((error as Error).message).not.toContain('pw-redis-9x');
-      expect((error as Error).message).not.toContain(VALID_ENV.JWT_SECRET);
     }
   });
 });

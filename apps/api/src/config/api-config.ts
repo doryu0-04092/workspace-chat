@@ -5,11 +5,14 @@ import {
   resolveRedisUrl,
   resolveTrustProxyHops,
 } from '../rate-limit/rate-limit-config';
+import { resolveDatabaseUrl } from './database-url';
 
 /**
- * api の起動に要る設定。**環境変数はここで1回だけ読み、組み立ての前にすべて検証する**（createApp）。
+ * アプリの組み立てに要る設定。createApp が環境変数から resolveApiConfig で作り、組み立ての前にすべて検証する。
  * モジュールは `process.env` を読まず、`API_CONFIG` を注入して使う。
- * 起動を止める設定を足すときは、この型と resolveApiConfig に足す（PORT は listen にしか使わず、bootstrap が読む）。
+ * **組み立てに要る設定を足すときは、この型と下の API_SETTINGS に足す**（API_SETTINGS に行が無いと型検査で落ちる）。
+ * PORT は組み立てに要らず（listen だけが使う）、bootstrap.ts が組み立ての前に別に検証する——
+ * **PORT と他の設定が同時に不正なら、PORT だけを先に知らせる。**
  */
 export interface ApiConfig {
   readonly databaseUrl: string;
@@ -23,26 +26,12 @@ export interface ApiConfig {
 /** ApiConfig を注入するトークン。 */
 export const API_CONFIG = Symbol('API_CONFIG');
 
-/**
- * DB の接続先を決める。**未設定・空は起動時に落とす。**
- * 見逃すと最初の問い合わせで原因の分かりにくいエラーになる。
- * **例外のメッセージに値を載せない**——接続先には資格情報が入り、起動の失敗はログに出る。
- */
-export function resolveDatabaseUrl(raw: string | undefined): string {
-  if (raw === undefined || raw === '') {
-    throw new Error(
-      'DATABASE_URL が設定されていません（開発用データベースの接続 URL を環境変数で渡す）',
-    );
-  }
-  return raw;
-}
-
 /** JWT_SECRET の下限（バイト）。RFC 7518 3.2: HS256 の鍵はハッシュの出力（256 ビット）以上でなければならない（MUST）。 */
 const JWT_SECRET_MIN_BYTES = 32;
 
 /**
- * アクセストークン（HS256）の署名の鍵。**必須。32 バイト未満は起動時に落とす。**
- * 文字数ではなく UTF-8 のバイト数で数える。**例外のメッセージに値を載せない**（鍵そのものである）。
+ * アクセストークン（HS256）の署名の鍵。**必須。32 バイト未満は起動時に落とす。** 文字数ではなく UTF-8 のバイト数で数える。
+ * **値は鍵そのものである**（API_SETTINGS で `secret: true`。不正なときのメッセージは集約が伏せる）。
  */
 export function resolveJwtSecret(raw: string | undefined): string {
   if (raw === undefined || raw === '') {
@@ -57,32 +46,76 @@ export function resolveJwtSecret(raw: string | undefined): string {
 }
 
 /**
+ * 設定1つの読み方。**`secret` はすべての行に必ず書く**（書かないと型検査で落ちる）——値に秘密（資格情報・鍵）が入るなら
+ * `secret: true` と、不正なときに代わりに示す `hint` を書く。
+ */
+type Setting<T> = {
+  readonly env: string;
+  readonly resolve: (raw: string | undefined) => T;
+} & ({ readonly secret: false } | { readonly secret: true; readonly hint: string });
+
+export type ApiSettings = { readonly [K in keyof ApiConfig]: Setting<ApiConfig[K]> };
+
+export const API_SETTINGS: ApiSettings = {
+  databaseUrl: {
+    env: 'DATABASE_URL',
+    resolve: resolveDatabaseUrl,
+    secret: true,
+    hint: '接続 URL を渡す',
+  },
+  redisUrl: {
+    env: 'REDIS_URL',
+    resolve: resolveRedisUrl,
+    secret: true,
+    hint: 'Valkey の接続 URL を渡す',
+  },
+  trustProxyHops: { env: 'TRUST_PROXY_HOPS', resolve: resolveTrustProxyHops, secret: false },
+  apiTaskCount: { env: 'API_TASK_COUNT', resolve: resolveApiTaskCount, secret: false },
+  registrationEnabled: {
+    env: 'REGISTRATION_ENABLED',
+    resolve: resolveRegistrationEnabled,
+    secret: false,
+  },
+  jwtSecret: {
+    env: 'JWT_SECRET',
+    resolve: resolveJwtSecret,
+    secret: true,
+    hint: `${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す`,
+  },
+};
+
+/**
  * 環境変数から ApiConfig を組み立てる。**不正な設定が複数あれば、すべてを1つの例外で知らせる**
  * （1つ直して起動し直すたびに次が見つかる形にしない）。
- * メッセージは各 resolve 関数のものをそのまま並べる（接続先の値を載せないのは各関数が守る）。
+ *
+ * **`secret: true` の設定は、値が空でないのに不正なら resolve 関数のメッセージを使わず、名前と hint だけを出す。**
+ * 起動の失敗はログに出る。resolve 関数が値をメッセージに埋めても（`… の値が不正です: ${raw}` はこのコードベースの
+ * 他の設定の書き方である）漏れないよう、伏せるのは集約の側で行う。`settings` はテストで差し替えるためにある。
  */
-export function resolveApiConfig(env: Readonly<Record<string, string | undefined>>): ApiConfig {
+export function resolveApiConfig(
+  env: Readonly<Record<string, string | undefined>>,
+  settings: ApiSettings = API_SETTINGS,
+): ApiConfig {
   const problems: string[] = [];
-  const read = <T>(resolve: () => T): T => {
+  const config: Record<string, unknown> = {};
+  for (const [key, setting] of Object.entries(settings) as [string, Setting<unknown>][]) {
+    const raw = env[setting.env];
     try {
-      return resolve();
+      config[key] = setting.resolve(raw);
     } catch (error) {
-      problems.push(error instanceof Error ? error.message : String(error));
-      return undefined as T;
+      problems.push(
+        setting.secret && raw !== undefined && raw !== ''
+          ? `${setting.env} の値が不正です（${setting.hint}。値は秘密を含むため載せない）`
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      );
     }
-  };
-  const config: ApiConfig = {
-    databaseUrl: read(() => resolveDatabaseUrl(env.DATABASE_URL)),
-    redisUrl: read(() => resolveRedisUrl(env.REDIS_URL)),
-    trustProxyHops: read(() => resolveTrustProxyHops(env.TRUST_PROXY_HOPS)),
-    apiTaskCount: read(() => resolveApiTaskCount(env.API_TASK_COUNT)),
-    registrationEnabled: read(() => resolveRegistrationEnabled(env.REGISTRATION_ENABLED)),
-    jwtSecret: read(() => resolveJwtSecret(env.JWT_SECRET)),
-  };
+  }
   if (problems.length > 0) {
     throw new Error(`起動の設定が不正です:\n${problems.join('\n')}`);
   }
-  return config;
+  return config as unknown as ApiConfig;
 }
 
 /** ApiConfig を全モジュールへ渡す（AppModule.forRoot が読み込む）。 */

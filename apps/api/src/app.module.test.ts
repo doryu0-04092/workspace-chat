@@ -5,6 +5,7 @@ import type { INestApplication } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { REALTIME_EVENT_KINDS } from '@workspace-chat/shared';
 import { AppModule } from './app.module';
+import { API_SETTINGS } from './config/api-config';
 
 describe('AppModule', () => {
   let app: INestApplication;
@@ -17,14 +18,7 @@ describe('AppModule', () => {
     //
     // **組み立ては、渡された設定だけを使い、環境変数を読まない**（#256。検証は createApp が組み立ての前に済ませる）。
     // 環境変数を不正な値にしておき、どこかのモジュールが読めばここで落ちるようにする。
-    for (const name of [
-      'DATABASE_URL',
-      'REDIS_URL',
-      'TRUST_PROXY_HOPS',
-      'API_TASK_COUNT',
-      'REGISTRATION_ENABLED',
-      'JWT_SECRET',
-    ]) {
+    for (const name of Object.values(API_SETTINGS).map((setting) => setting.env)) {
       vi.stubEnv(name, '');
     }
     // 接続は最初の問い合わせまで張られないため、繋がらない宛先でよい。
