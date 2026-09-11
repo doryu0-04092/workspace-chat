@@ -1,6 +1,7 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { RateLimitGuard } from '../rate-limit/rate-limit.module';
+import { Public } from './access-token.guard';
 import { RecoveryService, type RecoveryRequest, type RecoveryResponse } from './recovery.service';
 
 /**
@@ -8,6 +9,7 @@ import { RecoveryService, type RecoveryRequest, type RecoveryResponse } from './
  *
  * **入力の形はここでは確かめない**（register.controller.ts と同じ。openapi-validation.ts が仕様で確かめる）。
  */
+@Public()
 @Controller('auth')
 export class RecoveryController {
   constructor(private readonly recoveryService: RecoveryService) {}

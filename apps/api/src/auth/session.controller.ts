@@ -11,6 +11,7 @@ import {
 import type { paths } from '@workspace-chat/shared';
 import { parse } from 'cookie';
 import type { Request, Response } from 'express';
+import { Public } from './access-token.guard';
 import { CsrfGuard } from './csrf.guard';
 import { SessionService } from './session.service';
 import {
@@ -31,6 +32,7 @@ function readRefreshToken(request: Request): string | undefined {
  * リフレッシュとログアウト（F-02）。Cookie でリフレッシュトークンを受け取る唯一の2つであり、CSRF の対処を掛ける（CsrfGuard）。
  * 本体は受け取らない。
  */
+@Public()
 @Controller('auth')
 @UseGuards(CsrfGuard)
 export class SessionController {

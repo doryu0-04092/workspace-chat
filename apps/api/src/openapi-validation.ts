@@ -33,6 +33,9 @@ const validators = OpenApiValidator.middleware({
   validateRequests: true,
   validateResponses: false,
   fileUploader: false,
+  // 認証は auth/access-token.guard.ts の1箇所で判定する。ここで Bearer の有無を見させると、401 の本体と
+  // WWW-Authenticate が仕様（Unauthorized）と違う形になる。
+  validateSecurity: false,
 });
 
 export class OpenApiValidationMiddleware implements NestMiddleware {

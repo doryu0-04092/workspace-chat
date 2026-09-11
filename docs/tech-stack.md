@@ -382,6 +382,12 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 | **@nestjs/jwt** | **^11.0.2** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（11.0.2 の peerDependencies は `@nestjs/common` の ^11.0.0 を受け入れる）。`jsonwebtoken` 9.0.3 を包む。**署名も検証も HS256 だけにする**（`verifyOptions.algorithms`。RFC 8725 3.1「Libraries MUST enable the caller to specify a supported set of algorithms」）。鍵は環境変数 `JWT_SECRET`（32 バイト以上。RFC 7518 3.2「A key of the same size as the hash output (for instance, 256 bits for "HS256") or larger MUST be used」） |
 | **cookie** | **^1.1.1** | リフレッシュとログアウトで Cookie（refresh_token）を読む（`parse`）。**2 系は ESM だけで出ており**（package.json の `"type": "module"`）、CommonJS の NestJS 11 から読むため 1 系にした（1.1.1 は CommonJS と型を同梱する）。**採らなかったもの**: `cookie-parser`（全要求に掛けるミドルウェアで、Cookie を読むのは2つのエンドポイントだけ）／ヘッダーを自前で分解する（引用符や符号化の扱いを自前で書くことになる） |
 
+#### 追加で確認した項目 — アクセストークンの入口（2026-09-12。#276）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **yaml**（開発依存） | **^2.9.0** | 最新。テストで REST の仕様（openapi.yaml）を読み、認証を要さない操作（`security: []`）と api の `@Public()` のルートが一致することを確かめる（`apps/api/src/auth/access-token.test.ts`）。推移依存（vite）としては既に入っていたが、直接読むため明示した。**製品のコードからは読まない** |
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。

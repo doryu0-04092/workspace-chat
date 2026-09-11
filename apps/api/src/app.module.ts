@@ -11,6 +11,7 @@ import { HealthController } from './health.controller';
 import { ErrorResponseFilter } from './error-response';
 import { OpenApiValidationMiddleware } from './openapi-validation';
 import { PrismaModule } from './prisma.service';
+import { UsersModule } from './users/users.module';
 
 /**
  * **公開するエンドポイントを、要件に記録しないまま足さない**（CLAUDE.md 1）。
@@ -31,7 +32,7 @@ export class AppModule implements NestModule {
   static forRoot(config: ApiConfig): DynamicModule {
     return {
       module: AppModule,
-      imports: [ApiConfigModule.forRoot(config), PrismaModule, AuthModule],
+      imports: [ApiConfigModule.forRoot(config), PrismaModule, AuthModule, UsersModule],
     };
   }
 

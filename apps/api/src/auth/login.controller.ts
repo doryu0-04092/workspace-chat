@@ -2,6 +2,7 @@ import { Body, Controller, HttpCode, HttpStatus, Post, Res, UseGuards } from '@n
 import { Throttle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { RateLimitGuard } from '../rate-limit/rate-limit.module';
+import { Public } from './access-token.guard';
 import { LoginService, type LoginRequest, type LoginResponse } from './login.service';
 import { REFRESH_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE_OPTIONS } from './session-tokens';
 
@@ -10,6 +11,7 @@ import { REFRESH_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE_OPTIONS } from './session-to
  *
  * **入力の形はここでは確かめない**（register.controller.ts と同じ。openapi-validation.ts が仕様で確かめる）。
  */
+@Public()
 @Controller('auth')
 export class LoginController {
   constructor(private readonly loginService: LoginService) {}
