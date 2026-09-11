@@ -1,4 +1,5 @@
 import { Logger, Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import type Redis from 'ioredis';
 import { API_CONFIG, type ApiConfig } from '../config/api-config';
@@ -13,6 +14,7 @@ import {
   ResilientLoginBackoffStore,
   ValkeyLoginBackoffStore,
 } from './login-backoff';
+import { AccessTokenGuard } from './access-token.guard';
 import { LoginController } from './login.controller';
 import { LOGIN_BACKOFF_STORE, LoginService } from './login.service';
 import { CsrfGuard } from './csrf.guard';
@@ -43,6 +45,8 @@ import { ACCESS_TOKEN_TTL_SECONDS } from './session-tokens';
     LoginService,
     SessionService,
     CsrfGuard,
+    // すべてのルートに既定でアクセストークンを求める（外すのは @Public() のルートだけ。機能一覧 1.4）。
+    { provide: APP_GUARD, useClass: AccessTokenGuard },
     {
       provide: REGISTRATION_ENABLED,
       inject: [API_CONFIG],

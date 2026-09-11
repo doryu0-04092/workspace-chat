@@ -2,6 +2,7 @@ import { Body, Controller, ForbiddenException, Inject, Post, UseGuards } from '@
 import { Throttle } from '@nestjs/throttler';
 import type { ErrorResponse } from '../error-response';
 import { RateLimitGuard } from '../rate-limit/rate-limit.module';
+import { Public } from './access-token.guard';
 import { REGISTRATION_ENABLED } from './registration-enabled';
 import { RegisterService, type RegisterRequest, type RegisterResponse } from './register.service';
 
@@ -11,6 +12,7 @@ import { RegisterService, type RegisterRequest, type RegisterResponse } from './
  * **入力の形はここでは確かめない。** REST の仕様（openapi.yaml の RegisterRequest）どおりであることは、
  * ハンドラより前に openapi-validation.ts の検証が確かめる。**ここに検証を書き足すと、仕様と2箇所になる。**
  */
+@Public()
 @Controller('auth')
 export class RegisterController {
   constructor(

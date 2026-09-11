@@ -104,6 +104,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自分のプロフィールの取得（F-04）
+         * @description アバター画像の設定はまだ無く、avatarUrl は null のままである（機能一覧 1.3。11.1 と同じ段で足す）。
+         */
+        get: operations["getMyProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 自分のプロフィールの編集（F-04）
+         * @description 送った項目だけを変える。ユーザーID は変えられない（本体に userId を含めると 400。機能一覧 1.3）。 ステータスの絵文字とテキストは、null を送ると消える。
+         */
+        patch: operations["updateMyProfile"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -113,7 +137,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "invalid_token" | "csrf_rejected" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -163,12 +187,40 @@ export interface components {
             userId: string;
             displayName: string;
         };
+        Profile: {
+            /** Format: uuid */
+            id: string;
+            userId: string;
+            displayName: string;
+            avatarUrl: string | null;
+            statusEmoji: string | null;
+            statusText: string | null;
+        };
+        UpdateProfileRequest: {
+            /** @description 1〜50文字。空白だけは不可（RegisterRequest と同じ） */
+            displayName?: string;
+            /** @description 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色や ZWJ で繋いだ列・国旗も1つと数える）。 この形は pattern で表せないため、api が確かめて 400（validation_failed）を返す。null で消す */
+            statusEmoji?: string | null;
+            /** @description 1〜100文字（文字数はコードポイントで数える。機能一覧 1.3）。null で消す */
+            statusText?: string | null;
+        };
         HealthResponse: {
             /** @enum {string} */
             status: "ok";
         };
     };
     responses: {
+        /** @description Authorization ヘッダーに Bearer のアクセストークンが無い（authentication_required）か、 トークンが壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。入力の検証（400）はトークンの確認より先に行う */
+        Unauthorized: {
+            headers: {
+                /** @description トークンが無いときは `Bearer`、使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1） */
+                "WWW-Authenticate"?: string;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description Sec-Fetch-Site・Origin・Referer のどれも、api と同じ origin からの要求であることを示さない（csrf_rejected） */
         CsrfRejected: {
             headers: {
@@ -416,6 +468,59 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             403: components["responses"]["CsrfRejected"];
             405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getMyProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 自分のプロフィール */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateMyProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description 変えた後のプロフィール */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             500: components["responses"]["InternalServerError"];
         };
     };

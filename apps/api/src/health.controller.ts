@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
+import { Public } from './auth/access-token.guard';
 
 /**
  * 死活確認（F-39）。ALB のヘルスチェックが叩く。
@@ -18,6 +19,7 @@ import type { paths } from '@workspace-chat/shared';
  *   → 要求の検証（openapi-validation.ts）が `servers` を読んでパスを突き合わせるため、ずれると
  *   `/api` の下の要求が検証を通らなくなり、openapi-validation.test.ts と auth/register.test.ts が落ちる
  */
+@Public()
 @Controller()
 export class HealthController {
   @Get('health')

@@ -11,6 +11,10 @@ info:
 servers:
   # 全ルートの前置きは /api（#77 の決定。apps/api/src/app-setup.ts の createApp が付ける）。
   - url: /api
+# 既定ですべての操作にアクセストークンを求める。認証を要さない操作だけが `security: []` で外す
+# （api 側は auth/access-token.guard.ts が同じ既定を持つ。一致は auth/access-token.test.ts が仕様を読んで確かめる）。
+security:
+  - bearerAuth: []
 paths:
   /health:
     get:
@@ -187,7 +191,63 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /users/me:
+    get:
+      operationId: getMyProfile
+      summary: 自分のプロフィールの取得（F-04）
+      description: >-
+        アバター画像の設定はまだ無く、avatarUrl は null のままである（機能一覧 1.3。11.1 と同じ段で足す）。
+      responses:
+        '200':
+          description: 自分のプロフィール
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateMyProfile
+      summary: 自分のプロフィールの編集（F-04）
+      description: >-
+        送った項目だけを変える。ユーザーID は変えられない（本体に userId を含めると 400。機能一覧 1.3）。
+        ステータスの絵文字とテキストは、null を送ると消える。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: 変えた後のプロフィール
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
+  securitySchemes:
+    bearerAuth:
+      description: ログイン（/auth/login）とリフレッシュ（/auth/refresh）が返すアクセストークン（JWT・HS256）
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   parameters:
     RequestedBy:
       name: X-Requested-By
@@ -202,6 +262,21 @@ components:
           - workspace-chat
   # 複数のパスに共通のエラーの応答。パスに固有の意味を持つもの（403・409 など）はパスに書く。
   responses:
+    Unauthorized:
+      description: >-
+        Authorization ヘッダーに Bearer のアクセストークンが無い（authentication_required）か、
+        トークンが壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。
+        アクセストークンはリフレッシュ（/auth/refresh）で取り直す。入力の検証（400）はトークンの確認より先に行う
+      headers:
+        WWW-Authenticate:
+          description: >-
+            トークンが無いときは `Bearer`、使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1）
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     CsrfRejected:
       description: >-
         Sec-Fetch-Site・Origin・Referer のどれも、api と同じ origin からの要求であることを示さない（csrf_rejected）
@@ -276,6 +351,7 @@ components:
             - user_id_taken
             - registration_disabled
             - invalid_credentials
+            - authentication_required
             - invalid_token
             - csrf_rejected
             - request_rejected
@@ -404,6 +480,61 @@ components:
           type: string
         displayName:
           type: string
+    Profile:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - userId
+        - displayName
+        - avatarUrl
+        - statusEmoji
+        - statusText
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+        displayName:
+          type: string
+        avatarUrl:
+          type:
+            - string
+            - 'null'
+        statusEmoji:
+          type:
+            - string
+            - 'null'
+        statusText:
+          type:
+            - string
+            - 'null'
+    UpdateProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        displayName:
+          description: 1〜50文字。空白だけは不可（RegisterRequest と同じ）
+          type: string
+          minLength: 1
+          maxLength: 50
+          pattern: '\S'
+        statusEmoji:
+          description: >-
+            絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色や ZWJ で繋いだ列・国旗も1つと数える）。
+            この形は pattern で表せないため、api が確かめて 400（validation_failed）を返す。null で消す
+          type:
+            - string
+            - 'null'
+        statusText:
+          description: 1〜100文字（文字数はコードポイントで数える。機能一覧 1.3）。null で消す
+          type:
+            - string
+            - 'null'
+          minLength: 1
+          maxLength: 100
     HealthResponse:
       type: object
       additionalProperties: false
