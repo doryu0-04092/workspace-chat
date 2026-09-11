@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app-setup';
 
-// 起動を止める設定の検証は、アプリを組み立てる前に済ませる（main.ts の PORT と同じ。PR #254 第1巡・#256）。
+// 起動を止める設定の検証は、アプリを組み立てる前に済ませる（bootstrap.ts の PORT と同じ。PR #254 第1巡・#256）。
 // 組み立ての後に置くと、Prisma と Valkey への接続を一通り試してから落ちる。
 describe('createApp の設定の検証', () => {
   afterEach(() => {

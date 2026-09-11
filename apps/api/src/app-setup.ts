@@ -4,6 +4,8 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { bodyReadErrorHandler } from './body-read-error';
 import { resolveApiConfig } from './config/api-config';
+import { JsonLogger } from './logging/json-logger';
+import { requestContext } from './logging/request-context';
 
 /**
  * アプリを組み立てる入口を1つに置く。**main.ts とテストはどちらも createApp を通す**
@@ -21,15 +23,24 @@ import { resolveApiConfig } from './config/api-config';
  * **踏むと壊れる: 本体の読み取りは Nest の既定（`bodyParser`）を切り、JSON だけを読み、その直後に
  * body-read-error.ts を置く。** 既定に戻すと、壊れた JSON の失敗のメッセージ（入力の断片を含む）が応答に出る。
  * 受け付ける本体は仕様どおり JSON だけである（urlencoded は読まない）。
+ *
+ * **ログは構造化 JSON を標準出力に出し、要求の中のログにはリクエスト ID を付ける**（要件定義書 4.6。logging/）。
+ * テストは `logger` を渡して差し替える。**リクエスト ID のミドルウェアは、ほかのどのミドルウェアよりも先に置く。**
+ *
+ * **終了のシグナル（ECS のタスク入れ替えの SIGTERM）を購読する**（#251）。購読しないと、Valkey と Prisma の
+ * 片づけ（onApplicationShutdown / onModuleDestroy）は app.close() を呼ぶテストでだけ走り、本番では走らない。
  */
 export async function createApp(options?: NestApplicationOptions): Promise<INestApplication> {
-  // 起動を止める設定の検証は、アプリを組み立てる前にすべて済ませる（main.ts の PORT と同じ。config/api-config.ts）。
+  // 起動を止める設定の検証は、アプリを組み立てる前にすべて済ませる（bootstrap.ts の PORT と同じ。config/api-config.ts）。
   // 後に置くと、Prisma と Valkey への接続を一通り試してから落ちる。
   const config = resolveApiConfig(process.env);
   const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config), {
+    logger: new JsonLogger(),
     ...options,
     bodyParser: false,
   });
+  app.use(requestContext);
+  app.enableShutdownHooks();
   app.useBodyParser('json');
   app.use(bodyReadErrorHandler);
   app.setGlobalPrefix('api');
