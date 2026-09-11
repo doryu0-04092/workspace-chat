@@ -346,6 +346,16 @@ describe('Prisma のスキーマとマイグレーション', () => {
       expect(output).toContain('character varying(100)');
     });
 
+    it('displayName の長さの上限が列で効く', async () => {
+      // 上限（50文字。機能一覧 1.1 / 1.3。決定・2026-09-11・依頼側）は `userId` / `statusText` と同じ扱いで列の型に入れる。
+      // **表示名はメッセージ一覧を返すたびに載る列であり、登録以外の経路（プロフィールの更新）で検証を書き漏らしても DB が止める。**
+      const output = await expectSqlToFail(
+        `INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+         VALUES ('${randomUUID()}', 'long_display', '${'あ'.repeat(51)}', 'argon2id-placeholder');`,
+      );
+      expect(output).toContain('character varying(50)');
+    });
+
     it('退会したユーザーID も再利用できない', async () => {
       // 論理削除の行が残る以上、一意制約はそのまま効く。
       // **過去のメンションが別人を指すことを防ぐ**（機能一覧 1.5）。
