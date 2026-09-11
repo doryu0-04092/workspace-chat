@@ -1,0 +1,67 @@
+import { type ArgumentsHost, HttpException, Logger } from '@nestjs/common';
+import * as OpenApiValidator from 'express-openapi-validator';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ErrorResponseFilter } from './error-response';
+
+/** フィルタに渡す ArgumentsHost の代わり。応答の状態コードと本体を控える。 */
+function fakeHost(): { host: ArgumentsHost; sent: { status?: number; body?: unknown } } {
+  const sent: { status?: number; body?: unknown } = {};
+  const response = {
+    status(code: number) {
+      sent.status = code;
+      return this;
+    },
+    json(body: unknown) {
+      sent.body = body;
+      return this;
+    },
+  };
+  const host = {
+    switchToHttp: () => ({ getResponse: () => response }),
+  } as unknown as ArgumentsHost;
+  return { host, sent };
+}
+
+// 5xx は、どの経路で届いても internal_error を返し、例外のメッセージを載せず、error でログに出す（PR #253 第2巡）。
+// 経路は3つある: 要求の検証の失敗・HttpException・それ以外（想定外の失敗）。
+describe('例外フィルタの 5xx', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['code を持たない 5xx の HttpException', new HttpException('secret-looking detail', 503)],
+    [
+      'code を持つ本体で投げた 5xx の HttpException',
+      new HttpException({ code: 'user_id_taken', message: 'secret-looking detail' }, 500),
+    ],
+    [
+      '要求の検証の 500（express-openapi-validator の InternalServerError）',
+      new OpenApiValidator.error.InternalServerError({
+        path: '/x',
+        message: 'secret-looking detail',
+      }),
+    ],
+    ['HttpException でない例外', new Error('secret-looking detail')],
+  ])('%s は internal_error を返し、ログに error で出す', (_label, exception) => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { host, sent } = fakeHost();
+    new ErrorResponseFilter().catch(exception, host);
+
+    expect(sent.status).toBeGreaterThanOrEqual(500);
+    expect((sent.body as { code: string }).code).toBe('internal_error');
+    expect(JSON.stringify(sent.body)).not.toContain('secret-looking');
+    expect(logged).toHaveBeenCalledTimes(1);
+  });
+
+  it('code を持つ本体で投げた 4xx の HttpException は、その本体のまま返し、ログに出さない', () => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { host, sent } = fakeHost();
+    const body = { code: 'user_id_taken', message: 'このユーザーID は使えません' };
+    new ErrorResponseFilter().catch(new HttpException(body, 409), host);
+
+    expect(sent.status).toBe(409);
+    expect(sent.body).toEqual(body);
+    expect(logged).not.toHaveBeenCalled();
+  });
+});

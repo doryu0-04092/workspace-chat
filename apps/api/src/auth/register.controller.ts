@@ -1,5 +1,6 @@
 import { Body, Controller, ForbiddenException, Inject, Post, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { ErrorResponse } from '../error-response';
 import { RateLimitGuard } from '../rate-limit/rate-limit.module';
 import { REGISTRATION_ENABLED } from './registration-enabled';
 import { RegisterService, type RegisterRequest, type RegisterResponse } from './register.service';
@@ -31,7 +32,7 @@ export class RegisterController {
       throw new ForbiddenException({
         code: 'registration_disabled',
         message: '新規登録は停止しています',
-      });
+      } satisfies ErrorResponse);
     }
     return this.registerService.register(body);
   }

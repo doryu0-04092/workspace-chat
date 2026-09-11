@@ -9,6 +9,7 @@ import {
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import Redis from 'ioredis';
+import { errorBodyForStatus } from '../error-response';
 import { MemoryRateLimitStorage } from './memory-rate-limit-storage';
 import { resolveApiTaskCount, resolveRedisUrl } from './rate-limit-config';
 import { ResilientRateLimitStorage } from './resilient-rate-limit-storage';
@@ -94,10 +95,7 @@ export class ValkeyModule {}
 export class RateLimitGuard extends ThrottlerGuard {
   protected override async throwThrottlingException(): Promise<void> {
     throw new HttpException(
-      {
-        code: 'too_many_requests',
-        message: '要求が多すぎます。しばらく待ってからやり直してください',
-      },
+      errorBodyForStatus(HttpStatus.TOO_MANY_REQUESTS),
       HttpStatus.TOO_MANY_REQUESTS,
     );
   }

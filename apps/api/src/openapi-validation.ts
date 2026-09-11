@@ -1,11 +1,7 @@
 import { dirname, join } from 'node:path';
-import { type ArgumentsHost, Catch, type NestMiddleware } from '@nestjs/common';
-import { BaseExceptionFilter } from '@nestjs/core';
-import type { components } from '@workspace-chat/shared';
+import type { NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import * as OpenApiValidator from 'express-openapi-validator';
-
-type ErrorResponse = components['schemas']['ErrorResponse'];
 
 /**
  * REST の仕様（唯一の正。要件定義書 4.7）。共有パッケージの位置から引く。
@@ -27,6 +23,8 @@ export const OPENAPI_SPEC_PATH = join(
  *   （scripts/audit-allowlist.json の until）を、この依存から崩さないため
  * - 応答の検証（`validateResponses`）はしない。応答の形は型（`paths`）で縛る
  *
+ * 失敗は error-response.ts の ErrorResponseFilter が ErrorResponse にする。
+ *
  * **Nest のミドルウェアとして載せ、失敗を例外として投げ直す。** 素の `next(err)` のままだと、
  * 失敗が Nest の例外フィルタを通らず、Express の既定の応答（HTML）になる。
  */
@@ -45,50 +43,5 @@ export class OpenApiValidationMiddleware implements NestMiddleware {
       });
     }
     next();
-  }
-}
-
-const VALIDATOR_ERRORS = Object.values(OpenApiValidator.error);
-
-function isValidatorError(
-  exception: unknown,
-): exception is InstanceType<(typeof VALIDATOR_ERRORS)[number]> {
-  return VALIDATOR_ERRORS.some((ErrorClass) => exception instanceof ErrorClass);
-}
-
-const CODES: Record<number, { code: string; message: string }> = {
-  400: { code: 'validation_failed', message: '入力が仕様に合いません' },
-  404: { code: 'not_found', message: '見つかりません' },
-  405: { code: 'method_not_allowed', message: 'このメソッドは使えません' },
-  413: { code: 'payload_too_large', message: '要求が大きすぎます' },
-  415: { code: 'unsupported_media_type', message: 'この形式の本体は受け付けません' },
-};
-
-/**
- * 検証の失敗を ErrorResponse の形で返す。それ以外の例外は Nest の既定の扱いに渡す。
- *
- * **送られた値を応答に載せない。** 返すのは落ちた箇所（`path`）と規則の説明（`message`）だけである。
- * パスワードの検証で落ちたときに、送られたパスワードが応答やログに出ないようにするため。
- * **本体の読み取りの失敗（壊れた JSON・大きすぎる本体）は、ここには届く前に body-read-error.ts が返す。**
- */
-@Catch()
-export class OpenApiValidationErrorFilter extends BaseExceptionFilter {
-  override catch(exception: unknown, host: ArgumentsHost): void {
-    const response = host.switchToHttp().getResponse<Response>();
-    if (!isValidatorError(exception)) {
-      super.catch(exception, host);
-      return;
-    }
-    const known = CODES[exception.status] ?? {
-      code: 'request_rejected',
-      message: '要求を受け付けられません',
-    };
-    const body: ErrorResponse = {
-      ...known,
-      ...(exception.status === 400
-        ? { errors: exception.errors.map(({ path, message }) => ({ path, message })) }
-        : {}),
-    };
-    response.status(exception.status).json(body);
   }
 }

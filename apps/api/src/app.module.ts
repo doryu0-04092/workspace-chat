@@ -2,7 +2,8 @@ import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common
 import { APP_FILTER } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
 import { HealthController } from './health.controller';
-import { OpenApiValidationErrorFilter, OpenApiValidationMiddleware } from './openapi-validation';
+import { ErrorResponseFilter } from './error-response';
+import { OpenApiValidationMiddleware } from './openapi-validation';
 import { PrismaModule } from './prisma.service';
 
 /**
@@ -18,7 +19,7 @@ import { PrismaModule } from './prisma.service';
 @Module({
   imports: [PrismaModule, AuthModule],
   controllers: [HealthController],
-  providers: [{ provide: APP_FILTER, useClass: OpenApiValidationErrorFilter }],
+  providers: [{ provide: APP_FILTER, useClass: ErrorResponseFilter }],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
