@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { bodyReadErrorHandler } from './body-read-error';
@@ -53,5 +54,21 @@ describe('本体の読み取りの失敗の応答', () => {
 
     expect(next).toHaveBeenCalledWith(other);
     expect(sent.status).toBeUndefined();
+  });
+
+  // 5xx は想定外の失敗として error でログに残す（例外フィルタの 5xx と揃える。#250）。
+  // ログには種類と状態コードだけを出し、例外のメッセージ・本体は出さない（メッセージは入力の断片を含みうる）。
+  it.each([
+    [500, 'stream.not.readable', 1],
+    [400, 'entity.parse.failed', 0],
+    [413, 'entity.too.large', 0],
+  ])('%d（%s）のログの error は %d 回で、例外のメッセージを出さない', (status, type, times) => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { res } = fakeResponse();
+    bodyReadErrorHandler(bodyError(status, type), {} as Request, res, vi.fn() as NextFunction);
+
+    expect(logged).toHaveBeenCalledTimes(times);
+    expect(JSON.stringify(logged.mock.calls)).not.toContain('secret-looking');
+    logged.mockRestore();
   });
 });
