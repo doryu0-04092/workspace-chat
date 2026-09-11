@@ -12,7 +12,8 @@ import type { RealtimeValkeyClients } from './realtime-valkey';
  * - **`path` は `/api/socket.io/`**（#77。`REALTIME_PATH`。クライアントも同じ定数を読む）
  * - **`allowRequest` で `Origin` を web の origin（`WEB_ORIGIN`）と照合し、一致しないもの・`Origin` を持たないものを断る**
  *   （要件定義書 4.3 の CSWSH の対処。WebSocket は同一オリジンポリシーの対象外で、`cors` が効くのは long-polling だけである）。
- *   allowRequest はハンドシェイクの要求と WebSocket への切り替えの要求の両方に掛かる。
+ *   engine.io が allowRequest を呼ぶのは `sid` を持たない要求（ハンドシェイク）だけであり、polling から WebSocket への切り替えは
+ *   ハンドシェイクで得た `sid` が守る（engine.io の Server#verify）。
  *   web と api は同じ origin から配信する（#77）ため、許可するのは `WEB_ORIGIN` の1つだけである
  * - **タスクをまたぐ配信は `@socket.io/redis-adapter` が Valkey の Pub/Sub で行う**（技術スタック 難-2）
  */

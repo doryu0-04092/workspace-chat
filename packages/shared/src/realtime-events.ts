@@ -13,7 +13,8 @@
  * **この `.ts` は照合の対象に入っていない。** 数を書くと、イベントが増えたときここだけが黙って残る。
  *
  * **踏むと壊れる: ハンドシェイクの `path` は `/api/socket.io/` である**（#77 の決定。機能一覧 5.2）。
- * **サーバー（Gateway の設定）とクライアント（`io()` の `path` オプション）の両方で設定する。**
+ * **サーバー（apps/api/src/realtime/realtime-io.adapter.ts の createIOServer）とクライアント（`io()` の `path` オプション）の両方で、下の `REALTIME_PATH` を渡す。**
+ * サーバーは `@WebSocketGateway()` のオプションで渡しても、createIOServer が上書きするため効かない。
  * 既定の `/socket.io/` のままだと、CloudFront が `/api/*` だけを ALB へ振り分けるため ALB に届かず、
  * **アプリ側のログには何も出ない**（`apps/api/src/app.module.ts` の注記と同じ理由）。
  *
