@@ -8,8 +8,8 @@ import type { components } from '@workspace-chat/shared';
  * 「非ログインでの閲覧」には当たらない（要件定義書 2）。
  * **DB・Redis 等に問い合わせない**（浅い死活確認。代償は機能一覧 14.1）——依存を注入しない。
  *
- * 応答の型は REST の仕様（packages/shared/openapi/openapi.yaml）から生成したものを使う。
- * 仕様と食い違うと型検査で落ちる（要件定義書 4.7）。
+ * 応答の型は REST の仕様（packages/shared/openapi/openapi.yaml）から生成したものを使う（要件定義書 4.7）。
+ * **型検査で落ちるのは応答の本体の形が食い違ったときだけである。** パス・メソッド・状態コードは型では縛れない。
  */
 @Controller()
 export class HealthController {
