@@ -36,8 +36,9 @@ postgres_image=$(sed -n "s/^export const POSTGRES_IMAGE = '\([^']*\)';$/\1/p" ap
 [ -n "$postgres_image" ] || fail "apps/api/src/testing/postgres.ts から POSTGRES_IMAGE を読めない"
 
 echo "== イメージを作る"
-docker build --file apps/api/Dockerfile --target migrate --tag "$migrate_image" . >/dev/null
-docker build --file apps/api/Dockerfile --target runtime --tag "$runtime_image" . >/dev/null
+# --pull: 土台（タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で作り、手元の緑が CI の緑と同じ意味を持たない（#281）。
+docker build --pull --file apps/api/Dockerfile --target migrate --tag "$migrate_image" . >/dev/null
+docker build --pull --file apps/api/Dockerfile --target runtime --tag "$runtime_image" . >/dev/null
 
 echo "== 1. マイグレーション用のイメージを空の PostgreSQL に適用する"
 docker network create "$network" >/dev/null
