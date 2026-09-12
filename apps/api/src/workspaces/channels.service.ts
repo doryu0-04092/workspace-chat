@@ -5,9 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
-import type { ErrorResponse } from '../error-response';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
+import { CHANNEL_NAME_TAKEN, NOT_A_CHANNEL_MEMBER } from './channel-errors';
 import { OWNER_ONLY } from './workspace-errors';
 import { WorkspacesService } from './workspaces.service';
 
@@ -18,15 +18,6 @@ export type ManagedChannel =
   paths['/workspaces/{id}/managed-channels']['get']['responses'][200]['content']['application/json'][number];
 export type ChannelMember =
   paths['/workspaces/{id}/channels/{channelId}/members']['get']['responses'][200]['content']['application/json'][number];
-
-const CHANNEL_NAME_TAKEN: ErrorResponse = {
-  code: 'channel_name_taken',
-  message: 'この名前のチャンネルは既にあります',
-};
-const NOT_A_CHANNEL_MEMBER: ErrorResponse = {
-  code: 'not_a_channel_member',
-  message: 'このチャンネルの参加者ではありません',
-};
 
 /**
  * チャンネルの作成・一覧・オーナーの管理用の一覧・参加者一覧（F-10。機能一覧 3.1）。
