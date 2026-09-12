@@ -1,5 +1,5 @@
 # gitleaks の設定（.github/workflows/audit.yml の「秘密の値がソースに書かれていないかの検査」）。
-# 既定の規則をそのまま使う。誤検知の除外の扱いは、同じステップのコメント（代償の段）にある。
+# 既定の規則をそのまま使う。
 [extend]
 useDefault = true
 
