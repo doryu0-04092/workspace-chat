@@ -319,7 +319,7 @@ describe('Socket.IO の接続の入口（F-16）', () => {
         expect(connected).toBeDefined();
 
         socket.close();
-        // 自分の接続の行より後に出た切断の行を見る（前のテストの接続の切断を拾わない）。
+        // 自分の接続の行より前に出た行を除く（それより前の切断の行は、自分の接続の切断ではない）。
         const disconnected = await waitForEmf(
           captured,
           (doc) => doc.WebSocketDisconnects === 1,
