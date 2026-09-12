@@ -103,8 +103,8 @@ export class WorkspacesService {
     if (count !== 1) throw new NotFoundException();
   }
 
-  /** 要求する側の所属。無ければ 404（存在の有無を区別しない）。 */
-  private async membershipOf(userId: string, workspaceId: string) {
+  /** 要求する側の所属。無ければ 404（存在の有無を区別しない）。チャンネル（channels.service.ts）も入口でこれを通る。 */
+  async membershipOf(userId: string, workspaceId: string) {
     const row = await this.prisma.membership.findFirst({
       where: { userId, workspaceId, user: { deletedAt: null } },
       select: { role: true, workspace: { select: WORKSPACE_SELECT } },
