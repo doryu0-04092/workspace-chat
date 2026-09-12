@@ -8,7 +8,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { components } from '@workspace-chat/shared';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import * as OpenApiValidator from 'express-openapi-validator';
 
 /**
@@ -97,6 +97,8 @@ export class BearerUnauthorizedException extends UnauthorizedException {
  *   **例外のメッセージは載せない**（Nest の既定の 404 は「Cannot GET /…」とパスを述べる）
  * - それ以外（想定外の失敗）→ 500（internal_error）。**例外のメッセージを応答に載せない**
  *   （Prisma のメッセージは呼び出し箇所のソースの抜き出しを含む）。ログには今までどおり error で出す
+ * - **429 は、投げた経路（発信元単位のガード・アカウント単位の RetryAfterException）によらず、ここで `rate_limit_exceeded` として記録する**
+ *   （発信元とパス。決定・2026-09-12・依頼側。#270。1件では鳴らさない——閾値は Terraform 側。要件定義書 4.2）
  *
  * **本体の読み取りの失敗（壊れた JSON・大きすぎる本体）は、ここに届く前に body-read-error.ts が返す**
  * （Nest がメッセージから例外を作り直すため、ここでは見分けられない）。
@@ -131,6 +133,14 @@ export class ErrorResponseFilter implements ExceptionFilter {
       }
       // 404 は、投げた側が何を載せても「見つかりません」にする（機能一覧 1.4。本体の文言で存在を認めない）。
       const body = status !== 404 && isErrorResponse(given) ? given : errorBodyForStatus(status);
+      if (status === HttpStatus.TOO_MANY_REQUESTS) {
+        const request = host.switchToHttp().getRequest<Request>();
+        this.logger.warn({
+          event: 'rate_limit_exceeded',
+          ip: request.ip,
+          path: request.originalUrl,
+        });
+      }
       if (exception instanceof RetryAfterException) {
         response.setHeader('Retry-After', String(exception.retryAfterSeconds));
       }
