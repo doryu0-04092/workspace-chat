@@ -181,7 +181,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('マイグレーションの適用', () => {
-    it('6つのモデルの表がすべて作られている', async () => {
+    it('8つのモデルの表がすべて作られている', async () => {
       const output = await expectSqlToSucceed(
         `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -192,8 +192,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
         expect.arrayContaining([
           'Channel',
           'ChannelMember',
+          'Invitation',
           'Membership',
           'RecoveryCode',
+          'RefreshToken',
           'User',
           'Workspace',
         ]),
