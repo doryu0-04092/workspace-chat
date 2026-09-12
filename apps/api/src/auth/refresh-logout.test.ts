@@ -372,7 +372,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
 
   // 決定・2026-09-12・依頼側（#270）: 期限切れ・失効から 30 日で消す。
   describe('使い終わった行の後始末（#270）', () => {
-    it('ログインのたびに、その利用者の期限切れ・失効から 30 日を過ぎた行を消し、それ以外は残す', async () => {
+    it('ログインのたびに、その利用者の期限切れ・失効のうち早く起きた方から 30 日を過ぎた行を消し、それ以外は残す', async () => {
       const { userId } = await login();
       const day = 24 * 60 * 60 * 1000;
       const old = new Date(Date.now() - 31 * day);
@@ -384,6 +384,13 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
           { userId, tokenHash: sha256Hex('old-revoked'), expiresAt: future, revokedAt: old },
           { userId, tokenHash: sha256Hex('recent-revoked'), expiresAt: future, revokedAt: recent },
           { userId, tokenHash: sha256Hex('recent-expired'), expiresAt: recent },
+          // 期限切れの後に失効した行（期限は古く、失効は直近）。早い側（期限切れ）から 30 日で消える（#312）。
+          {
+            userId,
+            tokenHash: sha256Hex('old-expired-recent-revoked'),
+            expiresAt: old,
+            revokedAt: recent,
+          },
         ],
       });
       const loginId = (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).loginId;
@@ -399,6 +406,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       );
       expect(remaining).not.toContain(sha256Hex('old-expired'));
       expect(remaining).not.toContain(sha256Hex('old-revoked'));
+      expect(remaining).not.toContain(sha256Hex('old-expired-recent-revoked'));
       expect(remaining).toContain(sha256Hex('recent-revoked'));
       expect(remaining).toContain(sha256Hex('recent-expired'));
       // いま生きている2本（最初のログインと今回のログイン）
