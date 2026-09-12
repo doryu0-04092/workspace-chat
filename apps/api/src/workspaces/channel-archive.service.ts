@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
+import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { CHANNEL_ARCHIVED, CHANNEL_NOT_ARCHIVED } from './channel-errors';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
@@ -57,9 +57,7 @@ export class ChannelArchiveService {
           return this.view(tx, channelId);
         });
       } catch (error) {
-        const nameTaken =
-          error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
-        if (nameTaken && attempt < MAX_NUMBERING_ATTEMPTS) continue;
+        if (isUniqueViolation(error) && attempt < MAX_NUMBERING_ATTEMPTS) continue;
         throw error;
       }
     }
