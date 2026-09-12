@@ -172,19 +172,49 @@ describe('Socket.IO の接続の入口（F-16）', () => {
   // 要件定義書 4.6「WebSocket の接続数・切断率をメトリクスとして記録する」（決定・2026-09-12・依頼側。#287: 構造化ログと EMF の両方）。
   // アプリは logger: false で組み立てているため、Logger のメソッドを直接見張る。
   describe('接続と切断の記録（#287）', () => {
-    /** 見張った Logger の呼び出しのうち、条件を満たすものが現れるまで待つ（切断はサーバー側で少し遅れて観測される）。 */
-    async function waitForCall(
-      spy: { mock: { calls: unknown[][] } },
-      predicate: (text: string) => boolean,
+    type Emf = {
+      _aws?: unknown;
+      WebSocketConnections?: number;
+      WebSocketConnects?: number;
+      WebSocketDisconnects?: number;
+    };
+
+    /** 探す関数が値を返すまで、期限まで繰り返す（接続と切断はサーバー側で少し遅れて観測される）。 */
+    async function pollFor<T>(
+      lookup: () => T | undefined,
       timeoutMs = 3_000,
-    ): Promise<string | undefined> {
+    ): Promise<T | undefined> {
       const until = Date.now() + timeoutMs;
       while (Date.now() < until) {
-        const hit = spy.mock.calls.map((call) => JSON.stringify(call)).find(predicate);
+        const hit = lookup();
         if (hit !== undefined) return hit;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       return undefined;
+    }
+
+    /** 見張った Logger の呼び出しのうち、条件を満たすものが現れるまで待つ。 */
+    function waitForCall(
+      spy: { mock: { calls: unknown[][] } },
+      predicate: (text: string) => boolean,
+    ): Promise<string | undefined> {
+      return pollFor(() => spy.mock.calls.map((call) => JSON.stringify(call)).find(predicate));
+    }
+
+    /** `from` 行目以降で、条件を満たす EMF の行が出るまで待つ（見つかった行と、その位置を返す）。 */
+    function waitForEmf(
+      captured: ReturnType<typeof captureOutput>,
+      predicate: (doc: Emf) => boolean,
+      from = 0,
+    ): Promise<{ doc: Emf; index: number } | undefined> {
+      return pollFor(() => {
+        const lines = captured.jsonLines<Emf>();
+        const index = lines.findIndex(
+          (doc, i) => i >= from && doc._aws !== undefined && predicate(doc),
+        );
+        const doc = lines[index];
+        return doc === undefined ? undefined : { doc, index };
+      });
     }
 
     it('接続と切断を、利用者の ID とともに構造化ログに記録し、トークンは載せない', async () => {
@@ -212,15 +242,37 @@ describe('Socket.IO の接続の入口（F-16）', () => {
       const captured = captureOutput();
       try {
         await open(t.firstBase, { token });
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        const emf = await waitForEmf(captured, (doc) => doc.WebSocketConnects === 1);
+        expect(emf).toBeDefined();
+        expect(emf?.doc.WebSocketConnections).toBeGreaterThanOrEqual(1);
       } finally {
         captured.restore();
       }
-      const emf = captured
-        .jsonLines<{ _aws?: unknown; WebSocketConnections?: number; WebSocketConnects?: number }>()
-        .find((doc) => doc._aws !== undefined && doc.WebSocketConnects === 1);
-      expect(emf).toBeDefined();
-      expect(emf?.WebSocketConnections).toBeGreaterThanOrEqual(1);
+    });
+
+    // #305: 切断のときも、接続のときと対になる EMF の1行を出す（`metrics.write` と接続数の減算が両方効くことを固定する）。
+    it('切断のたびに、EMF の1行（切断の回数と、そのときの接続数）を標準出力に出す', async () => {
+      const { token } = await t.login();
+      const captured = captureOutput();
+      try {
+        const { socket } = await open(t.firstBase, { token });
+        const connected = await waitForEmf(captured, (doc) => doc.WebSocketConnects === 1);
+        expect(connected).toBeDefined();
+
+        socket.close();
+        // 自分の接続の行より前に出た行を除く（それより前の切断の行は、自分の接続の切断ではない）。
+        const disconnected = await waitForEmf(
+          captured,
+          (doc) => doc.WebSocketDisconnects === 1,
+          (connected?.index ?? 0) + 1,
+        );
+        expect(disconnected).toBeDefined();
+        expect(disconnected?.doc.WebSocketConnections).toBe(
+          (connected?.doc.WebSocketConnections ?? 0) - 1,
+        );
+      } finally {
+        captured.restore();
+      }
     });
   });
 

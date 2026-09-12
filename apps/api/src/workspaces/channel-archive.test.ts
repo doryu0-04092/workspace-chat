@@ -122,6 +122,67 @@ describe('チャンネルのアーカイブと復元（F-35）', () => {
     return ((await res.json()) as Channel[]).map((c) => c.name);
   }
 
+  /** トランザクションを開いて行のロックを取り、確定しないまま release を呼ぶまで持ち続ける。 */
+  async function holdWith(
+    lock: (tx: Pick<PrismaService, 'channel' | '$queryRaw'>) => Promise<unknown>,
+  ) {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markLocked!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      markLocked = resolve;
+    });
+    const done = prisma.$transaction(
+      async (tx) => {
+        await lock(tx);
+        markLocked();
+        await released;
+      },
+      { timeout: 10_000 },
+    );
+    await Promise.race([locked, done]);
+    return { release, done };
+  }
+
+  /** チャンネルの行の更新を書いたまま確定しない。 */
+  function holdUpdate(channelId: string, data: object) {
+    return holdWith((tx) => tx.channel.update({ where: { id: channelId }, data }));
+  }
+
+  /** 行のロックを待っている接続の数。 */
+  async function waitingOnLock(): Promise<number> {
+    const [found] = await prisma.$queryRaw<{ waiting: number }[]>`
+      SELECT count(*)::int AS "waiting" FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock'
+    `;
+    return found?.waiting ?? 0;
+  }
+
+  /** 行の更新を確定しないまま要求を送り、要求がロックを待つのを見てから確定し、要求の応答を返す。 */
+  async function racedWithUpdate(
+    channelId: string,
+    data: object,
+    request: () => Promise<Response>,
+  ): Promise<Response> {
+    const held = await holdUpdate(channelId, data);
+    try {
+      const pending = request();
+      // 要求が行のロックを待たずに先へ進むと、ここで時間切れになる。
+      await vi.waitFor(async () => expect(await waitingOnLock()).toBeGreaterThan(0), {
+        timeout: 3_000,
+        interval: 50,
+      });
+      held.release();
+      await held.done;
+      return await pending;
+    } finally {
+      held.release();
+      await held.done.catch(() => undefined);
+    }
+  }
+
   beforeAll(async () => {
     postgres = await startMigratedPostgres();
     const started = await startValkey();
@@ -339,6 +400,160 @@ describe('チャンネルのアーカイブと復元（F-35）', () => {
       }
       expect(await row(mine)).toMatchObject({ name: 'mine', archivedAt: null });
       expect(await row(theirs)).toMatchObject({ name: 'theirs', archivedAt: null });
+    });
+  });
+
+  // 機能一覧 3.2「アーカイブ後: 参加・招待もできない」: アーカイブと同時に来た参加・招待も、アーカイブの後には成立しない。
+  describe('アーカイブと参加・招待の同時実行', () => {
+    type ArchiveKind = { label: string; data: (baseName: string) => object; prepare: boolean };
+    // 初回のアーカイブは名前（一意索引の列）も変えるが、復元したものの再アーカイブは archivedAt だけを変える。
+    // 行のロックの強さが違う（名前を変える更新は FOR UPDATE、変えない更新は FOR NO KEY UPDATE）ため、両方で確かめる。
+    const kinds: ArchiveKind[] = [
+      {
+        label: '初回のアーカイブ（改名を伴う）',
+        data: (baseName) => ({ archivedAt: new Date(), archiveSequence: 1, name: `${baseName}-1` }),
+        prepare: false,
+      },
+      {
+        label: '復元したものの再アーカイブ（archivedAt だけ）',
+        data: () => ({ archivedAt: new Date() }),
+        prepare: true,
+      },
+    ];
+
+    async function participates(channelId: string, userId: string): Promise<boolean> {
+      return (await prisma.channelMember.count({ where: { channelId, userId } })) > 0;
+    }
+
+    it.each(kinds)(
+      'パブリックチャンネルへの参加は、$label の確定を待って 409（channel_archived）になり、参加は作られない',
+      async (kind) => {
+        const owner = await login();
+        const member = await login();
+        const workspace = await workspaceWith(owner, member);
+        const channel = await created(owner, workspace.id, 'racing');
+        if (kind.prepare) {
+          expect((await archive(owner, workspace.id, channel)).status).toBe(200);
+          expect((await restore(owner, workspace.id, channel)).status).toBe(200);
+        }
+
+        const res = await racedWithUpdate(channel, kind.data('racing'), () =>
+          send('POST', `/workspaces/${workspace.id}/channels/${channel}/join`, member),
+        );
+
+        expect(res.status).toBe(409);
+        expect(((await res.json()) as ErrorResponse).code).toBe('channel_archived');
+        expect(await participates(channel, member.id)).toBe(false);
+      },
+    );
+
+    it.each(kinds)(
+      'プライベートチャンネルへの招待は、$label の確定を待って 409（channel_archived）になり、参加は作られない',
+      async (kind) => {
+        const owner = await login();
+        const member = await login();
+        const workspace = await workspaceWith(owner, member);
+        const channel = await created(owner, workspace.id, 'hidden', 'PRIVATE');
+        if (kind.prepare) {
+          expect((await archive(owner, workspace.id, channel)).status).toBe(200);
+          expect((await restore(owner, workspace.id, channel)).status).toBe(200);
+        }
+
+        const res = await racedWithUpdate(channel, kind.data('hidden'), () =>
+          send('POST', `/workspaces/${workspace.id}/channels/${channel}/members`, owner, {
+            memberId: member.id,
+          }),
+        );
+
+        expect(res.status).toBe(409);
+        expect(((await res.json()) as ErrorResponse).code).toBe('channel_archived');
+        expect(await participates(channel, member.id)).toBe(false);
+      },
+    );
+
+    // 行を掴むのは (id, workspaceId) で引いた行だけである（channel-row-lock.ts）。別のワークスペースのチャンネルの ID を指しても、
+    // その行を掴まない——掴むと、そのワークスペースの操作の確定を待たせることになる。
+    it('別のワークスペースのチャンネルの ID で参加を求めても、その行のロックを待たずに 404 を返す', async () => {
+      const owner = await login();
+      const member = await login();
+      const other = await login();
+      const workspace = await workspaceWith(owner, member);
+      const otherWorkspace = await workspaceWith(other);
+      const theirs = await created(other, otherWorkspace.id, 'theirs');
+
+      const held = await holdUpdate(theirs, {
+        archivedAt: new Date(),
+        archiveSequence: 1,
+        name: 'theirs-1',
+      });
+      try {
+        const res = await Promise.race([
+          send('POST', `/workspaces/${workspace.id}/channels/${theirs}/join`, member),
+          new Promise<'waited'>((resolve) => setTimeout(() => resolve('waited'), 2_000)),
+        ]);
+        expect(res).not.toBe('waited');
+        expect((res as Response).status).toBe(404);
+      } finally {
+        held.release();
+        await held.done.catch(() => undefined);
+      }
+    });
+  });
+
+  // 機能一覧 3.2「再びアーカイブするとき: 採番も改名も行わない」を、読みと更新のあいだに採番と復元が確定しても保つ
+  // （schema.prisma の Channel.archiveSequence の注記。検査制約はこれを止めない）。
+  describe('アーカイブの同時実行', () => {
+    it('採番と復元が確定しかけていたら、その確定を待ってから読み、番号を持つ行として採番も改名もしない', async () => {
+      const owner = await login();
+      const workspace = await workspaceWith(owner);
+      const channel = await created(owner, workspace.id, 'numbered');
+
+      // 別の要求が「numbered-3 として採番し、復元した」状態を書いたまま確定しない。
+      const res = await racedWithUpdate(
+        channel,
+        { name: 'numbered-3', archiveSequence: 3, archivedAt: null },
+        () => archive(owner, workspace.id, channel),
+      );
+
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as ManagedChannel).name).toBe('numbered-3');
+      expect(await row(channel)).toMatchObject({ name: 'numbered-3', archiveSequence: 3 });
+      expect((await row(channel)).archivedAt).not.toBeNull();
+    });
+
+    // 行を掴む強さ: 共有ロック（FOR SHARE）で掴むと、同時の2つのアーカイブが両方とも掴んだまま更新に進み、互いを待って行き詰まる。
+    it('同じチャンネルを同時にアーカイブすると、1つだけが 200 で番号を付け、もう1つは 409（channel_archived）になる', async () => {
+      const owner = await login();
+      const workspace = await workspaceWith(owner);
+      const channel = await created(owner, workspace.id, 'twin');
+
+      // 行を共有ロックで掴んだまま確定せず、2つのアーカイブがどちらも行のロックを待つところまで進めてから放す。
+      const held = await holdWith(
+        (tx) => tx.$queryRaw`SELECT 1 FROM "Channel" WHERE "id" = ${channel}::uuid FOR SHARE`,
+      );
+      const responses = await (async () => {
+        try {
+          const pending = [
+            archive(owner, workspace.id, channel),
+            archive(owner, workspace.id, channel),
+          ];
+          await vi.waitFor(async () => expect(await waitingOnLock()).toBeGreaterThanOrEqual(2), {
+            timeout: 3_000,
+            interval: 50,
+          });
+          held.release();
+          await held.done;
+          return await Promise.all(pending);
+        } finally {
+          held.release();
+          await held.done.catch(() => undefined);
+        }
+      })();
+
+      expect(responses.map((res) => res.status).sort((a, b) => a - b)).toEqual([200, 409]);
+      const rejected = responses.find((res) => res.status === 409);
+      expect(((await rejected?.json()) as ErrorResponse).code).toBe('channel_archived');
+      expect(await row(channel)).toMatchObject({ name: 'twin-1', archiveSequence: 1 });
     });
   });
 });

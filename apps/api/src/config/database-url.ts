@@ -5,9 +5,7 @@
  */
 export function resolveDatabaseUrl(raw: string | undefined): string {
   if (raw === undefined || raw === '') {
-    throw new Error(
-      'DATABASE_URL が設定されていません（開発用データベースの接続 URL を環境変数で渡す）',
-    );
+    throw new Error('DATABASE_URL が設定されていません（接続 URL を環境変数で渡す）');
   }
   return raw;
 }

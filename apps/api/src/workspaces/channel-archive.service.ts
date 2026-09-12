@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { CHANNEL_ARCHIVED, CHANNEL_NOT_ARCHIVED } from './channel-errors';
+import { lockChannelRow } from './channel-row-lock';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { WorkspacesService } from './workspaces.service';
 
@@ -30,6 +31,7 @@ export class ChannelArchiveService {
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.prisma.$transaction(async (tx) => {
+          await lockChannelRow(tx, workspaceId, channelId, 'update');
           const channel = await tx.channel.findFirst({
             where: { id: channelId, workspaceId },
             select: { baseName: true, archivedAt: true, archiveSequence: true },
@@ -42,7 +44,8 @@ export class ChannelArchiveService {
             channel.archiveSequence === null
               ? await nextNaming(tx, workspaceId, channel.baseName, now)
               : { archivedAt: now };
-          // まだアーカイブされていない行だけを変える（同時のアーカイブの後の側は 0 件になる）。
+          // まだアーカイブされていない行だけを変える。同時のアーカイブの後の側は、行のロックを待って読み直し、上の判定で 409 になる。
+          // この条件は、行を掴まずに archivedAt を書く経路が足されたときに、アーカイブ済みの行を上書きしないための防波堤である。
           const { count } = await tx.channel.updateMany({
             where: { id: channelId, workspaceId, archivedAt: null },
             data,
@@ -60,17 +63,19 @@ export class ChannelArchiveService {
   /** 復元。**名前と番号は外れない**（`general-1` のまま）。アーカイブしていなければ 409 `channel_not_archived`。 */
   async restore(ownerId: string, workspaceId: string, channelId: string): Promise<ManagedChannel> {
     await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
-    const channel = await this.prisma.channel.findFirst({
-      where: { id: channelId, workspaceId },
-      select: { id: true },
+    return this.prisma.$transaction(async (tx) => {
+      const channel = await tx.channel.findFirst({
+        where: { id: channelId, workspaceId },
+        select: { id: true },
+      });
+      if (!channel) throw new NotFoundException();
+      const { count } = await tx.channel.updateMany({
+        where: { id: channelId, workspaceId, archivedAt: { not: null } },
+        data: { archivedAt: null },
+      });
+      if (count !== 1) throw new ConflictException(CHANNEL_NOT_ARCHIVED);
+      return this.view(tx, channelId);
     });
-    if (!channel) throw new NotFoundException();
-    const { count } = await this.prisma.channel.updateMany({
-      where: { id: channelId, workspaceId, archivedAt: { not: null } },
-      data: { archivedAt: null },
-    });
-    if (count !== 1) throw new ConflictException(CHANNEL_NOT_ARCHIVED);
-    return this.view(this.prisma, channelId);
   }
 
   private async view(

@@ -244,6 +244,27 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
       expect(((await again.json()) as ErrorResponse).code).toBe('channel_name_taken');
       expect((await create(owner, other.id, 'general')).status).toBe(201);
     });
+
+    // REVIEW.md 6章: 同時実行の競合は、同時に実行して1件だけ成功することを確かめる（逐次の 409 のテストでは、違反を捕まえない形でも落ちない）。
+    it('同じ名前の作成を同時に送ると、201 はちょうど1件で、残りはすべて 409（channel_name_taken）、行は1つだけ', async () => {
+      const owner = await login();
+      const workspace = await workspaceWith(owner);
+
+      const responses = await Promise.all(
+        Array.from({ length: 8 }, () => create(owner, workspace.id, 'race')),
+      );
+
+      expect(responses.map((res) => res.status).sort((a, b) => a - b)).toEqual([
+        201,
+        ...Array<number>(7).fill(409),
+      ]);
+      for (const res of responses.filter(({ status }) => status === 409)) {
+        expect(((await res.json()) as ErrorResponse).code).toBe('channel_name_taken');
+      }
+      expect(
+        await prisma.channel.count({ where: { workspaceId: workspace.id, name: 'race' } }),
+      ).toBe(1);
+    });
   });
 
   describe('一覧', () => {

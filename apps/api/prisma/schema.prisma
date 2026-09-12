@@ -248,8 +248,9 @@ model User {
   /// このスキーマは、一意性・検査制約・連鎖削除をすべて DB に置いている。
   /// **この列はその方針から外れる唯一のものである**（CLAUDE.md 4）。
   /// 代償: **生 SQL の `UPDATE` では据え置かれる。**
-  /// チャンネルのアーカイブ（採番と改名）は生 SQL を想定しているため、
-  /// **その経路で更新した行の `updatedAt` は進まない。**
+  /// チャンネルのアーカイブ（採番と改名）と復元は Prisma のクライアント（`updateMany`）で更新するため、
+  /// その行の `updatedAt` は進む（生 SQL で書くのは、行を掴む問い合わせと番号の選択だけ。
+  /// `apps/api/src/workspaces/channel-archive.service.ts`）。
   ///
   /// トリガを置かなかった理由: **現時点でこの列に依存する要求が1つも無い。**
   /// 置くなら `BEFORE UPDATE` のトリガを手書きし、このファイル冒頭の
@@ -558,6 +559,11 @@ model Channel {
   /// 並行してアーカイブすると2つの操作が同じ番号を選びうる。
   /// **一意制約違反を捕まえて番号を進め、やり直すこと。**
   ///
+  /// **この列を読む前に、その行を `SELECT … FOR UPDATE` で掴むこと。** 掴まずに読むと、
+  /// 読みと更新のあいだに別の要求の採番と復元が確定し、**番号を持つ行を採番し直す。**
+  /// 検査制約も一意制約もこれを止めない（採番し直した名前は空いているため、上のやり直しにも掛からない）。
+  /// 実装は apps/api/src/workspaces/channel-row-lock.ts の `lockChannelRow`（強さ `update`）を読む前に呼ぶ。
+  ///
   /// 番号の選び方を確かめる問い合わせは apps/api/src/prisma-schema.test.ts にある。
   /// **そのまま写さないこと。** テストは固定の文字列を連結しており、
   /// **baseName は利用者が付けた名前で `'` を含められる。**
@@ -580,9 +586,8 @@ model Channel {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
 
   /// **この列だけは DB が担保しない。** 理由と代償は `User.updatedAt` に書いた。
-  /// **この表では特に効く。** アーカイブの採番と改名は生 SQL を想定しており、
-  /// `@updatedAt` は Prisma のクライアント経由でしか作用しないため、
-  /// **アーカイブした行の `updatedAt` は据え置かれる。**
+  /// アーカイブ（採番と改名）と復元は Prisma のクライアントで更新しており、`updatedAt` は進む。
+  /// **生 SQL で行を更新する経路を足すと、その経路では据え置かれる。**
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
