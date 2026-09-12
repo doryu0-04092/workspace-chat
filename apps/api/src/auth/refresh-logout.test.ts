@@ -110,6 +110,14 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
     return { token: cookieValue(res)!, userId: user.id };
   }
 
+  /** 発行から `hours` 時間経ったことにする。入れ替えは発行から1日を過ぎたトークンでだけ起きる（#303）。 */
+  async function age(token: string, hours = 25): Promise<void> {
+    await prisma.refreshToken.update({
+      where: { tokenHash: sha256Hex(token) },
+      data: { createdAt: new Date(Date.now() - hours * 60 * 60 * 1000) },
+    });
+  }
+
   beforeAll(async () => {
     postgres = await startMigratedPostgres();
     const started = await startValkey();
@@ -134,8 +142,9 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
   });
 
   describe('リフレッシュ', () => {
-    it('新しいアクセストークンを返し、リフレッシュトークンを同じ系列の新しいものに入れ替える', async () => {
+    it('発行から1日を過ぎたトークンなら、新しいアクセストークンを返し、リフレッシュトークンを同じ系列の新しいものに入れ替える', async () => {
       const { token, userId } = await login();
+      await age(token);
       const res = await post('refresh', token);
 
       expect(res.status).toBe(200);
@@ -163,8 +172,35 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       expect(current.familyId).toBe(old.familyId);
     });
 
+    // 決定・2026-09-12・依頼側（#303）: 入れ替えは1日に1回。発行から1日以内は入れ替えず、アクセストークンだけを返す。
+    it('発行から1日以内のトークンなら、入れ替えずにアクセストークンだけを返し、同じトークンで何度でもリフレッシュできる', async () => {
+      const { token, userId } = await login();
+      await age(token, 23);
+      const rows = await prisma.refreshToken.count({ where: { userId } });
+
+      for (const res of [await post('refresh', token), await post('refresh', token)]) {
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as RefreshResponse;
+        expect(app.get(JwtService).verify<{ sub: string }>(body.accessToken).sub).toBe(userId);
+        // Cookie は出し直さない（今の Cookie をそのまま使う）。
+        expect(setCookie(res)).toBeUndefined();
+      }
+      expect(await prisma.refreshToken.count({ where: { userId } })).toBe(rows);
+      const row = await prisma.refreshToken.findUniqueOrThrow({
+        where: { tokenHash: sha256Hex(token) },
+      });
+      expect(row.revokedAt).toBeNull();
+    });
+
+    it('発行から1日以内なら、同じトークンで同時にリフレッシュしても両方通る', async () => {
+      const { token } = await login();
+      const results = await Promise.all([post('refresh', token), post('refresh', token)]);
+      expect(results.map((res) => res.status)).toEqual([200, 200]);
+    });
+
     it('入れ替えた後のトークンで、もう一度リフレッシュできる', async () => {
       const { token } = await login();
+      await age(token);
       const next = cookieValue(await post('refresh', token))!;
       expect((await post('refresh', next)).status).toBe(200);
     });
@@ -172,6 +208,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
     // RFC 9700 4.14.2: 入れ替え済みのトークンが出されたら、盗まれたものとみなして系列ごと失効させる。
     it('入れ替え済みのトークンが出されたら 401 を返し、その系列の新しいトークンも失効させる', async () => {
       const { token } = await login();
+      await age(token);
       const next = cookieValue(await post('refresh', token))!;
 
       const reused = await post('refresh', token);
@@ -183,6 +220,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
     // 期限は入れ替えのたびに延びるため、系列が生きたまま、入れ替え済みの古いトークンだけが期限切れになる。
     it('入れ替え済みのトークンが期限切れでも、出されたら系列ごと失効させる', async () => {
       const { token } = await login();
+      await age(token);
       const next = cookieValue(await post('refresh', token))!;
       await prisma.refreshToken.update({
         where: { tokenHash: sha256Hex(token) },
@@ -193,8 +231,9 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       expect((await post('refresh', next)).status).toBe(401);
     });
 
-    it('同じトークンで同時にリフレッシュしても、入れ替えに成功するのは1つだけである', async () => {
+    it('発行から1日を過ぎたトークンで同時にリフレッシュしても、入れ替えに成功するのは1つだけである', async () => {
       const { token } = await login();
+      await age(token);
       const results = await Promise.all([post('refresh', token), post('refresh', token)]);
       expect(results.filter((res) => res.status === 200)).toHaveLength(1);
     });
@@ -236,6 +275,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
 
     it('入れ替えた後にログアウトしたら、その系列のどのトークンでもリフレッシュできない', async () => {
       const { token } = await login();
+      await age(token);
       const next = cookieValue(await post('refresh', token))!;
       expect((await post('logout', next)).status).toBe(204);
       expect((await post('refresh', next)).status).toBe(401);
@@ -244,6 +284,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
     // 入れ替え前の古いトークンでログアウトしても、系列の今のトークンまで失効させる（使ったトークンの行だけを失効させない）。
     it('入れ替え前のトークンでログアウトしても、系列の今のトークンでリフレッシュできない', async () => {
       const { token } = await login();
+      await age(token);
       const next = cookieValue(await post('refresh', token))!;
       expect((await post('logout', token)).status).toBe(204);
       expect((await post('refresh', next)).status).toBe(401);
@@ -355,6 +396,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
 
     it('入れ替え済みのトークンの再利用を、系列と利用者の ID で記録し、トークンは載せない', async () => {
       const { token, userId } = await login();
+      await age(token);
       const next = cookieValue(await post('refresh', token))!;
       const before = logger.lines.length;
       expect((await post('refresh', token)).status).toBe(401);
@@ -413,10 +455,45 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       // いま生きている2本（最初のログインと今回のログイン）
       expect(remaining).toHaveLength(4);
     });
+
+    // 決定・2026-09-12・依頼側（#303）: 使い続ける利用者はログインし直さないため、入れ替え（1日に1回）のときにも同じ後始末をする。
+    it('入れ替えのときにも、その利用者の期限切れ・失効のうち早く起きた方から 30 日を過ぎた行を消す', async () => {
+      const { token, userId } = await login();
+      await age(token);
+      const day = 24 * 60 * 60 * 1000;
+      const future = new Date(Date.now() + 14 * day);
+      await prisma.refreshToken.createMany({
+        data: [
+          {
+            userId,
+            tokenHash: sha256Hex('rotate-old-revoked'),
+            expiresAt: future,
+            revokedAt: new Date(Date.now() - 31 * day),
+          },
+          {
+            userId,
+            tokenHash: sha256Hex('rotate-recent-revoked'),
+            expiresAt: future,
+            revokedAt: new Date(Date.now() - 29 * day),
+          },
+        ],
+      });
+
+      const res = await post('refresh', token);
+      expect(res.status).toBe(200);
+      expect(cookieValue(res)).toBeDefined();
+
+      const remaining = (await prisma.refreshToken.findMany({ where: { userId } })).map(
+        (r) => r.tokenHash,
+      );
+      expect(remaining).not.toContain(sha256Hex('rotate-old-revoked'));
+      expect(remaining).toContain(sha256Hex('rotate-recent-revoked'));
+    });
   });
 
   it('トークンをログに出さない', async () => {
     const { token } = await login();
+    await age(token);
     const res = await post('refresh', token);
     const next = cookieValue(res)!;
     const { accessToken } = (await res.json()) as RefreshResponse;
