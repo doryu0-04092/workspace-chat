@@ -15,6 +15,7 @@ import {
   CHANNEL_NOT_PRIVATE,
   NOT_A_CHANNEL_MEMBER,
 } from './channel-errors';
+import { lockChannelRow } from './channel-row-lock';
 import { WorkspacesService } from './workspaces.service';
 
 export type InviteChannelMemberRequest =
@@ -132,24 +133,14 @@ export class ChannelMembershipService {
   }
 }
 
-/**
- * 要求する側から見たチャンネル。別のワークスペースのチャンネル・無いチャンネルは 404。
- *
- * **チャンネルの行を `FOR SHARE` で掴んでから読む**——アーカイブ（行の更新）と同時に来ても、アーカイブの確定を待って読み、
- * アーカイブの後に人を増やさない（機能一覧 3.2）。掴んだロックはトランザクションの終わりまで残り、その間アーカイブは確定しない。
- * `FOR KEY SHARE` では足りない——名前を変えない更新（復元したものの再アーカイブ）と衝突しない。
- */
+/** 要求する側から見たチャンネル。行を共有ロックで掴んでから読む（channel-row-lock.ts）。別のワークスペースのチャンネル・無いチャンネルは 404。 */
 async function lockedChannelFor(
   tx: Pick<PrismaService, 'channel' | '$queryRaw'>,
   userId: string,
   workspaceId: string,
   channelId: string,
 ) {
-  await tx.$queryRaw`
-    SELECT 1 FROM "Channel"
-    WHERE "id" = ${channelId}::uuid AND "workspaceId" = ${workspaceId}::uuid
-    FOR SHARE
-  `;
+  await lockChannelRow(tx, workspaceId, channelId, 'share');
   const row = await tx.channel.findFirst({
     where: { id: channelId, workspaceId },
     select: {

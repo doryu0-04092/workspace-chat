@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { CHANNEL_ARCHIVED, CHANNEL_NOT_ARCHIVED } from './channel-errors';
+import { lockChannelRow } from './channel-row-lock';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { WorkspacesService } from './workspaces.service';
 
@@ -30,13 +31,7 @@ export class ChannelArchiveService {
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.prisma.$transaction(async (tx) => {
-          // 行を掴んでから読む。読みと更新のあいだに採番と復元が確定すると、番号を持つ行を採番し直すことになる
-          // （検査制約はこれを止めない）。FOR SHARE では、同時の2つのアーカイブが互いの共有ロックを待って行き詰まる。
-          await tx.$queryRaw`
-            SELECT 1 FROM "Channel"
-            WHERE "id" = ${channelId}::uuid AND "workspaceId" = ${workspaceId}::uuid
-            FOR UPDATE
-          `;
+          await lockChannelRow(tx, workspaceId, channelId, 'update');
           const channel = await tx.channel.findFirst({
             where: { id: channelId, workspaceId },
             select: { baseName: true, archivedAt: true, archiveSequence: true },

@@ -470,6 +470,34 @@ describe('チャンネルのアーカイブと復元（F-35）', () => {
         expect(await participates(channel, member.id)).toBe(false);
       },
     );
+
+    // 行を掴むのは (id, workspaceId) で引いた行だけである（channel-row-lock.ts）。別のワークスペースのチャンネルの ID を指しても、
+    // その行を掴まない——掴むと、そのワークスペースの操作の確定を待たせることになる。
+    it('別のワークスペースのチャンネルの ID で参加を求めても、その行のロックを待たずに 404 を返す', async () => {
+      const owner = await login();
+      const member = await login();
+      const other = await login();
+      const workspace = await workspaceWith(owner, member);
+      const otherWorkspace = await workspaceWith(other);
+      const theirs = await created(other, otherWorkspace.id, 'theirs');
+
+      const held = await holdUpdate(theirs, {
+        archivedAt: new Date(),
+        archiveSequence: 1,
+        name: 'theirs-1',
+      });
+      try {
+        const res = await Promise.race([
+          send('POST', `/workspaces/${workspace.id}/channels/${theirs}/join`, member),
+          new Promise<'waited'>((resolve) => setTimeout(() => resolve('waited'), 2_000)),
+        ]);
+        expect(res).not.toBe('waited');
+        expect((res as Response).status).toBe(404);
+      } finally {
+        held.release();
+        await held.done.catch(() => undefined);
+      }
+    });
   });
 
   // 機能一覧 3.2「再びアーカイブするとき: 採番も改名も行わない」を、読みと更新のあいだに採番と復元が確定しても保つ
