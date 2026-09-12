@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard';
 import {
   type CreateWorkspaceRequest,
@@ -40,5 +40,21 @@ export class WorkspacesController {
     @Param('id') id: string,
   ): Promise<WorkspaceMember[]> {
     return this.workspaces.members(user.id, id);
+  }
+
+  @Delete(':id/members/:memberId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  kick(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('memberId') memberId: string,
+  ): Promise<void> {
+    return this.workspaces.kick(user.id, id, memberId);
+  }
+
+  @Post(':id/leave')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  leave(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<void> {
+    return this.workspaces.leave(user.id, id);
   }
 }
