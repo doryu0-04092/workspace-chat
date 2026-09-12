@@ -246,6 +246,8 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       expect(res.status).toBe(401);
       expect(((await res.json()) as ErrorResponse).code).toBe('invalid_token');
       expect(isClearingCookie(res)).toBe(true);
+      // Cookie の経路の 401 は Bearer で守る資源ではないため、WWW-Authenticate は付けない（#297）。
+      expect(res.headers.get('www-authenticate')).toBeNull();
     });
 
     it('期限切れのトークンは 401', async () => {
@@ -331,6 +333,9 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       ['Sec-Fetch-Site・Origin・Referer のどれも無い', {}],
     ])('%s なら 403（csrf_rejected）で、トークンを使わない', async (_label, headers) => {
       const { token } = await login();
+      // 発行直後のトークンは1日以内で入れ替わらないため、age せずに続くリフレッシュが 200 であることを見ても
+      // 「拒否された要求がトークンを消費したか」は見分けられない。refresh の経路では age してから確かめる（#328）。
+      if (path === 'refresh') await age(token);
       const res = await post(path, token, { 'x-requested-by': 'workspace-chat', ...headers });
       expect(res.status).toBe(403);
       expect(((await res.json()) as ErrorResponse).code).toBe('csrf_rejected');
@@ -379,6 +384,21 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       expect(
         (await post('logout', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': nextIp() })).status,
       ).toBe(204);
+    });
+
+    it('CSRF で拒否された要求も枠を使う（レート制限は CSRF の判定より先に数える）', async () => {
+      const ip = nextIp();
+      for (let i = 0; i < LIMIT; i += 1) {
+        const res = await post('refresh', undefined, {
+          'x-requested-by': 'workspace-chat',
+          'sec-fetch-site': 'cross-site',
+          origin: TEST_WEB_ORIGIN,
+          'x-forwarded-for': ip,
+        });
+        expect(res.status).toBe(403);
+      }
+      const res = await post('refresh', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': ip });
+      expect(res.status).toBe(429);
     });
 
     it('上限の超過を、制限の種類（ip）・発信元・パスとともに記録する', async () => {
@@ -436,6 +456,13 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
           },
         ],
       });
+      // 別の利用者の期限切れの行は、その利用者がログインしても消えない（後始末はログインした本人の行だけに限る。#320）。
+      const other = await login();
+      await prisma.refreshToken.update({
+        where: { tokenHash: sha256Hex(other.token) },
+        data: { expiresAt: old },
+      });
+
       const loginId = (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).loginId;
       const res = await fetch(`${base}/api/auth/login`, {
         method: 'POST',
@@ -454,6 +481,11 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       expect(remaining).toContain(sha256Hex('recent-expired'));
       // いま生きている2本（最初のログインと今回のログイン）
       expect(remaining).toHaveLength(4);
+
+      const otherRemaining = (
+        await prisma.refreshToken.findMany({ where: { userId: other.userId } })
+      ).map((r) => r.tokenHash);
+      expect(otherRemaining).toContain(sha256Hex(other.token));
     });
 
     // 決定・2026-09-12・依頼側（#303）: 使い続ける利用者はログインし直さないため、入れ替え（1日に1回）のときにも同じ後始末をする。

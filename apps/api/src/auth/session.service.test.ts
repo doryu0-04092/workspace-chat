@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionService } from './session.service';
 
@@ -52,12 +52,23 @@ describe('SessionService.rotate（同時の入れ替え）', () => {
   // 先に入れ替えた要求が行を失効させた後の側は、失効させる行が 0 件になる。再利用として系列ごと失効させる。
   it('失効させる行が 0 件なら、新しいトークンを作らず、系列ごと失効させて 401', async () => {
     const { service, prisma, tx, row } = createService(0);
+    const warnSpy = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
-    await expect(service.rotate('token')).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(tx.refreshToken.create).not.toHaveBeenCalled();
-    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { familyId: row.familyId, revokedAt: null } }),
-    );
+    try {
+      await expect(service.rotate('token')).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(tx.refreshToken.create).not.toHaveBeenCalled();
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { familyId: row.familyId, revokedAt: null } }),
+      );
+      // 同時の入れ替えの後の側（失効させる行が 0 件）でも、再利用として記録する（#309）。
+      expect(warnSpy).toHaveBeenCalledWith({
+        event: 'refresh_token_reuse',
+        userId: row.userId,
+        familyId: row.familyId,
+      });
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 
