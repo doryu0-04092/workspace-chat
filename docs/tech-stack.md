@@ -333,10 +333,11 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 > 適用して exit 0）。
 >
 > **`DATABASE_URL` の変数名は README と `.env.example` に記載した**（値は書かない。
-> CLAUDE.md 禁止事項）。**コードの中で**この値を読み取っているのは、
-> 現時点では `prisma.config.ts`・api の [config/](../apps/api/src/config/)
-> （#256）・テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts) と、
-> アプリを組み立てるテスト（接続しない宛先を渡す）である。
+> CLAUDE.md 禁止事項）。**コードの中で**この値を読み取るのは、
+> 現時点では `prisma.config.ts` と api の [config/](../apps/api/src/config/)（#256）である。
+> 値を渡すのは、テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts)（マイグレーションの子プロセスへ）・
+> [testing/api-env.ts](../apps/api/src/testing/api-env.ts)（アプリを組み立てるテストへ。既定は接続しない宛先）と、
+> [scripts/api-image.test.sh](../scripts/api-image.test.sh)（イメージの検査で、使い捨ての接続先をコンテナへ）である。
 
 #### 追加で確認した項目 — React hooks の lint ルール（2026-09-07。#18 / #76）
 
