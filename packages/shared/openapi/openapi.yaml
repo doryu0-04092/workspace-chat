@@ -135,7 +135,8 @@ paths:
       operationId: refreshTokens
       summary: アクセストークンの更新（F-02）
       description: >-
-        Cookie（refresh_token）のリフレッシュトークンを新しいものに入れ替え、新しいアクセストークンを返す（機能一覧 1.2）。
+        新しいアクセストークンを返す。Cookie（refresh_token）のリフレッシュトークンは、発行から1日を過ぎていれば新しいものに入れ替える
+        （1日以内は入れ替えず、Set-Cookie を返さない。機能一覧 1.2）。
         入れ替え済みのトークンが出されたら、そのログインの系列のトークンをすべて失効させる（RFC 9700 4.14.2）。
         本体は送らない。X-Requested-By が無い要求は 400、Sec-Fetch-Site / Origin / Referer が同じ origin を示さない要求は 403
         （要件定義書 4.3 の CSRF の対処）。発信元単位のレート制限は15分に60回（機能一覧 1.2）。
@@ -144,10 +145,10 @@ paths:
         - $ref: '#/components/parameters/RequestedBy'
       responses:
         '200':
-          description: 入れ替えた
+          description: 新しいアクセストークン
           headers:
             Set-Cookie:
-              description: 新しいリフレッシュトークン（refresh_token）
+              description: 入れ替えたときだけ、新しいリフレッシュトークン（refresh_token）
               schema:
                 type: string
           content:
