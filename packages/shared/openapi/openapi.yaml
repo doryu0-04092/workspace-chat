@@ -391,6 +391,139 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    post:
+      operationId: inviteToWorkspace
+      summary: ワークスペースへの招待（F-08）
+      description: >-
+        オーナーだけが招待できる（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。
+        宛先はユーザーID で、大文字小文字を区別せず、退会済みは解決しない（解決できなければ 422 invitee_not_found）。
+        同じ利用者への未承諾の招待が既にあれば 409 already_invited、既にメンバーなら 409 already_member。招待に期限は無い。
+        招待したら、招待された利用者へリアルタイムの invitation:new を送る（機能一覧 2.2・F-38。決定・2026-09-12・依頼側。#326）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInvitationRequest'
+      responses:
+        '201':
+          description: 作った招待
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invitation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            オーナーでない（owner_only）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: >-
+            同じ利用者への未承諾の招待が既にある（already_invited）か、既にメンバーである（already_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: >-
+            宛先のユーザーID の利用者がいない、または退会済み（invitee_not_found）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /invitations:
+    get:
+      operationId: listMyInvitations
+      summary: 自分宛ての未承諾の招待の一覧（F-38）
+      description: 届いた順
+      responses:
+        '200':
+          description: 自分宛ての未承諾の招待
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MyInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /invitations/{id}/accept:
+    parameters:
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      operationId: acceptInvitation
+      summary: 招待の承諾（F-38）
+      description: >-
+        参加（MEMBER）が成立し、招待は消える。自分宛てでない招待・無い招待は、存在の有無を区別せず 404。
+        既にメンバーなら 409 already_member
+      responses:
+        '200':
+          description: 参加したワークスペース（role は MEMBER）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: >-
+            既にメンバーである（already_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /invitations/{id}/decline:
+    parameters:
+      - $ref: '#/components/parameters/InvitationId'
+    post:
+      operationId: declineInvitation
+      summary: 招待の辞退（F-38）
+      description: >-
+        招待が消える（オーナーは再度招待できる）。自分宛てでない招待・無い招待は、存在の有無を区別せず 404
+      responses:
+        '204':
+          description: 辞退した
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
   securitySchemes:
     bearerAuth:
@@ -399,6 +532,14 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    InvitationId:
+      name: id
+      in: path
+      required: true
+      description: 招待の id。形が uuid でなければ 400
+      schema:
+        type: string
+        format: uuid
     WorkspaceId:
       name: id
       in: path
@@ -520,6 +661,10 @@ components:
             - authentication_required
             - invalid_token
             - csrf_rejected
+            - owner_only
+            - invitee_not_found
+            - already_invited
+            - already_member
             - request_rejected
             - internal_error
         message:
@@ -808,3 +953,64 @@ components:
           type: string
         role:
           $ref: '#/components/schemas/WorkspaceRole'
+    CreateInvitationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+      properties:
+        userId:
+          description: 招待する利用者のユーザーID（大文字小文字を区別しない。形は登録と同じ英数字と _ の 3〜30 文字）
+          type: string
+          pattern: '^[A-Za-z0-9_]{3,30}$'
+    Invitation:
+      description: 作った招待（招待したオーナーに返す）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - workspaceId
+        - invitee
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        invitee:
+          $ref: '#/components/schemas/UserSummary'
+        createdAt:
+          type: string
+          format: date-time
+    MyInvitation:
+      description: 自分宛ての未承諾の招待
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - workspace
+        - invitedBy
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspace:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        invitedBy:
+          $ref: '#/components/schemas/UserSummary'
+        createdAt:
+          type: string
+          format: date-time

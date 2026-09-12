@@ -1146,11 +1146,11 @@ bt=$'\140'
 # 以前は events() の結果が空かどうかで見ていたため、**コード書式で書かれていない表は
 # 空を返し、「戻っている」の NG が出なかった。** 行の数で見る形に変えた。
 expect_ng "features.md 5.1 に、コード書式の無いイベント表を戻す" docs/features.md \
-  's/^\*\*この7種類以外の変化は即時反映されない。\*\*$/| イベント | 内容 |\n|---|---|\n| message:new | メッセージの新規投稿 |\n\n**この7種類以外の変化は即時反映されない。**/' \
+  's/^\*\*この8種類以外の変化は即時反映されない。\*\*$/| イベント | 内容 |\n|---|---|\n| message:new | メッセージの新規投稿 |\n\n**この8種類以外の変化は即時反映されない。**/' \
   'features.md 5.1 にイベント表が戻っている' \
   '| message:new | メッセージの新規投稿 |'
 expect_ng "features.md 5.1 にイベント表を戻す" docs/features.md \
-  "s/^\*\*この7種類以外の変化は即時反映されない。\*\*$/| イベント | 内容 |\n|---|---|\n| ${bt}message:new${bt} | メッセージの新規投稿 |\n\n**この7種類以外の変化は即時反映されない。**/" \
+  "s/^\*\*この8種類以外の変化は即時反映されない。\*\*$/| イベント | 内容 |\n|---|---|\n| ${bt}message:new${bt} | メッセージの新規投稿 |\n\n**この8種類以外の変化は即時反映されない。**/" \
   'features.md 5.1 にイベント表が戻っている' "| ${bt}message:new${bt} |"
 # **書式を付け忘れた行が、黙って読み飛ばされないこと。**
 # events() はコード書式（`…`）で始まる行だけを拾う。付け忘れた行は rows に入らず、
@@ -1162,33 +1162,33 @@ expect_ng "requirements.md のイベント表に、コード書式の無い行�
   '| notification:new |'
 expect_ng "requirements.md のイベント表から1行消す" docs/requirements.md \
   "/^| ${bt}unread:updated${bt} |/d" \
-  'CLAUDE.md の「イベント定義（N種類）」: 7 と書かれているが、実際は 6'
+  'CLAUDE.md の「イベント定義（N種類）」: 8 と書かれているが、実際は 7'
 # 宣言は6箇所にあり、場所ごとに別のパターンで拾う。1箇所ずつ壊して、
 # その箇所の compare_decls が本当に配線されていることを見る。
 # まとめて拾う実装に戻すと、無関係な「N種類」で偽の NG が出る側に戻る。
-expect_ng "CLAUDE.md の「7種類」を6種類に" CLAUDE.md \
-  's/イベント定義（7種類）/イベント定義（6種類）/' \
-  'CLAUDE.md の「イベント定義（N種類）」: 6 と書かれているが、実際は 7'
-expect_ng "requirements.md の「4.1 の7種類」を6種類に" docs/requirements.md \
-  's/（4.1 の7種類）/（4.1 の6種類）/' \
-  'requirements.md の「4.1 のN種類」: 6 と書かれているが、実際は 7'
-expect_ng "features.md の「7種類のイベントを配信」を6種類に" docs/features.md \
-  's/7種類のイベントを配信/6種類のイベントを配信/' \
-  'features.md の「N種類のイベントを配信」: 6 と書かれているが、実際は 7'
-expect_ng "features.md の「この7種類以外」を6種類に" docs/features.md \
-  's/この7種類以外/この6種類以外/' \
-  'features.md の「このN種類以外」: 6 と書かれているが、実際は 7'
-expect_ng "tech-stack.md の「7種類の WebSocket イベント」を6種類に" docs/tech-stack.md \
-  's/7種類の WebSocket イベント/6種類の WebSocket イベント/' \
-  'tech-stack.md の「N種類の WebSocket イベント」: 6 と書かれているが、実際は 7'
-expect_ng "tech-stack.md の「7種類のイベント定義」を6種類に" docs/tech-stack.md \
-  's/7種類のイベント定義/6種類のイベント定義/' \
-  'tech-stack.md の「N種類のイベント定義」: 6 と書かれているが、実際は 7'
+expect_ng "CLAUDE.md の「8種類」を7種類に" CLAUDE.md \
+  's/イベント定義（8種類）/イベント定義（7種類）/' \
+  'CLAUDE.md の「イベント定義（N種類）」: 7 と書かれているが、実際は 8'
+expect_ng "requirements.md の「4.1 の8種類」を7種類に" docs/requirements.md \
+  's/（4.1 の8種類）/（4.1 の7種類）/' \
+  'requirements.md の「4.1 のN種類」: 7 と書かれているが、実際は 8'
+expect_ng "features.md の「8種類のイベントを配信」を7種類に" docs/features.md \
+  's/8種類のイベントを配信/7種類のイベントを配信/' \
+  'features.md の「N種類のイベントを配信」: 7 と書かれているが、実際は 8'
+expect_ng "features.md の「この8種類以外」を7種類に" docs/features.md \
+  's/この8種類以外/この7種類以外/' \
+  'features.md の「このN種類以外」: 7 と書かれているが、実際は 8'
+expect_ng "tech-stack.md の「8種類の WebSocket イベント」を7種類に" docs/tech-stack.md \
+  's/8種類の WebSocket イベント/7種類の WebSocket イベント/' \
+  'tech-stack.md の「N種類の WebSocket イベント」: 7 と書かれているが、実際は 8'
+expect_ng "tech-stack.md の「8種類のイベント定義」を7種類に" docs/tech-stack.md \
+  's/8種類のイベント定義/7種類のイベント定義/' \
+  'tech-stack.md の「N種類のイベント定義」: 7 と書かれているが、実際は 8'
 # **小見出しの下に表を戻しても落ちること**（#129）。
 # table_lines の終端が「あらゆる見出し」だと、5.1 の中に小見出しを1つ置いた時点で
 # exit するため行数が 0 のままになり、「表が戻っている」の NG が出ない。
 expect_ng "features.md 5.1 の小見出しの下にイベント表を戻す" docs/features.md \
-  "s/^\\*\\*この7種類以外の変化は即時反映されない。\\*\\*$/#### 一覧\n\n| イベント | 内容 |\n|---|---|\n| ${bt}message:new${bt} | メッセージの新規投稿 |\n\n**この7種類以外の変化は即時反映されない。**/" \
+  "s/^\\*\\*この8種類以外の変化は即時反映されない。\\*\\*$/#### 一覧\n\n| イベント | 内容 |\n|---|---|\n| ${bt}message:new${bt} | メッセージの新規投稿 |\n\n**この8種類以外の変化は即時反映されない。**/" \
   'features.md 5.1 にイベント表が戻っている' "#### 一覧"
 
 # **5.1 の外に表を置いても落ちること**（#121）。
@@ -1222,12 +1222,12 @@ expect_ng "features.md 5.1 の外に、1行に2つ並べたイベントの行を
 # `##### 一覧` に一致せず、**そこで exit する。** `####` だけが節の中で、`#####` 以下は終端のままだった。
 # features.md は現に `#####` を使っている。**終端は、節の見出しと同じ深さか、それより浅い見出しである**（`sec_body`）。
 expect_ng "features.md 5.1 の ##### の下にイベント表を戻す" docs/features.md \
-  "s/^\\*\\*この7種類以外の変化は即時反映されない。\\*\\*$/##### 一覧\n\n| イベント | 内容 |\n|---|---|\n| message:new | メッセージの新規投稿 |\n\n**この7種類以外の変化は即時反映されない。**/" \
+  "s/^\\*\\*この8種類以外の変化は即時反映されない。\\*\\*$/##### 一覧\n\n| イベント | 内容 |\n|---|---|\n| message:new | メッセージの新規投稿 |\n\n**この8種類以外の変化は即時反映されない。**/" \
   'features.md 5.1 にイベント表が戻っている' "##### 一覧"
 
 # **features.md 以外へ表を置いても落ちること**（#182）。
 # 不変条件は「表は requirements.md 4.1 の1つだけである」であり、**見る先を features.md に
-# 限ると、主張より実装の範囲が狭い。** tech-stack.md は現に「7種類の WebSocket イベント」を
+# 限ると、主張より実装の範囲が狭い。** tech-stack.md は現に「8種類の WebSocket イベント」を
 # 語る文書で、一覧の置き場として現実に起こりうる。走査を全 Markdown へ広げた形を固定する。
 expect_ng "tech-stack.md にイベント表を置く" docs/tech-stack.md \
   "s/^## 全体構成\$/## 全体構成\n\n| イベント | 内容 |\n|---|---|\n| ${bt}message:new${bt} | メッセージの新規投稿 |/" \

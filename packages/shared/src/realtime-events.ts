@@ -24,8 +24,8 @@
  * web と api は同じ origin（#77）なので、既定のまま繋ぐとハンドシェイクが 403 で断られ、polling から WebSocket へは落ちない。
  * **代償: polling へのフォールバックが無い**（WebSocket を通さない経路からは繋がらない。機能一覧 5.2）。
  *
- * 配信内容（payload）の型はここに置いていない。**それぞれの機能を実装するときに、
- * その機能と一緒に足す。** 先に決めると、要件に無い形を作り込むことになる。
+ * 配信内容（payload）の型は、**それぞれの機能を実装するときに、
+ * その機能と一緒にこのファイルの下へ足す**（先に全部は置かない）。 先に決めると、要件に無い形を作り込むことになる。
  * **サーバーが自発的に配るイベントの payload には、送信時刻を載せる**（要件定義書 4.6 の配信遅延をメトリクスにするため。
  * 決定・2026-09-12・#287）。**その型も、payload の型と一緒に、その機能の実装で足す。**
  *
@@ -50,6 +50,7 @@ export const REALTIME_EVENT_KINDS = [
   'unread:updated',
   'typing',
   'presence:changed',
+  'invitation:new',
 ] as const;
 
 export type RealtimeEventKind = (typeof REALTIME_EVENT_KINDS)[number];
@@ -64,6 +65,22 @@ export const REALTIME_EVENT_NAMES = [
   'typing:start',
   'typing:stop',
   'presence:changed',
+  'invitation:new',
 ] as const;
 
 export type RealtimeEventName = (typeof REALTIME_EVENT_NAMES)[number];
+
+/**
+ * `invitation:new` の payload（F-08 / F-38。決定・2026-09-12・依頼側。#326）。招待された利用者の部屋へ送る。
+ * `sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため（機能一覧 5.2）。
+ */
+export type InvitationNewPayload = {
+  readonly invitationId: string;
+  readonly workspace: { readonly id: string; readonly name: string };
+  readonly invitedBy: {
+    readonly id: string;
+    readonly userId: string;
+    readonly displayName: string;
+  };
+  readonly sentAt: string;
+};

@@ -257,9 +257,12 @@ model User {
   /// **この列を根拠に何かを判定する要求が出たら、その時点で見直すこと。**
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
-  memberships   Membership[]
-  recoveryCodes RecoveryCode[]
-  refreshTokens RefreshToken[]
+  memberships         Membership[]
+  recoveryCodes       RecoveryCode[]
+  refreshTokens       RefreshToken[]
+  /// 自分宛ての未承諾の招待（F-38）と、自分が出した招待（F-08）。
+  invitationsReceived Invitation[]   @relation("InvitationInvitee")
+  invitationsSent     Invitation[]   @relation("InvitationInviter")
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -353,6 +356,7 @@ model Workspace {
 
   memberships Membership[]
   channels    Channel[]
+  invitations Invitation[]
 
   /// ワークスペース名に一意制約を置かない。**誰でも作成できる**（要件定義書 3.5.1）以上、
   /// 名前を取り合う設計にすると、先に作った人が名前を占有する。
@@ -379,7 +383,7 @@ model Workspace {
 /// 招待の未承諾（F-38）はこの表では表さない。**この表は成立した参加だけを持つ。**
 /// 承諾していない招待は参加ではなく、参加として持つと
 /// 「所属していないのに一覧に出る」経路をこちらから作ることになる。
-/// 招待そのものは F-08 / F-38 のイシューで別のモデルとして扱う。
+/// 招待そのものは `Invitation` が持つ（承諾で `Invitation` を消し、この表に行を作る。F-08 / F-38。#326）。
 model Membership {
   id          String @id @default(uuid(7)) @db.Uuid
   workspaceId String @db.Uuid
@@ -408,6 +412,34 @@ model Membership {
   @@unique([workspaceId, userId])
   /// 「その利用者が所属するワークスペースの一覧」（サイドバーの切替）に効く。
   @@index([userId])
+}
+
+/// ワークスペースへの招待（F-08 / F-38。機能一覧 2.2）。**承諾していない招待だけを持つ**——承諾したら消して `Membership` を作り、
+/// 辞退したら消す（オーナーは再度招待できる）。**期限は持たない**（決定・2026-09-12・依頼側。#326。代償: 放置された招待はいつまでも残り、
+/// ずっと後でも承諾できる）。
+///
+/// **同じワークスペースの同じ利用者への招待は1件だけ**（下の一意索引。2件目は 409 `already_invited`）。**既にメンバーの利用者は招待できない**
+/// （409 `already_member`）が、`Membership` との排他は索引では表せないため、アプリが招待の前に確かめる。
+/// **代償: その確認と承諾が重なると、メンバーでありながら未承諾の招待が残る**（機能一覧 2.2）。
+model Invitation {
+  id          String @id @default(uuid(7)) @db.Uuid
+  workspaceId String @db.Uuid
+
+  /// 招待された利用者（`User.id`。ユーザーID〔`User.loginId`〕ではない）。
+  inviteeId String @db.Uuid
+
+  /// 招待したオーナー（`User.id`）。
+  invitedById String @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitee   User      @relation("InvitationInvitee", fields: [inviteeId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, inviteeId])
+  /// 「自分宛ての招待の一覧」に効く。
+  @@index([inviteeId])
 }
 
 // ============================================================================

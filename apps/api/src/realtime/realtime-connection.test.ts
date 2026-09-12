@@ -3,77 +3,30 @@ import type { AddressInfo } from 'node:net';
 import { type INestApplication, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { REALTIME_PATH, REALTIME_TRANSPORTS } from '@workspace-chat/shared';
-import { io, type Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app-setup';
 import { AccessTokenResolver } from '../auth/access-token.guard';
 import { hashSecret } from '../auth/secret-hash';
 import { PrismaService } from '../prisma.service';
-import { TEST_WEB_ORIGIN, stubApiEnv } from '../testing/api-env';
+import { stubApiEnv } from '../testing/api-env';
 import { captureOutput } from '../testing/captured-output';
+import {
+  type ConnectOptions,
+  type Transport,
+  connectRealtime,
+  nextEvent,
+} from '../testing/realtime-client';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
 import { startValkey } from '../testing/valkey';
 import { RealtimeEmitter } from './realtime.emitter';
-
-type Transport = 'websocket' | 'polling';
-
-type ConnectOptions = {
-  origin?: string;
-  token?: unknown;
-  cookie?: string;
-  transport?: Transport;
-  path?: string;
-};
 
 let sequence = 0;
 let ipSequence = 0;
 function nextIp(): string {
   ipSequence += 1;
   return `2001:db8::9:${ipSequence.toString(16)}`;
-}
-
-/**
- * 接続できれば Socket を、断られれば connect_error の Error を返す。
- * transports の既定はクライアントが使う形（REALTIME_TRANSPORTS）。transport はそれ以外の経路を確かめるときにだけ指定する。
- */
-function connect(
-  base: string,
-  { origin = TEST_WEB_ORIGIN, token, cookie, transport, path = REALTIME_PATH }: ConnectOptions,
-): Promise<
-  { socket: Socket; error?: undefined } | { socket: Socket; error: Error & { data?: unknown } }
-> {
-  const socket = io(base, {
-    path,
-    transports: transport === undefined ? [...REALTIME_TRANSPORTS] : [transport],
-    reconnection: false,
-    forceNew: true,
-    timeout: 5_000,
-    ...(token === undefined ? {} : { auth: { token } }),
-    extraHeaders: {
-      ...(origin === '' ? {} : { origin }),
-      ...(cookie === undefined ? {} : { cookie }),
-    },
-  });
-  return new Promise((resolve) => {
-    socket.once('connect', () => resolve({ socket }));
-    socket.once('connect_error', (error) => {
-      socket.close();
-      resolve({ socket, error: error as Error & { data?: unknown } });
-    });
-  });
-}
-
-/** 次に届くイベントを待つ。届かなければ undefined。 */
-function nextEvent(socket: Socket, event: string, timeoutMs = 2_000): Promise<unknown> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(undefined), timeoutMs);
-    socket.once(event, (payload: unknown) => {
-      clearTimeout(timer);
-      resolve(payload);
-    });
-  });
 }
 
 // 機能一覧 5.2・9.2、要件定義書 4.2・4.3・4.8 の4（許可外の Origin からのハンドシェイクを拒否する）。
@@ -115,7 +68,7 @@ describe('Socket.IO の接続の入口（F-16）', () => {
   }
 
   async function open(base: string, options: ConnectOptions) {
-    const result = await connect(base, options);
+    const result = await connectRealtime(base, options);
     opened.push(result.socket);
     return result;
   }
