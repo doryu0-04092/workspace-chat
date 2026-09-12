@@ -2,26 +2,16 @@ import 'reflect-metadata';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installFatalHandlers, reportFatal, start } from './bootstrap';
+import { captureOutput } from './testing/captured-output';
 
 type LogLine = { level?: string; message?: unknown; stack?: unknown; context?: string };
 
-/** 標準出力と標準エラーに書かれた行を控える。 */
-function captureStreams(): { stdout: string[]; stderr: string[] } {
-  const written = { stdout: [] as string[], stderr: [] as string[] };
-  for (const name of ['stdout', 'stderr'] as const) {
-    vi.spyOn(process[name], 'write').mockImplementation(((chunk: unknown) => {
-      written[name].push(String(chunk));
-      return true;
-    }) as typeof process.stdout.write);
-  }
-  return written;
-}
-
-function jsonLines(chunks: string[]): LogLine[] {
-  return chunks
-    .flatMap((chunk) => chunk.split('\n'))
-    .filter((line) => line.startsWith('{'))
-    .map((line) => JSON.parse(line) as LogLine);
+/** 標準出力と標準エラーに書かれた行を控える。**通さない**——起動の失敗のスタックをテストの出力に混ぜない。 */
+function captureStreams() {
+  return {
+    stdout: captureOutput('stdout', { passThrough: false }),
+    stderr: captureOutput('stderr', { passThrough: false }),
+  };
 }
 
 // 要件定義書 4.6「ログは構造化 JSON を標準出力にのみ出す」を、起動に失敗した場面でも成り立たせる（PR #255 第1巡）。
@@ -41,11 +31,11 @@ describe('起動の失敗の報告', () => {
       reportFatal(error, exit),
     );
 
-    const errors = jsonLines(written.stdout).filter((line) => line.level === 'error');
+    const errors = written.stdout.jsonLines<LogLine>().filter((line) => line.level === 'error');
     expect(errors).toHaveLength(1);
     expect(String(errors[0]?.message)).toContain('PORT');
     expect(errors[0]?.context).toBe('Bootstrap');
-    expect(written.stderr).toHaveLength(0);
+    expect(written.stderr.chunks).toHaveLength(0);
     expect(exit).toHaveBeenCalledWith(1);
   });
 
