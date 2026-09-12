@@ -1,14 +1,8 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { CHANNEL_ARCHIVED, CHANNEL_NOT_ARCHIVED } from './channel-errors';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
-import { OWNER_ONLY } from './workspace-errors';
 import { WorkspacesService } from './workspaces.service';
 
 /** 名前の衝突（同時に同じ名前が作られた）で採番をやり直す回数の上限。 */
@@ -32,7 +26,7 @@ export class ChannelArchiveService {
   ) {}
 
   async archive(ownerId: string, workspaceId: string, channelId: string): Promise<ManagedChannel> {
-    await this.requireOwner(ownerId, workspaceId);
+    await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
     for (let attempt = 1; ; attempt += 1) {
       try {
         return await this.prisma.$transaction(async (tx) => {
@@ -65,7 +59,7 @@ export class ChannelArchiveService {
 
   /** 復元。**名前と番号は外れない**（`general-1` のまま）。アーカイブしていなければ 409 `channel_not_archived`。 */
   async restore(ownerId: string, workspaceId: string, channelId: string): Promise<ManagedChannel> {
-    await this.requireOwner(ownerId, workspaceId);
+    await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
     const channel = await this.prisma.channel.findFirst({
       where: { id: channelId, workspaceId },
       select: { id: true },
@@ -77,11 +71,6 @@ export class ChannelArchiveService {
     });
     if (count !== 1) throw new ConflictException(CHANNEL_NOT_ARCHIVED);
     return this.view(this.prisma, channelId);
-  }
-
-  private async requireOwner(userId: string, workspaceId: string): Promise<void> {
-    const membership = await this.workspaces.membershipOf(userId, workspaceId);
-    if (membership.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
   }
 
   private async view(
