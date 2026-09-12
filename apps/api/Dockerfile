@@ -3,7 +3,7 @@
 # ビルドの文脈はリポジトリの根である（npm workspaces のため）。作る手順は scripts/api-image.test.sh が持つ。
 #
 # 段:
-#   runtime … api を動かす。本番の依存だけを持つ
+#   runtime … api を動かす。本番の依存と、build 段のビルド済みの dist・openapi だけを持つ
 #   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクで使う）。本番の依存とスキーマだけを持つ
 #
 # 起動に要る環境変数は README「動かす」と apps/api/src/config/api-config.ts にある。**イメージに値を焼き込まない**

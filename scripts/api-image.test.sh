@@ -96,7 +96,7 @@ while IFS= read -r line; do
     fail "JSON でないログの行がある: $line"
 done <<<"$stdout"
 
-echo "== 4. どちらのイメージにも .env・テストのコード・ソース・開発依存が入っていない"
+echo "== 4. どちらのイメージにも .env・テストのコード・ソース・開発依存（代表として vitest と @nestjs/testing）が入っていない"
 # 本番のタスクとして動く2つのイメージに同じ検査を当てる（#277。マイグレーション用だけ弱くしない）。
 # 開発依存の代表として、テストの実行に要る vitest と @nestjs/testing が無いことを見る（--omit=dev を落とすと入る）。
 # 調べる側（docker run・find）の失敗は名指しして止める——代入をパイプにせず（pipefail と set -e で無言に抜ける）、
