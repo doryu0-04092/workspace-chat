@@ -12,7 +12,7 @@ export type UpdateProfileRequest = PatchOperation['requestBody']['content']['app
 /**
  * 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ）。
  * JSON Schema の pattern（Unicode の `u` フラグ）では文字列の性質を書けないため、仕様ではなくここで確かめる。
- * 数え方は依頼側の判断を経ていない（#283）。文字列の性質には `v` フラグが要る。tsconfig.base.json の target（ES2022）ではリテラルに書けないため、コンストラクタで作る（実行する Node 24 は扱える）。
+ * 文字列の性質には `v` フラグが要る。tsconfig.base.json の target（ES2022）ではリテラルに書けないため、コンストラクタで作る（実行する Node 24 は扱える）。
  */
 const SINGLE_EMOJI = new RegExp('^\\p{RGI_Emoji}$', 'v');
 
@@ -45,19 +45,20 @@ export class ProfileService {
    * （そのときは続く get が 401 を返す）。
    */
   async update(userId: string, input: UpdateProfileRequest): Promise<Profile> {
-    if (typeof input.statusEmoji === 'string' && !SINGLE_EMOJI.test(input.statusEmoji)) {
+    if (input.status != null && !SINGLE_EMOJI.test(input.status.emoji)) {
       throw new BadRequestException({
         ...errorBodyForStatus(400),
-        errors: [{ path: '/body/statusEmoji', message: '絵文字1つにしてください' }],
+        errors: [{ path: '/body/status/emoji', message: '絵文字1つにしてください' }],
       } satisfies ErrorResponse);
     }
+    // ステータスは絵文字とテキストの1セット（機能一覧 1.3。#283）。null なら両方消し、送らなければ両方触らない。
+    const status =
+      input.status === undefined
+        ? {}
+        : { statusEmoji: input.status?.emoji ?? null, statusText: input.status?.text ?? null };
     await this.prisma.user.updateMany({
       where: { id: userId, deletedAt: null },
-      data: {
-        displayName: input.displayName,
-        statusEmoji: input.statusEmoji,
-        statusText: input.statusText,
-      },
+      data: { displayName: input.displayName, ...status },
     });
     return this.get(userId);
   }
@@ -76,7 +77,10 @@ function toProfile(user: {
     userId: user.loginId,
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
-    statusEmoji: user.statusEmoji,
-    statusText: user.statusText,
+    // 列は2つだが、値は1セット（機能一覧 1.3）。両方入っているときだけステータスがある。
+    status:
+      user.statusEmoji !== null && user.statusText !== null
+        ? { emoji: user.statusEmoji, text: user.statusText }
+        : null,
   };
 }
