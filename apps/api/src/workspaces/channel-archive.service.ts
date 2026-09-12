@@ -60,17 +60,19 @@ export class ChannelArchiveService {
   /** 復元。**名前と番号は外れない**（`general-1` のまま）。アーカイブしていなければ 409 `channel_not_archived`。 */
   async restore(ownerId: string, workspaceId: string, channelId: string): Promise<ManagedChannel> {
     await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
-    const channel = await this.prisma.channel.findFirst({
-      where: { id: channelId, workspaceId },
-      select: { id: true },
+    return this.prisma.$transaction(async (tx) => {
+      const channel = await tx.channel.findFirst({
+        where: { id: channelId, workspaceId },
+        select: { id: true },
+      });
+      if (!channel) throw new NotFoundException();
+      const { count } = await tx.channel.updateMany({
+        where: { id: channelId, workspaceId, archivedAt: { not: null } },
+        data: { archivedAt: null },
+      });
+      if (count !== 1) throw new ConflictException(CHANNEL_NOT_ARCHIVED);
+      return this.view(tx, channelId);
     });
-    if (!channel) throw new NotFoundException();
-    const { count } = await this.prisma.channel.updateMany({
-      where: { id: channelId, workspaceId, archivedAt: { not: null } },
-      data: { archivedAt: null },
-    });
-    if (count !== 1) throw new ConflictException(CHANNEL_NOT_ARCHIVED);
-    return this.view(this.prisma, channelId);
   }
 
   private async view(

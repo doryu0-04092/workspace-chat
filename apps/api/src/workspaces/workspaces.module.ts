@@ -11,7 +11,7 @@ import { InvitationsService } from './invitations.service';
 import { WorkspacesController } from './workspaces.controller';
 import { WorkspacesService } from './workspaces.service';
 
-/** ワークスペース（F-06）と招待（F-08 / F-38）とチャンネル（F-10）。招待の通知に RealtimeEmitter を使う。 */
+/** ワークスペース（F-06）と招待（F-08 / F-38）とチャンネル（F-10）とチャンネルのアーカイブ（F-35）。招待の通知に RealtimeEmitter を使う。 */
 @Module({
   imports: [RealtimeModule],
   controllers: [
