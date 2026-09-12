@@ -1,19 +1,9 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
-import { Prisma } from '../generated/prisma/client';
+import { uniqueViolation } from '../testing/prisma-violations';
 import { InvitationsService } from './invitations.service';
 
-/**
- * 一意制約違反（Prisma の P2002）を捕まえて 409 にする経路を、DB の応答を差し替えて決まった形で起こす。
- * 実際の DB を使う検査は、作成の前に SELECT で確かめる形へ変えても、要求が重ならなければ落ちない
- * （session.service.test.ts・channels.service.test.ts と同じ形。#355）。
- */
-function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-    code: 'P2002',
-    clientVersion: 'test',
-  });
-}
+// 規則は testing/prisma-violations.ts。
 
 const OWNER = {
   role: 'OWNER' as const,

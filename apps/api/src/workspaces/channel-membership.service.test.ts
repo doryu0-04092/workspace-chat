@@ -1,19 +1,10 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
-import { Prisma } from '../generated/prisma/client';
+import { uniqueViolation } from '../testing/prisma-violations';
 import { ChannelMembershipService } from './channel-membership.service';
 
-/**
- * 一意制約違反（Prisma の P2002）を捕まえて 409 にする経路を、DB の応答を差し替えて決まった形で起こす。
- * 実際の DB を使う検査は、作成の前に SELECT で確かめる形へ変えても、要求が重ならなければ落ちない。参加は既に作成の前に
- * 参加済みかを確かめており、逐次の2件目は違反の経路を踏まない（channels.service.test.ts・invitations.service.test.ts と同じ形。#355）。
- */
-function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-    code: 'P2002',
-    clientVersion: 'test',
-  });
-}
+// 規則は testing/prisma-violations.ts。この経路に固有の事実: 参加は既に作成の前に参加済みかを確かめており、
+// 実際の DB での逐次の2件目は違反の経路を踏まない。
 
 const ALREADY_CHANNEL_MEMBER = {
   code: 'already_channel_member',

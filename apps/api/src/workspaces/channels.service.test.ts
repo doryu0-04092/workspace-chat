@@ -1,23 +1,11 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
-import { Prisma } from '../generated/prisma/client';
+import { uniqueViolation } from '../testing/prisma-violations';
 import { ChannelsService } from './channels.service';
 
-/**
- * 一意制約違反（Prisma の P2002）を捕まえて 409 にする経路を、DB の応答を差し替えて決まった形で起こす。
- * 実際の DB を使う channels.test.ts の同じ名前の 409 のうち、逐次の検査は作成の前に SELECT で確かめる形へ変えると違反の経路を
- * 踏まなくなり、同時の検査は今の実装では必ず踏むが、その形へ変えると要求が重なった回にしか踏まなくなる。
- * 差し替えは、その形へ変えても要求の順序に依らず違反の経路を踏む（#355）。
- */
-function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError(
-    'Unique constraint failed on the fields: (`name`)',
-    {
-      code: 'P2002',
-      clientVersion: 'test',
-    },
-  );
-}
+// 規則は testing/prisma-violations.ts。この経路に固有の事実: channels.test.ts の同じ名前の 409 のうち、逐次の検査は
+// 作成の前に SELECT で確かめる形へ変えると違反の経路を踏まなくなり、同時の検査は今の実装では必ず踏むが、
+// その形へ変えると要求が重なった回にしか踏まなくなる。
 
 /** 作成のトランザクション中に一意制約違反を起こす DB に差し替えた ChannelsService。 */
 function createService() {
