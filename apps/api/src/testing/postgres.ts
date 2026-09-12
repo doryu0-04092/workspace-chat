@@ -17,6 +17,10 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
  * 全文検索（F-30）は別のイシューで扱う。**検索のモデルが入る時点で、pg_bigm を同梱した
  * イメージが別途必要になる**（イシュー #34 に代償として記録した）。
  */
+/**
+ * **踏むと壊れる: この値は scripts/api-image.test.sh も読み、毎回 `docker pull` する。レジストリから取れる名前にすること。**
+ * 手元でビルドしただけのイメージ（docker/postgres のような形）にすると、`npm test` は通ったままイメージの検査だけが落ちる。
+ */
 export const POSTGRES_IMAGE = 'postgres:17';
 
 /**
