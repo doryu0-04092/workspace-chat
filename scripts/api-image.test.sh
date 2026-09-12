@@ -42,6 +42,8 @@ docker build --pull --file apps/api/Dockerfile --target runtime --tag "$runtime_
 
 echo "== 1. マイグレーション用のイメージを空の PostgreSQL に適用する"
 docker network create "$network" >/dev/null
+# 土台（タグで指す）は毎回取り直す。docker run も手元に同じタグがあればレジストリを見ない（docker build の --pull と同じ性質）。
+docker pull --quiet "$postgres_image" >/dev/null
 # 値はこの検査の中だけで使う使い捨ての資格情報である。
 docker run --detach --name "$postgres" --network "$network" \
   --env POSTGRES_PASSWORD=image-test --env POSTGRES_DB=chat "$postgres_image" >/dev/null
