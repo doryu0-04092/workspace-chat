@@ -350,6 +350,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       expect(line).toBeDefined();
       expect(line).toContain('/api/auth/refresh');
       expect(line).toContain(ip);
+      expect(line).toContain('"limit":"ip"');
     });
 
     it('入れ替え済みのトークンの再利用を、系列と利用者の ID で記録し、トークンは載せない', async () => {

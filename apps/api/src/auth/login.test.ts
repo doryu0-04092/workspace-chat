@@ -261,9 +261,9 @@ describe('POST /api/auth/login（F-02）', () => {
       expect(((await blocked.json()) as ErrorResponse).code).toBe('too_many_requests');
       expect(refreshCookie(blocked)).toBeUndefined();
       // アカウント単位の超過も、発信元単位と同じ形で記録する（#270 第3巡）。
-      expect(
-        logger.lines.find((l) => l.includes('rate_limit_exceeded') && l.includes(ip)),
-      ).toContain('/api/auth/login');
+      const limited = logger.lines.find((l) => l.includes('rate_limit_exceeded') && l.includes(ip));
+      expect(limited).toContain('/api/auth/login');
+      expect(limited).toContain('"limit":"account"');
 
       await sleep(1_100);
       expect((await postLogin({ userId: user.userId, password: 'backoff-password' })).status).toBe(
