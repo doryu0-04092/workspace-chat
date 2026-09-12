@@ -35,7 +35,7 @@ function readRefreshToken(request: Request): string | undefined {
  * 本体は受け取らない。
  *
  * **発信元単位で 15 分に 60 回**（決定・2026-09-12・依頼側。#270。サーバーの負荷の歯止め。正規の利用者は 15 分に1回のリフレッシュで足りる）。
- * ガードは CSRF の判定より先に数える（403 も 401 も1回として数える）。超過は RateLimitGuard が記録する。
+ * ガードは CSRF の判定より先に数える（403 も 401 も1回として数える）。超過の記録は ErrorResponseFilter（429 全体の1箇所。ガードには書かない）。
  */
 @Public()
 @Controller('auth')
