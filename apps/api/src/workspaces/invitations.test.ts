@@ -367,6 +367,10 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
       expect(
         await prisma.membership.count({ where: { workspaceId: workspace.id, userId: invitee.id } }),
       ).toBe(1);
+      // 機能一覧 2.2 の代償: 招待は残り、本人が辞退するまで自分宛ての一覧に出続ける。
+      const mine = await request('GET', '/invitations', invitee.authorization);
+      expect(mine.status).toBe(200);
+      expect(((await mine.json()) as MyInvitation[]).map((i) => i.id)).toContain(invitation.id);
     });
 
     it('他人宛ての招待は、承諾も辞退もできない（404）。招待は残る', async () => {
