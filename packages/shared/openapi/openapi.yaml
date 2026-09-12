@@ -288,6 +288,108 @@ paths:
           $ref: '#/components/responses/UnsupportedMediaType'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces:
+    post:
+      operationId: createWorkspace
+      summary: ワークスペースの作成（F-06）
+      description: >-
+        作成者がオーナーとして所属した状態になる（機能一覧 2.1）。名前は 1〜50 文字（コードポイント）で、空白だけは不可。
+        同名を許す（決定・2026-09-12・依頼側。#290）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkspaceRequest'
+      responses:
+        '201':
+          description: 作ったワークスペース（role は OWNER）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    get:
+      operationId: listMyWorkspaces
+      summary: 自分が所属するワークスペースの一覧（F-06。サイドバーの切替）
+      description: 参加した順。所属していないものは含まない
+      responses:
+        '200':
+          description: 所属するワークスペース
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Workspace'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: getWorkspace
+      summary: ワークスペースの取得（F-06）
+      description: 所属していなければ、存在の有無を区別せず 404（機能一覧 2.1）
+      responses:
+        '200':
+          description: ワークスペース
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workspace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/members:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: listWorkspaceMembers
+      summary: ワークスペースの参加者一覧（F-06）
+      description: >-
+        参加した順。退会済みの利用者を含まない（機能一覧 2.1・1.5）。所属していなければ、存在の有無を区別せず 404
+      responses:
+        '200':
+          description: 参加者
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkspaceMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
   securitySchemes:
     bearerAuth:
@@ -296,6 +398,14 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    WorkspaceId:
+      name: id
+      in: path
+      required: true
+      description: ワークスペースの id。形が uuid でなければ 400
+      schema:
+        type: string
+        format: uuid
     RequestedBy:
       name: X-Requested-By
       in: header
@@ -364,6 +474,14 @@ components:
           description: 再び受け付けるまでの秒数
           schema:
             type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: >-
+        見つからない（not_found）。所属していないワークスペースは、存在の有無を区別せずこれになる（機能一覧 2.1・1.4）。
+        本体は状態コードの本体であり、権限の有無を述べない
       content:
         application/json:
           schema:
@@ -630,3 +748,62 @@ components:
           type: string
           enum:
             - ok
+    CreateWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          description: >-
+            1〜50 文字（文字数はコードポイントで数える）。空白だけは不可（決定・2026-09-12・依頼側。#290）。
+            上限は入力にだけ置く（応答と DB の列には置かない。同決定）
+          type: string
+          minLength: 1
+          maxLength: 50
+          pattern: '\S'
+    WorkspaceRole:
+      description: ワークスペースでの役割（schema.prisma の WorkspaceRole）
+      type: string
+      enum:
+        - OWNER
+        - MEMBER
+    Workspace:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - createdAt
+        - role
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        role:
+          description: 要求した利用者の、このワークスペースでの役割
+          $ref: '#/components/schemas/WorkspaceRole'
+    WorkspaceMember:
+      description: 参加者。UserSummary に役割を足したもの
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - userId
+        - displayName
+        - role
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+        displayName:
+          type: string
+        role:
+          $ref: '#/components/schemas/WorkspaceRole'

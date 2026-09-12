@@ -13,6 +13,7 @@ import { OpenApiValidationMiddleware } from './openapi-validation';
 import { PrismaModule } from './prisma.service';
 import { RealtimeModule } from './realtime/realtime.module';
 import { UsersModule } from './users/users.module';
+import { WorkspacesModule } from './workspaces/workspaces.module';
 
 /**
  * **公開するエンドポイントを、要件に記録しないまま足さない**（CLAUDE.md 1）。
@@ -38,6 +39,7 @@ export class AppModule implements NestModule {
         PrismaModule,
         AuthModule,
         UsersModule,
+        WorkspacesModule,
         RealtimeModule,
       ],
     };
