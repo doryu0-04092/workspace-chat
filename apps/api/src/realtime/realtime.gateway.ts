@@ -37,7 +37,7 @@ function reject(code: RejectCode): Error & { data: { code: RejectCode } } {
  * - 認証を通った接続を、その利用者の部屋に入れる（9.2）
  * - **接続と切断を、構造化ログ（`websocket_connected` / `websocket_disconnected`。利用者の ID と切断の理由）と EMF のメトリクス
  *   （`WebSocketConnections`: このタスクの現在の接続数、`WebSocketConnects` / `WebSocketDisconnects`: 回数）の両方で記録する**
- *   （要件定義書 4.6。決定・2026-09-12・依頼側。#287）。切断率は回数の比から取る。配信遅延はイベントに送信時刻を載せる形になるため、チャンネルの実装で足す
+ *   （要件定義書 4.6。決定・2026-09-12・依頼側。#287）。切断率は回数の比から取る。配信遅延はサーバーが自発的に配るイベントの payload に送信時刻を載せる形になるため、チャンネルの実装で足す（範囲は機能一覧 5.2）
  */
 @WebSocketGateway()
 export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnection<RealtimeSocket> {
