@@ -182,6 +182,27 @@ describe('/api/workspaces（F-06）', () => {
     expect((await get(bob.authorization, '/not-a-uuid')).status).toBe(400);
   });
 
+  // 取得と参加者一覧の可否は所属で決まり、役割（OWNER）では決まらない（#314）。
+  it('オーナー以外のメンバーも、取得と参加者一覧を 200 で引ける', async () => {
+    const alice = await login();
+    const bob = await login();
+    const workspace = await create(alice.authorization, 'メンバーの取得');
+    await prisma.membership.create({
+      data: { workspaceId: workspace.id, userId: bob.id, role: 'MEMBER' },
+    });
+
+    const got = await get(bob.authorization, `/${workspace.id}`);
+    expect(got.status).toBe(200);
+    expect((await got.json()) as Workspace).toEqual({ ...workspace, role: 'MEMBER' });
+
+    const members = await get(bob.authorization, `/${workspace.id}/members`);
+    expect(members.status).toBe(200);
+    expect(((await members.json()) as WorkspaceMember[]).map((m) => m.role).sort()).toEqual([
+      'MEMBER',
+      'OWNER',
+    ]);
+  });
+
   it('参加者一覧は退会済みを含まず、所属していなければ 404', async () => {
     const alice = await login();
     const bob = await login();

@@ -3,6 +3,7 @@ import type { paths } from '@workspace-chat/shared';
 import { INVALID_TOKEN } from '../auth/session.service';
 import { BearerUnauthorizedException } from '../error-response';
 import { PrismaService } from '../prisma.service';
+import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { OWNER_CANNOT_LEAVE, OWNER_ONLY } from './workspace-errors';
 
 type CreateOperation = paths['/workspaces']['post'];
@@ -63,15 +64,10 @@ export class WorkspacesService {
     await this.membershipOf(userId, workspaceId);
     const rows = await this.prisma.membership.findMany({
       where: { workspaceId, user: { deletedAt: null } },
-      select: { role: true, user: { select: { id: true, loginId: true, displayName: true } } },
+      select: { role: true, user: { select: USER_SUMMARY_SELECT } },
       orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
     });
-    return rows.map(({ role, user }) => ({
-      id: user.id,
-      userId: user.loginId,
-      displayName: user.displayName,
-      role,
-    }));
+    return rows.map(({ role, user }) => ({ ...toUserSummary(user), role }));
   }
 
   /**
@@ -81,8 +77,7 @@ export class WorkspacesService {
    * 接続をチャンネルの部屋から外す処理は、チャンネルの部屋の実装と同時に入れる（#331）。
    */
   async kick(ownerId: string, workspaceId: string, memberId: string): Promise<void> {
-    const requester = await this.membershipOf(ownerId, workspaceId);
-    if (requester.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
+    await this.ownerMembershipOf(ownerId, workspaceId);
     if (memberId === ownerId) throw new ForbiddenException(OWNER_CANNOT_LEAVE);
     const { count } = await this.prisma.membership.deleteMany({
       where: { workspaceId, userId: memberId, role: 'MEMBER' },
@@ -103,13 +98,32 @@ export class WorkspacesService {
     if (count !== 1) throw new NotFoundException();
   }
 
-  /** 要求する側の所属。無ければ 404（存在の有無を区別しない）。 */
-  private async membershipOf(userId: string, workspaceId: string) {
+  /**
+   * 要求する側の所属。無ければ 404（存在の有無を区別しない）。**要求する側の `deletedAt IS NULL` はここで見る**（機能一覧 1.4 の2段構えの1段目）。
+   * **所属を確かめる経路（ワークスペース・招待・チャンネル）はすべてこれを通り、条件を写さない**——写すと、条件を足したときに届かない経路が残る。
+   * 要求する側の利用者の要約も返す（招待の通知が招待した人として使う）。
+   */
+  async membershipOf(userId: string, workspaceId: string) {
     const row = await this.prisma.membership.findFirst({
       where: { userId, workspaceId, user: { deletedAt: null } },
-      select: { role: true, workspace: { select: WORKSPACE_SELECT } },
+      select: {
+        role: true,
+        workspace: { select: WORKSPACE_SELECT },
+        user: { select: USER_SUMMARY_SELECT },
+      },
     });
     if (!row) throw new NotFoundException();
+    return row;
+  }
+
+  /**
+   * 要求する側がそのワークスペースのオーナーであること。所属していなければ 404（`membershipOf`）、メンバーなら 403 `owner_only`。
+   * **オーナー専用の操作（招待・キック・チャンネルの作成・管理用の一覧）の入口はすべてこれを通り、判定を写さない**——
+   * 写すと、次に足すオーナー専用の操作で1行落としても、他の経路のテストは緑のまま通る（REVIEW.md 2.2）。
+   */
+  async ownerMembershipOf(userId: string, workspaceId: string) {
+    const row = await this.membershipOf(userId, workspaceId);
+    if (row.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
     return row;
   }
 }

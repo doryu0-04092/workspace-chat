@@ -1,17 +1,21 @@
 import {
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { InvitationNewPayload, paths } from '@workspace-chat/shared';
 import type { ErrorResponse } from '../error-response';
-import { Prisma } from '../generated/prisma/client';
+import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
-import { OWNER_ONLY } from './workspace-errors';
-import { type Workspace, WORKSPACE_SELECT, toWorkspace } from './workspaces.service';
+import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
+import {
+  type Workspace,
+  WORKSPACE_SELECT,
+  WorkspacesService,
+  toWorkspace,
+} from './workspaces.service';
 
 type InviteOperation = paths['/workspaces/{id}/invitations']['post'];
 export type CreateInvitationRequest = InviteOperation['requestBody']['content']['application/json'];
@@ -32,16 +36,6 @@ const ALREADY_MEMBER: ErrorResponse = {
   message: 'この利用者は既にメンバーです',
 };
 
-const USER_SUMMARY_SELECT = { id: true, loginId: true, displayName: true } as const;
-
-function toUserSummary(user: { id: string; loginId: string; displayName: string }) {
-  return { id: user.id, userId: user.loginId, displayName: user.displayName };
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
-}
-
 /**
  * ワークスペースへの招待と、招待の承諾・辞退（F-08 / F-38。機能一覧 2.2）。
  *
@@ -50,7 +44,7 @@ function isUniqueViolation(error: unknown): boolean {
  *   Prisma のクライアントの等値比較では大文字小文字を区別するため `$queryRaw` で書く。解決できなければ 422 `invitee_not_found`）
  * - **同じ利用者への未承諾の招待が既にあれば 409 `already_invited`、既にメンバーなら 409 `already_member`**（決定・2026-09-12・依頼側。#326）
  * - **招待したら、招待された利用者の部屋へ `invitation:new` を送る**（決定・同。宛先は招待された本人だけ——自分宛ての招待を受け取る資格は本人にある）
- * - **要求する側の `deletedAt IS NULL` を、入口（ガード）とは別に、自分宛ての一覧・承諾・辞退の問い合わせにも置く**（機能一覧 1.4 の2段構えの1段目）
+ * - **要求する側の `deletedAt IS NULL` を、入口（ガード）とは別に、招待・自分宛ての一覧・承諾・辞退の問い合わせにも置く**（機能一覧 1.4 の2段構えの1段目）
  * - **承諾・辞退できるのは招待された本人だけ**（他人宛ては、存在の有無を区別せず 404）。承諾は招待を消して `Membership`（MEMBER）を作る
  */
 @Injectable()
@@ -58,6 +52,7 @@ export class InvitationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeEmitter,
+    private readonly workspaces: WorkspacesService,
   ) {}
 
   async invite(
@@ -65,16 +60,8 @@ export class InvitationsService {
     workspaceId: string,
     input: CreateInvitationRequest,
   ): Promise<Invitation> {
-    const owner = await this.prisma.membership.findFirst({
-      where: { userId: ownerId, workspaceId, user: { deletedAt: null } },
-      select: {
-        role: true,
-        workspace: { select: { id: true, name: true } },
-        user: { select: USER_SUMMARY_SELECT },
-      },
-    });
-    if (!owner) throw new NotFoundException();
-    if (owner.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
+    // 所属（退会していない）とオーナーの判定は WorkspacesService に1つだけ置く。要求する側の要約も同じ問い合わせで取る。
+    const owner = await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
 
     const [invitee] = await this.prisma.$queryRaw<{ id: string }[]>`
       SELECT "id" FROM "User"
@@ -102,7 +89,7 @@ export class InvitationsService {
     // 書き込みが確定してから送る（送った後に書き込みが落ちると、存在しない招待を知らせることになる）。
     const payload: InvitationNewPayload = {
       invitationId: created.id,
-      workspace: owner.workspace,
+      workspace: { id: owner.workspace.id, name: owner.workspace.name },
       invitedBy: toUserSummary(owner.user),
       sentAt: new Date().toISOString(),
     };
