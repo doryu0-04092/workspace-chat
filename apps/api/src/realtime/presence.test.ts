@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { POSTGRES_STARTUP_TIMEOUT_MS } from '../testing/postgres';
 import { type LoggedIn, type TwoTasks, startTwoTasks } from '../testing/two-tasks';
 import { PresenceRegistry } from './presence-registry';
+import { RoomMembershipReconciler } from './room-membership-reconciler';
 
 /** 届かないことを確かめるときに待つ時間（届くものは vi.waitFor で待つ）。 */
 const QUIET_MS = 700;
@@ -112,6 +113,27 @@ describe('在席（F-22）', () => {
   });
 
   describe('presence:changed', () => {
+    // 決定・2026-09-13・依頼側: Valkey が止まっている間のキック・退出で外し損ねた接続は、各タスクの参加の照合で外す。
+    // 照合で外れた利用者は参加者でなくなっており、他のタスクにその利用者の接続が残っていても（そちらの照合がまだ走っていなくても）在席ではない。
+    it('参加の照合で外された利用者は、別のタスクに接続が残っていても、照合したタスクが在席から外し、present: false が1回届く', async () => {
+      const { alice, bob, channelId } = await channelOfThree();
+      const bobSocket = await t.open(t.secondBase, bob);
+      await enter(bobSocket, channelId);
+      await enter(await t.open(t.firstBase, alice), channelId);
+      await enter(await t.open(t.secondBase, alice), channelId);
+      await untilBothSee(channelId, alice.id, true);
+      const received = collect(bobSocket);
+      await t.prisma.channelMember.deleteMany({ where: { channelId, userId: alice.id } });
+
+      await t.first.get(RoomMembershipReconciler).reconcile();
+
+      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 3_000 });
+      expect(received[0]).toMatchObject({ channelId, userId: alice.id, present: false });
+      await untilBothSee(channelId, alice.id, false);
+      await quiet();
+      expect(received).toHaveLength(1);
+    });
+
     it('最初の接続が入ったときに、送信時刻つきで部屋へ1回届く。同じ利用者の2本目（別のタスク）では届かない', async () => {
       const { alice, bob, channelId } = await channelOfThree();
       const bobSocket = await t.open(t.firstBase, bob);

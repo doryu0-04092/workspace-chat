@@ -6,6 +6,7 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { RealtimePresence } from './realtime-presence';
 import { REALTIME_VALKEY_CLIENTS, type RealtimeValkeyClients } from './realtime-valkey';
 import { RealtimeGateway, channelIdOfRoom, channelRoom } from './realtime.gateway';
 
@@ -18,6 +19,8 @@ export const ROOM_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
  * - **このタスクの接続が入っているチャンネルの部屋を、参加の行（退会していない利用者の所属を通る `ChannelMember`）と照合し、
  *   参加者でない接続を部屋から外す**——Valkey が止まっている間のキック・退出では、部屋から外す通知（`socketsLeave`）が
  *   他のタスクに届かず、参加者でなくなった接続が部屋に残るため（要件定義書 4.8 の3）
+ * - **外した（利用者, チャンネル）は、キック・退出と同じく利用者単位で在席から外す**（`RealtimePresence.userRemoved`）——
+ *   参加者でなくなった利用者は、他のタスクに接続が残っていても（そちらの照合がまだ走っていなくても）在席ではない
  * - **契機は5分ごとと、Valkey への publish が戻ったとき**。見るのは自タスクの接続だけ（`local`）——Valkey が止まっていても照合できる
  * - 照合に失敗しても例外にせず、warn を残す（次の契機でやり直す）
  */
@@ -29,6 +32,7 @@ export class RoomMembershipReconciler implements OnApplicationBootstrap, OnModul
   constructor(
     private readonly gateway: RealtimeGateway,
     private readonly prisma: PrismaService,
+    private readonly presence: RealtimePresence,
     @Inject(REALTIME_VALKEY_CLIENTS) private readonly valkey: RealtimeValkeyClients,
   ) {}
 
@@ -63,8 +67,16 @@ export class RoomMembershipReconciler implements OnApplicationBootstrap, OnModul
         select: { userId: true, channelId: true },
       });
       const participating = new Set(rows.map(({ userId, channelId }) => `${userId}/${channelId}`));
+      const removed = new Map<string, Set<string>>();
       for (const { socket, userId, channelId } of entries) {
-        if (!participating.has(`${userId}/${channelId}`)) socket.leave(channelRoom(channelId));
+        if (participating.has(`${userId}/${channelId}`)) continue;
+        socket.leave(channelRoom(channelId));
+        const channelIds = removed.get(userId) ?? new Set<string>();
+        channelIds.add(channelId);
+        removed.set(userId, channelIds);
+      }
+      for (const [userId, channelIds] of removed) {
+        this.presence.userRemoved([...channelIds], userId);
       }
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));

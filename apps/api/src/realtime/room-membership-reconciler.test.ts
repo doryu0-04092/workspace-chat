@@ -14,6 +14,7 @@ import { stubApiEnv } from '../testing/api-env';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
 import { connectRealtime, nextEvent } from '../testing/realtime-client';
 import { startValkey } from '../testing/valkey';
+import { PresenceRegistry } from './presence-registry';
 import { REALTIME_VALKEY_CLIENTS, type RealtimeValkeyClients } from './realtime-valkey';
 import { RealtimeGateway, channelRoom } from './realtime.gateway';
 import { ROOM_RECONCILE_INTERVAL_MS, RoomMembershipReconciler } from './room-membership-reconciler';
@@ -165,6 +166,19 @@ describe('チャンネルの部屋の参加の照合', () => {
       await app.get(RoomMembershipReconciler).reconcile();
 
       expect(await reached([aliceSocket, bobSocket], channelId)).toEqual([false, true]);
+    });
+
+    // 機能一覧 9.2「外れる契機（退室・切断・キック・退出）はどれでも同じ」: 照合で外したときも、最後の接続なら在席の変化を配る。
+    it('照合で外した接続がその利用者の最後の接続なら、残った参加者に在席の変化（present: false）を配り、在席の一覧から外す', async () => {
+      const { alice, bob, channelId, bobSocket } = await roomOfTwo();
+      await prisma.channelMember.deleteMany({ where: { channelId, userId: alice.id } });
+      const changed = nextEvent(bobSocket, 'presence:changed', 2_000);
+
+      await app.get(RoomMembershipReconciler).reconcile();
+
+      expect(await changed).toMatchObject({ channelId, userId: alice.id, present: false });
+      // 参加者のままの利用者は在席に残る。
+      expect(app.get(PresenceRegistry).usersIn(channelId)).toEqual([bob.id]);
     });
 
     it('退会した利用者の接続を部屋から外す', async () => {
