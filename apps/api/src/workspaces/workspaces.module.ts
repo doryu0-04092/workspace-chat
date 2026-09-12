@@ -14,8 +14,9 @@ import { WorkspacesController } from './workspaces.controller';
 import { WorkspacesService } from './workspaces.service';
 
 /**
- * ワークスペース（F-06）と招待（F-08 / F-38）とチャンネル（F-10）。チャンネルの部屋への入室要求（ChannelRoomsGateway）もここで受ける
- * （入室の判定が所属とチャンネルの参加を見るため）。招待の通知に RealtimeEmitter、参加資格を失った接続を部屋から外すのに RealtimeRooms を使う。
+ * ワークスペース（F-06）と招待（F-08 / F-38）とキック（F-09）とチャンネル（F-10）とチャンネルのアーカイブ（F-35）。
+ * チャンネルの部屋への入室要求（ChannelRoomsGateway）もここで受ける（入室の判定が所属とチャンネルの参加を見るため）。
+ * 招待の通知に RealtimeEmitter、参加資格を失った接続を部屋から外すのに RealtimeRooms を使う。
  */
 @Module({
   imports: [RealtimeModule],
