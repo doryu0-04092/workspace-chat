@@ -65,7 +65,7 @@ export class RetryAfterException extends HttpException {
 
 /**
  * 401 の本体のうち、`code` を `authentication_required` / `invalid_token` の2つに限ったもの（RFC 6750 3.1 の2つの形に対応する）。
- * Bearer の経路（AccessTokenGuard・プロフィール）と Cookie の経路（リフレッシュ・ログアウトの `INVALID_TOKEN`）の両方が使う。
+ * Bearer の経路（AccessTokenGuard と、入口の後で退会したばかりの利用者を引けなかったサービス）と Cookie の経路（リフレッシュ・ログアウトの `INVALID_TOKEN`）の両方が使う。
  */
 export type BearerErrorResponse = ErrorResponse & {
   code: 'authentication_required' | 'invalid_token';
