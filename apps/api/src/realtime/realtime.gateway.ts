@@ -8,6 +8,7 @@ import {
 import type { ErrorResponse } from '../error-response';
 import type { Server, Socket } from 'socket.io';
 import { AccessTokenResolver, type AuthenticatedUser } from '../auth/access-token.guard';
+import { MetricsWriter } from '../logging/metrics';
 
 /** 利用者の部屋の名前（機能一覧 9.2「利用者の部屋」）。 */
 export function userRoom(userId: string): string {
@@ -34,6 +35,9 @@ function reject(code: RejectCode): Error & { data: { code: RejectCode } } {
  * - **解決の想定外の失敗（DB に繋がらないなど）は、例外のメッセージを渡さず `internal_error` で断り、ログに error で残す**
  *   （Socket.IO は `next(err)` の `message` をクライアントへ送る。`server.use` は Nest の例外フィルタを通らないため、error-response.ts と同じ決めをここで当てる）
  * - 認証を通った接続を、その利用者の部屋に入れる（9.2）
+ * - **接続と切断を、構造化ログ（`websocket_connected` / `websocket_disconnected`。利用者の ID と切断の理由）と EMF のメトリクス
+ *   （`WebSocketConnections`: このタスクの現在の接続数、`WebSocketConnects` / `WebSocketDisconnects`: 回数）の両方で記録する**
+ *   （要件定義書 4.6。決定・2026-09-12・依頼側。#287）。切断率は回数の比から取る。配信遅延はイベントに送信時刻を載せる形になるため、チャンネルの実装で足す
  */
 @WebSocketGateway()
 export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnection<RealtimeSocket> {
@@ -41,8 +45,13 @@ export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnecti
   server!: Server;
 
   private readonly logger = new Logger('RealtimeGateway');
+  /** このタスクで確立している接続の数（他のタスクの分は含まない。CloudWatch 側で合計する）。 */
+  private connections = 0;
 
-  constructor(private readonly tokens: AccessTokenResolver) {}
+  constructor(
+    private readonly tokens: AccessTokenResolver,
+    private readonly metrics: MetricsWriter,
+  ) {}
 
   afterInit(server: Server): void {
     server.use((socket: RealtimeSocket, next) => {
@@ -74,5 +83,20 @@ export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnecti
     // 認証のミドルウェアを通らずに接続は確立しない。ここに来て利用者が無いのは組み立ての誤りである。
     if (!user) throw new Error('認証を通らない接続が確立した');
     void socket.join(userRoom(user.id));
+
+    this.connections += 1;
+    this.logger.log({ event: 'websocket_connected', userId: user.id });
+    this.metrics.write([
+      { name: 'WebSocketConnects', unit: 'Count', value: 1 },
+      { name: 'WebSocketConnections', unit: 'Count', value: this.connections },
+    ]);
+    socket.on('disconnect', (reason) => {
+      this.connections -= 1;
+      this.logger.log({ event: 'websocket_disconnected', userId: user.id, reason });
+      this.metrics.write([
+        { name: 'WebSocketDisconnects', unit: 'Count', value: 1 },
+        { name: 'WebSocketConnections', unit: 'Count', value: this.connections },
+      ]);
+    });
   }
 }
