@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import type { ErrorResponse } from '../error-response';
+import type { BearerErrorResponse } from '../error-response';
 import { PrismaService } from '../prisma.service';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
@@ -19,8 +19,10 @@ export type IssuedTokens = {
 /**
  * トークン（リフレッシュトークン・アクセストークン）が使えないときの本体。**無い・知らない・失効済み・期限切れ・退会済みを区別しない。**
  * 退会済みを応答から区別させないため、401（invalid_token）はすべてこれを返す（機能一覧 1.2・1.4）。
+ * **Cookie の経路（リフレッシュ・ログアウト）と Bearer の経路（access-token.guard.ts・profile.service.ts）の両方で使う。** Bearer の経路では
+ * BearerUnauthorizedException に包んで投げ、WWW-Authenticate は例外フィルタが付ける。Cookie の経路には付けない（Bearer で守る資源ではない）。
  */
-export const INVALID_TOKEN: ErrorResponse = {
+export const INVALID_TOKEN: BearerErrorResponse = {
   code: 'invalid_token',
   message: 'ログインし直してください',
 };

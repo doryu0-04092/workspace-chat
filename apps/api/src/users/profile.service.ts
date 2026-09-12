@@ -1,6 +1,10 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
-import { type ErrorResponse, errorBodyForStatus } from '../error-response';
+import {
+  BearerUnauthorizedException,
+  type ErrorResponse,
+  errorBodyForStatus,
+} from '../error-response';
 import { INVALID_TOKEN } from '../auth/session.service';
 import { PrismaService } from '../prisma.service';
 
@@ -35,7 +39,7 @@ export class ProfileService {
       where: { id: userId, deletedAt: null },
       select: PROFILE_SELECT,
     });
-    if (!user) throw new UnauthorizedException(INVALID_TOKEN);
+    if (!user) throw new BearerUnauthorizedException(INVALID_TOKEN);
     return toProfile(user);
   }
 

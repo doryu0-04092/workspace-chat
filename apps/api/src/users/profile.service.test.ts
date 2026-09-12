@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { UnauthorizedException } from '@nestjs/common';
+import { BearerUnauthorizedException } from '../error-response';
 import { describe, expect, it, vi } from 'vitest';
 import { ProfileService } from './profile.service';
 
@@ -18,7 +18,8 @@ function createServiceForDeletedUser() {
 
 /** 入口（AccessTokenGuard）の 401 と同じ本体であること。退会済みを応答から区別させない（機能一覧 1.4）。 */
 async function expectInvalidToken(result: Promise<unknown>): Promise<void> {
-  await expect(result).rejects.toBeInstanceOf(UnauthorizedException);
+  // 入口（AccessTokenGuard）と同じ例外にする。WWW-Authenticate は例外フィルタが付ける（#285）。
+  await expect(result).rejects.toBeInstanceOf(BearerUnauthorizedException);
   await expect(result).rejects.toMatchObject({
     response: { code: 'invalid_token', message: 'ログインし直してください' },
   });
