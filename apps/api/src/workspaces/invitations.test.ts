@@ -346,6 +346,29 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
       expect((await invite(owner, workspace.id, invitee.loginId)).status).toBe(201);
     });
 
+    // 機能一覧 2.2 の代償: 招待の後に別の経路で既にメンバーになっていたら、承諾は 409 で招待は残る（別の経路は Membership の直接の作成で代用する。#332）。
+    it('招待の後に別の経路で既にメンバーになっていたら、承諾は 409（already_member）で招待は残る', async () => {
+      const owner = await login();
+      const invitee = await login();
+      const workspace = await createWorkspace(owner);
+      const invitation = await invited(owner, workspace.id, invitee);
+      await prisma.membership.create({
+        data: { workspaceId: workspace.id, userId: invitee.id, role: 'MEMBER' },
+      });
+
+      const accepted = await request(
+        'POST',
+        `/invitations/${invitation.id}/accept`,
+        invitee.authorization,
+      );
+      expect(accepted.status).toBe(409);
+      expect(((await accepted.json()) as ErrorResponse).code).toBe('already_member');
+      expect(await prisma.invitation.count({ where: { id: invitation.id } })).toBe(1);
+      expect(
+        await prisma.membership.count({ where: { workspaceId: workspace.id, userId: invitee.id } }),
+      ).toBe(1);
+    });
+
     it('他人宛ての招待は、承諾も辞退もできない（404）。招待は残る', async () => {
       const owner = await login();
       const invitee = await login();
@@ -402,5 +425,20 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
       await prisma.membership.count({ where: { workspaceId: workspace.id, userId: invitee.id } }),
     ).toBe(0);
     expect(await prisma.invitation.count({ where: { id: invitation.id } })).toBe(1);
+  });
+
+  // 要求する側の退会済みは、入口（ガード）とは別に招待の問い合わせでも落とす（機能一覧 1.4 の2段構えの1段目。#332）。
+  // 退会済みのトークンはガードで 401 になり HTTP では届かないため、mine/accept/decline と同じくサービスを直に呼ぶ。
+  it('退会済みのオーナーは招待できない（サービスを直に呼んで404。招待も作らない）', async () => {
+    const owner = await login();
+    const invitee = await login();
+    const workspace = await createWorkspace(owner);
+    await prisma.user.update({ where: { id: owner.id }, data: { deletedAt: new Date() } });
+    const service = app.get(InvitationsService);
+
+    await expect(
+      service.invite(owner.id, workspace.id, { userId: invitee.loginId }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(await prisma.invitation.count({ where: { workspaceId: workspace.id } })).toBe(0);
   });
 });

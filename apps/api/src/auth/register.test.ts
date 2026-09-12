@@ -213,6 +213,57 @@ describe('POST /api/auth/register（F-01 / F-03 / F-37）', () => {
         SELECT count(*) AS count FROM "User" WHERE lower("userId") = lower(${userId})`;
       expect(rows[0]?.count).toBe(1n);
     });
+
+    // ユーザーID の一意性は DB の一意索引が担保し、同時の登録でも 201 は1件だけになる（REVIEW.md 6章「同時に実行して、1件だけ成功することを確かめる」。#247）。
+    it('同じユーザーID（大文字小文字を含む）で同時に登録すると、201は1件だけで、Userの行は1つ', async () => {
+      const userId = uniqueUserId();
+      const variants = [
+        userId,
+        userId.toUpperCase(),
+        userId.toLowerCase(),
+        userId,
+        userId.toUpperCase(),
+      ];
+
+      const results = await Promise.all(
+        variants.map((id, i) =>
+          postRegister(base, {
+            userId: id,
+            password: `concurrent-password-${i}`,
+            displayName: `同時${i}`,
+          }),
+        ),
+      );
+
+      const statuses = results.map((res) => res.status);
+      expect(statuses.filter((status) => status === 201)).toHaveLength(1);
+      expect(statuses.filter((status) => status === 409)).toHaveLength(variants.length - 1);
+
+      const rows = await prisma.$queryRaw<{ count: bigint }[]>`
+        SELECT count(*) AS count FROM "User" WHERE lower("userId") = lower(${userId})`;
+      expect(rows[0]?.count).toBe(1n);
+    });
+
+    // 利用者とリカバリーコードは1つの書き込みで作る。409 になった要求は、既存の利用者にリカバリーコードを書かない（#247）。
+    it('409になった要求の後にRecoveryCodeの行が増えない', async () => {
+      const userId = uniqueUserId();
+      const first = await postRegister(base, {
+        userId,
+        password: 'first-password',
+        displayName: '先',
+      });
+      expect(first.status).toBe(201);
+      const before = await prisma.recoveryCode.count();
+
+      const second = await postRegister(base, {
+        userId: userId.toUpperCase(),
+        password: 'second-password',
+        displayName: '後',
+      });
+      expect(second.status).toBe(409);
+
+      expect(await prisma.recoveryCode.count()).toBe(before);
+    });
   });
 
   describe('入力が仕様に合わない', () => {
