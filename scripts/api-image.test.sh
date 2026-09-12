@@ -4,7 +4,7 @@
 # 1. マイグレーション用（migrate）のイメージを、空の PostgreSQL 17 に適用できる
 # 2. 実行用（runtime）のイメージが起動し、/api/health が 200 を返す
 # 3. 実行用のイメージのログが、1行1件の JSON で標準出力に出る（要件定義書 4.6）。標準エラーには何も出さない
-# 4. どちらのイメージにも、秘密を置くファイル（.env と .env.*。.env.example を除く）・テストのコード・`src/` 配下のソース・開発依存（代表として vitest と @nestjs/testing）が入っていない
+# 4. どちらのイメージにも、秘密を置くファイル（.env と .env.*。.env.example を除く）・テストのコード・`src/` 配下のソース・--omit=dev を落とすと入る開発依存（代表として vitest と @nestjs/testing）が入っていない
 # 5. どちらのイメージも root で動かない
 # 6. 実行用のイメージの中で api の依存が解決される版が、package-lock.json の版と同じである
 #
@@ -96,7 +96,7 @@ while IFS= read -r line; do
     fail "JSON でないログの行がある: $line"
 done <<<"$stdout"
 
-echo "== 4. どちらのイメージにも .env・テストのコード・\`src/\` 配下のソース・開発依存（代表として vitest と @nestjs/testing）が入っていない"
+echo "== 4. どちらのイメージにも .env・テストのコード・\`src/\` 配下のソース・--omit=dev を落とすと入る開発依存（代表として vitest と @nestjs/testing）が入っていない"
 # 本番のタスクとして動く2つのイメージに同じ検査を当てる（#277。マイグレーション用だけ弱くしない）。
 # 開発依存の代表として、テストの実行に要る vitest と @nestjs/testing が無いことを見る（--omit=dev を落とすと入る）。
 # 調べる側（docker run・find）の失敗は名指しして止める——代入をパイプにせず（pipefail と set -e で無言に抜ける）、
