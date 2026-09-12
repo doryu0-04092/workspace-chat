@@ -1,8 +1,9 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
 import type { ErrorResponse } from '../error-response';
-import { Prisma } from '../generated/prisma/client';
+import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
+import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { canonicalRecoveryCode, generateRecoveryCode } from './recovery-code';
 import { hashSecret } from './secret-hash';
 
@@ -36,14 +37,11 @@ export class RegisterService {
           passwordHash,
           recoveryCodes: { create: { codeHash } },
         },
-        select: { id: true, loginId: true, displayName: true },
+        select: USER_SUMMARY_SELECT,
       });
-      return {
-        user: { id: user.id, userId: user.loginId, displayName: user.displayName },
-        recoveryCode,
-      };
+      return { user: toUserSummary(user), recoveryCode };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      if (isUniqueViolation(error)) {
         throw new ConflictException({
           code: 'user_id_taken',
           message: 'このユーザーID は使えません',

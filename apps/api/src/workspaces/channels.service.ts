@@ -5,8 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
-import { Prisma } from '../generated/prisma/client';
+import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
+import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { CHANNEL_NAME_TAKEN, NOT_A_CHANNEL_MEMBER } from './channel-errors';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { OWNER_ONLY } from './workspace-errors';
@@ -61,9 +62,7 @@ export class ChannelsService {
         return { ...channel, joined: true };
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException(CHANNEL_NAME_TAKEN);
-      }
+      if (isUniqueViolation(error)) throw new ConflictException(CHANNEL_NAME_TAKEN);
       throw error;
     }
   }
@@ -125,17 +124,9 @@ export class ChannelsService {
     }
     const rows = await this.prisma.channelMember.findMany({
       where: { channelId, membership: { user: { deletedAt: null } } },
-      select: {
-        membership: {
-          select: { user: { select: { id: true, loginId: true, displayName: true } } },
-        },
-      },
+      select: { membership: { select: { user: { select: USER_SUMMARY_SELECT } } } },
       orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
     });
-    return rows.map(({ membership: { user } }) => ({
-      id: user.id,
-      userId: user.loginId,
-      displayName: user.displayName,
-    }));
+    return rows.map(({ membership: { user } }) => toUserSummary(user));
   }
 }
