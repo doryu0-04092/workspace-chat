@@ -129,16 +129,21 @@ describe('例外フィルタの 429 の記録', () => {
   });
 
   it.each([
-    ['RetryAfterException（アカウント単位）', new RetryAfterException(7)],
-    ['HttpException の 429（発信元単位のガード）', new HttpException(errorBodyForStatus(429), 429)],
+    ['RetryAfterException（アカウント単位）', new RetryAfterException(7), 'account'],
+    [
+      'HttpException の 429（発信元単位のガード）',
+      new HttpException(errorBodyForStatus(429), 429),
+      'ip',
+    ],
   ])(
-    '%s を rate_limit_exceeded として、発信元とパスとともに warn で記録する',
-    (_name, exception) => {
+    '%s を rate_limit_exceeded として、制限の種類・発信元・パスとともに warn で記録する',
+    (_name, exception, limit) => {
       const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       const { host } = fakeHost();
       new ErrorResponseFilter().catch(exception, host);
       expect(warned).toHaveBeenCalledWith({
         event: 'rate_limit_exceeded',
+        limit,
         ip: '198.51.100.7',
         path: '/api/auth/login',
       });

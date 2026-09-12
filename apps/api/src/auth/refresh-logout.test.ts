@@ -381,7 +381,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       ).toBe(204);
     });
 
-    it('上限の超過を、発信元とパスとともに記録する', async () => {
+    it('上限の超過を、制限の種類（ip）・発信元・パスとともに記録する', async () => {
       const ip = nextIp();
       const before = logger.lines.length;
       for (let i = 0; i <= LIMIT; i += 1) {
@@ -391,6 +391,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       expect(line).toBeDefined();
       expect(line).toContain('/api/auth/refresh');
       expect(line).toContain(ip);
+      expect(line).toContain('"limit":"ip"');
     });
 
     it('入れ替え済みのトークンの再利用を、系列と利用者の ID で記録し、トークンは載せない', async () => {
