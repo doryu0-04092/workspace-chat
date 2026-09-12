@@ -74,7 +74,7 @@ export type BearerErrorResponse = ErrorResponse & {
 /**
  * Bearer のアクセストークンで守るルートの 401。**`WWW-Authenticate` は ErrorResponseFilter が付ける**（投げる経路ごとに付けない。
  * RFC 6750 3）。入口（AccessTokenGuard）で投げても、入口の後（退会したばかりの利用者をサービスが引けなかった）で投げても同じ形になる。
- * トークンが無い → `Bearer`（RFC 6750 3.1「SHOULD NOT include an error code」）、使えない → `Bearer error="invalid_token"`。
+ * Authorization ヘッダーが無い・Bearer 方式でない → `Bearer`（RFC 6750 3.1「SHOULD NOT include an error code」）、Bearer 方式で資格情報が無い・使えない → `Bearer error="invalid_token"`。
  */
 export class BearerUnauthorizedException extends UnauthorizedException {
   readonly challenge: string;

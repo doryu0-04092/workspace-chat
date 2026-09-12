@@ -635,7 +635,7 @@ components:
       headers:
         WWW-Authenticate:
           description: >-
-            トークンが無いときは `Bearer`、使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1）
+            Authorization ヘッダーが無い・Bearer 方式でないときは `Bearer`、Bearer 方式で資格情報が無い・使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1）
           schema:
             type: string
       content:

@@ -510,7 +510,7 @@ export interface components {
         /** @description Authorization ヘッダーが無い、または Bearer 方式でない（authentication_required）か、 Bearer 方式で資格情報が無い・壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
         Unauthorized: {
             headers: {
-                /** @description トークンが無いときは `Bearer`、使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1） */
+                /** @description Authorization ヘッダーが無い・Bearer 方式でないときは `Bearer`、Bearer 方式で資格情報が無い・使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1） */
                 "WWW-Authenticate"?: string;
                 [name: string]: unknown;
             };
