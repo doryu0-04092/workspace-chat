@@ -7,6 +7,7 @@ import { RealtimeEmitter } from './realtime.emitter';
 import { RealtimeGateway } from './realtime.gateway';
 import { RealtimeRooms } from './realtime-rooms';
 import { createRealtimeValkeyClients, REALTIME_VALKEY_CLIENTS } from './realtime-valkey';
+import { RoomMembershipReconciler } from './room-membership-reconciler';
 
 /** リアルタイム配信（F-16）。Socket.IO のサーバーの設定は createApp が RealtimeIoAdapter で当てる。 */
 @Module({
@@ -15,6 +16,7 @@ import { createRealtimeValkeyClients, REALTIME_VALKEY_CLIENTS } from './realtime
     RealtimeGateway,
     RealtimeEmitter,
     RealtimeRooms,
+    RoomMembershipReconciler,
     MetricsWriter,
     {
       provide: REALTIME_VALKEY_CLIENTS,

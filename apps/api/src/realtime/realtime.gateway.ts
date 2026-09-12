@@ -20,6 +20,12 @@ export function channelRoom(channelId: string): string {
   return `channel:${channelId}`;
 }
 
+/** 部屋の名前がチャンネルの部屋なら、そのチャンネルの ID（`channelRoom` の逆）。 */
+export function channelIdOfRoom(room: string): string | undefined {
+  const prefix = channelRoom('');
+  return room.startsWith(prefix) ? room.slice(prefix.length) : undefined;
+}
+
 export type RealtimeSocket = Socket & { data: { user?: AuthenticatedUser } };
 
 /** 断ったときにクライアントの `connect_error` の `data` に載る値。HTTP の 401 の `code` と同じ綴り（仕様の列挙から取る）。 */
