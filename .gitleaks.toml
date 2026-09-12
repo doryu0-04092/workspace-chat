@@ -1,5 +1,5 @@
 # gitleaks の設定（.github/workflows/audit.yml の「秘密の値がソースに書かれていないかの検査」）。
-# 既定の規則をそのまま使う。
+# 既定の規則をそのまま使う。誤検知で allowlist に行を足すときの扱いは、同じステップのコメント（代償の段）に記す。
 [extend]
 useDefault = true
 
