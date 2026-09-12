@@ -860,6 +860,7 @@
 - イベント定義の型がフロントエンドとバックエンドで共有されている（2箇所に書かない）
 - **サーバーが自発的に配るイベントの payload には送信時刻を載せる**（要求への応答〔acknowledgement〕・`@here` の受け取りの返事は含まない。[要件定義書](requirements.md) 4.6 の配信遅延をメトリクスにするため。決定・2026-09-12・#287。
   型は payload の型と一緒に、その機能の実装で足す——`packages/shared/src/realtime-events.ts`）
+- **WebSocket の接続と切断を、構造化ログとメトリクスの両方で記録する**——構造化ログは `websocket_connected` / `websocket_disconnected`（利用者の ID と切断の理由を載せ、トークンは載せない）、メトリクスは CloudWatch の埋め込みメトリクス形式（EMF）の `WebSocketConnections`（タスクごとの現在の接続数）・`WebSocketConnects` / `WebSocketDisconnects`（回数。切断率はこの比から取る）（[要件定義書](requirements.md) 4.6。決定・2026-09-12・依頼側。#287・#311。`apps/api/src/realtime/realtime.gateway.ts`）
 
 > **WebSocket は同一オリジンポリシーの対象外であり、CORS でも守られない。**
 > Socket.IO の `cors` オプションが効くのは HTTP long-polling のみである。
