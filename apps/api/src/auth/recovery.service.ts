@@ -56,12 +56,6 @@ export class RecoveryService {
       await this.backoff.recordFailure(key, Date.now());
       throw new UnauthorizedException(INVALID_CREDENTIALS);
     }
-    // 成功は本人の正規の切り替えであり、それ以前のログインの失敗は新しいパスワードへの総当たりの証拠にならない（#280）。
-    await Promise.all([
-      this.backoff.reset(key),
-      this.backoff.reset(accountBackoffKey('login', input.userId)),
-    ]);
-
     const { id: userId, codeId } = row;
     const recoveryCode = generateRecoveryCode();
     const [passwordHash, codeHash] = await Promise.all([
@@ -84,6 +78,12 @@ export class RecoveryService {
       return true;
     });
     if (!recovered) throw new UnauthorizedException(INVALID_CREDENTIALS);
+    // 数え直すのは、パスワードを入れ替えた後だけ。入れ替えなかった経路（無効化が 0 件で 401）では数え直さない。
+    // 成功は本人の正規の切り替えであり、それ以前のログインの失敗は新しいパスワードへの総当たりの証拠にならない（#280）。
+    await Promise.all([
+      this.backoff.reset(key),
+      this.backoff.reset(accountBackoffKey('login', input.userId)),
+    ]);
     return { recoveryCode };
   }
 }

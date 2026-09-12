@@ -267,8 +267,12 @@ describe('POST /api/auth/recovery（F-37）', () => {
     // 総当たりの証拠にならない（決定・2026-09-12・依頼側。#280）。数え直さないと、復旧した直後に最大 15 分ログインできない。
     it('再設定に成功したら、ログインの失敗の回数も数え直す（直後に新しいパスワードでログインできる）', async () => {
       const user = await register();
-      for (let i = 0; i < 3; i += 1) {
-        await post('login', { userId: user.userId, password: 'wrong-password' });
+      // 失敗を実際に3回数えさせる（待ち時間の間は照合に進まず数えられないため、1 秒・2 秒の待ち時間を越えて送る）。
+      // 3回目の後の待ち時間は 4 秒で、下の再設定とログインはその中に収まる。
+      for (const waitMs of [0, 1_100, 2_100]) {
+        await sleep(waitMs);
+        const failed = await post('login', { userId: user.userId, password: 'wrong-password' });
+        expect(failed.status).toBe(401);
       }
       const res = await post('recovery', {
         userId: user.userId,
