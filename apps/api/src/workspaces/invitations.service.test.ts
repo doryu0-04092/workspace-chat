@@ -5,7 +5,7 @@ import { InvitationsService } from './invitations.service';
 
 /**
  * 一意制約違反（Prisma の P2002）を捕まえて 409 にする経路を、DB の応答を差し替えて決まった形で起こす。
- * 実際の DB に同時に送る検査は、要求が実際に重なった回でしか一意制約違反を踏まない
+ * 実際の DB を使う検査は、作成の前に SELECT で確かめる形へ変えても、要求が重ならなければ落ちない
  * （session.service.test.ts・channels.service.test.ts と同じ形。#355）。
  */
 function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
