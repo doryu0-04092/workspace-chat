@@ -7,3 +7,11 @@ import { Prisma } from './generated/prisma/client';
 export function isUniqueViolation(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
+
+/**
+ * 外部キーの違反（Prisma の P2003）。**不変条件は DB の外部キーが持ち、ここは参照先が同時に消えたこと
+ * （例: 参加を作る間に、その利用者がワークスペースから外れた）を応答に写すためだけに使う。**
+ */
+export function isForeignKeyViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003';
+}

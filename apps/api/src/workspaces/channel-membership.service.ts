@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
-import { Prisma } from '../generated/prisma/client';
+import { isForeignKeyViolation, isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import {
   ALREADY_CHANNEL_MEMBER,
@@ -52,9 +52,9 @@ export class ChannelMembershipService {
     try {
       await this.prisma.channelMember.create({ data: { channelId, workspaceId, userId } });
     } catch (error) {
-      if (isKnown(error, 'P2002')) throw new ConflictException(ALREADY_CHANNEL_MEMBER);
+      if (isUniqueViolation(error)) throw new ConflictException(ALREADY_CHANNEL_MEMBER);
       // 同時にワークスペースから外れた（参加は Membership への外部キーを持つ）。
-      if (isKnown(error, 'P2003')) throw new NotFoundException();
+      if (isForeignKeyViolation(error)) throw new NotFoundException();
       throw error;
     }
   }
@@ -103,9 +103,9 @@ export class ChannelMembershipService {
         data: { channelId, workspaceId, userId: memberId },
       });
     } catch (error) {
-      if (isKnown(error, 'P2002')) throw new ConflictException(ALREADY_CHANNEL_MEMBER);
+      if (isUniqueViolation(error)) throw new ConflictException(ALREADY_CHANNEL_MEMBER);
       // 宛先が同時にワークスペースから外れた。
-      if (isKnown(error, 'P2003'))
+      if (isForeignKeyViolation(error))
         throw new UnprocessableEntityException(CHANNEL_INVITEE_NOT_FOUND);
       throw error;
     }
@@ -147,8 +147,4 @@ export class ChannelMembershipService {
       joined: row.members.length > 0,
     };
   }
-}
-
-function isKnown(error: unknown, code: string): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === code;
 }
