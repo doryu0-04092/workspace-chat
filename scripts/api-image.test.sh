@@ -4,8 +4,8 @@
 # 1. マイグレーション用（migrate）のイメージを、空の PostgreSQL 17 に適用できる
 # 2. 実行用（runtime）のイメージが起動し、/api/health が 200 を返す
 # 3. 実行用のイメージのログが、1行1件の JSON で標準出力に出る（要件定義書 4.6）。標準エラーには何も出さない
-# 4. 実行用のイメージに、秘密を置くファイル（.env と .env.*。.env.example を除く）とテストのコードが入っていない。マイグレーション用のイメージにも入っていない
-# 5. 実行用のイメージは root で動かない
+# 4. どちらのイメージにも、秘密を置くファイル（.env と .env.*。.env.example を除く）・テストのコード・ソース・開発依存が入っていない
+# 5. どちらのイメージも root で動かない
 # 6. 実行用のイメージの中で api の依存が解決される版が、package-lock.json の版と同じである
 #
 # Docker が動いていることが前提。作ったコンテナとネットワークは終わりに消す（イメージは残す）。
@@ -92,19 +92,23 @@ while IFS= read -r line; do
     fail "JSON でないログの行がある: $line"
 done <<<"$stdout"
 
-echo "== 4. 実行用のイメージに .env とテストのコードが入っていない"
-leaked=$(docker run --rm --entrypoint sh "$runtime_image" -c \
-  'find /app -name node_modules -prune -o \( \( -name ".env*" ! -name ".env.example" \) -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print' |
-  head -n 5)
-[ -z "$leaked" ] || fail "イメージに入れないはずのファイルがある: $leaked"
-leaked_env=$(docker run --rm --entrypoint sh "$migrate_image" -c 'find /app -name node_modules -prune -o \( -name ".env*" ! -name ".env.example" \) -print' | head -n 5)
-[ -z "$leaked_env" ] || fail "マイグレーション用のイメージに .env がある: $leaked_env"
+echo "== 4. どちらのイメージにも .env・テストのコード・ソース・開発依存が入っていない"
+# 本番のタスクとして動く2つのイメージに同じ検査を当てる（#277。マイグレーション用だけ弱くしない）。
+# 開発依存の代表として、テストの実行に要る vitest と @nestjs/testing が無いことを見る（--omit=dev を落とすと入る）。
+for image in "$runtime_image" "$migrate_image"; do
+  leaked=$(docker run --rm --entrypoint sh "$image" -c \
+    'find /app -name node_modules -prune -o \( \( -name ".env*" ! -name ".env.example" \) -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print; ls -d /app/node_modules/vitest /app/node_modules/@nestjs/testing 2>/dev/null || true' |
+    head -n 5)
+  [ -z "$leaked" ] || fail "$image に入れないはずのファイルがある: $leaked"
+done
 
-echo "== 5. 実行用のイメージは root で動かない"
-user=$(docker inspect --format "{{.Config.User}}" "$runtime_image")
-if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "0" ]; then
-  fail "実行用のイメージの利用者が root である（${user:-未指定}）"
-fi
+echo "== 5. どちらのイメージも root で動かない"
+for image in "$runtime_image" "$migrate_image"; do
+  user=$(docker inspect --format "{{.Config.User}}" "$image")
+  if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "0" ]; then
+    fail "$image の利用者が root である（${user:-未指定}）"
+  fi
+done
 
 echo "== 6. イメージの中で api の依存が解決される版が、package-lock.json と同じ"
 # 名前の一覧は apps/api/package.json の dependencies（ワークスペースの @workspace-chat/* を除く）。

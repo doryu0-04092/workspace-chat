@@ -5,7 +5,7 @@
 #
 # 段:
 #   runtime … api を動かす。本番の依存だけを持つ
-#   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクで使う）。prisma の CLI（開発依存）を持つ
+#   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクで使う）。本番の依存とスキーマだけを持つ
 #
 # 起動に要る環境変数は README「動かす」と apps/api/src/config/api-config.ts にある。**イメージに値を焼き込まない**
 # （.dockerignore が .env を文脈から外す）。scripts/api-image.test.sh が、実際に作って動かして確かめる。
@@ -44,7 +44,17 @@ COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --no-audit --no-fund
 
-FROM build AS migrate
+# マイグレーション用の段は build 段を継がない（#277）。build 段はソース・テストのコード・開発依存を全部持ち、それが本番の
+# タスクとして動くことになる。prod-deps の /app に、prisma.config.ts（接続先を DATABASE_URL から読む）とスキーマ・マイグレーションだけを足す。
+# prisma の CLI は prod-deps に入っている——@prisma/client が peerDependencies に持ち（任意）、package-lock.json で devOptional のため
+# --omit=dev でも lock の版で入る。ここで npm install しない（lock と違う版に解決される経路を作らない）。
+# 踏むと壊れる: @prisma/client が prisma を peer から外すと CLI が消える。scripts/api-image.test.sh の 1 が落ちて気づく。
+FROM ${NODE_IMAGE} AS migrate
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=prod-deps /app ./
+COPY prisma.config.ts ./
+COPY apps/api/prisma apps/api/prisma
 USER node
 CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
 
