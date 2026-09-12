@@ -80,9 +80,9 @@ export class AccessTokenResolver {
 /**
  * **すべてのルートに既定で掛かる**（AuthModule が APP_GUARD として登録する）。`@Public()` のルートだけを通す。
  *
- * - Authorization ヘッダーに Bearer のトークンが無い → 401（authentication_required。`WWW-Authenticate` は BearerUnauthorizedException を受けた例外フィルタが付ける。
+ * - Authorization ヘッダーが無い、または Bearer 方式でない → 401（authentication_required。`WWW-Authenticate` は BearerUnauthorizedException を受けた例外フィルタが付ける。
  *   RFC 6750 3.1「If the request lacks any authentication information … SHOULD NOT include an error code」）
- * - トークンの署名・期限・形が合わない、または利用者が退会済み → 401（invalid_token。`Bearer error="invalid_token"`）
+ * - Bearer 方式で資格情報が無い・壊れている・期限切れ、または利用者が退会済み → 401（invalid_token。`Bearer error="invalid_token"`）
  * - **退会済みはトークンから利用者を解決する時点で落とす**（機能一覧 1.4 の2段目。#90）。発行済みのアクセストークンは
  *   退会しても署名も期限も有効なままであり、ここで落とさないと書き込みが通る。問い合わせ側の `deletedAt IS NULL`（1段目）とは別に持つ
  *
