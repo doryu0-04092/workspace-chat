@@ -37,8 +37,9 @@ datasource db {
 // `pretypecheck` / `prebuild`）。CI はその両方を実行するため、
 // **生成器の設定が壊れていれば CI で落ちる。**
 //
-// `postinstall` に置かない。`prisma` は開発依存であり、`npm ci --omit=dev` でも
-// `postinstall` は走るため、**開発依存を入れない構成ではインストール自体が失敗する。**
+// `postinstall` に置かない。`npm ci --omit=dev`（apps/api/Dockerfile の prod-deps の段）でも `postinstall` は走る。
+// `prisma` の CLI 自体は `@prisma/client` の任意の peer として lock 上 devOptional であり `--omit=dev` でも入るが、
+// **依存を入れるだけの段で生成物を作ることになり、生成器の設定の失敗が install の失敗として出る。**
 // 代償: `npm ci` しただけでは生成物ができない。**型を使う前に typecheck か build を
 // 一度通す必要がある。** 生成を build の一部と見なす、という整理である。
 generator client {
