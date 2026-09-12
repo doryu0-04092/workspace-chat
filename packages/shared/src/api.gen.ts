@@ -143,7 +143,7 @@ export interface paths {
         head?: never;
         /**
          * 自分のプロフィールの編集（F-04）
-         * @description 送った項目だけを変える。ユーザーID は変えられない（本体に userId を含めると 400。機能一覧 1.3）。 ステータスの絵文字とテキストは、null を送ると消える。
+         * @description 送った項目だけを変える。ユーザーID は変えられない（本体に userId を含めると 400。機能一覧 1.3）。 ステータスは絵文字とテキストの1セットで、null を送ると消える。
          */
         patch: operations["updateMyProfile"];
         trace?: never;
@@ -225,16 +225,21 @@ export interface components {
             userId: string;
             displayName: string;
             avatarUrl: string | null;
-            statusEmoji: string | null;
-            statusText: string | null;
+            /** @description 絵文字とテキストの1セット。設定していなければ null（機能一覧 1.3） */
+            status: components["schemas"]["Status"] | null;
+        };
+        /** @description ステータス（機能一覧 1.3）。絵文字とテキストは1セットであり、片方だけは持たない（決定・2026-09-12・依頼側。#283） */
+        Status: {
+            /** @description 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色や ZWJ で繋いだ列・国旗も1つと数える）。 この形は pattern で表せないため、api が確かめて 400（validation_failed）を返す */
+            emoji: string;
+            /** @description 1〜100文字（文字数はコードポイントで数える） */
+            text: string;
         };
         UpdateProfileRequest: {
             /** @description 1〜50文字。空白だけは不可（RegisterRequest と同じ） */
             displayName?: string;
-            /** @description 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色や ZWJ で繋いだ列・国旗も1つと数える）。 この形は pattern で表せないため、api が確かめて 400（validation_failed）を返す。null で消す。 数え方と、テキストと片方だけ設定できるかは依頼側の判断を経ていない（#283） */
-            statusEmoji?: string | null;
-            /** @description 1〜100文字（文字数はコードポイントで数える。機能一覧 1.3）。null で消す */
-            statusText?: string | null;
+            /** @description 絵文字とテキストの1セットで設定する。null で消す（片方だけの本体は 400） */
+            status?: components["schemas"]["Status"] | null;
         };
         HealthResponse: {
             /** @enum {string} */

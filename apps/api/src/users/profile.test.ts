@@ -103,8 +103,7 @@ describe('GET・PATCH /api/users/me（F-04）', () => {
       userId: loginId,
       displayName: '最初の名前',
       avatarUrl: null,
-      statusEmoji: null,
-      statusText: null,
+      status: null,
     });
   });
 
@@ -116,30 +115,56 @@ describe('GET・PATCH /api/users/me（F-04）', () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as Profile).displayName).toBe('新しい名前');
 
-    const status = await patchMe(authorization, { statusEmoji: '🍵', statusText: '休憩中' });
+    const status = await patchMe(authorization, { status: { emoji: '🍵', text: '休憩中' } });
     expect(status.status).toBe(200);
     expect((await status.json()) as Profile).toMatchObject({
       displayName: '新しい名前',
-      statusEmoji: '🍵',
-      statusText: '休憩中',
+      status: { emoji: '🍵', text: '休憩中' },
     });
     expect((await (await getMe(authorization)).json()) as Profile).toMatchObject({
       displayName: '新しい名前',
-      statusEmoji: '🍵',
-      statusText: '休憩中',
+      status: { emoji: '🍵', text: '休憩中' },
     });
     // 他の利用者の行は変わらない。
     expect((await row(other.id)).displayName).toBe('最初の名前');
     expect((await row(id)).displayName).toBe('新しい名前');
   });
 
-  it('ステータスの絵文字とテキストは、null を送ると消える', async () => {
+  // 機能一覧 1.3: 絵文字とテキストは1セット（決定・2026-09-12・依頼側。#283）。
+  it('ステータスは絵文字とテキストの1セットで、null を送ると両方消える', async () => {
     const { authorization, id } = await login();
-    await patchMe(authorization, { statusEmoji: '🍵', statusText: '休憩中' });
+    await patchMe(authorization, { status: { emoji: '🍵', text: '休憩中' } });
+    expect(await row(id)).toMatchObject({ statusEmoji: '🍵', statusText: '休憩中' });
 
-    const res = await patchMe(authorization, { statusEmoji: null, statusText: null });
+    const res = await patchMe(authorization, { status: null });
     expect(res.status).toBe(200);
+    expect(((await res.json()) as Profile).status).toBeNull();
     expect(await row(id)).toMatchObject({ statusEmoji: null, statusText: null });
+  });
+
+  it.each([
+    ['絵文字だけ', { emoji: '🍵' }],
+    ['テキストだけ', { text: '休憩中' }],
+    ['絵文字が null', { emoji: null, text: '休憩中' }],
+    ['空のオブジェクト', {}],
+  ])('ステータスの片方が欠けた本体（%s）は 400 で、何も変えない', async (_label, status) => {
+    const { authorization, id } = await login();
+    const res = await patchMe(authorization, { status, displayName: '変える' });
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as ErrorResponse).code).toBe('validation_failed');
+    expect(await row(id)).toMatchObject({
+      displayName: '最初の名前',
+      statusEmoji: null,
+      statusText: null,
+    });
+  });
+
+  it('絵文字とテキストを別々の項目（statusEmoji / statusText）で送る形は受け付けない', async () => {
+    const { authorization } = await login();
+    expect((await patchMe(authorization, { statusEmoji: '🍵', statusText: '休憩中' })).status).toBe(
+      400,
+    );
   });
 
   // 機能一覧 1.3「ユーザーID は変更できない」。
@@ -173,10 +198,10 @@ describe('GET・PATCH /api/users/me（F-04）', () => {
 
   // 機能一覧 1.3「ステータスは絵文字1つとテキスト（最大100文字）で構成される」。
   describe('ステータス', () => {
-    it.each(['😀', '👍🏽', '👨‍👩‍👧', '🇯🇵', '#️⃣'])('絵文字1つ（%s）は通る', async (statusEmoji) => {
+    it.each(['😀', '👍🏽', '👨‍👩‍👧', '🇯🇵', '#️⃣'])('絵文字1つ（%s）は通る', async (emoji) => {
       const { authorization, id } = await login();
-      expect((await patchMe(authorization, { statusEmoji })).status).toBe(200);
-      expect((await row(id)).statusEmoji).toBe(statusEmoji);
+      expect((await patchMe(authorization, { status: { emoji, text: 'x' } })).status).toBe(200);
+      expect((await row(id)).statusEmoji).toBe(emoji);
     });
 
     it.each([
@@ -185,25 +210,26 @@ describe('GET・PATCH /api/users/me（F-04）', () => {
       ['絵文字2つ', '😀😀'],
       ['絵文字と文字', '😀a'],
       ['空文字', ''],
-    ])(
-      '絵文字1つでないもの（%s）は 400 で、落ちた項目を返し、変えない',
-      async (_label, statusEmoji) => {
-        const { authorization, id } = await login();
-        const res = await patchMe(authorization, { statusEmoji, displayName: '変える' });
+    ])('絵文字1つでないもの（%s）は 400 で、落ちた項目を返し、変えない', async (_label, emoji) => {
+      const { authorization, id } = await login();
+      const res = await patchMe(authorization, {
+        status: { emoji, text: 'x' },
+        displayName: '変える',
+      });
 
-        expect(res.status).toBe(400);
-        const body = (await res.json()) as ErrorResponse;
-        expect(body.code).toBe('validation_failed');
-        expect(body.errors?.map((e) => e.path)).toEqual(['/body/statusEmoji']);
-        expect(await row(id)).toMatchObject({ displayName: '最初の名前', statusEmoji: null });
-      },
-    );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as ErrorResponse;
+      expect(body.code).toBe('validation_failed');
+      expect(body.errors?.map((e) => e.path)).toEqual(['/body/status/emoji']);
+      expect(await row(id)).toMatchObject({ displayName: '最初の名前', statusEmoji: null });
+    });
 
     it('テキストは 100 文字（絵文字 100 個）まで通り、101 文字と空文字は 400', async () => {
       const { authorization, id } = await login();
-      expect((await patchMe(authorization, { statusText: '😀'.repeat(100) })).status).toBe(200);
-      expect((await patchMe(authorization, { statusText: '😀'.repeat(101) })).status).toBe(400);
-      expect((await patchMe(authorization, { statusText: '' })).status).toBe(400);
+      const withText = (text: string) => patchMe(authorization, { status: { emoji: '😀', text } });
+      expect((await withText('😀'.repeat(100))).status).toBe(200);
+      expect((await withText('😀'.repeat(101))).status).toBe(400);
+      expect((await withText('')).status).toBe(400);
       expect((await row(id)).statusText).toBe('😀'.repeat(100));
     });
   });
