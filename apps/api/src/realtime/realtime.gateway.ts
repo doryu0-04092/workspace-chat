@@ -45,7 +45,7 @@ export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnecti
   server!: Server;
 
   private readonly logger = new Logger('RealtimeGateway');
-  /** このタスクで確立している接続の数（他のタスクの分は含まない。CloudWatch 側で合計する）。 */
+  /** このタスクで確立している接続の数（他のタスクの分は含まない。合計は取れない——logging/metrics.ts の次元の注記）。 */
   private connections = 0;
 
   constructor(

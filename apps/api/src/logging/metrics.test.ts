@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { captureOutput } from '../testing/captured-output';
 import { METRIC_NAMESPACE, MetricsWriter, emfDocument } from './metrics';
 
 // CloudWatch の埋め込みメトリクス形式（EMF）の仕様（AWS の文書「Specification: Embedded metric format」）に沿った1行を作る。
@@ -35,16 +36,13 @@ describe('EMF の文書', () => {
 
 describe('MetricsWriter', () => {
   it('標準出力に1行の JSON として書き、末尾に改行を付ける', () => {
-    const written: string[] = [];
-    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
-      written.push(String(chunk));
-      return true;
-    }) as typeof process.stdout.write);
+    const captured = captureOutput();
     try {
       new MetricsWriter().write([{ name: 'WebSocketConnections', unit: 'Count', value: 0 }]);
     } finally {
-      spy.mockRestore();
+      captured.restore();
     }
+    const written = captured.chunks;
     expect(written).toHaveLength(1);
     expect(written[0]!.endsWith('\n')).toBe(true);
     expect(written[0]!.slice(0, -1)).not.toContain('\n');

@@ -12,6 +12,7 @@ import { AccessTokenResolver } from '../auth/access-token.guard';
 import { hashSecret } from '../auth/secret-hash';
 import { PrismaService } from '../prisma.service';
 import { TEST_WEB_ORIGIN, stubApiEnv } from '../testing/api-env';
+import { captureOutput } from '../testing/captured-output';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
 import { startValkey } from '../testing/valkey';
 import { RealtimeEmitter } from './realtime.emitter';
@@ -315,32 +316,15 @@ describe('Socket.IO の接続の入口（F-16）', () => {
 
     it('接続のたびに、EMF の1行（接続数と接続の回数）を標準出力に出す', async () => {
       const { token } = await login();
-      const written: string[] = [];
-      const original = process.stdout.write.bind(process.stdout);
-      const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((
-        chunk: unknown,
-        ...rest: unknown[]
-      ) => {
-        written.push(String(chunk));
-        return (original as (...args: unknown[]) => boolean)(chunk, ...rest);
-      }) as typeof process.stdout.write);
+      const captured = captureOutput();
       try {
         await open(firstBase, { token });
         await new Promise((resolve) => setTimeout(resolve, 200));
       } finally {
-        spy.mockRestore();
+        captured.restore();
       }
-      const emf = written
-        .flatMap((chunk) => chunk.split('\n'))
-        .filter((line) => line.startsWith('{'))
-        .map(
-          (line) =>
-            JSON.parse(line) as {
-              _aws?: unknown;
-              WebSocketConnections?: number;
-              WebSocketConnects?: number;
-            },
-        )
+      const emf = captured
+        .jsonLines<{ _aws?: unknown; WebSocketConnections?: number; WebSocketConnects?: number }>()
         .find((doc) => doc._aws !== undefined && doc.WebSocketConnects === 1);
       expect(emf).toBeDefined();
       expect(emf?.WebSocketConnections).toBeGreaterThanOrEqual(1);

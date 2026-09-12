@@ -9,7 +9,8 @@ import { Injectable } from '@nestjs/common';
  *   `Metrics[].Name` と同じ名前の最上位の数値が値になる。「The root node MAY contain any other members」）
  * - ログの行と同じく `level` と `message` を持たせる（要件定義書 4.6「ログは構造化 JSON」。logging.test.ts が全行に求める形）
  * - **次元（Dimensions）は置かない**（空の DimensionSet）。次元の組み合わせごとにメトリクスが増えて課金されるため（同仕様の注意）。
- *   タスクをまたいだ合計として見る
+ *   **代償: 全タスクの値が1つのメトリクスに混ざる。** 回数（`WebSocketConnects` など）は Sum で合計になるが、
+ *   現在値（`WebSocketConnections`）はタスクごとの値であり、Sum は書いた回数だけ重なって合計にならない（Maximum で「最も多いタスクの値」まで）
  * - **ログの出力先が CloudWatch Logs でないとメトリクスにならない**（手元では JSON の行が出るだけ）。ECS の awslogs ドライバが前提
  */
 
