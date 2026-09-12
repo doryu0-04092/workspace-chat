@@ -15,7 +15,6 @@ import {
   CHANNEL_NOT_PRIVATE,
   NOT_A_CHANNEL_MEMBER,
 } from './channel-errors';
-import { OWNER_ONLY } from './workspace-errors';
 import { WorkspacesService } from './workspaces.service';
 
 export type InviteChannelMemberRequest =
@@ -122,8 +121,7 @@ export class ChannelMembershipService {
     channelId: string,
     memberId: string,
   ): Promise<void> {
-    const requester = await this.workspaces.membershipOf(ownerId, workspaceId);
-    if (requester.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
+    await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
     const { count } = await this.prisma.channelMember.deleteMany({
       where: { channelId, workspaceId, userId: memberId },
     });
