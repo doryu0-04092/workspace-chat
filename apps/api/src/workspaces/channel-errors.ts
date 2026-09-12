@@ -27,6 +27,12 @@ export const CHANNEL_ARCHIVED: ErrorResponse = {
   message: 'アーカイブ済みのチャンネルです',
 };
 
+/** アーカイブしていないチャンネルは復元できない（409。機能一覧 3.2）。 */
+export const CHANNEL_NOT_ARCHIVED: ErrorResponse = {
+  code: 'channel_not_archived',
+  message: 'アーカイブしていないチャンネルです',
+};
+
 /** パブリックチャンネルへは招待しない（422。自由に参加できるため。機能一覧 2.2・3.1）。 */
 export const CHANNEL_NOT_PRIVATE: ErrorResponse = {
   code: 'channel_not_private',

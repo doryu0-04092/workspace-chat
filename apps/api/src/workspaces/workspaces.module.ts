@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { ChannelArchiveController } from './channel-archive.controller';
+import { ChannelArchiveService } from './channel-archive.service';
 import { ChannelMembershipController } from './channel-membership.controller';
 import { ChannelMembershipService } from './channel-membership.service';
 import { ChannelsController } from './channels.controller';
@@ -17,7 +19,14 @@ import { WorkspacesService } from './workspaces.service';
     InvitationsController,
     ChannelsController,
     ChannelMembershipController,
+    ChannelArchiveController,
   ],
-  providers: [WorkspacesService, InvitationsService, ChannelsService, ChannelMembershipService],
+  providers: [
+    WorkspacesService,
+    InvitationsService,
+    ChannelsService,
+    ChannelMembershipService,
+    ChannelArchiveService,
+  ],
 })
 export class WorkspacesModule {}

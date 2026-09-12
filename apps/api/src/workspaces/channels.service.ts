@@ -8,14 +8,14 @@ import type { paths } from '@workspace-chat/shared';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
 import { CHANNEL_NAME_TAKEN, NOT_A_CHANNEL_MEMBER } from './channel-errors';
+import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { OWNER_ONLY } from './workspace-errors';
 import { WorkspacesService } from './workspaces.service';
 
 type CreateOperation = paths['/workspaces/{id}/channels']['post'];
 export type CreateChannelRequest = CreateOperation['requestBody']['content']['application/json'];
 export type Channel = CreateOperation['responses'][201]['content']['application/json'];
-export type ManagedChannel =
-  paths['/workspaces/{id}/managed-channels']['get']['responses'][200]['content']['application/json'][number];
+export type { ManagedChannel };
 export type ChannelMember =
   paths['/workspaces/{id}/channels/{channelId}/members']['get']['responses'][200]['content']['application/json'][number];
 
@@ -101,24 +101,10 @@ export class ChannelsService {
     if (membership.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
     const rows = await this.prisma.channel.findMany({
       where: { workspaceId },
-      select: {
-        id: true,
-        name: true,
-        visibility: true,
-        archivedAt: true,
-        _count: {
-          select: { members: { where: { membership: { user: { deletedAt: null } } } } },
-        },
-      },
+      select: MANAGED_CHANNEL_SELECT,
       orderBy: { name: 'asc' },
     });
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      visibility: row.visibility,
-      memberCount: row._count.members,
-      archived: row.archivedAt !== null,
-    }));
+    return rows.map(toManagedChannel);
   }
 
   /**

@@ -789,6 +789,86 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/archive:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    post:
+      operationId: archiveChannel
+      summary: チャンネルのアーカイブ（F-35）
+      description: >-
+        オーナーだけ（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。参加していないプライベートチャンネルもアーカイブできる。
+        アーカイブの時点で名前に番号を付ける（基底名ごとに、その名前がまだ空いている最小の番号。general → general-1）。
+        既に番号を持つチャンネル（復元したもの）は、採番も改名もしない。アーカイブ済みなら 409 channel_archived。
+        アーカイブすると一般の一覧から外れる（機能一覧 3.2）
+      responses:
+        '200':
+          description: アーカイブしたチャンネル（管理用の一覧の項目と同じ形）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedChannel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: オーナーでない（owner_only）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済み（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    post:
+      operationId: restoreChannel
+      summary: チャンネルの復元（F-35）
+      description: >-
+        オーナーだけ（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。復元しても名前と番号は外れない（general-1 のまま）。
+        アーカイブしていなければ 409 channel_not_archived（機能一覧 3.2）
+      responses:
+        '200':
+          description: 復元したチャンネル（管理用の一覧の項目と同じ形）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManagedChannel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: オーナーでない（owner_only）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブしていない（channel_not_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /invitations:
     get:
       operationId: listMyInvitations
@@ -1026,6 +1106,7 @@ components:
             - already_channel_member
             - channel_archived
             - channel_not_private
+            - channel_not_archived
             - request_rejected
             - internal_error
         message:
