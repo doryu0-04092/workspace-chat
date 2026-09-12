@@ -254,11 +254,16 @@ describe('POST /api/auth/login（F-02）', () => {
         401,
       );
 
-      const blocked = await postLogin({ userId: user.userId, password: 'backoff-password' });
+      const ip = nextIp();
+      const blocked = await postLogin({ userId: user.userId, password: 'backoff-password' }, ip);
       expect(blocked.status).toBe(429);
       expect(blocked.headers.get('retry-after')).toBe('1');
       expect(((await blocked.json()) as ErrorResponse).code).toBe('too_many_requests');
       expect(refreshCookie(blocked)).toBeUndefined();
+      // アカウント単位の超過も、発信元単位と同じ形で記録する（#270 第3巡）。
+      expect(
+        logger.lines.find((l) => l.includes('rate_limit_exceeded') && l.includes(ip)),
+      ).toContain('/api/auth/login');
 
       await sleep(1_100);
       expect((await postLogin({ userId: user.userId, password: 'backoff-password' })).status).toBe(

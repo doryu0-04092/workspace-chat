@@ -91,6 +91,9 @@ export class ValkeyModule {}
 /**
  * 超過したときの応答を ErrorResponse の形（`code` / `message`）にする。
  * `Retry-After` はガードが先に付ける（名前が `default` の制限なので、ヘッダー名は `Retry-After` のまま）。
+ *
+ * **超過の記録（`rate_limit_exceeded`）はここで書かない。** 429 は投げた経路によらず ErrorResponseFilter が記録する
+ * （アカウント単位の RetryAfterException と同じ1箇所。#270）。
  */
 @Injectable()
 export class RateLimitGuard extends ThrottlerGuard {

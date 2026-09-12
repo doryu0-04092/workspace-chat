@@ -5,6 +5,7 @@ import {
   BearerUnauthorizedException,
   ErrorResponseFilter,
   RetryAfterException,
+  errorBodyForStatus,
 } from './error-response';
 
 /** フィルタに渡す ArgumentsHost の代わり。応答の状態コードと本体を控える。 */
@@ -30,7 +31,10 @@ function fakeHost(): {
     },
   };
   const host = {
-    switchToHttp: () => ({ getResponse: () => response }),
+    switchToHttp: () => ({
+      getResponse: () => response,
+      getRequest: () => ({ ip: '198.51.100.7', originalUrl: '/api/auth/login' }),
+    }),
   } as unknown as ArgumentsHost;
   return { host, sent };
 }
@@ -115,6 +119,38 @@ describe('例外フィルタの BearerUnauthorizedException', () => {
       expect(sent.headers['WWW-Authenticate']).toBe(challenge);
     },
   );
+});
+
+// レート制限の超過は、投げる経路（発信元単位のガードの 429・アカウント単位の RetryAfterException）によらず、
+// フィルタの1箇所で rate_limit_exceeded として記録する（#270 第3巡）。
+describe('例外フィルタの 429 の記録', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['RetryAfterException（アカウント単位）', new RetryAfterException(7)],
+    ['HttpException の 429（発信元単位のガード）', new HttpException(errorBodyForStatus(429), 429)],
+  ])(
+    '%s を rate_limit_exceeded として、発信元とパスとともに warn で記録する',
+    (_name, exception) => {
+      const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const { host } = fakeHost();
+      new ErrorResponseFilter().catch(exception, host);
+      expect(warned).toHaveBeenCalledWith({
+        event: 'rate_limit_exceeded',
+        ip: '198.51.100.7',
+        path: '/api/auth/login',
+      });
+    },
+  );
+
+  it('429 以外は記録しない', () => {
+    const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { host } = fakeHost();
+    new ErrorResponseFilter().catch(new NotFoundException(), host);
+    expect(warned).not.toHaveBeenCalled();
+  });
 });
 
 describe('例外フィルタの RetryAfterException', () => {

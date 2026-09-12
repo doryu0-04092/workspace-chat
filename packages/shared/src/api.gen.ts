@@ -75,7 +75,7 @@ export interface paths {
         put?: never;
         /**
          * アクセストークンの更新（F-02）
-         * @description Cookie（refresh_token）のリフレッシュトークンを新しいものに入れ替え、新しいアクセストークンを返す（機能一覧 1.2）。 入れ替え済みのトークンが出されたら、そのログインの系列のトークンをすべて失効させる（RFC 9700 4.14.2）。 本体は送らない。X-Requested-By が無い要求は 400、Sec-Fetch-Site / Origin / Referer が同じ origin を示さない要求は 403 （要件定義書 4.3 の CSRF の対処）。
+         * @description Cookie（refresh_token）のリフレッシュトークンを新しいものに入れ替え、新しいアクセストークンを返す（機能一覧 1.2）。 入れ替え済みのトークンが出されたら、そのログインの系列のトークンをすべて失効させる（RFC 9700 4.14.2）。 本体は送らない。X-Requested-By が無い要求は 400、Sec-Fetch-Site / Origin / Referer が同じ origin を示さない要求は 403 （要件定義書 4.3 の CSRF の対処）。発信元単位のレート制限は15分に60回（機能一覧 1.2）。
          */
         post: operations["refreshTokens"];
         delete?: never;
@@ -95,7 +95,7 @@ export interface paths {
         put?: never;
         /**
          * ログアウト（F-02）
-         * @description Cookie（refresh_token）のリフレッシュトークンの系列をすべて失効させ、Cookie を消す（機能一覧 1.2）。 トークンが無い・知らない場合も 204 を返す。本体は送らない。CSRF の対処は /auth/refresh と同じ。
+         * @description Cookie（refresh_token）のリフレッシュトークンの系列をすべて失効させ、Cookie を消す（機能一覧 1.2）。 トークンが無い・知らない場合も 204 を返す。本体は送らない。CSRF の対処は /auth/refresh と同じ。 発信元単位のレート制限は15分に60回（機能一覧 1.2）。
          */
         post: operations["logout"];
         delete?: never;
@@ -587,6 +587,7 @@ export interface operations {
             };
             403: components["responses"]["CsrfRejected"];
             405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -612,6 +613,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             403: components["responses"]["CsrfRejected"];
             405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };

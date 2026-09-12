@@ -239,14 +239,19 @@ describe('POST /api/auth/recovery（F-37）', () => {
         newPassword: 'whatever-pass',
       });
 
-      const blocked = await post('recovery', {
-        userId: user.userId,
-        recoveryCode: user.code,
-        newPassword: 'whatever-pass',
-      });
+      const ip = nextIp();
+      const blocked = await post(
+        'recovery',
+        { userId: user.userId, recoveryCode: user.code, newPassword: 'whatever-pass' },
+        ip,
+      );
       expect(blocked.status).toBe(429);
       expect(blocked.headers.get('retry-after')).toBe('1');
       expect(((await blocked.json()) as ErrorResponse).code).toBe('too_many_requests');
+      // アカウント単位の超過も、発信元単位と同じ形で記録する（#270 第3巡）。
+      expect(
+        logger.lines.find((l) => l.includes('rate_limit_exceeded') && l.includes(ip)),
+      ).toContain('/api/auth/recovery');
     });
 
     // ログインの失敗と再設定の失敗を同じキーで数えると、パスワードを忘れて何度か誤った利用者が、再設定まで待たされる。

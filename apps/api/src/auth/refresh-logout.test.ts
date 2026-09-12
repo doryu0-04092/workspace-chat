@@ -18,7 +18,7 @@ import { hashSecret } from './secret-hash';
 type RefreshResponse =
   paths['/auth/refresh']['post']['responses'][200]['content']['application/json'];
 type ErrorResponse = paths['/auth/refresh']['post']['responses'][
-  401 | 403]['content']['application/json'];
+  401 | 403 | 429]['content']['application/json'];
 
 let sequence = 0;
 function uniqueUserId(): string {
@@ -303,6 +303,106 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       const { token } = await login();
       const res = await post(path, token, { 'x-requested-by': 'workspace-chat', ...headers });
       expect(res.status).toBe(path === 'refresh' ? 200 : 204);
+    });
+  });
+
+  // 決定・2026-09-12・依頼側（#270）: 発信元単位で 15 分に 60 回。超過と、失効済みトークンの再利用は不正アクセスの疑いとして記録する。
+  describe('レート制限と記録（#270）', () => {
+    const LIMIT = 60;
+
+    it('リフレッシュは同じ発信元から 61 回目で 429（Retry-After は 15 分）', async () => {
+      const ip = nextIp();
+      for (let i = 0; i < LIMIT; i += 1) {
+        expect(
+          (await post('refresh', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': ip })).status,
+        ).toBe(401);
+      }
+      const res = await post('refresh', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': ip });
+      expect(res.status).toBe(429);
+      expect(((await res.json()) as ErrorResponse).code).toBe('too_many_requests');
+      const retryAfter = Number(res.headers.get('retry-after'));
+      expect(retryAfter).toBeGreaterThan(850);
+      expect(retryAfter).toBeLessThanOrEqual(900);
+    });
+
+    it('ログアウトも同じ上限で、別の発信元は止めない', async () => {
+      const ip = nextIp();
+      for (let i = 0; i < LIMIT; i += 1) {
+        expect(
+          (await post('logout', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': ip })).status,
+        ).toBe(204);
+      }
+      expect(
+        (await post('logout', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': ip })).status,
+      ).toBe(429);
+      expect(
+        (await post('logout', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': nextIp() })).status,
+      ).toBe(204);
+    });
+
+    it('上限の超過を、発信元とパスとともに記録する', async () => {
+      const ip = nextIp();
+      const before = logger.lines.length;
+      for (let i = 0; i <= LIMIT; i += 1) {
+        await post('refresh', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': ip });
+      }
+      const line = logger.lines.slice(before).find((l) => l.includes('rate_limit_exceeded'));
+      expect(line).toBeDefined();
+      expect(line).toContain('/api/auth/refresh');
+      expect(line).toContain(ip);
+    });
+
+    it('入れ替え済みのトークンの再利用を、系列と利用者の ID で記録し、トークンは載せない', async () => {
+      const { token, userId } = await login();
+      const next = cookieValue(await post('refresh', token))!;
+      const before = logger.lines.length;
+      expect((await post('refresh', token)).status).toBe(401);
+
+      const family = (
+        await prisma.refreshToken.findUniqueOrThrow({ where: { tokenHash: sha256Hex(token) } })
+      ).familyId;
+      const line = logger.lines.slice(before).find((l) => l.includes('refresh_token_reuse'));
+      expect(line).toBeDefined();
+      expect(line).toContain(family);
+      expect(line).toContain(userId);
+      expect(line).not.toContain(token);
+      expect(line).not.toContain(next);
+    });
+  });
+
+  // 決定・2026-09-12・依頼側（#270）: 期限切れ・失効から 30 日で消す。
+  describe('使い終わった行の後始末（#270）', () => {
+    it('ログインのたびに、その利用者の期限切れ・失効から 30 日を過ぎた行を消し、それ以外は残す', async () => {
+      const { userId } = await login();
+      const day = 24 * 60 * 60 * 1000;
+      const old = new Date(Date.now() - 31 * day);
+      const recent = new Date(Date.now() - 29 * day);
+      const future = new Date(Date.now() + 14 * day);
+      await prisma.refreshToken.createMany({
+        data: [
+          { userId, tokenHash: sha256Hex('old-expired'), expiresAt: old },
+          { userId, tokenHash: sha256Hex('old-revoked'), expiresAt: future, revokedAt: old },
+          { userId, tokenHash: sha256Hex('recent-revoked'), expiresAt: future, revokedAt: recent },
+          { userId, tokenHash: sha256Hex('recent-expired'), expiresAt: recent },
+        ],
+      });
+      const loginId = (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).loginId;
+      const res = await fetch(`${base}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': nextIp() },
+        body: JSON.stringify({ userId: loginId, password: 'refresh-password' }),
+      });
+      expect(res.status).toBe(200);
+
+      const remaining = (await prisma.refreshToken.findMany({ where: { userId } })).map(
+        (r) => r.tokenHash,
+      );
+      expect(remaining).not.toContain(sha256Hex('old-expired'));
+      expect(remaining).not.toContain(sha256Hex('old-revoked'));
+      expect(remaining).toContain(sha256Hex('recent-revoked'));
+      expect(remaining).toContain(sha256Hex('recent-expired'));
+      // いま生きている2本（最初のログインと今回のログイン）
+      expect(remaining).toHaveLength(4);
     });
   });
 
