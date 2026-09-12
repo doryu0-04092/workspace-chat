@@ -85,7 +85,7 @@ for _ in $(seq 1 60); do
 done
 [ "$status" = "200" ] || { docker logs "$api" >&2 || true; fail "/api/health が 200 を返さない（$status）"; }
 
-echo "== 3. ログは1行1件の JSON で標準出力に出る"
+echo "== 3. 実行用のイメージのログは1行1件の JSON で標準出力に出る（標準エラーには何も出さない）"
 stdout=$(docker logs "$api" 2>/dev/null)
 stderr=$(docker logs "$api" 2>&1 >/dev/null)
 [ -n "$stdout" ] || fail "標準出力にログが無い"
@@ -116,7 +116,7 @@ for image in "$runtime_image" "$migrate_image"; do
   fi
 done
 
-echo "== 6. イメージの中で api の依存が解決される版が、package-lock.json と同じ"
+echo "== 6. 実行用のイメージの中で api の依存が解決される版が、package-lock.json と同じ"
 # 名前の一覧は apps/api/package.json の dependencies（ワークスペースの @workspace-chat/* を除く）。
 # 期待する版は lock の apps/api/node_modules/<名前>、無ければ node_modules/<名前>（Node が api から探す順）。
 # イメージの中では、api の入口（apps/api/dist/main.js）から Node が探す順に package.json を探す。
