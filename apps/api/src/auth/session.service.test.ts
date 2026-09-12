@@ -14,6 +14,8 @@ function createService(updatedCount: number) {
     familyId: 'family-1',
     revokedAt: null,
     expiresAt: new Date(Date.now() + 60_000),
+    // 入れ替えは発行から1日を過ぎたトークンでだけ起きる（#303）。
+    createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
     user: { deletedAt: null },
   };
   const tx = {
@@ -26,6 +28,7 @@ function createService(updatedCount: number) {
     refreshToken: {
       findUnique: vi.fn(async () => row),
       updateMany: vi.fn(async () => ({ count: 1 })),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
     },
     $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
   };
@@ -54,6 +57,31 @@ describe('SessionService.rotate（同時の入れ替え）', () => {
     expect(tx.refreshToken.create).not.toHaveBeenCalled();
     expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { familyId: row.familyId, revokedAt: null } }),
+    );
+  });
+});
+
+describe('SessionService.rotate（入れ替えの間隔。#303）', () => {
+  it('発行から1日以内なら、書き込まず、リフレッシュトークンを載せずにアクセストークンだけを返す', async () => {
+    const { service, prisma, row } = createService(1);
+    row.createdAt = new Date(Date.now() - 23 * 60 * 60 * 1000);
+
+    const tokens = await service.rotate('token');
+
+    expect(tokens.accessToken).toBe('access-token');
+    expect(tokens.refreshToken).toBeUndefined();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.refreshToken.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('発行から1日を過ぎていれば入れ替え、この利用者の使い終わった行を消す', async () => {
+    const { service, prisma, row } = createService(1);
+
+    const tokens = await service.rotate('token');
+
+    expect(typeof tokens.refreshToken).toBe('string');
+    expect(prisma.refreshToken.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ userId: row.userId }) }),
     );
   });
 });

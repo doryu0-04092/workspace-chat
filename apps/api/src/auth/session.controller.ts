@@ -52,7 +52,10 @@ export class SessionController {
   ): Promise<RefreshResponse> {
     try {
       const tokens = await this.sessions.rotate(readRefreshToken(request));
-      res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
+      // 入れ替えたときだけ Cookie を出し直す（1日以内は今の Cookie をそのまま使う。#303）。
+      if (tokens.refreshToken !== undefined) {
+        res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, REFRESH_TOKEN_COOKIE_OPTIONS);
+      }
       return { accessToken: tokens.accessToken, tokenType: 'Bearer', expiresIn: tokens.expiresIn };
     } catch (error) {
       // 使えないトークンを持ち続けさせない。
