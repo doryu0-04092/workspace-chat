@@ -37,6 +37,7 @@ postgres_image=$(sed -n "s/^export const POSTGRES_IMAGE = '\([^']*\)';$/\1/p" ap
 
 echo "== イメージを作る"
 # --pull: 土台（タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で作り、手元の緑が CI の緑と同じ意味を持たない（#281）。
+# 代償: レジストリに届かない環境では、手元に土台があってもこの検査は通らない（下の docker pull も同じ）。
 docker build --pull --file apps/api/Dockerfile --target migrate --tag "$migrate_image" . >/dev/null
 docker build --pull --file apps/api/Dockerfile --target runtime --tag "$runtime_image" . >/dev/null
 

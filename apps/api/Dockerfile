@@ -1,7 +1,6 @@
 # api のコンテナイメージ（#271）。ECS Fargate で動かす（技術スタック）。
 #
-# ビルドの文脈はリポジトリの根である（npm workspaces のため）:
-#   docker build --file apps/api/Dockerfile --target runtime .
+# ビルドの文脈はリポジトリの根である（npm workspaces のため）。作る手順は scripts/api-image.test.sh が持つ。
 #
 # 段:
 #   runtime … api を動かす。本番の依存だけを持つ
