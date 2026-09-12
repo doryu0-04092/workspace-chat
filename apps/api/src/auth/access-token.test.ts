@@ -181,7 +181,7 @@ describe('アクセストークンの入口（F-05）', () => {
     expect(((await res.json()) as ErrorResponse).code).toBe('authentication_required');
   });
 
-  it('書き込み（PATCH）も、トークンが無ければ 401 で、変えない', async () => {
+  it('書き込み（PATCH）も、トークンが無ければ 401', async () => {
     const res = await patchMe(undefined, { displayName: '変える' });
     expect(res.status).toBe(401);
     expect(((await res.json()) as ErrorResponse).code).toBe('authentication_required');
