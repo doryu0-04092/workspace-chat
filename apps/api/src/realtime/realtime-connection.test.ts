@@ -12,6 +12,7 @@ import { AccessTokenResolver } from '../auth/access-token.guard';
 import { hashSecret } from '../auth/secret-hash';
 import { PrismaService } from '../prisma.service';
 import { TEST_WEB_ORIGIN, stubApiEnv } from '../testing/api-env';
+import { captureOutput } from '../testing/captured-output';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
 import { startValkey } from '../testing/valkey';
 import { RealtimeEmitter } from './realtime.emitter';
@@ -275,6 +276,59 @@ describe('Socket.IO の接続の入口（F-16）', () => {
       failing.mockRestore();
       logged.mockRestore();
     }
+  });
+
+  // 要件定義書 4.6「WebSocket の接続数・切断率をメトリクスとして記録する」（決定・2026-09-12・依頼側。#287: 構造化ログと EMF の両方）。
+  // アプリは logger: false で組み立てているため、Logger のメソッドを直接見張る。
+  describe('接続と切断の記録（#287）', () => {
+    /** 見張った Logger の呼び出しのうち、条件を満たすものが現れるまで待つ（切断はサーバー側で少し遅れて観測される）。 */
+    async function waitForCall(
+      spy: { mock: { calls: unknown[][] } },
+      predicate: (text: string) => boolean,
+      timeoutMs = 3_000,
+    ): Promise<string | undefined> {
+      const until = Date.now() + timeoutMs;
+      while (Date.now() < until) {
+        const hit = spy.mock.calls.map((call) => JSON.stringify(call)).find(predicate);
+        if (hit !== undefined) return hit;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return undefined;
+    }
+
+    it('接続と切断を、利用者の ID とともに構造化ログに記録し、トークンは載せない', async () => {
+      const { token, id } = await login();
+      const logged = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      try {
+        const { socket } = await open(firstBase, { token });
+        const connected = await waitForCall(logged, (t) => t.includes('websocket_connected'));
+        expect(connected).toContain(id);
+        expect(connected).not.toContain(token);
+
+        socket.close();
+        const disconnected = await waitForCall(logged, (t) => t.includes('websocket_disconnected'));
+        expect(disconnected).toContain(id);
+        expect(disconnected).not.toContain(token);
+      } finally {
+        logged.mockRestore();
+      }
+    });
+
+    it('接続のたびに、EMF の1行（接続数と接続の回数）を標準出力に出す', async () => {
+      const { token } = await login();
+      const captured = captureOutput();
+      try {
+        await open(firstBase, { token });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } finally {
+        captured.restore();
+      }
+      const emf = captured
+        .jsonLines<{ _aws?: unknown; WebSocketConnections?: number; WebSocketConnects?: number }>()
+        .find((doc) => doc._aws !== undefined && doc.WebSocketConnects === 1);
+      expect(emf).toBeDefined();
+      expect(emf?.WebSocketConnections).toBeGreaterThanOrEqual(1);
+    });
   });
 
   // 要件定義書 4.2: Valkey が止まっている間は、タスク間の配信共有が止まるが、接続は保ち、同じタスクの中の配信は続く。
