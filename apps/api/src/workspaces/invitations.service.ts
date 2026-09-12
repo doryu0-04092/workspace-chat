@@ -1,6 +1,5 @@
 import {
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -11,8 +10,12 @@ import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
-import { OWNER_ONLY } from './workspace-errors';
-import { type Workspace, WORKSPACE_SELECT, toWorkspace } from './workspaces.service';
+import {
+  type Workspace,
+  WORKSPACE_SELECT,
+  WorkspacesService,
+  toWorkspace,
+} from './workspaces.service';
 
 type InviteOperation = paths['/workspaces/{id}/invitations']['post'];
 export type CreateInvitationRequest = InviteOperation['requestBody']['content']['application/json'];
@@ -49,6 +52,7 @@ export class InvitationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeEmitter,
+    private readonly workspaces: WorkspacesService,
   ) {}
 
   async invite(
@@ -56,16 +60,8 @@ export class InvitationsService {
     workspaceId: string,
     input: CreateInvitationRequest,
   ): Promise<Invitation> {
-    const owner = await this.prisma.membership.findFirst({
-      where: { userId: ownerId, workspaceId, user: { deletedAt: null } },
-      select: {
-        role: true,
-        workspace: { select: { id: true, name: true } },
-        user: { select: USER_SUMMARY_SELECT },
-      },
-    });
-    if (!owner) throw new NotFoundException();
-    if (owner.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
+    // 所属（退会していない）とオーナーの判定は WorkspacesService に1つだけ置く。要求する側の要約も同じ問い合わせで取る。
+    const owner = await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
 
     const [invitee] = await this.prisma.$queryRaw<{ id: string }[]>`
       SELECT "id" FROM "User"
@@ -93,7 +89,7 @@ export class InvitationsService {
     // 書き込みが確定してから送る（送った後に書き込みが落ちると、存在しない招待を知らせることになる）。
     const payload: InvitationNewPayload = {
       invitationId: created.id,
-      workspace: owner.workspace,
+      workspace: { id: owner.workspace.id, name: owner.workspace.name },
       invitedBy: toUserSummary(owner.user),
       sentAt: new Date().toISOString(),
     };

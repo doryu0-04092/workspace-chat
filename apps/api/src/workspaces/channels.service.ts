@@ -9,7 +9,6 @@ import type { ErrorResponse } from '../error-response';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
-import { OWNER_ONLY } from './workspace-errors';
 import { WorkspacesService } from './workspaces.service';
 
 type CreateOperation = paths['/workspaces/{id}/channels']['post'];
@@ -53,8 +52,7 @@ export class ChannelsService {
    * （一意索引 `Channel_workspaceId_name_key`。同時の2件目もここで 409）。名前の形は仕様が確かめる（#290）。
    */
   async create(userId: string, workspaceId: string, input: CreateChannelRequest): Promise<Channel> {
-    const membership = await this.workspaces.membershipOf(userId, workspaceId);
-    if (membership.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
+    await this.workspaces.ownerMembershipOf(userId, workspaceId);
     try {
       return await this.prisma.$transaction(async (tx) => {
         const channel = await tx.channel.create({
@@ -105,8 +103,7 @@ export class ChannelsService {
    * **アーカイブ済みも含める**（含めないと復元の経路が無くなる。F-35）。**参加者数は退会者を除く**。
    */
   async managed(userId: string, workspaceId: string): Promise<ManagedChannel[]> {
-    const membership = await this.workspaces.membershipOf(userId, workspaceId);
-    if (membership.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
+    await this.workspaces.ownerMembershipOf(userId, workspaceId);
     const rows = await this.prisma.channel.findMany({
       where: { workspaceId },
       select: {
