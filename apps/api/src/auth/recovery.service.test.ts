@@ -69,4 +69,14 @@ describe('RecoveryService', () => {
     expect(tx.recoveryCode.create).not.toHaveBeenCalled();
     expect(tx.refreshToken.updateMany).not.toHaveBeenCalled();
   });
+
+  it('成功したら、再設定のキーとログインのキーの両方を数え直す', async () => {
+    const { service, store } = createService([
+      { id: 'user-1', codeId: 'code-1', codeHash: 'hash' },
+    ]);
+
+    await service.recover(INPUT);
+    expect(store.reset).toHaveBeenCalledWith('recovery:some_user');
+    expect(store.reset).toHaveBeenCalledWith('login:some_user');
+  });
 });

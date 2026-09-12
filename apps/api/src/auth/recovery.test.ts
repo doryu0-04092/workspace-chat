@@ -263,6 +263,24 @@ describe('POST /api/auth/recovery（F-37）', () => {
       expect(res.status).toBe(200);
     });
 
+    // 再設定は正規の経路であり、成功した以上は本人が切り替えたと考える。それ以前のログインの失敗は、新しいパスワードへの
+    // 総当たりの証拠にならない（決定・2026-09-12・依頼側。#280）。数え直さないと、復旧した直後に最大 15 分ログインできない。
+    it('再設定に成功したら、ログインの失敗の回数も数え直す（直後に新しいパスワードでログインできる）', async () => {
+      const user = await register();
+      for (let i = 0; i < 3; i += 1) {
+        await post('login', { userId: user.userId, password: 'wrong-password' });
+      }
+      const res = await post('recovery', {
+        userId: user.userId,
+        recoveryCode: user.code,
+        newPassword: 'recovered-password',
+      });
+      expect(res.status).toBe(200);
+
+      const login = await post('login', { userId: user.userId, password: 'recovered-password' });
+      expect(login.status).toBe(200);
+    });
+
     it('発信元単位: 同じ発信元から 11 回目は 429', async () => {
       const ip = nextIp();
       for (let i = 0; i < RECOVERY_LIMIT_PER_IP; i++) {
