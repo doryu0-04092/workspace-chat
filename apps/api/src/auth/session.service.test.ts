@@ -85,3 +85,15 @@ describe('SessionService.rotate（入れ替えの間隔。#303）', () => {
     );
   });
 });
+
+describe('SessionService.rotate（後始末の失敗。PR #323 第0巡）', () => {
+  // 確定した入れ替えの後に後始末を置くと、後始末が落ちたとき新しいトークンが利用者に渡らず、次のリフレッシュが再利用になる。
+  it('後始末が落ちたら、入れ替えを確定させない（使ったトークンは失効しない）', async () => {
+    const { service, prisma, tx } = createService(1);
+    prisma.refreshToken.deleteMany.mockRejectedValueOnce(new Error('接続が切れた'));
+
+    await expect(service.rotate('token')).rejects.toThrow('接続が切れた');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.refreshToken.updateMany).not.toHaveBeenCalled();
+  });
+});

@@ -93,6 +93,11 @@ export class SessionService {
       return { ...(await this.signAccessToken(row.userId)), refreshToken: undefined };
     }
 
+    // 後始末は入れ替えの前に行う（start と同じ）。後に置くと、後始末が落ちたとき入れ替えだけが確定し、新しいトークンが利用者に渡らない。
+    // 使い続ける利用者はログインし直さないため、入れ替えのときにも後始末をする（1端末あたり約 30 行に収める。#303）。
+    // 対象は期限切れ・失効から 30 日を過ぎた行であり、いま入れ替える行（未失効・期限内）は含まない。
+    await this.removeUsedRows(row.userId);
+
     const next = generateRefreshToken();
     const rotated = await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.refreshToken.updateMany({
@@ -115,8 +120,6 @@ export class SessionService {
       await this.revokeFamily(row.familyId, now);
       throw invalidToken();
     }
-    // 使い続ける利用者はログインし直さないため、入れ替えのときにも後始末をする（1端末あたり約 30 行に収める。#303）。
-    await this.removeUsedRows(row.userId);
     return this.issue(row.userId, next);
   }
 
