@@ -18,7 +18,7 @@ import { hashSecret } from './secret-hash';
 type RefreshResponse =
   paths['/auth/refresh']['post']['responses'][200]['content']['application/json'];
 type ErrorResponse = paths['/auth/refresh']['post']['responses'][
-  401 | 403]['content']['application/json'];
+  401 | 403 | 429]['content']['application/json'];
 
 let sequence = 0;
 function uniqueUserId(): string {
