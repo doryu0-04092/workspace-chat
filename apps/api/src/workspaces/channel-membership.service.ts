@@ -25,7 +25,8 @@ export type InviteChannelMemberRequest =
  *
  * - **要求する側の所属（`WorkspacesService.membershipOf`。退会していない）を最初に確かめ、無ければ存在の有無を区別せず 404**
  * - **チャンネルは `(id, workspaceId)` で引く**（別のワークスペースのチャンネルは 404）
- * - **人を増やす操作（参加・招待）はアーカイブ済みでは拒む。減らす操作（退出・キック）は拒まない**（機能一覧 3.2）
+ * - **人を増やす操作（参加・招待）はアーカイブ済みでは拒む。減らす操作（退出・キック）は拒まない**（機能一覧 3.2）。
+ *   人を増やす操作は、チャンネルの行を掴んでからアーカイブ済みかを読み、同じトランザクションで参加を作る（`lockedChannelFor`）
  * - **参加の記録は物理削除**（機能一覧 F-38 の代償）
  * - 接続をチャンネルの部屋へ入れる・部屋から外す処理は、チャンネルの部屋の実装と同時に入れる（#331）
  */
@@ -43,13 +44,15 @@ export class ChannelMembershipService {
    */
   async join(userId: string, workspaceId: string, channelId: string): Promise<void> {
     await this.workspaces.membershipOf(userId, workspaceId);
-    const channel = await this.channelFor(userId, workspaceId, channelId);
-    if (channel.joined) throw new ConflictException(ALREADY_CHANNEL_MEMBER);
-    // 存在を隠す判定を、アーカイブ済みの判定より先に置く（アーカイブ済みのプライベートの存在を 409 で漏らさない）。
-    if (channel.visibility === 'PRIVATE') throw new NotFoundException();
-    if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
     try {
-      await this.prisma.channelMember.create({ data: { channelId, workspaceId, userId } });
+      await this.prisma.$transaction(async (tx) => {
+        const channel = await lockedChannelFor(tx, userId, workspaceId, channelId);
+        if (channel.joined) throw new ConflictException(ALREADY_CHANNEL_MEMBER);
+        // 存在を隠す判定を、アーカイブ済みの判定より先に置く（アーカイブ済みのプライベートの存在を 409 で漏らさない）。
+        if (channel.visibility === 'PRIVATE') throw new NotFoundException();
+        if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
+        await tx.channelMember.create({ data: { channelId, workspaceId, userId } });
+      });
     } catch (error) {
       if (isUniqueViolation(error)) throw new ConflictException(ALREADY_CHANNEL_MEMBER);
       // 同時にワークスペースから外れた（参加は Membership への外部キーを持つ）。
@@ -84,22 +87,22 @@ export class ChannelMembershipService {
     memberId: string,
   ): Promise<void> {
     await this.workspaces.membershipOf(userId, workspaceId);
-    const channel = await this.channelFor(userId, workspaceId, channelId);
-    if (!channel.joined) {
-      if (channel.visibility === 'PRIVATE') throw new NotFoundException();
-      throw new ForbiddenException(NOT_A_CHANNEL_MEMBER);
-    }
-    if (channel.visibility === 'PUBLIC')
-      throw new UnprocessableEntityException(CHANNEL_NOT_PRIVATE);
-    if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
-    const invitee = await this.prisma.membership.findFirst({
-      where: { workspaceId, userId: memberId, user: { deletedAt: null } },
-      select: { id: true },
-    });
-    if (!invitee) throw new UnprocessableEntityException(CHANNEL_INVITEE_NOT_FOUND);
     try {
-      await this.prisma.channelMember.create({
-        data: { channelId, workspaceId, userId: memberId },
+      await this.prisma.$transaction(async (tx) => {
+        const channel = await lockedChannelFor(tx, userId, workspaceId, channelId);
+        if (!channel.joined) {
+          if (channel.visibility === 'PRIVATE') throw new NotFoundException();
+          throw new ForbiddenException(NOT_A_CHANNEL_MEMBER);
+        }
+        if (channel.visibility === 'PUBLIC')
+          throw new UnprocessableEntityException(CHANNEL_NOT_PRIVATE);
+        if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
+        const invitee = await tx.membership.findFirst({
+          where: { workspaceId, userId: memberId, user: { deletedAt: null } },
+          select: { id: true },
+        });
+        if (!invitee) throw new UnprocessableEntityException(CHANNEL_INVITEE_NOT_FOUND);
+        await tx.channelMember.create({ data: { channelId, workspaceId, userId: memberId } });
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new ConflictException(ALREADY_CHANNEL_MEMBER);
@@ -127,22 +130,38 @@ export class ChannelMembershipService {
     });
     if (count !== 1) throw new NotFoundException();
   }
+}
 
-  /** 要求する側から見たチャンネル。別のワークスペースのチャンネル・無いチャンネルは 404。 */
-  private async channelFor(userId: string, workspaceId: string, channelId: string) {
-    const row = await this.prisma.channel.findFirst({
-      where: { id: channelId, workspaceId },
-      select: {
-        visibility: true,
-        archivedAt: true,
-        members: { where: { userId }, select: { id: true } },
-      },
-    });
-    if (!row) throw new NotFoundException();
-    return {
-      visibility: row.visibility,
-      archived: row.archivedAt !== null,
-      joined: row.members.length > 0,
-    };
-  }
+/**
+ * 要求する側から見たチャンネル。別のワークスペースのチャンネル・無いチャンネルは 404。
+ *
+ * **チャンネルの行を `FOR SHARE` で掴んでから読む**——アーカイブ（行の更新）と同時に来ても、アーカイブの確定を待って読み、
+ * アーカイブの後に人を増やさない（機能一覧 3.2）。掴んだロックはトランザクションの終わりまで残り、その間アーカイブは確定しない。
+ * `FOR KEY SHARE` では足りない——名前を変えない更新（復元したものの再アーカイブ）と衝突しない。
+ */
+async function lockedChannelFor(
+  tx: Pick<PrismaService, 'channel' | '$queryRaw'>,
+  userId: string,
+  workspaceId: string,
+  channelId: string,
+) {
+  await tx.$queryRaw`
+    SELECT 1 FROM "Channel"
+    WHERE "id" = ${channelId}::uuid AND "workspaceId" = ${workspaceId}::uuid
+    FOR SHARE
+  `;
+  const row = await tx.channel.findFirst({
+    where: { id: channelId, workspaceId },
+    select: {
+      visibility: true,
+      archivedAt: true,
+      members: { where: { userId }, select: { id: true } },
+    },
+  });
+  if (!row) throw new NotFoundException();
+  return {
+    visibility: row.visibility,
+    archived: row.archivedAt !== null,
+    joined: row.members.length > 0,
+  };
 }

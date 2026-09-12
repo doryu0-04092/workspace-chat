@@ -341,4 +341,127 @@ describe('チャンネルのアーカイブと復元（F-35）', () => {
       expect(await row(theirs)).toMatchObject({ name: 'theirs', archivedAt: null });
     });
   });
+
+  // 機能一覧 3.2「アーカイブ後: 参加・招待もできない」: アーカイブと同時に来た参加・招待も、アーカイブの後には成立しない。
+  describe('アーカイブと参加・招待の同時実行', () => {
+    type ArchiveKind = { label: string; data: (baseName: string) => object; prepare: boolean };
+    // 初回のアーカイブは名前（一意索引の列）も変えるが、復元したものの再アーカイブは archivedAt だけを変える。
+    // 行のロックの強さが違う（名前を変える更新は FOR UPDATE、変えない更新は FOR NO KEY UPDATE）ため、両方で確かめる。
+    const kinds: ArchiveKind[] = [
+      {
+        label: '初回のアーカイブ（改名を伴う）',
+        data: (baseName) => ({ archivedAt: new Date(), archiveSequence: 1, name: `${baseName}-1` }),
+        prepare: false,
+      },
+      {
+        label: '復元したものの再アーカイブ（archivedAt だけ）',
+        data: () => ({ archivedAt: new Date() }),
+        prepare: true,
+      },
+    ];
+
+    /** アーカイブを書いたまま確定しないトランザクションを開き、release を呼ぶまで行のロックを持ち続ける。 */
+    async function holdArchive(channelId: string, data: object) {
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let markLocked!: () => void;
+      const locked = new Promise<void>((resolve) => {
+        markLocked = resolve;
+      });
+      const done = prisma.$transaction(
+        async (tx) => {
+          await tx.channel.update({ where: { id: channelId }, data });
+          markLocked();
+          await released;
+        },
+        { timeout: 10_000 },
+      );
+      await Promise.race([locked, done]);
+      return { release, done };
+    }
+
+    async function someoneWaitsOnLock(): Promise<boolean> {
+      const [found] = await prisma.$queryRaw<{ waiting: number }[]>`
+        SELECT count(*)::int AS "waiting" FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+      `;
+      return (found?.waiting ?? 0) > 0;
+    }
+
+    /** アーカイブを確定しないまま要求を送り、要求がロックを待つのを見てから確定し、要求の応答を返す。 */
+    async function racedWithArchive(
+      channelId: string,
+      baseName: string,
+      kind: ArchiveKind,
+      request: () => Promise<Response>,
+    ): Promise<Response> {
+      const held = await holdArchive(channelId, kind.data(baseName));
+      try {
+        const pending = request();
+        // 要求がアーカイブの行のロックを待たずに先へ進むと、ここで時間切れになる。
+        await vi.waitFor(async () => expect(await someoneWaitsOnLock()).toBe(true), {
+          timeout: 3_000,
+          interval: 50,
+        });
+        held.release();
+        await held.done;
+        return await pending;
+      } finally {
+        held.release();
+        await held.done.catch(() => undefined);
+      }
+    }
+
+    async function participates(channelId: string, userId: string): Promise<boolean> {
+      return (await prisma.channelMember.count({ where: { channelId, userId } })) > 0;
+    }
+
+    it.each(kinds)(
+      'パブリックチャンネルへの参加は、$label の確定を待って 409（channel_archived）になり、参加は作られない',
+      async (kind) => {
+        const owner = await login();
+        const member = await login();
+        const workspace = await workspaceWith(owner, member);
+        const channel = await created(owner, workspace.id, 'racing');
+        if (kind.prepare) {
+          expect((await archive(owner, workspace.id, channel)).status).toBe(200);
+          expect((await restore(owner, workspace.id, channel)).status).toBe(200);
+        }
+
+        const res = await racedWithArchive(channel, 'racing', kind, () =>
+          send('POST', `/workspaces/${workspace.id}/channels/${channel}/join`, member),
+        );
+
+        expect(res.status).toBe(409);
+        expect(((await res.json()) as ErrorResponse).code).toBe('channel_archived');
+        expect(await participates(channel, member.id)).toBe(false);
+      },
+    );
+
+    it.each(kinds)(
+      'プライベートチャンネルへの招待は、$label の確定を待って 409（channel_archived）になり、参加は作られない',
+      async (kind) => {
+        const owner = await login();
+        const member = await login();
+        const workspace = await workspaceWith(owner, member);
+        const channel = await created(owner, workspace.id, 'hidden', 'PRIVATE');
+        if (kind.prepare) {
+          expect((await archive(owner, workspace.id, channel)).status).toBe(200);
+          expect((await restore(owner, workspace.id, channel)).status).toBe(200);
+        }
+
+        const res = await racedWithArchive(channel, 'hidden', kind, () =>
+          send('POST', `/workspaces/${workspace.id}/channels/${channel}/members`, owner, {
+            memberId: member.id,
+          }),
+        );
+
+        expect(res.status).toBe(409);
+        expect(((await res.json()) as ErrorResponse).code).toBe('channel_archived');
+        expect(await participates(channel, member.id)).toBe(false);
+      },
+    );
+  });
 });
