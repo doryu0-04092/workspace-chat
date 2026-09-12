@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma.service';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_RETENTION_MS,
+  REFRESH_TOKEN_ROTATION_INTERVAL_MS,
   REFRESH_TOKEN_TTL_SECONDS,
   generateRefreshToken,
   hashRefreshToken,
@@ -15,6 +16,11 @@ export type IssuedTokens = {
   readonly accessToken: string;
   readonly expiresIn: number;
   readonly refreshToken: string;
+};
+
+/** リフレッシュの結果。**リフレッシュトークンは入れ替えたときだけ載る**（1日以内は入れ替えない。#303）。 */
+export type RefreshedTokens = Omit<IssuedTokens, 'refreshToken'> & {
+  readonly refreshToken: string | undefined;
 };
 
 /**
@@ -32,7 +38,8 @@ export const INVALID_TOKEN: BearerErrorResponse = {
  * ログインの系列（リフレッシュトークンの入れ替えの連なり）を扱う（機能一覧 1.2）。
  *
  * - **start**: ログインで新しい系列を作る
- * - **rotate**: リフレッシュのたびに、使ったトークンを失効させて同じ系列の新しいトークンを出す。**失効済みのトークンが
+ * - **rotate**: リフレッシュでアクセストークンを出す。**発行から1日を過ぎたトークンなら**、使ったトークンを失効させて同じ系列の新しいトークンを出す
+ *   （1日に1回。#303）。**失効済みのトークンが
  *   出されたら、盗まれたものとみなして系列ごと失効させる**（RFC 9700 4.14.2）
  * - **end**: ログアウトで系列ごと失効させる
  *
@@ -48,12 +55,9 @@ export class SessionService {
     private readonly jwt: JwtService,
   ) {}
 
-  /** ログインで新しい系列を作る。**あわせて、この利用者の使い終わった行（期限切れ・失効から 30 日）を消す**（#270）。 */
+  /** ログインで新しい系列を作る。**あわせて、この利用者の使い終わった行を消す**（removeUsedRows）。 */
   async start(userId: string): Promise<IssuedTokens> {
-    const cutoff = new Date(Date.now() - REFRESH_TOKEN_RETENTION_MS);
-    await this.prisma.refreshToken.deleteMany({
-      where: { userId, OR: [{ expiresAt: { lt: cutoff } }, { revokedAt: { lt: cutoff } }] },
-    });
+    await this.removeUsedRows(userId);
     const refreshToken = generateRefreshToken();
     // familyId は schema.prisma の既定値（UUIDv7）で新しく作る。
     await this.prisma.refreshToken.create({
@@ -64,9 +68,9 @@ export class SessionService {
 
   /**
    * **使ったトークンの失効と新しいトークンの作成を1つのトランザクションで行い、失効は「まだ失効していない行」だけに当てる。**
-   * 同じトークンで同時にリフレッシュされたとき、後の側は失効させる行が 0 件になり、再利用として扱う（入れ替えに成功するのは1つだけ）。
+   * 入れ替えの時点で同じトークンが同時に出されたとき、後の側は失効させる行が 0 件になり、再利用として扱う（入れ替えに成功するのは1つだけ）。
    */
-  async rotate(refreshToken: string | undefined): Promise<IssuedTokens> {
+  async rotate(refreshToken: string | undefined): Promise<RefreshedTokens> {
     if (refreshToken === undefined || refreshToken === '') throw invalidToken();
     const row = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: hashRefreshToken(refreshToken) },
@@ -83,6 +87,16 @@ export class SessionService {
       throw invalidToken();
     }
     if (row.expiresAt <= now || row.user.deletedAt !== null) throw invalidToken();
+
+    // 入れ替えは1日に1回（#303）。1日以内は書き込まず、アクセストークンだけを返す——この間の再送や同時の要求は競合しない。
+    if (now.getTime() - row.createdAt.getTime() < REFRESH_TOKEN_ROTATION_INTERVAL_MS) {
+      return { ...(await this.signAccessToken(row.userId)), refreshToken: undefined };
+    }
+
+    // 後始末は入れ替えの前に行う（start と同じ）。後に置くと、後始末が落ちたとき入れ替えだけが確定し、新しいトークンが利用者に渡らない。
+    // 使い続ける利用者はログインし直さないため、入れ替えのときにも後始末をする（1端末あたり約 30 行に収める。#303）。
+    // 対象は期限切れ・失効から 30 日を過ぎた行であり、いま入れ替える行（未失効・期限内）は含まない。
+    await this.removeUsedRows(row.userId);
 
     const next = generateRefreshToken();
     const rotated = await this.prisma.$transaction(async (tx) => {
@@ -131,9 +145,24 @@ export class SessionService {
     });
   }
 
-  private async issue(userId: string, refreshToken: string): Promise<IssuedTokens> {
+  /**
+   * この利用者の使い終わった行（期限切れ・失効のうち早く起きた方から 30 日を過ぎた行）を消す。ログインと入れ替えのときに呼ぶ
+   * （#270・#303。定期の処理は持たない）。
+   */
+  private async removeUsedRows(userId: string): Promise<void> {
+    const cutoff = new Date(Date.now() - REFRESH_TOKEN_RETENTION_MS);
+    await this.prisma.refreshToken.deleteMany({
+      where: { userId, OR: [{ expiresAt: { lt: cutoff } }, { revokedAt: { lt: cutoff } }] },
+    });
+  }
+
+  private async signAccessToken(userId: string): Promise<Omit<IssuedTokens, 'refreshToken'>> {
     const accessToken = await this.jwt.signAsync({ sub: userId });
-    return { accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS, refreshToken };
+    return { accessToken, expiresIn: ACCESS_TOKEN_TTL_SECONDS };
+  }
+
+  private async issue(userId: string, refreshToken: string): Promise<IssuedTokens> {
+    return { ...(await this.signAccessToken(userId)), refreshToken };
   }
 }
 
