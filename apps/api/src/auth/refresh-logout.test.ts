@@ -321,6 +321,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
   describe.each(['refresh', 'logout'] as const)('/api/auth/%s の CSRF の対処', (path) => {
     it('X-Requested-By が無ければ 400 で、トークンを使わない', async () => {
       const { token } = await login();
+      if (path === 'refresh') await age(token);
       const res = await post(path, token, { 'sec-fetch-site': 'same-origin' });
       expect(res.status).toBe(400);
       expect((await post('refresh', token)).status).toBe(200);
