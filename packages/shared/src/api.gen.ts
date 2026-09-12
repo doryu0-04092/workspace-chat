@@ -148,6 +148,76 @@ export interface paths {
         patch: operations["updateMyProfile"];
         trace?: never;
     };
+    "/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自分が所属するワークスペースの一覧（F-06。サイドバーの切替）
+         * @description 参加した順。所属していないものは含まない
+         */
+        get: operations["listMyWorkspaces"];
+        put?: never;
+        /**
+         * ワークスペースの作成（F-06）
+         * @description 作成者がオーナーとして所属した状態になる（機能一覧 2.1）。名前は 1〜50 文字（コードポイント）で、空白だけは不可。 同名を許す（決定・2026-09-12・依頼側。#290）
+         */
+        post: operations["createWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * ワークスペースの取得（F-06）
+         * @description 所属していなければ、存在の有無を区別せず 404（機能一覧 2.1）
+         */
+        get: operations["getWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * ワークスペースの参加者一覧（F-06）
+         * @description 参加した順。退会済みの利用者を含まない（機能一覧 2.1・1.5）。所属していなければ、存在の有無を区別せず 404
+         */
+        get: operations["listWorkspaceMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -245,6 +315,32 @@ export interface components {
             /** @enum {string} */
             status: "ok";
         };
+        CreateWorkspaceRequest: {
+            /** @description 1〜50 文字（文字数はコードポイントで数える）。空白だけは不可（決定・2026-09-12・依頼側。#290）。 上限は入力にだけ置く（応答と DB の列には置かない。同決定） */
+            name: string;
+        };
+        /**
+         * @description ワークスペースでの役割（schema.prisma の WorkspaceRole）
+         * @enum {string}
+         */
+        WorkspaceRole: "OWNER" | "MEMBER";
+        Workspace: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description 要求した利用者の、このワークスペースでの役割 */
+            role: components["schemas"]["WorkspaceRole"];
+        };
+        /** @description 参加者。UserSummary に役割を足したもの */
+        WorkspaceMember: {
+            /** Format: uuid */
+            id: string;
+            userId: string;
+            displayName: string;
+            role: components["schemas"]["WorkspaceRole"];
+        };
     };
     responses: {
         /** @description Authorization ヘッダーに Bearer のアクセストークンが無い（authentication_required）か、 トークンが壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
@@ -314,6 +410,15 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 見つからない（not_found）。所属していないワークスペースは、存在の有無を区別せずこれになる（機能一覧 2.1・1.4）。 本体は状態コードの本体であり、権限の有無を述べない */
+        NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description 想定外の失敗（internal_error）。例外のメッセージは載せない */
         InternalServerError: {
             headers: {
@@ -325,6 +430,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description ワークスペースの id。形が uuid でなければ 400 */
+        WorkspaceId: string;
         /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
         RequestedBy: "workspace-chat";
     };
@@ -597,6 +704,115 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listMyWorkspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 所属するワークスペース */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkspaceRequest"];
+            };
+        };
+        responses: {
+            /** @description 作ったワークスペース（role は OWNER） */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ワークスペース */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listWorkspaceMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 参加者 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMember"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
             500: components["responses"]["InternalServerError"];
         };
     };
