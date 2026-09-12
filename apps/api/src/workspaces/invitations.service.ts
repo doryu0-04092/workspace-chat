@@ -10,6 +10,7 @@ import type { ErrorResponse } from '../error-response';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
+import { OWNER_ONLY } from './workspace-errors';
 import { type Workspace, WORKSPACE_SELECT, toWorkspace } from './workspaces.service';
 
 type InviteOperation = paths['/workspaces/{id}/invitations']['post'];
@@ -18,7 +19,6 @@ export type Invitation = InviteOperation['responses'][201]['content']['applicati
 export type MyInvitation =
   paths['/invitations']['get']['responses'][200]['content']['application/json'][number];
 
-const OWNER_ONLY: ErrorResponse = { code: 'owner_only', message: 'オーナーだけが実行できます' };
 const INVITEE_NOT_FOUND: ErrorResponse = {
   code: 'invitee_not_found',
   message: 'そのユーザーID の利用者はいません',

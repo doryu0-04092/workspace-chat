@@ -391,6 +391,64 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/MemberId'
+    delete:
+      operationId: kickWorkspaceMember
+      summary: ワークスペースからのキック（F-09）
+      description: >-
+        オーナーだけ（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。オーナー自身は外せない（403 owner_cannot_leave）。
+        外す相手がメンバーでなければ 404。キックされた利用者は、そのワークスペースの全チャンネルから外れる（機能一覧 2.2）
+      responses:
+        '204':
+          description: 外した
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            オーナーでない（owner_only）か、オーナーが自分を外そうとした（owner_cannot_leave）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/leave:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    post:
+      operationId: leaveWorkspace
+      summary: ワークスペースからの退出（F-38）
+      description: >-
+        メンバー本人が抜ける。オーナーは退出できない（403 owner_cannot_leave。理由のメッセージを返す）。
+        所属していなければ存在の有無を区別せず 404。退出した利用者は、そのワークスペースの全チャンネルから外れる（機能一覧 F-38）
+      responses:
+        '204':
+          description: 抜けた
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: オーナーは退出できない（owner_cannot_leave）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces/{id}/invitations:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
@@ -532,6 +590,14 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      description: 外す利用者の User.id（ユーザーID ではない）。形が uuid でなければ 400
+      schema:
+        type: string
+        format: uuid
     InvitationId:
       name: id
       in: path
@@ -665,6 +731,7 @@ components:
             - invitee_not_found
             - already_invited
             - already_member
+            - owner_cannot_leave
             - request_rejected
             - internal_error
         message:

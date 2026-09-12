@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
 import { INVALID_TOKEN } from '../auth/session.service';
 import { BearerUnauthorizedException } from '../error-response';
 import { PrismaService } from '../prisma.service';
+import { OWNER_CANNOT_LEAVE, OWNER_ONLY } from './workspace-errors';
 
 type CreateOperation = paths['/workspaces']['post'];
 export type CreateWorkspaceRequest = CreateOperation['requestBody']['content']['application/json'];
@@ -71,6 +72,35 @@ export class WorkspacesService {
       displayName: user.displayName,
       role,
     }));
+  }
+
+  /**
+   * キック（F-09。機能一覧 2.2）。**オーナーだけ**（メンバーは 403 `owner_only`、所属していなければ存在の有無を区別せず 404）。
+   * オーナー自身は外せない（403 `owner_cannot_leave`）。外す相手がメンバーでなければ 404。
+   * **参加の記録は物理削除**（機能一覧 F-38 の代償）。`ChannelMember` は `Membership` の連鎖で消える（全チャンネルから外れる）。
+   * 接続をチャンネルの部屋から外す処理は、チャンネルの部屋の実装と同時に入れる（#331）。
+   */
+  async kick(ownerId: string, workspaceId: string, memberId: string): Promise<void> {
+    const requester = await this.membershipOf(ownerId, workspaceId);
+    if (requester.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
+    if (memberId === ownerId) throw new ForbiddenException(OWNER_CANNOT_LEAVE);
+    const { count } = await this.prisma.membership.deleteMany({
+      where: { workspaceId, userId: memberId, role: 'MEMBER' },
+    });
+    if (count !== 1) throw new NotFoundException();
+  }
+
+  /**
+   * 退出（F-38）。メンバー本人。**オーナーは退出できない**（403 `owner_cannot_leave`。理由のメッセージを返す）。
+   * 所属していなければ存在の有無を区別せず 404。参加の記録は物理削除（キックと同じ）。
+   */
+  async leave(userId: string, workspaceId: string): Promise<void> {
+    const membership = await this.membershipOf(userId, workspaceId);
+    if (membership.role === 'OWNER') throw new ForbiddenException(OWNER_CANNOT_LEAVE);
+    const { count } = await this.prisma.membership.deleteMany({
+      where: { workspaceId, userId, role: 'MEMBER', user: { deletedAt: null } },
+    });
+    if (count !== 1) throw new NotFoundException();
   }
 
   /** 要求する側の所属。無ければ 404（存在の有無を区別しない）。 */
