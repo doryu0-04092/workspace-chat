@@ -17,6 +17,7 @@ export type AccountBackoffPurpose = 'login' | 'recovery';
 
 /**
  * アカウント単位の制限のキー。**用途ごとに前置きを分ける**——同じキーで数えると、一方の失敗で他方も待たされる。
+ * **例外は一方向に1つだけ**: リカバリーコードによる再設定の成功は、`login` の回数も数え直す（機能一覧 1.1・1.2。#280）。
  * ユーザーID は小文字にする（大文字小文字を区別しない照合に合わせる）。
  */
 export function accountBackoffKey(purpose: AccountBackoffPurpose, userId: string): string {
