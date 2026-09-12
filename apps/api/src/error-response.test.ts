@@ -1,7 +1,11 @@
 import { type ArgumentsHost, HttpException, Logger, NotFoundException } from '@nestjs/common';
 import * as OpenApiValidator from 'express-openapi-validator';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ErrorResponseFilter, RetryAfterException } from './error-response';
+import {
+  BearerUnauthorizedException,
+  ErrorResponseFilter,
+  RetryAfterException,
+} from './error-response';
 
 /** フィルタに渡す ArgumentsHost の代わり。応答の状態コードと本体を控える。 */
 function fakeHost(): {
@@ -95,6 +99,24 @@ describe('例外フィルタの 404', () => {
 });
 
 // アカウント単位の制限（ログイン・リカバリーコードの照合）は、どの経路から投げても同じ形で返す（PR #275 第1巡）。
+// Bearer のアクセストークンで守るルートの 401 は、入口（ガード）で投げても、入口の後（サービス）で投げても同じ形で返す（#285）。
+describe('例外フィルタの BearerUnauthorizedException', () => {
+  it.each([
+    ['authentication_required', 'ログインしてください', 'Bearer'],
+    ['invalid_token', 'ログインし直してください', 'Bearer error="invalid_token"'],
+  ] as const)(
+    '%s の 401 に WWW-Authenticate: %s を付け、本体をそのまま返す',
+    (code, message, challenge) => {
+      const { host, sent } = fakeHost();
+      new ErrorResponseFilter().catch(new BearerUnauthorizedException({ code, message }), host);
+
+      expect(sent.status).toBe(401);
+      expect(sent.body).toEqual({ code, message });
+      expect(sent.headers['WWW-Authenticate']).toBe(challenge);
+    },
+  );
+});
+
 describe('例外フィルタの RetryAfterException', () => {
   it('429（too_many_requests）と、秒の Retry-After を返す', () => {
     const { host, sent } = fakeHost();

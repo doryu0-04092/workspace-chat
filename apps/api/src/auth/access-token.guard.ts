@@ -4,12 +4,11 @@ import {
   type ExecutionContext,
   Injectable,
   SetMetadata,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import type { Request, Response } from 'express';
-import type { ErrorResponse } from '../error-response';
+import type { Request } from 'express';
+import { type BearerErrorResponse, BearerUnauthorizedException } from '../error-response';
 import { PrismaService } from '../prisma.service';
 import { INVALID_TOKEN } from './session.service';
 
@@ -37,7 +36,7 @@ export const CurrentUser = createParamDecorator(
   },
 );
 
-const AUTHENTICATION_REQUIRED: ErrorResponse = {
+const AUTHENTICATION_REQUIRED: BearerErrorResponse = {
   code: 'authentication_required',
   message: 'ログインしてください',
 };
@@ -81,7 +80,7 @@ export class AccessTokenResolver {
 /**
  * **すべてのルートに既定で掛かる**（AuthModule が APP_GUARD として登録する）。`@Public()` のルートだけを通す。
  *
- * - Authorization ヘッダーに Bearer のトークンが無い → 401（authentication_required。`WWW-Authenticate: Bearer`。
+ * - Authorization ヘッダーに Bearer のトークンが無い → 401（authentication_required。`WWW-Authenticate` は BearerUnauthorizedException を受けた例外フィルタが付ける。
  *   RFC 6750 3.1「If the request lacks any authentication information … SHOULD NOT include an error code」）
  * - トークンの署名・期限・形が合わない、または利用者が退会済み → 401（invalid_token。`Bearer error="invalid_token"`）
  * - **退会済みはトークンから利用者を解決する時点で落とす**（機能一覧 1.4 の2段目。#90）。発行済みのアクセストークンは
@@ -101,18 +100,15 @@ export class AccessTokenGuard implements CanActivate {
 
     const http = context.switchToHttp();
     const request = http.getRequest<AuthenticatedRequest>();
-    const response = http.getResponse<Response>();
 
     const header = request.headers.authorization;
     if (header === undefined || !/^Bearer(\s|$)/i.test(header)) {
-      response.setHeader('WWW-Authenticate', 'Bearer');
-      throw new UnauthorizedException(AUTHENTICATION_REQUIRED);
+      throw new BearerUnauthorizedException(AUTHENTICATION_REQUIRED);
     }
 
     const user = await this.tokens.resolve(BEARER.exec(header)?.[1]);
     if (!user) {
-      response.setHeader('WWW-Authenticate', 'Bearer error="invalid_token"');
-      throw new UnauthorizedException(INVALID_TOKEN);
+      throw new BearerUnauthorizedException(INVALID_TOKEN);
     }
     request[AUTHENTICATED_USER] = user;
     return true;
