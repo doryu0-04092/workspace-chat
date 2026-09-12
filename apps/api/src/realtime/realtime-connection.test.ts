@@ -282,6 +282,57 @@ describe('Socket.IO の接続の入口（F-16）', () => {
       expect(emf).toBeDefined();
       expect(emf?.WebSocketConnections).toBeGreaterThanOrEqual(1);
     });
+
+    // #305: 切断のときも、接続のときと対になる EMF の1行を出す（`metrics.write` と接続数の減算が両方効くことを固定する）。
+    it('切断のたびに、EMF の1行（切断の回数と、そのときの接続数）を標準出力に出す', async () => {
+      type Emf = {
+        _aws?: unknown;
+        WebSocketConnections?: number;
+        WebSocketConnects?: number;
+        WebSocketDisconnects?: number;
+      };
+      /** `from` 行目以降で、条件を満たす EMF の行が出るまで待つ（見つかった行と、その位置を返す）。 */
+      async function waitForEmf(
+        captured: ReturnType<typeof captureOutput>,
+        predicate: (doc: Emf) => boolean,
+        from = 0,
+        timeoutMs = 3_000,
+      ): Promise<{ doc: Emf; index: number } | undefined> {
+        const until = Date.now() + timeoutMs;
+        while (Date.now() < until) {
+          const lines = captured.jsonLines<Emf>();
+          const index = lines.findIndex(
+            (doc, i) => i >= from && doc._aws !== undefined && predicate(doc),
+          );
+          const doc = lines[index];
+          if (doc !== undefined) return { doc, index };
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        return undefined;
+      }
+
+      const { token } = await login();
+      const captured = captureOutput();
+      try {
+        const { socket } = await open(firstBase, { token });
+        const connected = await waitForEmf(captured, (doc) => doc.WebSocketConnects === 1);
+        expect(connected).toBeDefined();
+
+        socket.close();
+        // 自分の接続の行より後に出た切断の行を見る（前のテストの接続の切断を拾わない）。
+        const disconnected = await waitForEmf(
+          captured,
+          (doc) => doc.WebSocketDisconnects === 1,
+          (connected?.index ?? 0) + 1,
+        );
+        expect(disconnected).toBeDefined();
+        expect(disconnected?.doc.WebSocketConnections).toBe(
+          (connected?.doc.WebSocketConnections ?? 0) - 1,
+        );
+      } finally {
+        captured.restore();
+      }
+    });
   });
 
   // 要件定義書 4.2: Valkey が止まっている間は、タスク間の配信共有が止まるが、接続は保ち、同じタスクの中の配信は続く。
