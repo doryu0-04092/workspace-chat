@@ -3,6 +3,7 @@ import type { paths } from '@workspace-chat/shared';
 import { INVALID_TOKEN } from '../auth/session.service';
 import { BearerUnauthorizedException } from '../error-response';
 import { PrismaService } from '../prisma.service';
+import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { OWNER_CANNOT_LEAVE, OWNER_ONLY } from './workspace-errors';
 
 type CreateOperation = paths['/workspaces']['post'];
@@ -63,15 +64,10 @@ export class WorkspacesService {
     await this.membershipOf(userId, workspaceId);
     const rows = await this.prisma.membership.findMany({
       where: { workspaceId, user: { deletedAt: null } },
-      select: { role: true, user: { select: { id: true, loginId: true, displayName: true } } },
+      select: { role: true, user: { select: USER_SUMMARY_SELECT } },
       orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
     });
-    return rows.map(({ role, user }) => ({
-      id: user.id,
-      userId: user.loginId,
-      displayName: user.displayName,
-      role,
-    }));
+    return rows.map(({ role, user }) => ({ ...toUserSummary(user), role }));
   }
 
   /**

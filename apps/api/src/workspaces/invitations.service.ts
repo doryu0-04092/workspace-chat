@@ -7,9 +7,10 @@ import {
 } from '@nestjs/common';
 import type { InvitationNewPayload, paths } from '@workspace-chat/shared';
 import type { ErrorResponse } from '../error-response';
-import { Prisma } from '../generated/prisma/client';
+import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
+import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { OWNER_ONLY } from './workspace-errors';
 import { type Workspace, WORKSPACE_SELECT, toWorkspace } from './workspaces.service';
 
@@ -31,16 +32,6 @@ const ALREADY_MEMBER: ErrorResponse = {
   code: 'already_member',
   message: 'この利用者は既にメンバーです',
 };
-
-const USER_SUMMARY_SELECT = { id: true, loginId: true, displayName: true } as const;
-
-function toUserSummary(user: { id: string; loginId: string; displayName: string }) {
-  return { id: user.id, userId: user.loginId, displayName: user.displayName };
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
-}
 
 /**
  * ワークスペースへの招待と、招待の承諾・辞退（F-08 / F-38。機能一覧 2.2）。
