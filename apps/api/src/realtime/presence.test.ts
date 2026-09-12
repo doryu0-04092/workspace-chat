@@ -63,6 +63,16 @@ describe('在席（F-22）', () => {
     );
   }
 
+  /**
+   * 入室で配られた presence:changed が届き切るのを待ってから、その接続に届く分を溜め始める。
+   * 一覧への反映（untilBothSee が見る。サーバー間の通知）と部屋への配信は別の経路で届き、順序が決まらない——
+   * 待たずに溜め始めると、入室の present: true が後から紛れ込む（同じ利用者の2本目の入室で2回配られる場合も含む。9.2 の代償）。
+   */
+  async function collectAfterEntries(socket: Socket): Promise<PresenceChangedPayload[]> {
+    await quiet();
+    return collect(socket);
+  }
+
   /** オーナーと alice・bob が参加するチャンネル。 */
   async function channelOfThree() {
     const owner = await t.login();
@@ -122,7 +132,7 @@ describe('在席（F-22）', () => {
       await enter(await t.open(t.firstBase, alice), channelId);
       await enter(await t.open(t.secondBase, alice), channelId);
       await untilBothSee(channelId, alice.id, true);
-      const received = collect(bobSocket);
+      const received = await collectAfterEntries(bobSocket);
       await t.prisma.channelMember.deleteMany({ where: { channelId, userId: alice.id } });
 
       await t.first.get(RoomMembershipReconciler).reconcile();
@@ -183,7 +193,7 @@ describe('在席（F-22）', () => {
       const aliceSocket = await t.open(t.secondBase, alice);
       await enter(aliceSocket, channelId);
       await untilBothSee(channelId, alice.id, true);
-      const received = collect(bobSocket);
+      const received = await collectAfterEntries(bobSocket);
 
       aliceSocket.close();
 
@@ -215,7 +225,7 @@ describe('在席（F-22）', () => {
       await enter(await t.open(t.firstBase, alice), channelId);
       await enter(await t.open(t.secondBase, alice), channelId);
       await untilBothSee(channelId, alice.id, true);
-      const received = collect(bobSocket);
+      const received = await collectAfterEntries(bobSocket);
 
       const res = await t.send(
         'DELETE',
@@ -242,7 +252,7 @@ describe('在席（F-22）', () => {
       await enter(bobSocket, notEntered);
       await enter(await t.open(t.firstBase, alice), channelId);
       await untilBothSee(channelId, alice.id, true);
-      const received = collect(bobSocket);
+      const received = await collectAfterEntries(bobSocket);
 
       const res = await t.send('POST', `/workspaces/${workspace.id}/leave`, alice);
       expect(res.status).toBe(204);
