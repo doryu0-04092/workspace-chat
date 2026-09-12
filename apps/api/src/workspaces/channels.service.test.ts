@@ -5,8 +5,9 @@ import { ChannelsService } from './channels.service';
 
 /**
  * 一意制約違反（Prisma の P2002）を捕まえて 409 にする経路を、DB の応答を差し替えて決まった形で起こす。
- * 実際の DB を使う検査（channels.test.ts の同じ名前の 409）は、作成の前に SELECT で確かめる形へ変えても、
- * 要求が重ならなければ落ちない。差し替えは要求の順序に依らず違反の経路を踏む（#355）。
+ * 実際の DB を使う channels.test.ts の同じ名前の 409 のうち、逐次の検査は作成の前に SELECT で確かめる形へ変えると違反の経路を
+ * 踏まなくなり、同時の検査は今の実装では必ず踏むが、その形へ変えると要求が重なった回にしか踏まなくなる。
+ * 差し替えは、その形へ変えても要求の順序に依らず違反の経路を踏む（#355）。
  */
 function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError(
