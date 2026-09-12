@@ -36,11 +36,15 @@ postgres_image=$(sed -n "s/^export const POSTGRES_IMAGE = '\([^']*\)';$/\1/p" ap
 [ -n "$postgres_image" ] || fail "apps/api/src/testing/postgres.ts から POSTGRES_IMAGE を読めない"
 
 echo "== イメージを作る"
-docker build --file apps/api/Dockerfile --target migrate --tag "$migrate_image" . >/dev/null
-docker build --file apps/api/Dockerfile --target runtime --tag "$runtime_image" . >/dev/null
+# --pull: 土台（タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で作り、手元の緑が CI の緑と同じ意味を持たない（#281）。
+# 代償: レジストリに届かない環境では、手元に土台があってもこの検査は通らない（下の docker pull も同じ）。
+docker build --pull --file apps/api/Dockerfile --target migrate --tag "$migrate_image" . >/dev/null
+docker build --pull --file apps/api/Dockerfile --target runtime --tag "$runtime_image" . >/dev/null
 
 echo "== 1. マイグレーション用のイメージを空の PostgreSQL に適用する"
 docker network create "$network" >/dev/null
+# 土台（タグで指す）は毎回取り直す。docker run も手元に同じタグがあればレジストリを見ない（docker build の --pull と同じ性質）。
+docker pull --quiet "$postgres_image" >/dev/null
 # 値はこの検査の中だけで使う使い捨ての資格情報である。
 docker run --detach --name "$postgres" --network "$network" \
   --env POSTGRES_PASSWORD=image-test --env POSTGRES_DB=chat "$postgres_image" >/dev/null
