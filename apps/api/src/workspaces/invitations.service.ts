@@ -5,11 +5,11 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { InvitationNewPayload, paths } from '@workspace-chat/shared';
-import type { ErrorResponse } from '../error-response';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
+import { ALREADY_INVITED, ALREADY_MEMBER, INVITEE_NOT_FOUND } from './invitation-errors';
 import {
   type Workspace,
   WORKSPACE_SELECT,
@@ -22,19 +22,6 @@ export type CreateInvitationRequest = InviteOperation['requestBody']['content'][
 export type Invitation = InviteOperation['responses'][201]['content']['application/json'];
 export type MyInvitation =
   paths['/invitations']['get']['responses'][200]['content']['application/json'][number];
-
-const INVITEE_NOT_FOUND: ErrorResponse = {
-  code: 'invitee_not_found',
-  message: 'そのユーザーID の利用者はいません',
-};
-const ALREADY_INVITED: ErrorResponse = {
-  code: 'already_invited',
-  message: 'この利用者は既に招待しています',
-};
-const ALREADY_MEMBER: ErrorResponse = {
-  code: 'already_member',
-  message: 'この利用者は既にメンバーです',
-};
 
 /**
  * ワークスペースへの招待と、招待の承諾・辞退（F-08 / F-38。機能一覧 2.2）。

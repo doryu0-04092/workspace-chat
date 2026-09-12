@@ -3,8 +3,8 @@
 # ビルドの文脈はリポジトリの根である（npm workspaces のため）。作る手順は scripts/api-image.test.sh が持つ。
 #
 # 段:
-#   runtime … api を動かす。本番の依存と、build 段のビルド済みの dist・openapi だけを持つ
-#   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクで使う）。本番の依存と、prisma.config.ts・スキーマ・マイグレーションだけを持つ
+#   runtime … api を動かす。`npm ci --omit=dev` で入る依存と、build 段のビルド済みの dist・openapi だけを持つ
+#   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクで使う）。`npm ci --omit=dev` で入る依存と、prisma.config.ts・スキーマ・マイグレーションだけを持つ
 #
 # 起動に要る環境変数は README「動かす」と apps/api/src/config/api-config.ts にある。**イメージに値を焼き込まない**
 # （.dockerignore が .env を文脈から外す）。scripts/api-image.test.sh が、実際に作って動かして確かめる。
