@@ -181,7 +181,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('マイグレーションの適用', () => {
-    it('6つのモデルの表がすべて作られている', async () => {
+    it('8つのモデルの表がすべて作られている', async () => {
       const output = await expectSqlToSucceed(
         `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -192,8 +192,10 @@ describe('Prisma のスキーマとマイグレーション', () => {
         expect.arrayContaining([
           'Channel',
           'ChannelMember',
+          'Invitation',
           'Membership',
           'RecoveryCode',
+          'RefreshToken',
           'User',
           'Workspace',
         ]),
@@ -1279,6 +1281,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * `mentionTargetByLoginId`（投稿時の宛先解決）は**対象側にも要求する側にも**
      * `deletedAt IS NULL` を当てる（#191 の決定）。表示時の参照先解決（経路2。
      * 参照実装は下の `mentionDisplayTarget`。#78）も、この照合とは別の問い合わせになる。
+     * **招待（機能一覧 2.2）は、この照合（対象側）に加えて、招待するオーナーの所属の問い合わせでも
+     * 要求する側の `deletedAt IS NULL` を当てる**（`invite` が通る `WorkspacesService.membershipOf`。機能一覧 1.4 の2段構えの1段目）。
      * **経路ごとに書き分けること。**
      *
      * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す

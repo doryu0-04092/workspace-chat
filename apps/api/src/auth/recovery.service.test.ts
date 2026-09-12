@@ -52,6 +52,8 @@ describe('RecoveryService', () => {
     await expect(service.recover(INPUT)).rejects.toBeInstanceOf(UnauthorizedException);
     expect(verifySecret).toHaveBeenCalledExactlyOnceWith('dummy-argon2id-hash', 'ABCDEFGHJKMNPQRS');
     expect(store.recordFailure).toHaveBeenCalledWith('recovery:some_user', expect.any(Number));
+    // 照合に失敗した経路では、ログイン側（login:）のキーを数え直さない。数え直すのは成功したときだけ（#280・#298）。
+    expect(store.reset).not.toHaveBeenCalled();
   });
 
   // 同時の再設定の後の側・退会の処理と重なった場合は、無効化する行が 0 件になる。
