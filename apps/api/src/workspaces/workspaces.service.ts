@@ -3,6 +3,7 @@ import type { paths } from '@workspace-chat/shared';
 import { INVALID_TOKEN } from '../auth/session.service';
 import { BearerUnauthorizedException } from '../error-response';
 import { PrismaService } from '../prisma.service';
+import { RealtimeRooms } from '../realtime/realtime-rooms';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { OWNER_CANNOT_LEAVE, OWNER_ONLY } from './workspace-errors';
 
@@ -23,7 +24,10 @@ export const WORKSPACE_SELECT = { id: true, name: true, createdAt: true } as con
  */
 @Injectable()
 export class WorkspacesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rooms: RealtimeRooms,
+  ) {}
 
   /**
    * 作成者をオーナーとして、**同じ文で**参加させる（schema.prisma の Membership の注記: オーナーが 0 人のワークスペースを作らない）。
@@ -74,7 +78,7 @@ export class WorkspacesService {
    * キック（F-09。機能一覧 2.2）。**オーナーだけ**（メンバーは 403 `owner_only`、所属していなければ存在の有無を区別せず 404）。
    * オーナー自身は外せない（403 `owner_cannot_leave`）。外す相手がメンバーでなければ 404。
    * **参加の記録は物理削除**（機能一覧 F-38 の代償）。`ChannelMember` は `Membership` の連鎖で消える（全チャンネルから外れる）。
-   * 接続をチャンネルの部屋から外す処理は、チャンネルの部屋の実装と同時に入れる（#331）。
+   * **外した利用者の接続を、そのワークスペースの全チャンネルの部屋から外す**（2.2）。
    */
   async kick(ownerId: string, workspaceId: string, memberId: string): Promise<void> {
     await this.ownerMembershipOf(ownerId, workspaceId);
@@ -83,11 +87,12 @@ export class WorkspacesService {
       where: { workspaceId, userId: memberId, role: 'MEMBER' },
     });
     if (count !== 1) throw new NotFoundException();
+    await this.removeFromChannelRooms(memberId, workspaceId);
   }
 
   /**
    * 退出（F-38）。メンバー本人。**オーナーは退出できない**（403 `owner_cannot_leave`。理由のメッセージを返す）。
-   * 所属していなければ存在の有無を区別せず 404。参加の記録は物理削除（キックと同じ）。
+   * 所属していなければ存在の有無を区別せず 404。参加の記録は物理削除し、接続をチャンネルの部屋から外す（キックと同じ）。
    */
   async leave(userId: string, workspaceId: string): Promise<void> {
     const membership = await this.membershipOf(userId, workspaceId);
@@ -96,6 +101,7 @@ export class WorkspacesService {
       where: { workspaceId, userId, role: 'MEMBER', user: { deletedAt: null } },
     });
     if (count !== 1) throw new NotFoundException();
+    await this.removeFromChannelRooms(userId, workspaceId);
   }
 
   /**
@@ -125,6 +131,18 @@ export class WorkspacesService {
     const row = await this.membershipOf(userId, workspaceId);
     if (row.role !== 'OWNER') throw new ForbiddenException(OWNER_ONLY);
     return row;
+  }
+
+  /** ワークスペースから外れた利用者の接続を、そのワークスペースの全チャンネルの部屋（参加していなかったものを含む）から外す。 */
+  private async removeFromChannelRooms(userId: string, workspaceId: string): Promise<void> {
+    const channels = await this.prisma.channel.findMany({
+      where: { workspaceId },
+      select: { id: true },
+    });
+    this.rooms.removeFromChannels(
+      userId,
+      channels.map(({ id }) => id),
+    );
   }
 }
 

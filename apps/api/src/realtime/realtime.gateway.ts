@@ -15,7 +15,12 @@ export function userRoom(userId: string): string {
   return `user:${userId}`;
 }
 
-type RealtimeSocket = Socket & { data: { user?: AuthenticatedUser } };
+/** チャンネルの部屋の名前（機能一覧 9.2「チャンネルの部屋」。利用者の部屋と同じ形。#335）。 */
+export function channelRoom(channelId: string): string {
+  return `channel:${channelId}`;
+}
+
+export type RealtimeSocket = Socket & { data: { user?: AuthenticatedUser } };
 
 /** 断ったときにクライアントの `connect_error` の `data` に載る値。HTTP の 401 の `code` と同じ綴り（仕様の列挙から取る）。 */
 type RejectCode = Extract<
