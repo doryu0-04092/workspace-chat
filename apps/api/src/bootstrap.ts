@@ -1,4 +1,4 @@
-import type { INestApplication } from '@nestjs/common';
+import type { INestApplication, LoggerService } from '@nestjs/common';
 import { createApp } from './app-setup';
 import { JsonLogger } from './logging/json-logger';
 import { resolvePort } from './port';
@@ -38,6 +38,29 @@ export function installFatalHandlers(
 }
 
 /**
+ * Node 自身の警告（`DeprecationWarning`・`MaxListenersExceededWarning` など）を、構造化ログの warn として残す（要件定義書 4.6）。
+ *
+ * - **既定の出力（素のテキストで標準エラー）を止めるのは、起動のコマンドの `--no-warnings` である**——`'warning'` を購読しても止まらない
+ * - **警告は普段は出ない。残った警告は原因を調べる**（決定・2026-09-13・依頼側）——場所を辿れるようにスタックも残す
+ */
+export function installWarningLog(
+  proc: NodeJS.Process = process,
+  logger: LoggerService = new JsonLogger(),
+): void {
+  proc.on('warning', (warning) => {
+    logger.warn(
+      {
+        name: warning.name,
+        code: (warning as Error & { code?: string }).code,
+        message: warning.message,
+        stack: warning.stack,
+      },
+      'NodeWarning',
+    );
+  });
+}
+
+/**
  * 本番の起動の入口（main.ts はこれだけを呼ぶ）。**購読と失敗の報告をここで組む**——main.ts で個別に組むと、
  * 当て忘れてもテストが落ちない（app-setup.ts の createApp と同じ理由）。
  */
@@ -46,6 +69,7 @@ export async function start(
   report: (error: unknown) => void = reportFatal,
   run: () => Promise<unknown> = bootstrap,
 ): Promise<void> {
+  installWarningLog(proc);
   installFatalHandlers(proc, report);
   try {
     await run();
