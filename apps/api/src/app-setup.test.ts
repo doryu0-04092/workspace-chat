@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from './app-setup';
+import { stubApiEnv } from './testing/api-env';
 import { API_SETTINGS } from './config/api-config';
 
 // 起動を止める設定の検証は、アプリを組み立てる前に済ませる（bootstrap.ts の PORT と同じ。PR #254 第1巡・#256）。
@@ -19,6 +20,8 @@ describe('createApp の設定の検証', () => {
     ['TRUST_PROXY_HOPS', undefined],
     ['API_TASK_COUNT', '0'],
     ['REGISTRATION_ENABLED', 'FALSE'],
+    ['JWT_SECRET', 'short'],
+    ['WEB_ORIGIN', 'https://chat.example.com/'],
   ];
 
   it('不正な値の表は、起動の設定のすべてを持つ', () => {
@@ -30,12 +33,7 @@ describe('createApp の設定の検証', () => {
   });
 
   it.each(INVALID)('%s が %j なら、アプリを組み立てる前に落ちる', async (name, raw) => {
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
-    vi.stubEnv('TRUST_PROXY_HOPS', '0');
-    vi.stubEnv('API_TASK_COUNT', undefined);
-    vi.stubEnv('REGISTRATION_ENABLED', undefined);
-    vi.stubEnv(name, raw);
+    stubApiEnv({ [name]: raw });
     // 組み立てを本当に走らせると、Nest は失敗時にプロセスを終わらせる（テストの実行ごと落ちて原因が読めない）。
     // 呼ばれたら分かる失敗に差し替える。
     const create = vi

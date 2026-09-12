@@ -31,12 +31,14 @@
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.6",
     "prisma": "^7.10.0",
+    "socket.io-client": "^4.8.3",
     "testcontainers": "^12.1.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.69.0",
     "unplugin-swc": "^1.5.11",
     "vite": "^7.3.6",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "yaml": "^2.9.0"
   },
   "overrides": {
     "vite": "$vite",

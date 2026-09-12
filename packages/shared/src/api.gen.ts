@@ -44,6 +44,180 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ログイン（F-02）
+         * @description 認証を要さない。成功するとアクセストークン（JWT・15分）を本体で返し、リフレッシュトークン（14日）を Cookie（refresh_token。HttpOnly; Secure; SameSite=Strict; Path=/api/auth）で渡す（機能一覧 1.2）。 発信元単位のレート制限は15分に20回。加えてユーザーID（大文字小文字を区別しない。存在しない ID も同じ）ごとに、 連続して失敗した回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す。成功で数え直す（リカバリーコードによる再設定の成功でも数え直す。#280）。
+         */
+        post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * アクセストークンの更新（F-02）
+         * @description Cookie（refresh_token）のリフレッシュトークンを新しいものに入れ替え、新しいアクセストークンを返す（機能一覧 1.2）。 入れ替え済みのトークンが出されたら、そのログインの系列のトークンをすべて失効させる（RFC 9700 4.14.2）。 本体は送らない。X-Requested-By が無い要求は 400、Sec-Fetch-Site / Origin / Referer が同じ origin を示さない要求は 403 （要件定義書 4.3 の CSRF の対処）。発信元単位のレート制限は15分に60回（機能一覧 1.2）。
+         */
+        post: operations["refreshTokens"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ログアウト（F-02）
+         * @description Cookie（refresh_token）のリフレッシュトークンの系列をすべて失効させ、Cookie を消す（機能一覧 1.2）。 トークンが無い・知らない場合も 204 を返す。本体は送らない。CSRF の対処は /auth/refresh と同じ。 発信元単位のレート制限は15分に60回（機能一覧 1.2）。
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * リカバリーコードによるパスワードの再設定（F-37）
+         * @description 認証を要さない。ユーザーID とリカバリーコードでパスワードを再設定し、使ったコードを無効化して新しいコードを発行する （新しいコードはこの応答でだけ返す）。その利用者のリフレッシュトークンをすべて失効させる（機能一覧 1.1）。 発信元単位のレート制限は1時間に10回。加えてユーザーID（大文字小文字を区別しない。存在しない ID も同じ）ごとに、 連続して失敗した回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える。ただし再設定に成功したら、ログインの回数も数え直す。#280）。
+         */
+        post: operations["recover"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自分のプロフィールの取得（F-04）
+         * @description アバター画像の設定はまだ無く、avatarUrl は null のままである（機能一覧 1.3。11.1 と同じ段で足す）。
+         */
+        get: operations["getMyProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 自分のプロフィールの編集（F-04）
+         * @description 送った項目だけを変える。ユーザーID は変えられない（本体に userId を含めると 400。機能一覧 1.3）。 ステータスは絵文字とテキストの1セットで、null を送ると消える。
+         */
+        patch: operations["updateMyProfile"];
+        trace?: never;
+    };
+    "/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自分が所属するワークスペースの一覧（F-06。サイドバーの切替）
+         * @description 参加した順。所属していないものは含まない
+         */
+        get: operations["listMyWorkspaces"];
+        put?: never;
+        /**
+         * ワークスペースの作成（F-06）
+         * @description 作成者がオーナーとして所属した状態になる（機能一覧 2.1）。名前は 1〜50 文字（コードポイント）で、空白だけは不可。 同名を許す（決定・2026-09-12・依頼側。#290）
+         */
+        post: operations["createWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * ワークスペースの取得（F-06）
+         * @description 所属していなければ、存在の有無を区別せず 404（機能一覧 2.1）
+         */
+        get: operations["getWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * ワークスペースの参加者一覧（F-06）
+         * @description 参加した順。退会済みの利用者を含まない（機能一覧 2.1・1.5）。所属していなければ、存在の有無を区別せず 404
+         */
+        get: operations["listWorkspaceMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -53,7 +227,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -69,22 +243,126 @@ export interface components {
             /** @description 1〜50文字。空白だけは不可（機能一覧 1.1。決定・2026-09-11・依頼側。列の型にも入れてある） */
             displayName: string;
         };
+        RecoveryRequest: {
+            /** @description 英数字とアンダースコアのみ、3〜30文字（RegisterRequest と同じ） */
+            userId: string;
+            /** @description 登録で受け取ったコード。英小文字・ハイフンの有無を問わない（照合の前に正規形へ寄せる。O は 0、I・L は 1 と読む） */
+            recoveryCode: string;
+            /** @description 8〜128文字（RegisterRequest の password と同じ） */
+            newPassword: string;
+        };
+        RecoveryResponse: {
+            /** @description 新しいリカバリーコード。Crockford の Base32 で16文字（80ビット）を4文字ずつハイフンで区切る */
+            recoveryCode: string;
+        };
         RegisterResponse: {
-            user: {
-                /** Format: uuid */
-                id: string;
-                userId: string;
-                displayName: string;
-            };
+            user: components["schemas"]["UserSummary"];
             /** @description Crockford の Base32 で16文字（80ビット）を4文字ずつハイフンで区切る */
             recoveryCode: string;
+        };
+        LoginRequest: {
+            /** @description 英数字とアンダースコアのみ、3〜30文字（RegisterRequest と同じ） */
+            userId: string;
+            /** @description 1〜128文字。下限を登録（8文字）に揃えないのは、下限を変えたときに既存の利用者がログインできなくならないようにするため */
+            password: string;
+        };
+        RefreshResponse: {
+            /** @description JWT（HS256）。Authorization ヘッダーに Bearer で付ける */
+            accessToken: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+            /** @description アクセストークンの有効期間（秒） */
+            expiresIn: number;
+        };
+        LoginResponse: {
+            /** @description JWT（HS256）。Authorization ヘッダーに Bearer で付ける */
+            accessToken: string;
+            /** @enum {string} */
+            tokenType: "Bearer";
+            /** @description アクセストークンの有効期間（秒） */
+            expiresIn: number;
+            user: components["schemas"]["UserSummary"];
+        };
+        UserSummary: {
+            /** Format: uuid */
+            id: string;
+            userId: string;
+            displayName: string;
+        };
+        Profile: {
+            /** Format: uuid */
+            id: string;
+            userId: string;
+            displayName: string;
+            avatarUrl: string | null;
+            /** @description 絵文字とテキストの1セット。設定していなければ null（機能一覧 1.3） */
+            status: components["schemas"]["Status"] | null;
+        };
+        /** @description ステータス（機能一覧 1.3）。絵文字とテキストは1セットであり、片方だけは持たない（決定・2026-09-12・依頼側。#283） */
+        Status: {
+            /** @description 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色や ZWJ で繋いだ列・国旗も1つと数える）。 この形は pattern で表せないため、api が確かめて 400（validation_failed）を返す */
+            emoji: string;
+            /** @description 1〜100文字（文字数はコードポイントで数える） */
+            text: string;
+        };
+        UpdateProfileRequest: {
+            /** @description 1〜50文字。空白だけは不可（RegisterRequest と同じ） */
+            displayName?: string;
+            /** @description 絵文字とテキストの1セットで設定する。null で消す（片方だけの本体は 400） */
+            status?: components["schemas"]["Status"] | null;
         };
         HealthResponse: {
             /** @enum {string} */
             status: "ok";
         };
+        CreateWorkspaceRequest: {
+            /** @description 1〜50 文字（文字数はコードポイントで数える）。空白だけは不可（決定・2026-09-12・依頼側。#290）。 上限は入力にだけ置く（応答と DB の列には置かない。同決定） */
+            name: string;
+        };
+        /**
+         * @description ワークスペースでの役割（schema.prisma の WorkspaceRole）
+         * @enum {string}
+         */
+        WorkspaceRole: "OWNER" | "MEMBER";
+        Workspace: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description 要求した利用者の、このワークスペースでの役割 */
+            role: components["schemas"]["WorkspaceRole"];
+        };
+        /** @description 参加者。UserSummary に役割を足したもの */
+        WorkspaceMember: {
+            /** Format: uuid */
+            id: string;
+            userId: string;
+            displayName: string;
+            role: components["schemas"]["WorkspaceRole"];
+        };
     };
     responses: {
+        /** @description Authorization ヘッダーに Bearer のアクセストークンが無い（authentication_required）か、 トークンが壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
+        Unauthorized: {
+            headers: {
+                /** @description トークンが無いときは `Bearer`、使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1） */
+                "WWW-Authenticate"?: string;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description Sec-Fetch-Site・Origin・Referer のどれも、api と同じ origin からの要求であることを示さない（csrf_rejected） */
+        CsrfRejected: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description 入力が仕様に合わない（validation_failed）か、本体を JSON として読めない（invalid_body）。 どちらも送られた値を応答に載せない */
         BadRequest: {
             headers: {
@@ -132,6 +410,15 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description 見つからない（not_found）。所属していないワークスペースは、存在の有無を区別せずこれになる（機能一覧 2.1・1.4）。 本体は状態コードの本体であり、権限の有無を述べない */
+        NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
         /** @description 想定外の失敗（internal_error）。例外のメッセージは載せない */
         InternalServerError: {
             headers: {
@@ -142,7 +429,12 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description ワークスペースの id。形が uuid でなければ 400 */
+        WorkspaceId: string;
+        /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
+        RequestedBy: "workspace-chat";
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -216,6 +508,313 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    login: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description ログインした */
+            200: {
+                headers: {
+                    /** @description リフレッシュトークン（refresh_token） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description ユーザーID かパスワードが違う、または退会済み（invalid_credentials）。どれに当たったかは区別しない（機能一覧 1.2） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    refreshTokens: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
+                "X-Requested-By": components["parameters"]["RequestedBy"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 入れ替えた */
+            200: {
+                headers: {
+                    /** @description 新しいリフレッシュトークン（refresh_token） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description リフレッシュトークンが無い・知らない・失効済み・期限切れ、または利用者が退会済み（invalid_token）。 どれに当たったかは区別しない。Cookie を消す */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            403: components["responses"]["CsrfRejected"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
+                "X-Requested-By": components["parameters"]["RequestedBy"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ログアウトした（Cookie を消す） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["CsrfRejected"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    recover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description 再設定した */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description ユーザーID かリカバリーコードが違う、コードが使用済み、または退会済み（invalid_credentials）。どれに当たったかは区別しない */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getMyProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 自分のプロフィール */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateMyProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description 変えた後のプロフィール */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listMyWorkspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 所属するワークスペース */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkspaceRequest"];
+            };
+        };
+        responses: {
+            /** @description 作ったワークスペース（role は OWNER） */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ワークスペース */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listWorkspaceMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 参加者 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMember"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
             500: components["responses"]["InternalServerError"];
         };
     };

@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net';
 import type { INestApplication } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app-setup';
+import { stubApiEnv } from '../testing/api-env';
+import { type CapturedOutput, captureOutput } from '../testing/captured-output';
 
 type LogLine = { level?: string; message?: unknown; context?: string; requestId?: string };
 
@@ -13,30 +15,16 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 describe('構造化ログとリクエスト ID', () => {
   let app: INestApplication;
   let base: string;
-  const written: { stdout: string[]; stderr: string[] } = { stdout: [], stderr: [] };
+  let captured: { stdout: CapturedOutput; stderr: CapturedOutput };
 
-  /** 書かれた行のうち JSON として読めるもの。Vitest 自身の出力が混ざるため、JSON の行だけを拾う。 */
   function jsonLines(stream: 'stdout' | 'stderr' = 'stdout'): LogLine[] {
-    return written[stream]
-      .flatMap((chunk) => chunk.split('\n'))
-      .filter((line) => line.startsWith('{'))
-      .map((line) => JSON.parse(line) as LogLine);
+    return captured[stream].jsonLines<LogLine>();
   }
 
   beforeAll(async () => {
-    for (const name of ['stdout', 'stderr'] as const) {
-      const stream = process[name];
-      const original = stream.write.bind(stream);
-      vi.spyOn(stream, 'write').mockImplementation(((chunk: unknown, ...rest: unknown[]) => {
-        written[name].push(String(chunk));
-        return (original as (...args: unknown[]) => boolean)(chunk, ...rest);
-      }) as typeof stream.write);
-    }
+    captured = { stdout: captureOutput('stdout'), stderr: captureOutput('stderr') };
     // DB に繋がらない宛先にし、新規登録で想定外の失敗（500）を起こしてログを出させる。
-    vi.stubEnv('DATABASE_URL', 'postgresql://unused:unused@127.0.0.1:9/unused');
-    vi.stubEnv('REDIS_URL', 'redis://127.0.0.1:9');
-    vi.stubEnv('TRUST_PROXY_HOPS', '0');
-    vi.stubEnv('REGISTRATION_ENABLED', undefined);
+    stubApiEnv();
     app = await createApp();
     await app.listen(0, '127.0.0.1');
     const { port } = app.getHttpServer().address() as AddressInfo;

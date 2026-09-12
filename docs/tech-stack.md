@@ -227,7 +227,7 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | **ElastiCache for Valkey** | **cache.t4g.micro（0.5 GB）× 1 ノード** | 用途は **Pub/Sub による配信共有と、期限つきのレート制限の回数だけ**で、データを蓄積しない（**在席は保持しない**。[要件定義書](requirements.md) 4.2）。**レプリカは置かない**（停止すると複数タスク間の配信が止まり、レート制限は各タスクのメモリでの計数に落ちる。これも割り切りである） |
 | **ALB** | 1 台 | TLS 終端と WebSocket の維持。**ターゲットグループのヘルスチェックのパスは `/api/health`**（F-39。#77 の決定によりアプリ側のパスが `/api` を持つ） |
 | **S3** | 上限を設けない（実測で監視） | 添付は画像 10 MB / 動画 100 MB / 文書・圧縮 25 MB を上限とする（[要件定義書](requirements.md) 4.3） |
-| **CloudFront** | 1 ディストリビューション / **オリジンを3つ**（フロントの静的配信のバケット、**添付のバケット**、**ALB**） / **ビヘイビアを4つに分ける**（**`/api/*` → ALB** / `/files/*` → **添付のバケット** / **`/avatars/*` → 添付のバケット**（パスを剥がさない。**オリジンへは正規化の前のパスが渡り、`avatars/` の外のキーに届かないかは未確認であり、[要件定義書](requirements.md) 4.3 の「確かめる URL の形」の URL で実際に配信して確かめる**。[要件定義書](requirements.md) 4.3） / 既定の `*` → **静的配信のバケット**。**添付のバケットへは `/files/*` と `/avatars/*` からしか到達できない**（**CloudFront の内部の限定であって、バケット側で到達経路を閉じるという意味ではない**——**バケットを「CloudFront の OAC からのみ」に閉じると、アップロードの署名付き PUT が通らなくなる**。#176）。[要件定義書](requirements.md) 4.3） / **`/files/*` と `/avatars/*` のビヘイビアに応答ヘッダーのポリシー SecurityHeadersPolicy を付ける**（すべての応答に `X-Content-Type-Options: nosniff`。[機能一覧](features.md) 11.1・1.3） / **viewer-request の関数を1つ**（`/files` を剥がす。[要件定義書](requirements.md) 4.3。**これが無いと添付が `NoSuchKey` になり、参加者でも取得できない**。**署名付き Cookie の照合と両立するかは未確認であり、実際に配信して確かめる**。**オリジンへは正規化の前のパスが渡り、`/files/*` の内側で Cookie の対象の外のキーに届かないかも未確認であり、同じく「確かめる URL の形」の URL で配信して確かめる**） | フロントの静的配信・添付ファイルの配信・**API と WebSocket** を1つのドメインで兼ねる。**API を同一ドメインに置くのは、署名付き Cookie をこのホストに限って発行するためである**（#77 の決定）——署名付き Cookie は CloudFront のドメインに対して設定される必要があるが、発行するのは API であり、API が別サブドメインにあると `Domain` を広げない限り届かない。[要件定義書](requirements.md) 4.3 は「**サブドメインに Cookie を書ける攻撃者に破られる**」を明記してこの範囲を警戒しており、別サブドメインを採ると自分でその範囲を広げることになる。**`/api/*` はパスを剥がさずオリジンへ渡す**（アプリ側のパスも `/api` を含む）。**`/api/*` は GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE のすべてを許可する**（`Allowed HTTP methods`。[AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesCacheBehavior.html) は3つの選択肢しか持たず、**POST を通すのはこれだけである**。狭い側を選ぶと `POST /api/auth/login` がオリジンに届かず、**認証が成立しないまま、原因がエッジ側にあるためアプリのログには何も出ない**）。**`/api/*` はキャッシュしない**（`CachingDisabled` 相当）**、**すべてのビューアーのヘッダー・Cookie・クエリ文字列をオリジンへ転送する**（origin request policy の `AllViewer` 相当）——**転送するものを数えて列挙しない。** `Authorization` と Cookie とクエリ文字列だけを挙げると、**WebSocket のハンドシェイクが要求する `Upgrade` / `Connection` / `Sec-WebSocket-Key` / `Sec-WebSocket-Version` が落ちる**（RFC 6455）。**Socket.IO は既定で HTTP long-polling から入るため、繋がらないのではなく「常時 long-polling のまま」に静かに落ちる**（#77）——**CloudFront は既定でこれらをオリジンへ渡さない**（[AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/controlling-origin-requests.html)）。**これが無いと認証がまったく成立せず、さらに `Authorization` がキャッシュキーに入らないまま GET の応答がエッジに残り、非参加者へ返りうる**（[REVIEW.md](../REVIEW.md) 2.1 経路1）。**署名を要求するのは添付のパス（`/files/*`）とアバターのパス（`/avatars/*`）のみ**とする（**署名付き Cookie の対象は `/files/workspace/{ws}/channel/{ch}/*` と `/avatars/*`**。[要件定義書](requirements.md) 4.3）。ディストリビューション全体に署名を要求すると、**署名付き Cookie を持たない未ログインの利用者がログイン画面すら開けなくなる** |
+| **CloudFront** | 1 ディストリビューション / **オリジンを3つ**（フロントの静的配信のバケット、**添付のバケット**、**ALB**） / **ビヘイビアを4つに分ける**（**`/api/*` → ALB** / `/files/*` → **添付のバケット** / **`/avatars/*` → 添付のバケット**（パスを剥がさない。**オリジンへは正規化の前のパスが渡り、`avatars/` の外のキーに届かないかは未確認であり、[要件定義書](requirements.md) 4.3 の「確かめる URL の形」の URL で実際に配信して確かめる**。[要件定義書](requirements.md) 4.3） / 既定の `*` → **静的配信のバケット**。**添付のバケットへは `/files/*` と `/avatars/*` からしか到達できない**（**CloudFront の内部の限定であって、バケット側で到達経路を閉じるという意味ではない**——**バケットを「CloudFront の OAC からのみ」に閉じると、アップロードの署名付き PUT が通らなくなる**。#176）。[要件定義書](requirements.md) 4.3） / **`/files/*` と `/avatars/*` のビヘイビアに応答ヘッダーのポリシー SecurityHeadersPolicy を付ける**（すべての応答に `X-Content-Type-Options: nosniff`。[機能一覧](features.md) 11.1・1.3） / **viewer-request の関数を1つ**（`/files` を剥がす。[要件定義書](requirements.md) 4.3。**これが無いと添付が `NoSuchKey` になり、参加者でも取得できない**。**署名付き Cookie の照合と両立するかは未確認であり、実際に配信して確かめる**。**オリジンへは正規化の前のパスが渡り、`/files/*` の内側で Cookie の対象の外のキーに届かないかも未確認であり、同じく「確かめる URL の形」の URL で配信して確かめる**） | フロントの静的配信・添付ファイルの配信・**API と WebSocket** を1つのドメインで兼ねる。**API を同一ドメインに置くのは、署名付き Cookie をこのホストに限って発行するためである**（#77 の決定）——署名付き Cookie は CloudFront のドメインに対して設定される必要があるが、発行するのは API であり、API が別サブドメインにあると `Domain` を広げない限り届かない。[要件定義書](requirements.md) 4.3 は「**サブドメインに Cookie を書ける攻撃者に破られる**」を明記してこの範囲を警戒しており、別サブドメインを採ると自分でその範囲を広げることになる。**`/api/*` はパスを剥がさずオリジンへ渡す**（アプリ側のパスも `/api` を含む）。**`/api/*` は GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE のすべてを許可する**（`Allowed HTTP methods`。[AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesCacheBehavior.html) は3つの選択肢しか持たず、**POST を通すのはこれだけである**。狭い側を選ぶと `POST /api/auth/login` がオリジンに届かず、**認証が成立しないまま、原因がエッジ側にあるためアプリのログには何も出ない**）。**`/api/*` はキャッシュしない**（`CachingDisabled` 相当）**、**すべてのビューアーのヘッダー・Cookie・クエリ文字列をオリジンへ転送する**（origin request policy の `AllViewer` 相当）——**転送するものを数えて列挙しない。** `Authorization` と Cookie とクエリ文字列だけを挙げると、**WebSocket のハンドシェイクが要求する `Upgrade` / `Connection` / `Sec-WebSocket-Key` / `Sec-WebSocket-Version` が落ちる**（RFC 6455）。**クライアントは WebSocket だけで繋ぐ（[機能一覧](features.md) 5.2。`REALTIME_TRANSPORTS`）ため、これらが落ちると接続そのものが成立しない**（#77・#284。polling へのフォールバックは無い）——**CloudFront は既定でこれらをオリジンへ渡さない**（[AWS の文書](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/controlling-origin-requests.html)）。**これが無いと認証がまったく成立せず、さらに `Authorization` がキャッシュキーに入らないまま GET の応答がエッジに残り、非参加者へ返りうる**（[REVIEW.md](../REVIEW.md) 2.1 経路1）。**署名を要求するのは添付のパス（`/files/*`）とアバターのパス（`/avatars/*`）のみ**とする（**署名付き Cookie の対象は `/files/workspace/{ws}/channel/{ch}/*` と `/avatars/*`**。[要件定義書](requirements.md) 4.3）。ディストリビューション全体に署名を要求すると、**署名付き Cookie を持たない未ログインの利用者がログイン画面すら開けなくなる** |
 
 **この規模を超えた場合に最初に詰まるのは ECS タスクではなく RDS の接続数である。**
 `db.t4g.micro` の最大接続数は限られるため、**接続プールの上限をタスク数 × プール数で管理し、
@@ -240,11 +240,11 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | ECS Fargate（0.25 vCPU / 0.5 GB × **2**） | 約 $18 |
 | ALB | 約 $16 |
 | RDS db.t4g.micro（Single-AZ） | 約 $13 |
-| ElastiCache for Valkey cache.t4g.micro（価格の根拠は「Valkey の版（ローカル）」） | 約 $9 |
+| ElastiCache for Valkey cache.t4g.micro（価格は未確認。「Valkey の版（ローカル）」にあるのは Redis 比の相対値のみで、この額の根拠にならない） | 約 $9 |
 | S3 + CloudFront | 数ドル |
 | **合計** | **約 $55〜65 / 月** |
 
-**デモ後は `terraform destroy` する運用**を前提とし、実費を数ドルに抑える。
+**デモ後に `terraform destroy` する運用**（[要件定義書](requirements.md) 4.2 の決定。ここには書かない）により、実費を数ドルに抑える。
 
 ---
 
@@ -338,6 +338,12 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 > （#256）・テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts) と、
 > アプリを組み立てるテスト（接続しない宛先を渡す）である。
 
+#### 追加で確認した項目 — React hooks の lint ルール（2026-09-07。#18 / #76）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **eslint-plugin-react-hooks** | **^7.1.1** | 最新版。`peerDependencies` の `eslint` はこの版でも `^10.0.0` を含む広い範囲を受け入れる。**`configs.recommended` はそのまま使わない**——rules-of-hooks / exhaustive-deps に加え、React Compiler 向けの静的解析ルール（purity・refs・static-components など10件超）を丸ごと束ねており、#18 が挙げた問題（hooks の呼び出し規則の違反・useEffect の依存配列の漏れ）はこの2つだけで足りる。直下の `eslint.config.js`（`files: ['apps/web/**/*.{ts,tsx}']`）で2つに絞って有効化済み |
+
 #### 追加で確認した項目 — REST の型の生成（2026-09-11。#243）
 
 [要件定義書](requirements.md) 4.7「REST API の仕様を唯一の正とし、そこから型を生成する」の道具。
@@ -360,6 +366,36 @@ F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の 
 | **@nest-lab/throttler-storage-redis** | **^1.2.0** | 最新。状態を Valkey に置き、タスクをまたいで数える（Lua の `eval` で原子的に数える）。`@nestjs/throttler` の >=6.0.0 を受け入れる。旧 `nestjs-throttler-storage-redis` は npm で非推奨 |
 | **ioredis** | **^5.11.1** | 上の保存先が要求する接続（peerDependencies の >=5.0.0）。**`enableOfflineQueue: false`・`commandTimeout` で、Valkey が止まっているときにすぐ失敗させる**（既定は接続が切れている間のコマンドを溜め、要求が詰まる） |
 | **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動する（`GenericContainer`）。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
+
+#### 追加で確認した項目 — api のコンテナイメージ（2026-09-12。#271）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **土台のイメージ** | **node:24-bookworm-slim** | Node.js 24 LTS（上表）の Debian 12 の slim。**Alpine（musl）にしない**——argon2 はビルド済みのネイティブモジュールを使い、musl では入れ方が変わる。段は実行用（`runtime`）とマイグレーション用（`migrate`。`prisma migrate deploy` を1回流す。ECS の一回きりのタスクで使う）に分ける（[apps/api/Dockerfile](../apps/api/Dockerfile)）。**どちらも `prod-deps`（`npm ci --omit=dev`。開発依存のうち `@prisma/client` の任意の peer である `prisma` は lock 上 devOptional のため入る）の `/app` から作り、`USER node` で動く。ソース・テスト・開発依存を持つ `build` 段を `FROM` で継がない**（`runtime` はビルド済みの `dist` と `openapi` だけを `COPY --from=build` で受け取る。`migrate` は受け取らない。#277）。CI の `code` が [scripts/api-image.test.sh](../scripts/api-image.test.sh) で作って動かす。**版はダイジェストで固定していない**（固定しない理由と代償は [Dockerfile](../apps/api/Dockerfile) に記した） |
+
+#### 追加で確認した項目 — ログイン（2026-09-11。#257）
+
+F-02 で追加した依存（`apps/api` の dependencies）。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **@nestjs/jwt** | **^11.0.2** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（11.0.2 の peerDependencies は `@nestjs/common` の ^11.0.0 を受け入れる）。`jsonwebtoken` 9.0.3 を包む。**署名も検証も HS256 だけにする**（`verifyOptions.algorithms`。RFC 8725 3.1「Libraries MUST enable the caller to specify a supported set of algorithms」）。鍵は環境変数 `JWT_SECRET`（32 バイト以上。RFC 7518 3.2「A key of the same size as the hash output (for instance, 256 bits for "HS256") or larger MUST be used」） |
+| **cookie** | **^1.1.1** | リフレッシュとログアウトで Cookie（refresh_token）を読む（`parse`）。**2 系は ESM だけで出ており**（package.json の `"type": "module"`）、CommonJS の NestJS 11 から読むため 1 系にした（1.1.1 は CommonJS と型を同梱する）。**採らなかったもの**: `cookie-parser`（全要求に掛けるミドルウェアで、Cookie を読むのは2つのエンドポイントだけ）／ヘッダーを自前で分解する（引用符や符号化の扱いを自前で書くことになる） |
+
+#### 追加で確認した項目 — アクセストークンの入口（2026-09-12。#276）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **yaml**（開発依存） | **^2.9.0** | 最新。テストで REST の仕様（openapi.yaml）を読み、認証を要さない操作（`security: []`）と api の `@Public()` のルートが一致することを確かめる（`apps/api/src/auth/access-token.test.ts`）。推移依存（vite）としては既に入っていたが、直接読むため明示した。**製品のコードからは読まない** |
+
+#### 追加で確認した項目 — Socket.IO の接続の入口（2026-09-12。#284）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **socket.io** | **^4.8.3** | 最新（上表「リアルタイム」の 4.x）。`@nestjs/platform-socket.io` 11.2.3 が同じ 4.8.3 を依存に持つ |
+| **@nestjs/websockets**・**@nestjs/platform-socket.io** | **^11.2.3** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（peerDependencies は `@nestjs/common` の ^11.0.0） |
+| **@socket.io/redis-adapter** | **^8.3.0** | 最新（上表「難-2」）。`ioredis` の接続をそのまま渡せる。**アダプタはコマンドの Promise を待たずに捨てる**（`publish`・終了時の `unsubscribe`）ため、Valkey が止まっていると未処理の reject でプロセスが落ちる。接続に失敗の受け手を付けてから渡す（`apps/api/src/realtime/realtime-valkey.ts`） |
+| **socket.io-client**（開発依存） | **^4.8.3** | テストで実際に接続する（Origin・トークン・タスクをまたぐ配信）。web が使うときに web の依存へ足す |
 
 #### TypeScript 7 を採らない理由
 
@@ -428,7 +464,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
      `psql` の実問い合わせで3つとも赤にするところまで作ってあるが、
      **符号化と照合順序はその対象外である。緑のまま、2-gram 索引の挙動だけが環境ごとに変わる。**
      露見するのは検索を実装したあとであり、**本書が繰り返し避けてきた「最も遅い段階」**にあたる
-- **その前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
+- **`CREATE EXTENSION` の前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
   pg_bigm は共有ライブラリの事前読み込みを必須としている（公式ドキュメント）。
   **ローカルは `compose.yaml` が `postgres -c shared_preload_libraries=pg_bigm` で渡しているが、
   RDS には同じ指定が無い。** RDS では DB パラメータグループに書く必要があり、
@@ -517,7 +553,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 
 ローカルは `valkey/valkey:8-alpine` とする。**本番と同系統に寄せた暫定である**
 （`redis-server` / `redis-cli` 等の Redis 互換コマンド名がそのまま使えることを実行して確認した。
-`compose.yaml` の `command` とヘルスチェックはこれまでの記述を変えていない）。
+`compose.yaml` の `command` とヘルスチェックは**値は変えていない**。コメントは加筆した）。
 **ElastiCache for Valkey が実際にどの版を提供するかは未確認**であり、Terraform で環境を作る段階で確認する。
 
 > **代償を明記する。** **Valkey は Redis のフォークである。** 現時点では Redis 互換の機能
@@ -547,11 +583,11 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 `/data` に `tmpfs` を当てる。用途は **Pub/Sub による配信共有と、期限つきのレート制限の回数だけ**で、
 **データを蓄積しない**ためである。
 
-**`tmpfs` は書き込みを切ったうえでさらに要る。** 匿名ボリュームを作るのは redis の設定ではなく
-**イメージの `VOLUME /data` 宣言**であり、その位置にマウントが無いと
-**コンテナを作るたびに Docker が匿名ボリュームを作る**。
-`docker compose down`（`-v` 無し）は匿名ボリュームを消さないため、
-`down` → `up` を繰り返すだけで積み上がる（実際に増えることを確認した）。
+**`tmpfs` は匿名ボリュームの対策として要るわけではない。** `docker image inspect valkey/valkey:8-alpine
+--format '{{.Config.Volumes}}'` で確かめると `null` であり、**このイメージは `/data` を `VOLUME`
+宣言していない**（作成・削除を繰り返しても匿名ボリュームが増えないことも確認した）。
+`tmpfs` を当てているのは、**イメージの版が変わって `VOLUME` 宣言が付いても永続化させない**ことを
+明示的に保証するためである。
 
 > **代償を明記する。** **再起動で、配信の共有が一度切れ、レート制限の回数は数え直しになる。**
 > Valkey が持つのは Pub/Sub の経路と期限つきのレート制限の回数だけであり、**作り直せない状態は無い**

@@ -18,7 +18,7 @@ import { ResilientRateLimitStorage } from './resilient-rate-limit-storage';
 export const VALKEY_CLIENT = Symbol('VALKEY_CLIENT');
 
 /** Valkey が失敗した後、試し直すまでの間隔。 */
-const VALKEY_RETRY_INTERVAL_MS = 30_000;
+export const VALKEY_RETRY_INTERVAL_MS = 30_000;
 /** 起動時に Valkey の準備を待つ上限。応答の無い宛先で起動が止まらないようにする。 */
 const VALKEY_READY_TIMEOUT_MS = 3_000;
 
@@ -91,6 +91,9 @@ export class ValkeyModule {}
 /**
  * 超過したときの応答を ErrorResponse の形（`code` / `message`）にする。
  * `Retry-After` はガードが先に付ける（名前が `default` の制限なので、ヘッダー名は `Retry-After` のまま）。
+ *
+ * **超過の記録（`rate_limit_exceeded`）はここで書かない。** 429 は投げた経路によらず ErrorResponseFilter が記録する
+ * （アカウント単位の RetryAfterException と同じ1箇所。#270）。
  */
 @Injectable()
 export class RateLimitGuard extends ThrottlerGuard {

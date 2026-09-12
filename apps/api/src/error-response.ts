@@ -5,9 +5,10 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { components } from '@workspace-chat/shared';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import * as OpenApiValidator from 'express-openapi-validator';
 
 /**
@@ -55,16 +56,49 @@ function isErrorResponse(value: unknown): value is ErrorResponse {
   return typeof code === 'string' && typeof message === 'string';
 }
 
+/** 429 と `Retry-After`（秒）を返す例外。**ヘッダーは ErrorResponseFilter が付ける**（投げる経路ごとに付けない）。 */
+export class RetryAfterException extends HttpException {
+  constructor(readonly retryAfterSeconds: number) {
+    super(errorBodyForStatus(HttpStatus.TOO_MANY_REQUESTS), HttpStatus.TOO_MANY_REQUESTS);
+  }
+}
+
+/**
+ * 401 の本体のうち、`code` を `authentication_required` / `invalid_token` の2つに限ったもの（RFC 6750 3.1 の2つの形に対応する）。
+ * Bearer の経路（AccessTokenGuard・プロフィール）と Cookie の経路（リフレッシュ・ログアウトの `INVALID_TOKEN`）の両方が使う。
+ */
+export type BearerErrorResponse = ErrorResponse & {
+  code: 'authentication_required' | 'invalid_token';
+};
+
+/**
+ * Bearer のアクセストークンで守るルートの 401。**`WWW-Authenticate` は ErrorResponseFilter が付ける**（投げる経路ごとに付けない。
+ * RFC 6750 3）。入口（AccessTokenGuard）で投げても、入口の後（退会したばかりの利用者をサービスが引けなかった）で投げても同じ形になる。
+ * トークンが無い → `Bearer`（RFC 6750 3.1「SHOULD NOT include an error code」）、使えない → `Bearer error="invalid_token"`。
+ */
+export class BearerUnauthorizedException extends UnauthorizedException {
+  readonly challenge: string;
+
+  constructor(body: BearerErrorResponse) {
+    super(body);
+    this.challenge =
+      body.code === 'authentication_required' ? 'Bearer' : 'Bearer error="invalid_token"';
+  }
+}
+
 /**
  * **すべての例外を ErrorResponse で返す**（横断的な例外処理で揃える。機能一覧 1.4）。
  *
  * - 要求の検証の失敗（express-openapi-validator）→ 状態コードごとの本体。400 には落ちた箇所（`path`）と
  *   規則の説明（`message`）だけを `errors` に載せる。**送られた値は載せない**
- * - `code` を持つ本体で投げた HttpException（登録の 403・409、レート制限の 429 など）→ その本体のまま
+ * - `code` を持つ本体で投げた HttpException（登録の 403・409、レート制限の 429 など）→ その本体のまま。
+ *   **ただし 404 だけは、何を載せても状態コードの本体にする**（機能一覧 1.4。ハンドラごとの文言で存在を認めさせない）
  * - `code` を持たない HttpException（前置き /api の外の Nest の既定の 404 など）→ 状態コードごとの本体。
  *   **例外のメッセージは載せない**（Nest の既定の 404 は「Cannot GET /…」とパスを述べる）
  * - それ以外（想定外の失敗）→ 500（internal_error）。**例外のメッセージを応答に載せない**
  *   （Prisma のメッセージは呼び出し箇所のソースの抜き出しを含む）。ログには今までどおり error で出す
+ * - **429 は、投げた経路（発信元単位のガード・アカウント単位の RetryAfterException）によらず、ここで `rate_limit_exceeded` として記録する**
+ *   （発信元とパス。決定・2026-09-12・依頼側。#270。1件では鳴らさない——閾値は Terraform 側。要件定義書 4.2）
  *
  * **本体の読み取りの失敗（壊れた JSON・大きすぎる本体）は、ここに届く前に body-read-error.ts が返す**
  * （Nest がメッセージから例外を作り直すため、ここでは見分けられない）。
@@ -97,7 +131,23 @@ export class ErrorResponseFilter implements ExceptionFilter {
         response.status(status).json(errorBodyForStatus(status));
         return;
       }
-      response.status(status).json(isErrorResponse(given) ? given : errorBodyForStatus(status));
+      // 404 は、投げた側が何を載せても「見つかりません」にする（機能一覧 1.4。本体の文言で存在を認めない）。
+      const body = status !== 404 && isErrorResponse(given) ? given : errorBodyForStatus(status);
+      if (status === HttpStatus.TOO_MANY_REQUESTS) {
+        const request = host.switchToHttp().getRequest<Request>();
+        this.logger.warn({
+          event: 'rate_limit_exceeded',
+          ip: request.ip,
+          path: request.originalUrl,
+        });
+      }
+      if (exception instanceof RetryAfterException) {
+        response.setHeader('Retry-After', String(exception.retryAfterSeconds));
+      }
+      if (exception instanceof BearerUnauthorizedException) {
+        response.setHeader('WWW-Authenticate', exception.challenge);
+      }
+      response.status(status).json(body);
       return;
     }
 

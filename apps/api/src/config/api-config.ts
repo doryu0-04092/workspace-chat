@@ -20,10 +20,62 @@ export interface ApiConfig {
   readonly trustProxyHops: number;
   readonly apiTaskCount: number;
   readonly registrationEnabled: boolean;
+  readonly jwtSecret: string;
+  readonly webOrigin: string;
 }
 
 /** ApiConfig を注入するトークン。 */
 export const API_CONFIG = Symbol('API_CONFIG');
+
+/** JWT_SECRET の下限（バイト）。RFC 7518 3.2: HS256 の鍵はハッシュの出力（256 ビット）以上でなければならない（MUST）。 */
+const JWT_SECRET_MIN_BYTES = 32;
+
+/**
+ * アクセストークン（HS256）の署名の鍵。**必須。32 バイト未満は起動時に落とす。** 文字数ではなく UTF-8 のバイト数で数える。
+ * **値は鍵そのものである**（API_SETTINGS で `secret: true`。不正なときのメッセージは集約が伏せる）。
+ */
+export function resolveJwtSecret(raw: string | undefined): string {
+  if (raw === undefined || raw === '') {
+    throw new Error(
+      `JWT_SECRET が設定されていません（アクセストークンの署名の鍵。${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す）`,
+    );
+  }
+  if (Buffer.byteLength(raw, 'utf8') < JWT_SECRET_MIN_BYTES) {
+    throw new Error(`JWT_SECRET が短すぎます（${JWT_SECRET_MIN_BYTES} バイト以上を渡す）`);
+  }
+  return raw;
+}
+
+/**
+ * web の origin（環境変数 `WEB_ORIGIN`。例: `https://chat.example.com`）。**必須。**
+ * Cookie を使う要求の CSRF の対処で Origin / Referer と、WebSocket のハンドシェイクで Origin と突き合わせる
+ * （要件定義書 4.3。auth/same-origin.ts・realtime/realtime-io.adapter.ts）。
+ * **origin の形（スキーム://ホスト[:ポート]）でなければ起動時に落とす**——末尾の / やパスが付くと、ブラウザが送る Origin と
+ * 一致せず、正規の要求がすべて 403 になる。
+ */
+export function resolveWebOrigin(raw: string | undefined): string {
+  if (raw === undefined || raw === '') {
+    throw new Error(
+      'WEB_ORIGIN が設定されていません（web の origin。例: https://chat.example.com）',
+    );
+  }
+  let url: URL | undefined;
+  try {
+    url = new URL(raw);
+  } catch {
+    url = undefined;
+  }
+  if (
+    url === undefined ||
+    (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+    url.origin !== raw
+  ) {
+    throw new Error(
+      `WEB_ORIGIN の値が不正です（スキーム://ホスト[:ポート] の形で、末尾の / やパスを付けない）: ${JSON.stringify(raw)}`,
+    );
+  }
+  return raw;
+}
 
 /**
  * 設定1つの読み方。**`secret` はすべての行に必ず書く**（書かないと型検査で落ちる）——値に秘密（資格情報・鍵）が入るなら
@@ -56,6 +108,13 @@ export const API_SETTINGS: ApiSettings = {
     resolve: resolveRegistrationEnabled,
     secret: false,
   },
+  jwtSecret: {
+    env: 'JWT_SECRET',
+    resolve: resolveJwtSecret,
+    secret: true,
+    hint: `${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す`,
+  },
+  webOrigin: { env: 'WEB_ORIGIN', resolve: resolveWebOrigin, secret: false },
 };
 
 /**

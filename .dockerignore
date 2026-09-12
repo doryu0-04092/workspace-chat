@@ -1,0 +1,17 @@
+# api のイメージ（apps/api/Dockerfile）のビルドの文脈から外すもの（#271）。
+# **秘密の値を置くファイル（.env）をイメージに入れない。** 依存と生成物は段の中で作り直す。
+# 階層を問わずに当てるため **/ を付ける（.dockerignore はビルドの文脈の根からのパスに照合し、.gitignore と違って
+# スラッシュの無い行がどの階層にも当たるわけではない）。
+**/.env
+**/.env.*
+!**/.env.example
+.git
+.github
+.claude
+**/node_modules
+**/dist
+**/generated
+**/coverage
+reports
+docs
+*.md
