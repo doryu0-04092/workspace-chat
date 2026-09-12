@@ -44,7 +44,8 @@ export class ChannelArchiveService {
             channel.archiveSequence === null
               ? await nextNaming(tx, workspaceId, channel.baseName, now)
               : { archivedAt: now };
-          // まだアーカイブされていない行だけを変える（同時のアーカイブの後の側は 0 件になる）。
+          // まだアーカイブされていない行だけを変える。同時のアーカイブの後の側は、行のロックを待って読み直し、上の判定で 409 になる。
+          // この条件は、行を掴まずに archivedAt を書く経路が足されたときに、アーカイブ済みの行を上書きしないための防波堤である。
           const { count } = await tx.channel.updateMany({
             where: { id: channelId, workspaceId, archivedAt: null },
             data,
