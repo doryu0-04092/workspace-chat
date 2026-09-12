@@ -333,10 +333,11 @@ PR #40（Prisma のスキーマとマイグレーション）で追加した依�
 > 適用して exit 0）。
 >
 > **`DATABASE_URL` の変数名は README と `.env.example` に記載した**（値は書かない。
-> CLAUDE.md 禁止事項）。**コードの中で**この変数名を参照しているのは、
-> 現時点では `prisma.config.ts`・api の [config/](../apps/api/src/config/)
-> （#256）・テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts) と、
-> アプリを組み立てるテスト（接続しない宛先を渡す）である。
+> CLAUDE.md 禁止事項）。**コードの中で**この値を読み取るのは、
+> 現時点では `prisma.config.ts` と api の [config/](../apps/api/src/config/)（#256）である。
+> 値を渡すのは、テスト用の [testing/postgres.ts](../apps/api/src/testing/postgres.ts)（マイグレーションの子プロセスへ）・
+> [testing/api-env.ts](../apps/api/src/testing/api-env.ts)（アプリを組み立てるテストへ。既定は接続しない宛先）と、
+> [scripts/api-image.test.sh](../scripts/api-image.test.sh)（イメージの検査で、使い捨ての接続先をコンテナへ）である。
 
 #### 追加で確認した項目 — React hooks の lint ルール（2026-09-07。#18 / #76）
 
@@ -371,7 +372,7 @@ F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の 
 
 | 対象 | 採用 | 判断 |
 |---|---|---|
-| **土台のイメージ** | **node:24-bookworm-slim** | Node.js 24 LTS（上表）の Debian 12 の slim。**Alpine（musl）にしない**——argon2 はビルド済みのネイティブモジュールを使い、musl では入れ方が変わる。段は実行用（`runtime`）とマイグレーション用（`migrate`。`prisma migrate deploy` を1回流す。ECS の一回きりのタスクで使う）に分ける（[apps/api/Dockerfile](../apps/api/Dockerfile)）。**どちらも `prod-deps`（`npm ci --omit=dev`。開発依存のうち `@prisma/client` の任意の peer である `prisma` は lock 上 devOptional のため入る）の `/app` から作り、`USER node` で動く。ソース・テスト・開発依存を持つ `build` 段を `FROM` で継がない**（`runtime` はビルド済みの `dist` と `openapi` だけを `COPY --from=build` で受け取る。`migrate` は受け取らない。#277）。CI の `code` が [scripts/api-image.test.sh](../scripts/api-image.test.sh) で作って動かす。**版はダイジェストで固定していない**（固定しない理由と代償は [Dockerfile](../apps/api/Dockerfile) に記した） |
+| **土台のイメージ** | **node:24-bookworm-slim** | Node.js 24 LTS（上表）の Debian 12 の slim。**Alpine（musl）にしない**——argon2 はビルド済みのネイティブモジュールを使い、musl では入れ方が変わる。段は実行用（`runtime`）とマイグレーション用（`migrate`。`prisma migrate deploy` を1回流す。ECS の一回きりのタスクで使う）に分ける（[apps/api/Dockerfile](../apps/api/Dockerfile)）。**どちらも `prod-deps`（`npm ci --omit=dev`。開発依存のうち lock 上 `devOptional` のもの〔`@prisma/client` の任意の peer である `prisma` など〕と、本番の依存が引く `@types/node` は入る）の `/app` から作り、`USER node` で動く。ソース・テスト・開発依存を持つ `build` 段を `FROM` で継がない**（`runtime` はビルド済みの `dist` と `openapi` だけを `COPY --from=build` で受け取る。`migrate` は受け取らない。#277）。CI の `code` が [scripts/api-image.test.sh](../scripts/api-image.test.sh) で作って動かす。**版はダイジェストで固定していない**（固定しない理由と代償は [Dockerfile](../apps/api/Dockerfile) に記した） |
 
 #### 追加で確認した項目 — ログイン（2026-09-11。#257）
 
