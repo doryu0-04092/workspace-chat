@@ -38,3 +38,9 @@ export function generateRefreshToken(): string {
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
+
+/**
+ * 使い終わった行（期限切れ・失効）を残す期間（30 日。決定・2026-09-12・依頼側。#270）。過ぎた行は、その利用者のログインのたびに消す
+ * （SessionService.start）。**代償: ログインしない利用者の古い行は残る**（退会で系列ごと消える）。
+ */
+export const REFRESH_TOKEN_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;

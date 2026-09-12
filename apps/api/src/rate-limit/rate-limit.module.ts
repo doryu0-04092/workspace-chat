@@ -1,4 +1,5 @@
 import {
+  type ExecutionContext,
   HttpException,
   HttpStatus,
   Injectable,
@@ -8,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import type { Request } from 'express';
 import Redis from 'ioredis';
 import { API_CONFIG, type ApiConfig } from '../config/api-config';
 import { errorBodyForStatus } from '../error-response';
@@ -91,10 +93,17 @@ export class ValkeyModule {}
 /**
  * 超過したときの応答を ErrorResponse の形（`code` / `message`）にする。
  * `Retry-After` はガードが先に付ける（名前が `default` の制限なので、ヘッダー名は `Retry-After` のまま）。
+ *
+ * **超過は不正アクセスの疑いとして記録する**（`rate_limit_exceeded`。発信元とパス。決定・2026-09-12・依頼側。#270）。
+ * 1件で鳴らさない——発信元は IP であり、NAT や携帯回線の正規の利用者でも上限に達しうる。アラートの閾値は Terraform 側（要件定義書 4.2）。
  */
 @Injectable()
 export class RateLimitGuard extends ThrottlerGuard {
-  protected override async throwThrottlingException(): Promise<void> {
+  private readonly logger = new Logger('RateLimit');
+
+  protected override async throwThrottlingException(context: ExecutionContext): Promise<void> {
+    const request = context.switchToHttp().getRequest<Request>();
+    this.logger.warn({ event: 'rate_limit_exceeded', ip: request.ip, path: request.originalUrl });
     throw new HttpException(
       errorBodyForStatus(HttpStatus.TOO_MANY_REQUESTS),
       HttpStatus.TOO_MANY_REQUESTS,

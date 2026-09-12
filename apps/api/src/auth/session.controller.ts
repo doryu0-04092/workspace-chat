@@ -12,6 +12,8 @@ import type { paths } from '@workspace-chat/shared';
 import { parse } from 'cookie';
 import type { Request, Response } from 'express';
 import { Public } from './access-token.guard';
+import { Throttle } from '@nestjs/throttler';
+import { RateLimitGuard } from '../rate-limit/rate-limit.module';
 import { CsrfGuard } from './csrf.guard';
 import { SessionService } from './session.service';
 import {
@@ -31,10 +33,14 @@ function readRefreshToken(request: Request): string | undefined {
 /**
  * リフレッシュとログアウト（F-02）。Cookie でリフレッシュトークンを受け取る唯一の2つであり、CSRF の対処を掛ける（CsrfGuard）。
  * 本体は受け取らない。
+ *
+ * **発信元単位で 15 分に 60 回**（決定・2026-09-12・依頼側。#270。サーバーの負荷の歯止め。正規の利用者は 15 分に1回のリフレッシュで足りる）。
+ * ガードは CSRF の判定より先に数える（403 も 401 も1回として数える）。超過は RateLimitGuard が記録する。
  */
 @Public()
 @Controller('auth')
-@UseGuards(CsrfGuard)
+@UseGuards(RateLimitGuard, CsrfGuard)
+@Throttle({ default: { limit: 60, ttl: 15 * 60 * 1000 } })
 export class SessionController {
   constructor(private readonly sessions: SessionService) {}
 
