@@ -53,13 +53,17 @@ describe('チャンネルの部屋への入室・退室と、参加資格を失�
     );
   }
 
-  /** 部屋に入っている接続の利用者（全タスク）。 */
+  /** 部屋に入っている接続の利用者（両方のタスクの手元の接続を合わせる。Valkey を通る問い合わせの待ちに左右させない）。 */
   async function usersInRoom(channelId: string): Promise<string[]> {
-    const sockets = await t.first
-      .get(RealtimeGateway)
-      .server.in(channelRoom(channelId))
-      .fetchSockets();
-    return sockets.map((socket) => (socket.data as { user: { id: string } }).user.id);
+    const users: string[] = [];
+    for (const app of [t.first, t.second]) {
+      const sockets = await app
+        .get(RealtimeGateway)
+        .server.in(channelRoom(channelId))
+        .local.fetchSockets();
+      users.push(...sockets.map((socket) => (socket.data as { user: { id: string } }).user.id));
+    }
+    return users;
   }
 
   /** 部屋から外す処理は他のタスクへアダプタを通って届くため、外れ切るまで待つ。 */
