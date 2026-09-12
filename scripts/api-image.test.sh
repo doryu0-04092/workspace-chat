@@ -4,7 +4,7 @@
 # 1. マイグレーション用（migrate）のイメージを、空の PostgreSQL 17 に適用できる
 # 2. 実行用（runtime）のイメージが起動し、/api/health が 200 を返す
 # 3. 実行用のイメージのログが、1行1件の JSON で標準出力に出る（要件定義書 4.6）。標準エラーには何も出さない
-# 4. どちらのイメージにも、秘密を置くファイル（.env と .env.*。.env.example を除く）・テストのコード・ソース・開発依存が入っていない
+# 4. どちらのイメージにも、秘密を置くファイル（.env と .env.*。.env.example を除く）・テストのコード・ソース・開発依存（代表として vitest と @nestjs/testing）が入っていない
 # 5. どちらのイメージも root で動かない
 # 6. 実行用のイメージの中で api の依存が解決される版が、package-lock.json の版と同じである
 #
@@ -95,16 +95,18 @@ done <<<"$stdout"
 echo "== 4. どちらのイメージにも .env・テストのコード・ソース・開発依存が入っていない"
 # 本番のタスクとして動く2つのイメージに同じ検査を当てる（#277。マイグレーション用だけ弱くしない）。
 # 開発依存の代表として、テストの実行に要る vitest と @nestjs/testing が無いことを見る（--omit=dev を落とすと入る）。
+# 調べる側（docker run・find）の失敗は名指しして止める——代入をパイプにせず（pipefail と set -e で無言に抜ける）、
+# find の失敗を ls の || true で上書きしない（調べられなかったのに「無い」として通る）。
 for image in "$runtime_image" "$migrate_image"; do
   leaked=$(docker run --rm --entrypoint sh "$image" -c \
-    'find /app -name node_modules -prune -o \( \( -name ".env*" ! -name ".env.example" \) -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print; ls -d /app/node_modules/vitest /app/node_modules/@nestjs/testing 2>/dev/null || true' |
-    head -n 5)
-  [ -z "$leaked" ] || fail "$image に入れないはずのファイルがある: $leaked"
+    'find /app -name node_modules -prune -o \( \( -name ".env*" ! -name ".env.example" \) -o -name "*.test.js" -o -name "*.test.ts" -o -path "*/src/*" \) -print && { ls -d /app/node_modules/vitest /app/node_modules/@nestjs/testing 2>/dev/null || true; }') ||
+    fail "$image の中を調べられない（docker run か find が失敗した）"
+  [ -z "$leaked" ] || fail "$image に入れないはずのファイルがある: $(printf '%s\n' "$leaked" | head -n 5)"
 done
 
 echo "== 5. どちらのイメージも root で動かない"
 for image in "$runtime_image" "$migrate_image"; do
-  user=$(docker inspect --format "{{.Config.User}}" "$image")
+  user=$(docker inspect --format "{{.Config.User}}" "$image") || fail "$image を inspect できない"
   if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "0" ]; then
     fail "$image の利用者が root である（${user:-未指定}）"
   fi
