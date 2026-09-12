@@ -224,6 +224,18 @@ describe('GET・PATCH /api/users/me（F-04）', () => {
       expect(await row(id)).toMatchObject({ displayName: '最初の名前', statusEmoji: null });
     });
 
+    // 手で書いた errors[].path（/body/status/emoji）は、仕様の検証（express-openapi-validator）が返す書式と同じ形である（#300）。
+    // text の空文字は仕様の minLength 1 で検証器が落とす経路であり、検証器の側の書式（/body/status/text）を見られる。
+    it('テキストが空文字なら、検証器が返す errors[].path は /body/status/text', async () => {
+      const { authorization } = await login();
+      const res = await patchMe(authorization, { status: { emoji: '😀', text: '' } });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as ErrorResponse;
+      // 空文字は仕様の oneOf の候補ごとにも落ちるため、他の項目（/body/status）も含めて複数返る。先頭が text の項目である。
+      expect(body.errors?.[0]?.path).toBe('/body/status/text');
+    });
+
     it('テキストは 100 文字（絵文字 100 個）まで通り、101 文字と空文字は 400', async () => {
       const { authorization, id } = await login();
       const withText = (text: string) => patchMe(authorization, { status: { emoji: '😀', text } });

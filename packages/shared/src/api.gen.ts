@@ -289,6 +289,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * チャンネル一覧（F-10）
+         * @description パブリックと、自分が参加しているプライベートだけを返す。アーカイブ済みは含めない。名前の順（機能一覧 3.1・3.2）。 オーナーでも、参加していないプライベートチャンネルは含めない（管理用の一覧は /workspaces/{id}/managed-channels）。 所属していなければ、存在の有無を区別せず 404
+         */
+        get: operations["listChannels"];
+        put?: never;
+        /**
+         * チャンネルの作成（F-10）
+         * @description オーナーだけ（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。作ったオーナーはそのチャンネルの参加者になる。 名前は 1〜50 文字（コードポイント）で、空白だけは不可。同じワークスペースに同じ名前があれば 409 channel_name_taken （ワークスペースをまたげば同じ名前を使える。機能一覧 3.1。#290）
+         */
+        post: operations["createChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/managed-channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * オーナーの管理用のチャンネル一覧（F-09）
+         * @description オーナーだけ（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。参加していないプライベートチャンネルと アーカイブ済みも含める。返すのは id・名前・種別・参加者数（退会済みを含まない）・アーカイブ済みかだけで、 メッセージ・添付ファイル・未読数・在席は返さない。名前の順（機能一覧 3.1 の但し書き）
+         */
+        get: operations["listManagedChannels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * チャンネルの参加者一覧（F-10）
+         * @description 参加者とオーナーが取得できる。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加者でもオーナーでもなければ、 パブリックは 403 not_a_channel_member・プライベートは 404（機能一覧 3.1）。別のワークスペースのチャンネル・無いチャンネルは 404。 参加した順。退会済みの利用者と在席を含まない（機能一覧 3.1・1.5）
+         */
+        get: operations["listChannelMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invitations": {
         parameters: {
             query?: never;
@@ -364,7 +439,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -478,6 +553,36 @@ export interface components {
             displayName: string;
             role: components["schemas"]["WorkspaceRole"];
         };
+        /**
+         * @description チャンネルの種別（schema.prisma の ChannelVisibility）
+         * @enum {string}
+         */
+        ChannelVisibility: "PUBLIC" | "PRIVATE";
+        CreateChannelRequest: {
+            /** @description 1〜50 文字（文字数はコードポイントで数える）。空白だけは不可（決定・2026-09-12・依頼側。#290）。 上限は入力にだけ置く（アーカイブ時の接尾辞 -<採番> はこの外側に付くため、応答と DB の列には置かない。同決定） */
+            name: string;
+            visibility: components["schemas"]["ChannelVisibility"];
+        };
+        /** @description 一般の一覧（参加者向け）のチャンネル */
+        Channel: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            visibility: components["schemas"]["ChannelVisibility"];
+            /** @description 要求した利用者がこのチャンネルに参加しているか */
+            joined: boolean;
+        };
+        /** @description オーナーの管理用の一覧の項目。持つのはこれだけで、メッセージ・添付ファイル・未読数・在席は持たない（機能一覧 3.1 の但し書き） */
+        ManagedChannel: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            visibility: components["schemas"]["ChannelVisibility"];
+            /** @description 参加者の数。退会済みの利用者を含めない（機能一覧 1.5） */
+            memberCount: number;
+            /** @description アーカイブ済みか（管理用の一覧はアーカイブ済みも含める。含めないと復元の経路が無くなる。F-35） */
+            archived: boolean;
+        };
         CreateInvitationRequest: {
             /** @description 招待する利用者のユーザーID（大文字小文字を区別しない。形は登録と同じ英数字と _ の 3〜30 文字） */
             userId: string;
@@ -507,10 +612,10 @@ export interface components {
         };
     };
     responses: {
-        /** @description Authorization ヘッダーに Bearer のアクセストークンが無い（authentication_required）か、 トークンが壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
+        /** @description Authorization ヘッダーが無い、または Bearer 方式でない（authentication_required）か、 Bearer 方式で資格情報が無い・壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
         Unauthorized: {
             headers: {
-                /** @description トークンが無いときは `Bearer`、使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1） */
+                /** @description Authorization ヘッダーが無い・Bearer 方式でないときは `Bearer`、Bearer 方式で資格情報が無い・使えないときは `Bearer error="invalid_token"`（RFC 6750 3.1） */
                 "WWW-Authenticate"?: string;
                 [name: string]: unknown;
             };
@@ -596,6 +701,8 @@ export interface components {
     parameters: {
         /** @description 外す利用者の User.id（ユーザーID ではない）。形が uuid でなければ 400 */
         MemberId: string;
+        /** @description チャンネルの id。形が uuid でなければ 400 */
+        ChannelId: string;
         /** @description 招待の id。形が uuid でなければ 400 */
         InvitationId: string;
         /** @description ワークスペースの id。形が uuid でなければ 400 */
@@ -1116,6 +1223,162 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listChannels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 見えるチャンネル */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Channel"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChannelRequest"];
+            };
+        };
+        responses: {
+            /** @description 作ったチャンネル（joined は true） */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Channel"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description オーナーでない（owner_only） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 同じワークスペースに同じ名前のチャンネルがある（channel_name_taken） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listManagedChannels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description そのワークスペースの全チャンネル */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedChannel"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description オーナーでない（owner_only） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listChannelMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 参加者 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
             500: components["responses"]["InternalServerError"];
         };
     };
