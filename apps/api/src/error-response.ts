@@ -65,7 +65,7 @@ export class RetryAfterException extends HttpException {
 
 /**
  * 401 の本体のうち、`code` を `authentication_required` / `invalid_token` の2つに限ったもの（RFC 6750 3.1 の2つの形に対応する）。
- * Bearer の経路（AccessTokenGuard・プロフィール）と Cookie の経路（リフレッシュ・ログアウトの `INVALID_TOKEN`）の両方が使う。
+ * Bearer の経路（AccessTokenGuard と、入口の後で退会したばかりの利用者を引けなかったサービス）と Cookie の経路（リフレッシュの `INVALID_TOKEN`。ログアウトはこの本体を使わない）の両方が使う。
  */
 export type BearerErrorResponse = ErrorResponse & {
   code: 'authentication_required' | 'invalid_token';
@@ -74,7 +74,7 @@ export type BearerErrorResponse = ErrorResponse & {
 /**
  * Bearer のアクセストークンで守るルートの 401。**`WWW-Authenticate` は ErrorResponseFilter が付ける**（投げる経路ごとに付けない。
  * RFC 6750 3）。入口（AccessTokenGuard）で投げても、入口の後（退会したばかりの利用者をサービスが引けなかった）で投げても同じ形になる。
- * トークンが無い → `Bearer`（RFC 6750 3.1「SHOULD NOT include an error code」）、使えない → `Bearer error="invalid_token"`。
+ * Authorization ヘッダーが無い・Bearer 方式でない → `Bearer`（RFC 6750 3.1「SHOULD NOT include an error code」）、Bearer 方式で資格情報が無い・使えない → `Bearer error="invalid_token"`。
  */
 export class BearerUnauthorizedException extends UnauthorizedException {
   readonly challenge: string;
