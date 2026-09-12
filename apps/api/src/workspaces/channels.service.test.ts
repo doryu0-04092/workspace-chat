@@ -3,9 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { uniqueViolation } from '../testing/prisma-violations';
 import { ChannelsService } from './channels.service';
 
-// 規則は testing/prisma-violations.ts。この経路に固有の事実: channels.test.ts の同じ名前の 409 のうち、逐次の検査は
-// 作成の前に SELECT で確かめる形へ変えると違反の経路を踏まなくなり、同時の検査は今の実装では必ず踏むが、
-// その形へ変えると要求が重なった回にしか踏まなくなる。
+// 規則は testing/prisma-violations.ts。
 
 /** 作成のトランザクション中に一意制約違反を起こす DB に差し替えた ChannelsService。 */
 function createService() {

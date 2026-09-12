@@ -3,8 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { uniqueViolation } from '../testing/prisma-violations';
 import { ChannelMembershipService } from './channel-membership.service';
 
-// 規則は testing/prisma-violations.ts。この経路に固有の事実: 参加は既に作成の前に参加済みかを確かめており、
-// 実際の DB での逐次の2件目は違反の経路を踏まない。
+// 規則は testing/prisma-violations.ts。
 
 const ALREADY_CHANNEL_MEMBER = {
   code: 'already_channel_member',
