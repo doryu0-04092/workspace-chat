@@ -42,12 +42,12 @@ export class WorkspacesService {
     });
   }
 
-  /** 自分が所属するワークスペース（サイドバーの切替）。参加した順。 */
+  /** 自分が所属するワークスペース（サイドバーの切替）。参加した順（同時刻は id〔UUIDv7〕の順）。 */
   async list(userId: string): Promise<Workspace[]> {
     const rows = await this.prisma.membership.findMany({
       where: { userId, user: { deletedAt: null } },
       select: { role: true, workspace: { select: WORKSPACE_SELECT } },
-      orderBy: { joinedAt: 'asc' },
+      orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
     });
     return rows.map((row) => toWorkspace(row.workspace, row.role));
   }
@@ -63,7 +63,7 @@ export class WorkspacesService {
     const rows = await this.prisma.membership.findMany({
       where: { workspaceId, user: { deletedAt: null } },
       select: { role: true, user: { select: { id: true, loginId: true, displayName: true } } },
-      orderBy: { joinedAt: 'asc' },
+      orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
     });
     return rows.map(({ role, user }) => ({
       id: user.id,
