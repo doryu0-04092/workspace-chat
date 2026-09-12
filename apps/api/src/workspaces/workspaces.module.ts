@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { ChannelMembershipController } from './channel-membership.controller';
+import { ChannelMembershipService } from './channel-membership.service';
 import { ChannelsController } from './channels.controller';
 import { ChannelsService } from './channels.service';
 import { InvitationsController } from './invitations.controller';
@@ -10,7 +12,12 @@ import { WorkspacesService } from './workspaces.service';
 /** ワークスペース（F-06）と招待（F-08 / F-38）とチャンネル（F-10）。招待の通知に RealtimeEmitter を使う。 */
 @Module({
   imports: [RealtimeModule],
-  controllers: [WorkspacesController, InvitationsController, ChannelsController],
-  providers: [WorkspacesService, InvitationsService, ChannelsService],
+  controllers: [
+    WorkspacesController,
+    InvitationsController,
+    ChannelsController,
+    ChannelMembershipController,
+  ],
+  providers: [WorkspacesService, InvitationsService, ChannelsService, ChannelMembershipService],
 })
 export class WorkspacesModule {}

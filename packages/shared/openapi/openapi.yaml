@@ -654,6 +654,141 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: inviteChannelMember
+      summary: プライベートチャンネルへの招待（F-08）
+      description: >-
+        そのチャンネルの参加者なら誰でも招待でき、招待した時点で参加する（承諾の流れを持たない。決定・2026-09-12・依頼側。#335）。
+        宛先は User.id で、そのワークスペースのメンバー（退会済みを除く）に限る（そうでなければ 422 invitee_not_found。機能一覧 2.2）。
+        要求する側のコードは参加者一覧と同じ2段階（所属していなければ 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・
+        プライベートは 404。オーナーでも参加していなければ同じ）。パブリックチャンネルへは招待しない（自由に参加できるため。422 channel_not_private）。
+        アーカイブ済みは 409 channel_archived、宛先が既に参加していれば 409 already_channel_member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteChannelMemberRequest'
+      responses:
+        '204':
+          description: 参加させた
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済み（channel_archived）か、宛先が既に参加している（already_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: >-
+            宛先がそのワークスペースのメンバーでない・退会済み（invitee_not_found）か、パブリックチャンネルである（channel_not_private）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/members/{memberId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MemberId'
+    delete:
+      operationId: kickChannelMember
+      summary: チャンネルからのキック（F-09）
+      description: >-
+        オーナーだけ（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。そのチャンネルだけから外す（機能一覧 2.2）。
+        オーナーは参加していないプライベートチャンネル・アーカイブ済みのチャンネルからも外せる（相手は参加者一覧で特定する。機能一覧 3.1）。
+        チャンネルが無い・外す相手が参加していなければ 404
+      responses:
+        '204':
+          description: 外した
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: オーナーでない（owner_only）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/join:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    post:
+      operationId: joinChannel
+      summary: パブリックチャンネルへの参加（F-10）
+      description: >-
+        そのワークスペースのメンバーなら自由に参加できる（機能一覧 3.1）。所属していない・チャンネルが無ければ 404。
+        プライベートチャンネルは、参加していなければ 404（招待で参加する）。既に参加していれば 409 already_channel_member、
+        アーカイブ済みは 409 channel_archived
+      responses:
+        '204':
+          description: 参加した
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: 既に参加している（already_channel_member）か、アーカイブ済み（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/leave:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    post:
+      operationId: leaveChannel
+      summary: チャンネルからの退出（F-10）
+      description: >-
+        参加者本人が抜ける。パブリックは自由に、プライベートも自分の意思で抜けられる（決定・2026-09-12・依頼側。#335。戻るには再び招待が要る）。
+        オーナーも、アーカイブ済みのチャンネルからも抜けられる。所属していない・チャンネルが無い・参加していなければ 404
+      responses:
+        '204':
+          description: 抜けた
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /invitations:
     get:
       operationId: listMyInvitations
@@ -888,6 +1023,9 @@ components:
             - owner_cannot_leave
             - channel_name_taken
             - not_a_channel_member
+            - already_channel_member
+            - channel_archived
+            - channel_not_private
             - request_rejected
             - internal_error
         message:
@@ -1245,6 +1383,16 @@ components:
         archived:
           description: アーカイブ済みか（管理用の一覧はアーカイブ済みも含める。含めないと復元の経路が無くなる。F-35）
           type: boolean
+    InviteChannelMemberRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - memberId
+      properties:
+        memberId:
+          description: 招待する利用者の User.id（ワークスペースの参加者一覧が返す id。ユーザーID ではない）
+          type: string
+          format: uuid
     CreateInvitationRequest:
       type: object
       additionalProperties: false
