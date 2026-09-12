@@ -403,19 +403,22 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
     });
 
     // 機能一覧 1.2: 独自ヘッダーの無い要求は仕様の検証で 400 になり、レート制限の枠を消費しない。
-    it('独自ヘッダーの無い要求は、上限を超えて送っても 400 のままで、枠を消費しない', async () => {
-      const ip = nextIp();
-      for (let i = 0; i <= LIMIT; i += 1) {
-        const res = await post('refresh', undefined, {
-          'sec-fetch-site': 'same-origin',
-          'x-forwarded-for': ip,
-        });
-        expect(res.status).toBe(400);
-      }
-      // 枠を消費していなければ、続く正当な要求はまだ 1 回目であり 429 にはならない（トークンが無いので 401）。
-      const res = await post('refresh', undefined, { ...SAME_ORIGIN, 'x-forwarded-for': ip });
-      expect(res.status).toBe(401);
-    });
+    it.each(['refresh', 'logout'] as const)(
+      '独自ヘッダーの無い要求は、上限を超えて送っても 400 のままで、枠を消費しない（%s）',
+      async (path) => {
+        const ip = nextIp();
+        for (let i = 0; i <= LIMIT; i += 1) {
+          const res = await post(path, undefined, {
+            'sec-fetch-site': 'same-origin',
+            'x-forwarded-for': ip,
+          });
+          expect(res.status).toBe(400);
+        }
+        // 枠を消費していなければ、続く正当な要求は上限に達していない。
+        const res = await post(path, undefined, { ...SAME_ORIGIN, 'x-forwarded-for': ip });
+        expect(res.status).not.toBe(429);
+      },
+    );
 
     it('上限の超過を、制限の種類（ip）・発信元・パスとともに記録する', async () => {
       const ip = nextIp();
