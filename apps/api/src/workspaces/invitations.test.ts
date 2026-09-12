@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import type { AddressInfo } from 'node:net';
-import type { INestApplication } from '@nestjs/common';
+import { type INestApplication, NotFoundException } from '@nestjs/common';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { paths } from '@workspace-chat/shared';
 import type { Socket } from 'socket.io-client';
@@ -13,6 +13,7 @@ import { stubApiEnv } from '../testing/api-env';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
 import { connectRealtime, nextEvent } from '../testing/realtime-client';
 import { startValkey } from '../testing/valkey';
+import { InvitationsService } from './invitations.service';
 
 type Workspace = paths['/workspaces']['post']['responses'][201]['content']['application/json'];
 type Invitation =
@@ -368,5 +369,38 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
         await prisma.membership.count({ where: { workspaceId: workspace.id, userId: other.id } }),
       ).toBe(0);
     });
+  });
+
+  // 機能一覧 1.1: ユーザーID は英数字と _ の 3〜30 文字。宛先の形は仕様が確かめる（登録・ログイン・再設定と同じ）。PR #329 第0巡。
+  it('宛先のユーザーID が識別子の形でなければ 400', async () => {
+    const owner = await login();
+    const workspace = await createWorkspace(owner);
+    for (const userId of ['ab', 'has space', 'x'.repeat(31), 'with-hyphen']) {
+      expect((await invite(owner, workspace.id, userId)).status).toBe(400);
+    }
+    expect(await prisma.invitation.count({ where: { workspaceId: workspace.id } })).toBe(0);
+  });
+
+  // 機能一覧 1.4「2段構え」の1段目: 入口（ガード）とは別に、問い合わせ・書き込みの側でも退会済みの要求者を落とす（PR #329 第0巡）。
+  // 退会済みのトークンはガードで 401 になり HTTP では届かないため、サービスを直に呼んで1段目だけを確かめる。
+  it('退会済みの利用者には、自分宛ての招待を返さず、承諾も辞退もさせない（参加を作らず、招待も消さない）', async () => {
+    const owner = await login();
+    const invitee = await login();
+    const workspace = await createWorkspace(owner);
+    const invitation = await invited(owner, workspace.id, invitee);
+    await prisma.user.update({ where: { id: invitee.id }, data: { deletedAt: new Date() } });
+    const service = app.get(InvitationsService);
+
+    expect(await service.mine(invitee.id)).toEqual([]);
+    await expect(service.accept(invitee.id, invitation.id)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(service.decline(invitee.id, invitation.id)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(
+      await prisma.membership.count({ where: { workspaceId: workspace.id, userId: invitee.id } }),
+    ).toBe(0);
+    expect(await prisma.invitation.count({ where: { id: invitation.id } })).toBe(1);
   });
 });

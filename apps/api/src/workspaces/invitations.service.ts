@@ -50,6 +50,7 @@ function isUniqueViolation(error: unknown): boolean {
  *   Prisma のクライアントの等値比較では大文字小文字を区別するため `$queryRaw` で書く。解決できなければ 422 `invitee_not_found`）
  * - **同じ利用者への未承諾の招待が既にあれば 409 `already_invited`、既にメンバーなら 409 `already_member`**（決定・2026-09-12・依頼側。#326）
  * - **招待したら、招待された利用者の部屋へ `invitation:new` を送る**（決定・同。宛先は招待された本人だけ——自分宛ての招待を受け取る資格は本人にある）
+ * - **要求する側の `deletedAt IS NULL` を、入口（ガード）とは別に、自分宛ての一覧・承諾・辞退の問い合わせにも置く**（機能一覧 1.4 の2段構えの1段目）
  * - **承諾・辞退できるのは招待された本人だけ**（他人宛ては、存在の有無を区別せず 404）。承諾は招待を消して `Membership`（MEMBER）を作る
  */
 @Injectable()
@@ -118,7 +119,7 @@ export class InvitationsService {
   /** 自分宛ての未承諾の招待。届いた順（同時刻は id〔UUIDv7〕の順）。 */
   async mine(userId: string): Promise<MyInvitation[]> {
     const rows = await this.prisma.invitation.findMany({
-      where: { inviteeId: userId },
+      where: { inviteeId: userId, invitee: { deletedAt: null } },
       select: {
         id: true,
         createdAt: true,
@@ -143,12 +144,12 @@ export class InvitationsService {
     try {
       return await this.prisma.$transaction(async (tx) => {
         const invitation = await tx.invitation.findFirst({
-          where: { id: invitationId, inviteeId: userId },
+          where: { id: invitationId, inviteeId: userId, invitee: { deletedAt: null } },
           select: { workspace: { select: WORKSPACE_SELECT } },
         });
         if (!invitation) throw new NotFoundException();
         const { count } = await tx.invitation.deleteMany({
-          where: { id: invitationId, inviteeId: userId },
+          where: { id: invitationId, inviteeId: userId, invitee: { deletedAt: null } },
         });
         if (count !== 1) throw new NotFoundException();
         await tx.membership.create({
@@ -166,7 +167,7 @@ export class InvitationsService {
   /** 辞退。招待を消す（オーナーは再度招待できる）。 */
   async decline(userId: string, invitationId: string): Promise<void> {
     const { count } = await this.prisma.invitation.deleteMany({
-      where: { id: invitationId, inviteeId: userId },
+      where: { id: invitationId, inviteeId: userId, invitee: { deletedAt: null } },
     });
     if (count !== 1) throw new NotFoundException();
   }

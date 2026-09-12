@@ -420,6 +420,7 @@ model Membership {
 ///
 /// **同じワークスペースの同じ利用者への招待は1件だけ**（下の一意索引。2件目は 409 `already_invited`）。**既にメンバーの利用者は招待できない**
 /// （409 `already_member`）が、`Membership` との排他は索引では表せないため、アプリが招待の前に確かめる。
+/// **代償: その確認と承諾が重なると、メンバーでありながら未承諾の招待が残る**（機能一覧 2.2）。
 model Invitation {
   id          String @id @default(uuid(7)) @db.Uuid
   workspaceId String @db.Uuid

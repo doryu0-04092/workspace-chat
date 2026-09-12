@@ -431,7 +431,7 @@ export interface components {
             role: components["schemas"]["WorkspaceRole"];
         };
         CreateInvitationRequest: {
-            /** @description 招待する利用者のユーザーID（大文字小文字を区別しない） */
+            /** @description 招待する利用者のユーザーID（大文字小文字を区別しない。形は登録と同じ英数字と _ の 3〜30 文字） */
             userId: string;
         };
         /** @description 作った招待（招待したオーナーに返す） */
