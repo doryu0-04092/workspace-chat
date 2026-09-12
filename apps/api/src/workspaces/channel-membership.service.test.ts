@@ -27,7 +27,8 @@ function createService(channel: { visibility: 'PUBLIC' | 'PRIVATE'; members: { i
     $transaction: vi.fn(async (fn: (tx: typeof client) => Promise<unknown>) => fn(client)),
   };
   const workspaces = { membershipOf: vi.fn(async () => ({})) };
-  return new ChannelMembershipService(prisma as never, workspaces as never);
+  const rooms = { removeFromChannels: vi.fn() };
+  return new ChannelMembershipService(prisma as never, workspaces as never, rooms as never);
 }
 
 describe('ChannelMembershipService（一意制約違反。#355）', () => {
