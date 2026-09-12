@@ -218,6 +218,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ワークスペースへの招待（F-08）
+         * @description オーナーだけが招待できる（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。 宛先はユーザーID で、大文字小文字を区別せず、退会済みは解決しない（解決できなければ 422 invitee_not_found）。 同じ利用者への未承諾の招待が既にあれば 409 already_invited、既にメンバーなら 409 already_member。招待に期限は無い。 招待したら、招待された利用者へリアルタイムの invitation:new を送る（機能一覧 2.2・F-38。決定・2026-09-12・依頼側。#326）
+         */
+        post: operations["inviteToWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自分宛ての未承諾の招待の一覧（F-38）
+         * @description 届いた順
+         */
+        get: operations["listMyInvitations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invitations/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 招待の id。形が uuid でなければ 400 */
+                id: components["parameters"]["InvitationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 招待の承諾（F-38）
+         * @description 参加（MEMBER）が成立し、招待は消える。自分宛てでない招待・無い招待は、存在の有無を区別せず 404。 既にメンバーなら 409 already_member
+         */
+        post: operations["acceptInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invitations/{id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 招待の id。形が uuid でなければ 400 */
+                id: components["parameters"]["InvitationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 招待の辞退（F-38）
+         * @description 招待が消える（オーナーは再度招待できる）。自分宛てでない招待・無い招待は、存在の有無を区別せず 404
+         */
+        post: operations["declineInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -227,7 +316,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -341,6 +430,33 @@ export interface components {
             displayName: string;
             role: components["schemas"]["WorkspaceRole"];
         };
+        CreateInvitationRequest: {
+            /** @description 招待する利用者のユーザーID（大文字小文字を区別しない） */
+            userId: string;
+        };
+        /** @description 作った招待（招待したオーナーに返す） */
+        Invitation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            invitee: components["schemas"]["UserSummary"];
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /** @description 自分宛ての未承諾の招待 */
+        MyInvitation: {
+            /** Format: uuid */
+            id: string;
+            workspace: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            invitedBy: components["schemas"]["UserSummary"];
+            /** Format: date-time */
+            createdAt: string;
+        };
     };
     responses: {
         /** @description Authorization ヘッダーに Bearer のアクセストークンが無い（authentication_required）か、 トークンが壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
@@ -430,6 +546,8 @@ export interface components {
         };
     };
     parameters: {
+        /** @description 招待の id。形が uuid でなければ 400 */
+        InvitationId: string;
         /** @description ワークスペースの id。形が uuid でなければ 400 */
         WorkspaceId: string;
         /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
@@ -810,6 +928,153 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WorkspaceMember"][];
                 };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    inviteToWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description 作った招待 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invitation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description オーナーでない（owner_only） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 同じ利用者への未承諾の招待が既にある（already_invited）か、既にメンバーである（already_member） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description 宛先のユーザーID の利用者がいない、または退会済み（invitee_not_found） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listMyInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 自分宛ての未承諾の招待 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyInvitation"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    acceptInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 招待の id。形が uuid でなければ 400 */
+                id: components["parameters"]["InvitationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 参加したワークスペース（role は MEMBER） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 既にメンバーである（already_member） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    declineInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 招待の id。形が uuid でなければ 400 */
+                id: components["parameters"]["InvitationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 辞退した */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];

@@ -10,7 +10,7 @@ export type Workspace = CreateOperation['responses'][201]['content']['applicatio
 export type WorkspaceMember =
   paths['/workspaces/{id}/members']['get']['responses'][200]['content']['application/json'][number];
 
-const WORKSPACE_SELECT = { id: true, name: true, createdAt: true } as const;
+export const WORKSPACE_SELECT = { id: true, name: true, createdAt: true } as const;
 
 /**
  * ワークスペース（F-06。機能一覧 2.1）。**所属は `Membership` の行だけを根拠にする**（オーナーも `role` で表す。schema.prisma）。
@@ -84,7 +84,7 @@ export class WorkspacesService {
   }
 }
 
-function toWorkspace(
+export function toWorkspace(
   row: { id: string; name: string; createdAt: Date },
   role: Workspace['role'],
 ): Workspace {

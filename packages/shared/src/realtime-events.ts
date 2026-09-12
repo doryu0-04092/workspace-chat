@@ -50,6 +50,7 @@ export const REALTIME_EVENT_KINDS = [
   'unread:updated',
   'typing',
   'presence:changed',
+  'invitation:new',
 ] as const;
 
 export type RealtimeEventKind = (typeof REALTIME_EVENT_KINDS)[number];
@@ -64,6 +65,22 @@ export const REALTIME_EVENT_NAMES = [
   'typing:start',
   'typing:stop',
   'presence:changed',
+  'invitation:new',
 ] as const;
 
 export type RealtimeEventName = (typeof REALTIME_EVENT_NAMES)[number];
+
+/**
+ * `invitation:new` の payload（F-08 / F-38。決定・2026-09-12・依頼側。#326）。招待された利用者の部屋へ送る。
+ * `sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため（機能一覧 5.2）。
+ */
+export type InvitationNewPayload = {
+  readonly invitationId: string;
+  readonly workspace: { readonly id: string; readonly name: string };
+  readonly invitedBy: {
+    readonly id: string;
+    readonly userId: string;
+    readonly displayName: string;
+  };
+  readonly sentAt: string;
+};
