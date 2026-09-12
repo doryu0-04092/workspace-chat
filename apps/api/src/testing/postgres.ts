@@ -18,8 +18,9 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
  * イメージが別途必要になる**（イシュー #34 に代償として記録した）。
  */
 /**
- * **踏むと壊れる: この値は scripts/api-image.test.sh も読み、毎回 `docker pull` する。レジストリから取れる名前にすること。**
- * 手元でビルドしただけのイメージ（docker/postgres のような形）にすると、`npm test` は通ったままイメージの検査だけが落ちる。
+ * **踏むと壊れる: この値は scripts/api-image.test.sh も読み、毎回 `docker pull` する。レジストリから取れる名前にすること**
+ * （README「CI が回すのと同じ検査を手元で通す」の前提。手元でビルドしただけの名前では、その検査が `docker pull` で落ちる。
+ * Testcontainers が手元のイメージをどう扱うかは #296）。
  */
 export const POSTGRES_IMAGE = 'postgres:17';
 
