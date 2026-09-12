@@ -340,7 +340,7 @@ describe('POST /api/auth/refresh・/api/auth/logout（F-02）', () => {
       ).toBe(204);
     });
 
-    it('上限の超過を、発信元とパスとともに記録する', async () => {
+    it('上限の超過を、制限の種類（ip）・発信元・パスとともに記録する', async () => {
       const ip = nextIp();
       const before = logger.lines.length;
       for (let i = 0; i <= LIMIT; i += 1) {
