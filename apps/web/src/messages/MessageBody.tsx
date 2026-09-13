@@ -1,6 +1,4 @@
-import { gfmAutolinkLiteralFromMarkdown } from 'mdast-util-gfm-autolink-literal';
 import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough';
-import { gfmAutolinkLiteral } from 'micromark-extension-gfm-autolink-literal';
 import { gfmStrikethrough } from 'micromark-extension-gfm-strikethrough';
 import Markdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
@@ -51,19 +49,15 @@ type MarkdownNode = {
 };
 
 /**
- * GFM のうち、取り消し線と URL の自動リンクだけを解釈させる。**表・タスクリスト・脚注は記法として読ませない**
- * （読ませると、要素にしなかったときにチェックの有無が消えたり、書いていない「Footnotes」が出たりする）。
- * remark-gfm と同じく、構文の拡張を processor の data に積む。
+ * GFM のうち、取り消し線だけを解釈させる。**表・タスクリスト・脚注・URL の自動リンクは記法として読ませない**
+ * （F-14 の記法に含まれない）。remark-gfm と同じく、構文の拡張を processor の data に積む。
  */
-function strikethroughAndAutolink(this: unknown) {
+function strikethrough(this: unknown) {
   const data = (
     this as { data(): { micromarkExtensions?: unknown[]; fromMarkdownExtensions?: unknown[] } }
   ).data();
-  (data.micromarkExtensions ??= []).push(gfmStrikethrough(), gfmAutolinkLiteral());
-  (data.fromMarkdownExtensions ??= []).push(
-    gfmStrikethroughFromMarkdown(),
-    gfmAutolinkLiteralFromMarkdown(),
-  );
+  (data.micromarkExtensions ??= []).push(gfmStrikethrough());
+  (data.fromMarkdownExtensions ??= []).push(gfmStrikethroughFromMarkdown());
 }
 
 /** 記法として解釈しない節を、書いた元の文字（本文のうち、その節の範囲）の `text` に置き換える。 */
@@ -100,12 +94,14 @@ function asWrittenText() {
  *   **`urlTransform` を差し替えない**——`javascript:` のリンクが通る
  * - プラグインが足した要素も、描画の前に rehype-sanitize の既定のスキーマで落とす
  * - 段落の中の改行（入力欄の Enter）は改行の要素にする（remark-breaks。Markdown の既定は空白1つに畳む）
+ * - **踏むと壊れる: `remarkPlugins` の並びを変えない。** `remarkBreaks` を `asWrittenText` より前に置くと、
+ *   `asWrittenText` が後から作る文字（表・複数行の生の HTML など）の中の改行が、改行の要素にならない
  */
 export function MessageBody({ body }: { body: string }) {
   return (
     <div className="break-words">
       <Markdown
-        remarkPlugins={[strikethroughAndAutolink, asWrittenText, remarkBreaks]}
+        remarkPlugins={[strikethrough, asWrittenText, remarkBreaks]}
         rehypePlugins={[rehypeSanitize]}
         allowedElements={ALLOWED_ELEMENTS}
         unwrapDisallowed

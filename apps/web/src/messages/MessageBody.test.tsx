@@ -83,9 +83,10 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(paragraph?.textContent).toContain('二行目');
     });
 
-    it('URL をそのまま書くと、その URL へのリンクになる（GFM の自動リンク）', () => {
-      const link = renderBody('https://example.com/x を見て').querySelector('a');
-      expect(link?.getAttribute('href')).toBe('https://example.com/x');
+    it('URL をそのまま書いても、リンクにせず文字のまま残す（GFM の自動リンクは F-14 の記法に含まない）', () => {
+      const container = renderBody('https://example.com/x を見て');
+      expect(container.querySelector('a')).toBeNull();
+      expect(container.textContent).toContain('https://example.com/x を見て');
     });
 
     it('リンクは http / https の URL を href に持つ', () => {
