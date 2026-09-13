@@ -88,6 +88,32 @@ export type InvitationNewPayload = {
 };
 
 /**
+ * `message:new` の payload（F-11。機能一覧 4.1・5.2）。チャンネルの部屋へ送る。
+ * `message` は投稿の応答（REST の Message）と同じ形。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
+ */
+export type MessageNewPayload = {
+  readonly message: components['schemas']['Message'];
+  readonly sentAt: string;
+};
+
+/**
+ * `message:updated` の payload（F-13。機能一覧 4.2・5.2）。チャンネルの部屋へ送る。`message` は編集の応答と同じ形（`editedAt` を持つ）。
+ */
+export type MessageUpdatedPayload = {
+  readonly message: components['schemas']['Message'];
+  readonly sentAt: string;
+};
+
+/**
+ * `message:deleted` の payload（F-13。機能一覧 4.2・5.2）。チャンネルの部屋へ送る。**本文は載せない**（削除した本文を配らない）。
+ */
+export type MessageDeletedPayload = {
+  readonly channelId: string;
+  readonly messageId: string;
+  readonly sentAt: string;
+};
+
+/**
  * クライアントからサーバーへの要求の名前（機能一覧 9.2「部屋（Socket.IO の room）」）。**配信の対象イベントではない**ため、
  * 上の `REALTIME_EVENT_KINDS` / `REALTIME_EVENT_NAMES` には入れない。
  * - `channelEnter`: チャンネルを開いたときの入室要求。サーバーが参加者であることを確かめてから、その接続をチャンネルの部屋に入れる

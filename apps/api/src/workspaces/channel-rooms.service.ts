@@ -1,11 +1,6 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import { NOT_A_CHANNEL_MEMBER } from './channel-errors';
+import { assertChannelParticipant } from './channel-access';
 import { WorkspacesService } from './workspaces.service';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,8 +38,9 @@ export class ChannelRoomsService {
     });
     if (!channel) throw new NotFoundException();
     await this.workspaces.membershipOf(userId, channel.workspaceId);
-    if (channel.members.length > 0) return;
-    if (channel.visibility === 'PRIVATE') throw new NotFoundException();
-    throw new ForbiddenException(NOT_A_CHANNEL_MEMBER);
+    assertChannelParticipant({
+      visibility: channel.visibility,
+      joined: channel.members.length > 0,
+    });
   }
 }

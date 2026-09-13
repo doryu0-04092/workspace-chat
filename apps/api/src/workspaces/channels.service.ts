@@ -1,14 +1,10 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
-import { CHANNEL_NAME_TAKEN, NOT_A_CHANNEL_MEMBER } from './channel-errors';
+import { assertChannelParticipant, channelFor } from './channel-access';
+import { CHANNEL_NAME_TAKEN } from './channel-errors';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { WorkspacesService } from './workspaces.service';
 
@@ -110,15 +106,8 @@ export class ChannelsService {
    */
   async members(userId: string, workspaceId: string, channelId: string): Promise<ChannelMember[]> {
     const membership = await this.workspaces.membershipOf(userId, workspaceId);
-    const channel = await this.prisma.channel.findFirst({
-      where: { id: channelId, workspaceId },
-      select: { visibility: true, members: { where: { userId }, select: { id: true } } },
-    });
-    if (!channel) throw new NotFoundException();
-    if (channel.members.length === 0 && membership.role !== 'OWNER') {
-      if (channel.visibility === 'PRIVATE') throw new NotFoundException();
-      throw new ForbiddenException(NOT_A_CHANNEL_MEMBER);
-    }
+    const channel = await channelFor(this.prisma, userId, workspaceId, channelId);
+    if (membership.role !== 'OWNER') assertChannelParticipant(channel);
     const rows = await this.prisma.channelMember.findMany({
       where: { channelId, membership: { user: { deletedAt: null } } },
       select: { membership: { select: { user: { select: USER_SUMMARY_SELECT } } } },

@@ -495,6 +495,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/channels/{channelId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * チャンネルのメッセージの一覧（F-11・F-12）
+         * @description 新しい順。before（メッセージの id）を渡すと、それより古いものを返す（カーソルページネーション。OFFSET を使わない。機能一覧 4.1）。 before はそのチャンネルのメッセージでなくてもよく、存在を確かめない（id の順で比べる境目にすぎない）。 続きがあれば nextBefore に次の before を、無ければ null を返す。 参加者だけが取得できる。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、 パブリックは 403 not_a_channel_member・プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。 別のワークスペースのチャンネル・無いチャンネルは 404。アーカイブ済みでも参加者は読める（機能一覧 3.2）。 退会した投稿者のメッセージは残し、author を null にする（機能一覧 1.5）
+         */
+        get: operations["listMessages"];
+        put?: never;
+        /**
+         * チャンネルへのメッセージの投稿（F-11）
+         * @description 参加者だけが投稿できる。コードは一覧と同じ2段階（所属していなければ 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・ プライベートは 404。オーナーでも参加していなければ同じ）。アーカイブ済みのチャンネルには投稿できない（409 channel_archived。機能一覧 3.2）。 本文は 1〜4000 文字（コードポイント）で、空白だけは不可（機能一覧 4.1）。 作ったメッセージを message:new としてチャンネルの部屋へ配る（機能一覧 5.2）。 利用者単位で1分に60回まで（実装時に決めた値。機能一覧 4.1）
+         */
+        post: operations["postMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * メッセージの削除（F-13）
+         * @description 論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、 以後の応答と配信では返さない（body: null・deleted: true。要件定義書 3.4）。message:deleted（本文を載せない）をチャンネルの部屋へ配る。 利用者単位で1分に60回まで（投稿と同じ値で、枠はルートごとに別。実装時に決めた値。機能一覧 4.2）
+         */
+        delete: operations["deleteMessage"];
+        options?: never;
+        head?: never;
+        /**
+         * メッセージの編集（F-13）
+         * @description 自分のメッセージだけを編集できる（作者でなければ 403 not_message_author。オーナーでも同じ。機能一覧 4.2）。 判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404 → そのチャンネルに無い・削除済みのメッセージは 404 → 作者でなければ 403 not_message_author → アーカイブ済みのチャンネルは 409 channel_archived。 本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。編集したメッセージを message:updated としてチャンネルの部屋へ配る（機能一覧 5.2）。 利用者単位で1分に60回まで（投稿と同じ値で、枠はルートごとに別。実装時に決めた値。機能一覧 4.2）
+         */
+        patch: operations["editMessage"];
+        trace?: never;
+    };
     "/invitations": {
         parameters: {
             query?: never;
@@ -570,7 +630,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -693,6 +753,42 @@ export interface components {
             /** @description 1〜50 文字（文字数はコードポイントで数える）。空白だけは不可（決定・2026-09-12・依頼側。#290）。 上限は入力にだけ置く（アーカイブ時の接尾辞 -<採番> はこの外側に付くため、応答と DB の列には置かない。同決定） */
             name: string;
             visibility: components["schemas"]["ChannelVisibility"];
+        };
+        PostMessageRequest: {
+            /** @description 1〜4000 文字（文字数はコードポイントで数える）。空白だけは不可（機能一覧 4.1） */
+            body: string;
+        };
+        /** @description チャンネルのメッセージ（機能一覧 4.1・4.2） */
+        Message: {
+            /**
+             * Format: uuid
+             * @description UUIDv7。一覧のカーソル（before）にそのまま使う
+             */
+            id: string;
+            /** Format: uuid */
+            channelId: string;
+            /** @description 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            author: components["schemas"]["UserSummary"] | null;
+            /** @description 本文。削除済みなら null（本文は DB に残るが返さない。機能一覧 4.2） */
+            body: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最後に編集した時刻。編集していなければ null（「編集済み」の表示に使う。機能一覧 4.2）
+             */
+            editedAt: string | null;
+            /** @description 削除済みか（「このメッセージは削除されました」に置き換えて表示する。機能一覧 4.2） */
+            deleted: boolean;
+        };
+        MessagePage: {
+            /** @description 新しい順 */
+            messages: components["schemas"]["Message"][];
+            /**
+             * Format: uuid
+             * @description 続きを取るときに before に渡す id。続きが無ければ null
+             */
+            nextBefore: string | null;
         };
         /** @description 一般の一覧（参加者向け）のチャンネル */
         Channel: {
@@ -841,6 +937,8 @@ export interface components {
         MemberId: string;
         /** @description チャンネルの id。形が uuid でなければ 400 */
         ChannelId: string;
+        /** @description メッセージの id。形が uuid でなければ 400 */
+        MessageId: string;
         /** @description 招待の id。形が uuid でなければ 400 */
         InvitationId: string;
         /** @description ワークスペースの id。形が uuid でなければ 400 */
@@ -1778,6 +1876,211 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listMessages: {
+        parameters: {
+            query?: {
+                /** @description これより古いメッセージを返す（メッセージの id）。形が uuid でなければ 400 */
+                before?: string;
+                /** @description 返す件数の上限。1〜100、既定は 50（実装時に決めた値。機能一覧 4.1） */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description メッセージ（新しい順）と、続きを取るための before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessagePage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    postMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description 作ったメッセージ */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 削除した */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member）か、自分のメッセージではない（not_message_author） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    editMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description 編集したメッセージ（editedAt を持つ） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member）か、自分のメッセージではない（not_message_author） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };

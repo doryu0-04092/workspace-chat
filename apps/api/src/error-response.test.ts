@@ -5,6 +5,7 @@ import {
   BearerUnauthorizedException,
   ErrorResponseFilter,
   RetryAfterException,
+  UserRateLimitException,
   errorBodyForStatus,
 } from './error-response';
 
@@ -121,8 +122,8 @@ describe('例外フィルタの BearerUnauthorizedException', () => {
   );
 });
 
-// HTTP のレート制限の超過は、投げる経路（発信元単位のガードの 429・アカウント単位の RetryAfterException）によらず、
-// フィルタの1箇所で rate_limit_exceeded として記録する（#270 第3巡）。
+// HTTP のレート制限の超過は、投げる経路（発信元単位のガードの 429・アカウント単位の RetryAfterException・
+// 利用者単位の UserRateLimitException）によらず、フィルタの1箇所で rate_limit_exceeded として記録する（#270 第3巡）。
 describe('例外フィルタの 429 の記録', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -149,6 +150,19 @@ describe('例外フィルタの 429 の記録', () => {
       });
     },
   );
+
+  it('UserRateLimitException（利用者単位）を、制限の種類・発信元・パスに利用者の ID を加えて warn で記録する', () => {
+    const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const { host } = fakeHost();
+    new ErrorResponseFilter().catch(new UserRateLimitException('user-1'), host);
+    expect(warned).toHaveBeenCalledWith({
+      event: 'rate_limit_exceeded',
+      limit: 'user',
+      ip: '198.51.100.7',
+      path: '/api/auth/login',
+      userId: 'user-1',
+    });
+  });
 
   it('429 以外は記録しない', () => {
     const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
