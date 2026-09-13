@@ -69,7 +69,8 @@ describe('在席の一覧（PresenceRegistry）', () => {
     }
   });
 
-  it('取り直しに失敗したチャンネルは今の一覧を残し、例外にせず warn を残す', async () => {
+  // #373: 失敗の原因（Valkey の停止・待ち時間の超過・置き換え側の不具合）を、運用ログの上で区別できるようにする。
+  it('取り直しに失敗したチャンネルは今の一覧を残し、例外にせず、件数と最初の失敗の原因を warn に残す', async () => {
     const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const registry = new PresenceRegistry(
       fakeGateway(async () => {
@@ -77,10 +78,33 @@ describe('在席の一覧（PresenceRegistry）', () => {
       }).gateway,
     );
     registry.add('c1', 'u1', 's1');
+    registry.add('c2', 'u1', 's1');
 
     await expect(registry.refresh()).resolves.toBeUndefined();
 
     expect(registry.usersIn('c1')).toEqual(['u1']);
     expect(warned).toHaveBeenCalledTimes(1);
+    const [message] = warned.mock.calls[0] as [string];
+    expect(message).toContain('2 チャンネル');
+    expect(message).toContain('timeout reached while waiting for fetchSockets response');
+  });
+
+  it('code を持つ失敗は code だけを warn に残し、メッセージに入りうる接続先は残さない', async () => {
+    const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const refused = Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:6379'), {
+      code: 'ECONNREFUSED',
+    });
+    const registry = new PresenceRegistry(
+      fakeGateway(async () => {
+        throw refused;
+      }).gateway,
+    );
+    registry.add('c1', 'u1', 's1');
+
+    await registry.refreshOne('c1');
+
+    const [message] = warned.mock.calls[0] as [string];
+    expect(message).toContain('ECONNREFUSED');
+    expect(message).not.toContain('10.0.0.5');
   });
 });
