@@ -15,13 +15,22 @@ export const NOT_A_CHANNEL_MEMBER: ErrorResponse = {
   message: 'このチャンネルの参加者ではありません',
 };
 
+/**
+ * 自分のメッセージではない（403。編集・削除。機能一覧 4.2）。**参加者でない側には使わない**
+ * （参加していなければ、メッセージの有無も作者も分からないよう、参加の2段階のコードを先に返す）。
+ */
+export const NOT_MESSAGE_AUTHOR: ErrorResponse = {
+  code: 'not_message_author',
+  message: '自分のメッセージだけを編集・削除できます',
+};
+
 /** 既にそのチャンネルの参加者である（409。参加・招待。一意索引 `ChannelMember_channelId_userId_key`）。 */
 export const ALREADY_CHANNEL_MEMBER: ErrorResponse = {
   code: 'already_channel_member',
   message: '既にこのチャンネルの参加者です',
 };
 
-/** アーカイブ済みのチャンネルである（409。参加・招待では人を増やせない・投稿できない・アーカイブでは再びアーカイブできない。機能一覧 3.2）。 */
+/** アーカイブ済みのチャンネルである（409。参加・招待では人を増やせない・投稿・編集・削除ではメッセージを書けない・アーカイブでは再びアーカイブできない。機能一覧 3.2）。 */
 export const CHANNEL_ARCHIVED: ErrorResponse = {
   code: 'channel_archived',
   message: 'アーカイブ済みのチャンネルです',
