@@ -205,6 +205,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | HTTPS とドメイン | **独自ドメインを持たない。** 閲覧者から CloudFront までは、CloudFront の既定のドメイン（`d111111abcdef8.cloudfront.net` の形）で HTTPS を必須にする（ビヘイビアの Viewer Protocol Policy。AWS 公式「In that configuration, CloudFront provides the SSL/TLS certificate.」）。**CloudFront から ALB までは VPC オリジンで HTTP にする**（ALB はプライベートサブネット。オリジンのプロトコルは `http-only`）。**VPC にはインターネットゲートウェイが要る**（AWS 公式「The internet gateway is required to denote that the VPC can receive traffic from the internet. The internet gateway is not used for routing traffic to origins inside the subnet」） |
 | 秘密情報（DB のパスワード・トークンの署名鍵など） | **Systems Manager Parameter Store の暗号化パラメータ（標準の区分）**。ECS のコンテナ定義の `secrets` で環境変数として渡す。Secrets Manager の自動ローテーション・アカウント間の共有は、デモ後に destroy する運用では使わない |
 | Terraform の state | **S3 バケット（バージョニングあり）＋ `use_lockfile`**。バケットは本体の構成の外で先に作る（`dynamodb_table` は非推奨） |
+| ECS のタスクの置き場 | **パブリックサブネットに公開 IP 付きで置き、受信は ALB のセキュリティグループからだけにする**（NAT ゲートウェイ・インターフェースエンドポイントを置かない）。Fargate がイメージを取るには経路が要り（AWS 公式「When using a public subnet, you can assign a public IP address to the task ENI.」）、内部の ALB はタスクを ENI のプライベート IP で登録する（AWS 公式「When the target type is ip, you can specify IP addresses from … The subnets of the VPC for the target group」「You can't specify publicly routable IP addresses.」）。RDS と ElastiCache はプライベートサブネットに置く |
 
 **代償**（[CLAUDE.md](../CLAUDE.md) 4）
 
@@ -212,10 +213,11 @@ ESM で出すと `apps/api` から素直に `import` できない。
 - **経路のすべての暗号化を求められる用途**（決済などの規格に従う・実際の利用者のデータを長く預かる）**には、この構成を使えない。** その場合は独自ドメインと ACM の証明書を持ち、CloudFront と ALB の両方を HTTPS にする形へ切り替える（オリジンの HTTPS には信頼された認証局の証明書が要り、自己署名は使えない）
 - **提出物の URL が CloudFront の既定のドメインの形になる**（[要件定義書](requirements.md) 5）
 - **state のバケットは `terraform destroy` の対象外として残る**（[要件定義書](requirements.md) 4.2 の「バックアップ」）
+- **タスクへの受信を止めるのは、セキュリティグループの1層だけである**（AWS 公式「When you first create a security group, it has no inbound rules. Therefore, no inbound traffic is allowed until you add inbound rules to the security group.」）。規則を広げる誤りをすると、CloudFront を経ずに api へ直接届き、平文の HTTP でトークンが流れ、X-Forwarded-For を偽ってレート制限を迂回できる（上の ALB の行の `TRUST_PROXY_HOPS=2` の前提が崩れる）。**規則は Terraform だけで書き（送信元を ALB のセキュリティグループに限る）、`apply` の後に実際の規則を確かめる**。プライベートサブネットと NAT ゲートウェイの形なら、同じ誤りでも外から届かない
+- **公開 IPv4 アドレスの料金がかかる**（AWS 公式「Effective February 1, 2024 there will be a charge of $0.005 per IP per hour for all public IPv4 addresses」。タスク 2 つで月におよそ 7 ドル）
 
 **未確認**
 
-- **ECS のタスクの置き場とイメージの取得の経路**——Fargate がイメージを取るには、公開 IP・NAT ゲートウェイ・ECR のインターフェースエンドポイントのいずれかの経路が要る。費用が変わるため、Terraform の実装時に決める
 - **暗号化パラメータに使う KMS の鍵の費用**
 - **VPC オリジンを経ても、api が受け取る X-Forwarded-For が「CloudFront → ALB」の2段の形になること**（`TRUST_PROXY_HOPS=2` の前提。上の ALB の行）
 
