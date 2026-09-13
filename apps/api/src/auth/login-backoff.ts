@@ -1,4 +1,5 @@
 import type Redis from 'ioredis';
+import { errorKind } from '../logging/error-kind';
 
 /**
  * アカウント単位の制限: **連続して失敗した回数 n に対し、2^(n-1) 秒（上限 15 分）の間は照合しない**
@@ -223,7 +224,7 @@ export class ResilientLoginBackoffStore implements LoginBackoffStore {
     } catch (error) {
       if (!this.degraded) {
         this.options.logger.warn(
-          `Valkey に書けないため、アカウント単位の失敗の回数を各タスクのメモリで数える: ${describe(error)}`,
+          `Valkey に書けないため、アカウント単位の失敗の回数を各タスクのメモリで数える: ${errorKind(error, 'name')}`,
         );
       }
       this.degraded = true;
@@ -231,13 +232,4 @@ export class ResilientLoginBackoffStore implements LoginBackoffStore {
       return operation(this.fallback);
     }
   }
-}
-
-/** 失敗の種類だけを書く。メッセージには接続先が入りうるため、code があればそれを使う。 */
-function describe(error: unknown): string {
-  if (error instanceof Error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code ?? error.name;
-  }
-  return 'unknown';
 }

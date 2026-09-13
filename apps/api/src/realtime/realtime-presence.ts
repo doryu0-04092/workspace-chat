@@ -1,7 +1,8 @@
 import { Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import type { PresenceChangedPayload } from '@workspace-chat/shared';
 import { PresenceRegistry } from './presence-registry';
-import { RealtimeGateway, channelRoom } from './realtime.gateway';
+import { RealtimeEmitter } from './realtime.emitter';
+import { RealtimeGateway } from './realtime.gateway';
 
 /** 他のタスクへ在席の変化を知らせるサーバー間の通知（serverSideEmit）の名前。クライアントとはやりとりしない。 */
 const ENTERED = 'presence:server:entered';
@@ -15,7 +16,8 @@ type UserRemoved = { channelIds: string[]; userId: string };
  * 在席の変化を配る（F-22。機能一覧 9.2「在席の変化は利用者単位で配る」「タスクをまたぐ在席」）。
  *
  * - **利用者の最初の接続が部屋に入ったときと、最後の接続が外れたときにだけ、そのチャンネルの部屋へ `presence:changed` を送る**
- *   （同じ利用者の別の接続が残っている間は送らない）。**外れる契機はどれでも同じ**（契機は列挙しない。機能一覧 9.2）
+ *   （同じ利用者の別の接続が残っている間は送らない）。**外れる契機はどれでも同じ**（契機は列挙しない。機能一覧 9.2）。
+ *   **送るのは配信の出口（`RealtimeEmitter.toChannel`）から**——`gateway.server` の `emit` を直接呼ぶと、イベント名が共有の定義と型で結ばれない（CLAUDE.md 3）
  * - **他のタスクへはサーバー間の通知で知らせ、受け取った側は一覧を更新するだけにする**
  *   （クライアントへの配信は、送った側の部屋への送信がアダプタを通って届く）
  * - 部屋への送信とサーバー間の通知の失敗は、アダプタが例外にしない（realtime-valkey.ts・Redis アダプタの serverSideEmit）
@@ -25,6 +27,7 @@ export class RealtimePresence implements OnApplicationBootstrap {
   constructor(
     private readonly gateway: RealtimeGateway,
     private readonly registry: PresenceRegistry,
+    private readonly emitter: RealtimeEmitter,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -84,6 +87,6 @@ export class RealtimePresence implements OnApplicationBootstrap {
       present,
       sentAt: new Date().toISOString(),
     };
-    this.gateway.server.to(channelRoom(channelId)).emit('presence:changed', payload);
+    this.emitter.toChannel(channelId, 'presence:changed', payload);
   }
 }
