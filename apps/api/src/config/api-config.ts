@@ -80,6 +80,9 @@ export function resolveWebOrigin(raw: string | undefined): string {
 /**
  * 設定1つの読み方。**`secret` はすべての行に必ず書く**（書かないと型検査で落ちる）——値に秘密（資格情報・鍵）が入るなら
  * `secret: true` と、不正なときに代わりに示す `hint` を書く。
+ * **踏むと壊れる: `secret: true` は、本番で Systems Manager Parameter Store の暗号化パラメータと ECS の `secrets` で渡す対象を決める。**
+ * `secret: true` の設定を足したら Terraform の側にもパラメータを足し、タスク定義の `environment` には書かない
+ * （docs/tech-stack.md の「本番の HTTPS・秘密情報・state の置き場」）。
  */
 type Setting<T> = {
   readonly env: string;

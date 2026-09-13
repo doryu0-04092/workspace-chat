@@ -188,7 +188,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 
 | 項目 | 採用 | 備考 |
 |---|---|---|
-| IaC | **Terraform** **1.11 以上** | 既存プロジェクトで実績あり。**1.11 以上とするのは、state のロックに S3 バックエンドの `use_lockfile` を使うためである**（HashiCorp の S3 バックエンドの文書: 1.9 の版には `use_lockfile` が無く、1.10 は「(Experimental, Optional)」、1.11 は「(Optional)」。下の「本番の HTTPS・秘密情報・state の置き場」）。これより古い版では `terraform init` がバックエンドの設定を受け付けない |
+| IaC | **Terraform** **1.11 以上** | 既存プロジェクトで実績あり。**1.11 以上とするのは、state のロックに S3 バックエンドの `use_lockfile` を使うためである**（HashiCorp の S3 バックエンドの文書: 1.9 の版には `use_lockfile` が無く、1.10 は「(Experimental, Optional)」、1.11 は「(Optional)」。下の「本番の HTTPS・秘密情報・state の置き場」） |
 | フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**閲覧者との HTTPS を終端する**（ブラウザ通知に必要な HTTPS。[要件定義書](requirements.md) 5。下の「本番の HTTPS・秘密情報・state の置き場」） |
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。**プライベートサブネットに置き、CloudFront の VPC オリジンとして HTTP で受ける**（TLS は終端せず、タスクへも HTTP で渡す。**閲覧者との HTTPS は CloudFront が終端する**。下の「本番の HTTPS・秘密情報・state の置き場」）。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト、または VPC オリジンを作ると AWS が作る `CloudFront-VPCOrigins-Service-SG`）。**タスクのセキュリティグループも、ALB のセキュリティグループからだけ到達できるようにする**（タスクは公開 IP を持つ。下の「ECS のタスクの置き場」の行）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB やタスクを直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
