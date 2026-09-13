@@ -97,6 +97,22 @@ describe('起動時の復元', () => {
 
     expect(order).toEqual(['lock:workspace-chat:refresh', 'refresh', 'unlock']);
   });
+
+  it('ロックが取れず断られても（InvalidStateError など）、ロックの外でリフレッシュし、確かめる途中のまま止まらない', async () => {
+    const { count } = fakeFetch({
+      'POST /api/auth/refresh': () => token('t1'),
+      'GET /api/users/me': () => json(200, PROFILE),
+    });
+    const locks: RefreshLocks = {
+      request: () => Promise.reject(new DOMException('not fully active', 'InvalidStateError')),
+    };
+    const store = createSessionStore({ locks });
+
+    await store.restore();
+
+    expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't1', user: USER });
+    expect(count('POST /api/auth/refresh')).toBe(1);
+  });
 });
 
 describe('ログイン', () => {
