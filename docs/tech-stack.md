@@ -107,7 +107,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | **メッセージ一覧** | **react-virtuoso** | 4.x | **難-1 の解決**。`firstItemIndex` は「先頭に要素を足しても表示位置を維持する」ための機能で、チャット用途を想定して用意されている。自前だと `scrollHeight` の差分補正が必要になる |
 | **Markdown 描画** | **react-markdown** + GFM の取り消し線の拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線の拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。選定時に挙げた rehype-highlight は採っていない。**解釈する記法と、その区分・承認（取り消し線・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
 | データ取得 | **TanStack Query** | v5 | `useInfiniteQuery` がカーソルページネーションに直結する。WebSocket 受信を `setQueryData` でキャッシュに反映する |
-| 一時状態 | **Zustand** | v5 | 在席・入力中など、永続化しない状態を TanStack Query と分けて持つ |
+| 一時状態 | **Zustand** | v5 | 在席・入力中・ログインの状態（アクセストークンを含む）など、永続化しない状態を TanStack Query と分けて持つ（ログインの状態を含めるのは決定・2026-09-14・依頼側） |
 | スタイル | **Tailwind CSS** | 4.x | 密度の高い UI を素早く組む。画面数に対して独自 CSS は割に合わない |
 | WebSocket | **socket.io-client** | 4.x | サーバーと対 |
 | テスト | Vitest / Playwright（axe-core 同梱） | — | 既存プロジェクトで運用実績あり |
@@ -190,7 +190,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 項目 | 採用 | 備考 |
 |---|---|---|
 | IaC | **Terraform** 1.x | 既存プロジェクトで実績あり |
-| フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77） |
+| フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**既定のビヘイビアに viewer request の CloudFront Functions を置き、拡張子の無いパス（画面の URL。[機能一覧](features.md) 1.2）を `/index.html` に書き換える**（AWS の例 `url-rewrite-single-page-apps` と同じ形。例はパスの下の `index.html` を付けるが、画面は根の `index.html` 1つである）。**カスタムエラー応答で `index.html` を返す形は採らない**——API リファレンスで `CustomErrorResponses` は `DistributionConfig` にあり `CacheBehavior` には無く、`/api/*` の 404 の本体まで置き換わる |
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。TLS 終端。**ブラウザ通知に必要な HTTPS を提供する**。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB を直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
@@ -378,7 +378,7 @@ F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の 
 | **@nestjs/throttler** | **^6.5.0** | 最新。レート制限（[要件定義書](requirements.md) 4.3 のレート制限の行）。ガードは全体に掛けず、ルートごとに `@UseGuards` と `@Throttle` で上限を決める。**WebSocket のチャンネルの部屋への入室要求は、ガードを通らないため、同じ保存先（`ThrottlerStorage`）で直接数える**（[機能一覧](features.md) 9.2）。**メッセージの投稿・編集・削除は、発信元ではなく利用者で数え（`UserRateLimitGuard`。`getTracker` を利用者の ID にする）、3つのルートで1つの枠を分け合う**（`MessageWriteRateLimitGuard` が `generateKey` をハンドラによらないキーにする。[機能一覧](features.md) 4.1・4.2）。**同梱のメモリの保存先（`ThrottlerStorageService`）は使わない**——記録を Map から消さず、要求1回ごとにタイマーを1つ作るため、発信元を変えながら叩かれるとメモリが増え続ける（`apps/api/src/rate-limit/memory-rate-limit-storage.ts` に自前で置いた） |
 | **@nest-lab/throttler-storage-redis** | **^1.2.0** | 最新。状態を Valkey に置き、タスクをまたいで数える（Lua の `eval` で原子的に数える）。`@nestjs/throttler` の >=6.0.0 を受け入れる。旧 `nestjs-throttler-storage-redis` は npm で非推奨 |
 | **ioredis** | **^5.11.1** | 上の保存先が要求する接続（peerDependencies の >=5.0.0）。**`enableOfflineQueue: false`・`commandTimeout` で、Valkey が止まっているときにすぐ失敗させる**（既定は接続が切れている間のコマンドを溜め、要求が詰まる） |
-| **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動する（`GenericContainer`）。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
+| **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動し（`apps/api/src/testing/valkey.ts` の `GenericContainer`）、起動のたびに土台のイメージを取り直す（`valkey.ts`・`postgres.ts` の `PullPolicy`）。起動したコンテナの型（`StartedTestContainer`）も、コンテナを持つテストが直接読む。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
 
 #### 追加で確認した項目 — api のコンテナイメージ（2026-09-12。#271）
 
@@ -415,6 +415,7 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 | 対象 | 採用 | 判断 |
 |---|---|---|
 | **react-router** | **^8.3.1** | 最新（上表「ルーティング」。決定・2026-09-13・依頼側）。`apps/web` の dependencies。8.3.1 の `react-router` 自体が `BrowserRouter`・`Routes`・`Route`・`Navigate`・`MemoryRouter` を出している（`dist/production/index.d.ts`）ため、`react-router-dom` は入れない。engines は `node >=22.22.0`、peerDependencies は `react`・`react-dom` の `>=19.2.7`（上表の Node.js 24・React 19.2 を満たす）。使い方は同梱の `docs/start/declarative`（`BrowserRouter` で包み、`Routes`・`Route` で組む） |
+| **zustand** | **^5.0.15** | 最新（上表「一時状態」の v5）。`apps/web` の dependencies。依存は無く、peerDependencies（`react`・`@types/react`・`immer`・`use-sync-external-store`）はすべて任意。ライセンスは MIT。ログインの状態を `zustand/vanilla` の `createStore` に置き（`vanilla.d.ts` の `createStore`）、画面は `zustand` の `useStore` で読む（`react.d.ts` の `useStore(api)`。`apps/web/src/auth/session-store.ts`・`session-context.tsx`） |
 
 #### 追加で確認した項目 — web のワークスペースとチャンネルの画面（2026-09-13。#379）
 
