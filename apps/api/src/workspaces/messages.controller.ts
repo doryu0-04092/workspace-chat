@@ -21,7 +21,10 @@ import {
   type PostMessageRequest,
 } from './messages.service';
 
-/** 投稿・編集・削除の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1・4.2）。 */
+/**
+ * 投稿・編集・削除の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1・4.2）。
+ * **枠はルートごとに別**で、同じ利用者が3つを合わせて1分に最大 180 回書ける。
+ */
 export const MESSAGE_POST_LIMIT = { limit: 60, ttl: 60 * 1000 } as const;
 
 /**

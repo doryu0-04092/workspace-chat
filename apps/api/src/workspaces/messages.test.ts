@@ -28,7 +28,7 @@ const TOO_MANY_REQUESTS = {
 const MISSING_ID = '00000000-0000-7000-8000-000000000000';
 const LAST_ID = 'ffffffff-ffff-7fff-bfff-ffffffffffff';
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-/** 投稿・編集・削除の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1・4.2）。 */
+/** 投稿・編集・削除の上限（ルートごとに、利用者単位で1分に60回。枠は別。実装時に決めた値。機能一覧 4.1・4.2）。 */
 const POST_LIMIT = 60;
 
 let sequence = 0;
@@ -843,20 +843,25 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
     });
 
     it('断った編集・削除（作者でない・アーカイブ済み）は配らない', async () => {
-      const { bob, workspace, channelId, message } = await postedByAlice();
+      const { alice, bob, workspace, channelId, message } = await postedByAlice();
       const bobSocket = await open(bob);
       expect(await enter(bobSocket, channelId)).toMatchObject({ ok: true });
 
-      const updated = nextEvent(bobSocket, 'message:updated', 1_000);
-      const deleted = nextEvent(bobSocket, 'message:deleted', 1_000);
+      const updated = nextEvent(bobSocket, 'message:updated', 3_000);
+      const deleted = nextEvent(bobSocket, 'message:deleted', 3_000);
       expect((await edit(bob, workspace.id, channelId, message.id, '他人の')).status).toBe(403);
       expect((await remove(bob, workspace.id, channelId, message.id)).status).toBe(403);
+
+      // アーカイブ済みでは、作者でも 409 で断る。部屋に入っている接続はアーカイブの後も残る。
+      await archive(channelId);
+      expect((await edit(alice, workspace.id, channelId, message.id, '作者の')).status).toBe(409);
+      expect((await remove(alice, workspace.id, channelId, message.id)).status).toBe(409);
 
       expect(await updated).toBeUndefined();
       expect(await deleted).toBeUndefined();
     });
 
-    it('編集と削除も、同じ利用者で1分に60回を超えたら 429 で断る', async () => {
+    it('編集と削除も、ルートごとに同じ利用者で1分に60回を超えたら 429 で断る（枠はルートごとに別）', async () => {
       const { alice, workspace, channelId, message } = await postedByAlice();
 
       for (let i = 0; i < POST_LIMIT; i += 1) {
