@@ -30,7 +30,7 @@ export const ALREADY_CHANNEL_MEMBER: ErrorResponse = {
   message: '既にこのチャンネルの参加者です',
 };
 
-/** アーカイブ済みのチャンネルである（409。参加・招待では人を増やせない・アーカイブでは再びアーカイブできない。機能一覧 3.2）。 */
+/** アーカイブ済みのチャンネルである（409。参加・招待では人を増やせない・投稿できない・アーカイブでは再びアーカイブできない。機能一覧 3.2）。 */
 export const CHANNEL_ARCHIVED: ErrorResponse = {
   code: 'channel_archived',
   message: 'アーカイブ済みのチャンネルです',

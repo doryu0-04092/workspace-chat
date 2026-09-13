@@ -897,6 +897,20 @@ describe('メッセージの投稿と一覧（F-11・F-12）', () => {
       expect((await post(bob, workspace.id, channelId, '別の人')).status).toBe(201);
     });
 
+    // 機能一覧 4.1: 仕様の検証で 400 になる投稿は、ガードより前に断るため枠を消費しない（9.2 の入室要求とは違う）。
+    it('本文が仕様に合わない投稿は、上限を超えて送っても 400 のままで、枠を消費しない', async () => {
+      const owner = await login();
+      const alice = await login();
+      const workspace = await workspaceWith(owner, alice);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice]);
+
+      for (let i = 0; i <= POST_LIMIT; i += 1) {
+        expect((await post(alice, workspace.id, channelId, '')).status).toBe(400);
+      }
+      // 枠を消費していなければ、続く正当な投稿は上限に達していない。
+      expect((await post(alice, workspace.id, channelId, '正しい本文')).status).toBe(201);
+    });
+
     it('上限の超過を、制限の種類（user）・利用者の ID・パスとともに記録する', async () => {
       const owner = await login();
       const alice = await login();
