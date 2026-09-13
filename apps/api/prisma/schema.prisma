@@ -683,7 +683,7 @@ model ChannelMember {
   @@index([userId])
 }
 
-/// チャンネルのメッセージ（F-11。機能一覧 4.1）。
+/// チャンネルのメッセージ（F-11・F-13。機能一覧 4.1・4.2）。
 model Message {
   /// UUIDv7。一覧のカーソル（`before`）にそのまま使う。
   id String @id @default(uuid(7)) @db.Uuid

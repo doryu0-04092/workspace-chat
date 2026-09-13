@@ -78,6 +78,24 @@ async function assertAuthoredMessage(
 }
 
 /**
+ * 編集・削除してよいかを、トランザクションの中で判定の順どおりに確かめる（機能一覧 4.2）。
+ * **順を変えない**: チャンネルの行を掴んでから読む → 参加の2段階 → メッセージの有無 → 作者 → アーカイブ済み。
+ * 参加していない人に、メッセージの有無も作者も漏らさない。
+ */
+async function assertEditableMessage(
+  tx: Pick<PrismaService, 'channel' | '$queryRaw' | 'message'>,
+  userId: string,
+  workspaceId: string,
+  channelId: string,
+  messageId: string,
+): Promise<void> {
+  const channel = await lockedChannelFor(tx, userId, workspaceId, channelId);
+  assertChannelParticipant(channel);
+  await assertAuthoredMessage(tx, userId, channelId, messageId);
+  if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
+}
+
+/**
  * チャンネルのメッセージの投稿・一覧・編集・削除（F-11・F-12・F-13。機能一覧 4.1・4.2）。
  *
  * - **読めるのも書けるのも参加者だけ**。所属していなければ 404（`membershipOf`）、所属していれば 2段階（`assertChannelParticipant`）。
@@ -151,10 +169,7 @@ export class MessagesService {
   ): Promise<Message> {
     await this.workspaces.membershipOf(userId, workspaceId);
     const message = await this.prisma.$transaction(async (tx) => {
-      const channel = await lockedChannelFor(tx, userId, workspaceId, channelId);
-      assertChannelParticipant(channel);
-      await assertAuthoredMessage(tx, userId, channelId, messageId);
-      if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
+      await assertEditableMessage(tx, userId, workspaceId, channelId, messageId);
       const { count } = await tx.message.updateMany({
         where: { id: messageId, channelId, deletedAt: null },
         data: { body: input.body, editedAt: new Date() },
@@ -183,10 +198,7 @@ export class MessagesService {
   ): Promise<void> {
     await this.workspaces.membershipOf(userId, workspaceId);
     await this.prisma.$transaction(async (tx) => {
-      const channel = await lockedChannelFor(tx, userId, workspaceId, channelId);
-      assertChannelParticipant(channel);
-      await assertAuthoredMessage(tx, userId, channelId, messageId);
-      if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
+      await assertEditableMessage(tx, userId, workspaceId, channelId, messageId);
       const { count } = await tx.message.updateMany({
         where: { id: messageId, channelId, deletedAt: null },
         data: { deletedAt: new Date() },

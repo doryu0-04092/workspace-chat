@@ -758,7 +758,7 @@ export interface components {
             /** @description 1〜4000 文字（文字数はコードポイントで数える）。空白だけは不可（機能一覧 4.1） */
             body: string;
         };
-        /** @description チャンネルのメッセージ（機能一覧 4.1） */
+        /** @description チャンネルのメッセージ（機能一覧 4.1・4.2） */
         Message: {
             /**
              * Format: uuid
