@@ -26,10 +26,15 @@ export type AuthenticatedUser = { readonly id: string };
 const AUTHENTICATED_USER = Symbol('AUTHENTICATED_USER');
 type AuthenticatedRequest = Request & { [AUTHENTICATED_USER]?: AuthenticatedUser };
 
+/** AccessTokenGuard が要求に載せた利用者。`@Public()` のルートと、ガードより前の段では無い。 */
+export function authenticatedUserOf(request: object): AuthenticatedUser | undefined {
+  return (request as AuthenticatedRequest)[AUTHENTICATED_USER];
+}
+
 /** ハンドラの引数に、AccessTokenGuard が解決した利用者を渡す。 */
 export const CurrentUser = createParamDecorator(
   (_data: unknown, context: ExecutionContext): AuthenticatedUser => {
-    const user = context.switchToHttp().getRequest<AuthenticatedRequest>()[AUTHENTICATED_USER];
+    const user = authenticatedUserOf(context.switchToHttp().getRequest<AuthenticatedRequest>());
     // Public のルートで使うと、ガードが利用者を解決していない。
     if (user === undefined) throw new Error('CurrentUser は認証を要するルートでだけ使う');
     return user;

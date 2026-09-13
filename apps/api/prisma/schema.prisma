@@ -1,26 +1,27 @@
 // Prisma のスキーマ。
 //
-// このファイルが定義するのは **認証・ワークスペース・チャンネルの土台**である。
-// メッセージ・スレッド・リアクション・メンション・添付・検索は別のイシューで扱う。
+// このファイルが定義するのは **認証・ワークスペース・チャンネルの土台と、チャンネルのメッセージ**である。
+// スレッド・リアクション・メンション・添付・検索は別のイシューで扱う。
 //
 // ============================================================================
-// このファイルを直す人へ: **Prisma の記法で書けない制約が4つある**
+// このファイルを直す人へ: **Prisma の記法で書けない制約が5つある**
 // ============================================================================
 //
 // 部分一意索引（`WHERE` 付き）・式に対する索引（`lower(...)`）・検査制約（CHECK）は
 // Prisma のスキーマ言語に無い。
-// **マイグレーションの SQL に直接書いてある。** 具体的には次の4つ。
+// **マイグレーションの SQL に直接書いてある。** 具体的には次の5つ。
 //
 //   1. `User_userId_lower_key`                 … ユーザーID の一意性は大文字小文字を区別しない
 //   2. `Membership_single_owner_per_workspace` … 1ワークスペースにオーナーは1人
 //   3. `RecoveryCode_single_unused_per_user`   … 未使用のリカバリーコードは1人1つ
 //   4. `Channel_archive_naming_check`          … アーカイブと採番と改名が不可分
+//   5. `Message_body_check`                    … 本文は 1〜4000 文字で、空白だけではない
 //
-// **このファイルだけを見ても、この4つは見えない。** モデルを増減させるときは
-// `prisma/migrations/` の SQL も併せて読むこと。4つとも
+// **このファイルだけを見ても、この5つは見えない。** モデルを増減させるときは
+// `prisma/migrations/` の SQL も併せて読むこと。5つとも
 // `apps/api/src/prisma-schema.test.ts` が実際の PostgreSQL に対して検証している。
 //
-// 代償: 上の4つは `prisma migrate dev` の自動生成では復元されない。
+// 代償: 上の5つは `prisma migrate dev` の自動生成では復元されない。
 // スキーマを作り直すときは手で書き足す必要がある。
 // 採らなかった側（制約をアプリ側の実装だけで守る）の代償は、
 // **片方だけ実行された状態を DB が受け入れてしまう**ことである。
@@ -119,7 +120,7 @@ model User {
   /// 素の等値比較では、登録時と違う綴りで引けない。
   ///
   /// **この照合は Prisma のクライアントでは書けない。**
-  /// このファイルの冒頭に挙げた4つの制約と同じ理由である
+  /// このファイルの冒頭に挙げた5つの制約と同じ理由である
   /// （Prisma のスキーマ言語・問い合わせ API に `lower(...)` の等値比較が無い）。
   ///
   ///   - `findUnique({ where: { loginId } })` は**完全一致**であり、
@@ -251,7 +252,7 @@ model User {
   ///
   /// トリガを置かなかった理由: **現時点でこの列に依存する要求が1つも無い。**
   /// 置くなら `BEFORE UPDATE` のトリガを手書きし、このファイル冒頭の
-  /// 「Prisma の記法で書けない制約」の一覧を4つから5つに増やすことになる。
+  /// 「Prisma の記法で書けない制約」の一覧を5つから6つに増やすことになる。
   /// **この列を根拠に何かを判定する要求が出たら、その時点で見直すこと。**
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
@@ -261,6 +262,7 @@ model User {
   /// 自分宛ての未承諾の招待（F-38）と、自分が出した招待（F-08）。
   invitationsReceived Invitation[]   @relation("InvitationInvitee")
   invitationsSent     Invitation[]   @relation("InvitationInviter")
+  messages            Message[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -539,7 +541,7 @@ model Channel {
   ///
   /// **この列を読んで、人を増やす・投稿するかを決める経路（参加・招待・投稿）は、読む前にその行を掴むこと。**
   /// 掴まずに読むと、アーカイブの確定の直前に読んだ古い値に基づいて、アーカイブの後に参加・招待・投稿が成立する。
-  /// DB の制約はこれを止めない。実装は apps/api/src/workspaces/channel-row-lock.ts の `lockChannelRow`（参加・招待は強さ `share`）を読む前に呼ぶ。
+  /// DB の制約はこれを止めない。実装は apps/api/src/workspaces/channel-access.ts の `lockedChannelFor`（行を強さ `share` で掴んでから読む）を使う。
   archivedAt DateTime? @db.Timestamptz(3)
 
   /// 同じ基底名の中での通し番号。**一度アーカイブされた行が持つ。**
@@ -595,6 +597,7 @@ model Channel {
 
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   members   ChannelMember[]
+  messages  Message[]
 
   /// ワークスペース内で名前は一意。**ワークスペースをまたげば同じ名前を使える。**
   /// 一意制約の範囲が広すぎないことは、テストが別ワークスペースへの作成で確かめている。
@@ -678,4 +681,29 @@ model ChannelMember {
   /// **可視性の判定はこの向きで引く**（「この利用者が参加しているチャンネル」）。
   /// 索引が無いと、チャンネル一覧のたびに全走査になる。
   @@index([userId])
+}
+
+/// チャンネルのメッセージ（F-11。機能一覧 4.1）。
+model Message {
+  /// UUIDv7。一覧のカーソル（`before`）にそのまま使う。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  channelId String @db.Uuid
+
+  /// **チャンネルと同じワークスペース。** 複合外部キーで、別のワークスペースのチャンネルを指せない。
+  workspaceId String @db.Uuid
+
+  /// 投稿者。**退会しても行は残る**（利用者は論理削除。機能一覧 1.5）。
+  authorId String @db.Uuid
+
+  /// 1〜4000 文字で、空白だけではない（検査制約 `Message_body_check`。マイグレーションに置く）。
+  body String
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  channel Channel @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /// **一覧（新しい順・`before` より古いもの）はこの向きで引く。**
+  @@index([channelId, id(sort: Desc)])
 }

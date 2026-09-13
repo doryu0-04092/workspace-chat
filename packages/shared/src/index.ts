@@ -11,6 +11,7 @@ export type {
   ChannelRoomRejection,
   ChannelRoomRequest,
   InvitationNewPayload,
+  MessageNewPayload,
   PresenceChangedPayload,
   RealtimeEventKind,
   RealtimeEventName,
