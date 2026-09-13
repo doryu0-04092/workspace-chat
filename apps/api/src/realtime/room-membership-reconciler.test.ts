@@ -81,7 +81,7 @@ describe('チャンネルの部屋の参加の照合', () => {
       expect(await reached([aliceSocket, bobSocket], channelId)).toEqual([false, true]);
     });
 
-    // 機能一覧 9.2「外れる契機（退室・切断・キック・退出）はどれでも同じ」: 照合で外したときも、最後の接続なら在席の変化を配る。
+    // 機能一覧 9.2「外れる契機はどれでも同じである」: 照合で外したときも、最後の接続なら在席の変化を配る。
     it('照合で外した接続がその利用者の最後の接続なら、残った参加者に在席の変化（present: false）を配り、在席の一覧から外す', async () => {
       const { alice, bob, channelId, bobSocket } = await roomOfTwo();
       await t.prisma.channelMember.deleteMany({ where: { channelId, userId: alice.id } });

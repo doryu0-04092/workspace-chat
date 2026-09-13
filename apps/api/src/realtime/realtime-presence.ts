@@ -15,7 +15,7 @@ type UserRemoved = { channelIds: string[]; userId: string };
  * 在席の変化を配る（F-22。機能一覧 9.2「在席の変化は利用者単位で配る」「タスクをまたぐ在席」）。
  *
  * - **利用者の最初の接続が部屋に入ったときと、最後の接続が外れたときにだけ、そのチャンネルの部屋へ `presence:changed` を送る**
- *   （同じ利用者の別の接続が残っている間は送らない）。**外れる契機（退室・切断・キック・退出）はどれでも同じ**
+ *   （同じ利用者の別の接続が残っている間は送らない）。**外れる契機はどれでも同じ**（契機は列挙しない。機能一覧 9.2）
  * - **他のタスクへはサーバー間の通知で知らせ、受け取った側は一覧を更新するだけにする**
  *   （クライアントへの配信は、送った側の部屋への送信がアダプタを通って届く）
  * - 部屋への送信とサーバー間の通知の失敗は、アダプタが例外にしない（realtime-valkey.ts・Redis アダプタの serverSideEmit）
@@ -62,7 +62,7 @@ export class RealtimePresence implements OnApplicationBootstrap {
     this.gateway.server.serverSideEmit(LEFT, { channelId, userId, socketId } satisfies Entered);
   }
 
-  /** 利用者のすべての接続が、それらのチャンネルの部屋から外された（キック・退出）。 */
+  /** 利用者のすべての接続が、サーバーによってそれらのチャンネルの部屋から外された（契機は問わない）。 */
   userRemoved(channelIds: readonly string[], userId: string): void {
     for (const channelId of channelIds) {
       if (this.registry.removeUser(channelId, userId)) this.broadcast(channelId, userId, false);
