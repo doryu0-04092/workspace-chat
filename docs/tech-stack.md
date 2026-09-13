@@ -104,7 +104,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 言語 | **TypeScript** | 5.x | **難-3 の解決**。バックエンドと WebSocket のイベント型を共有する |
 | ビルド | **Vite** | **7.x** | Vite 8（2026-03 安定版）は内部バンドラを Rolldown / Oxc に刷新しており、プラグイン互換の実績が積み上がるまで見送る |
 | **メッセージ一覧** | **react-virtuoso** | 4.x | **難-1 の解決**。`firstItemIndex` は「先頭に要素を足しても表示位置を維持する」ための機能で、チャット用途を想定して用意されている。自前だと `scrollHeight` の差分補正が必要になる |
-| **Markdown 描画** | **react-markdown** + rehype-sanitize + rehype-highlight | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない** |
+| **Markdown 描画** | **react-markdown** + remark-gfm + rehype-sanitize + rehype-highlight | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。remark-gfm は取り消し線（F-14）を解釈するために要る（区分: 派生）。rehype-highlight（コードの色付け）はまだ入れていない（[機能一覧](features.md) 4.3） |
 | データ取得 | **TanStack Query** | v5 | `useInfiniteQuery` がカーソルページネーションに直結する。WebSocket 受信を `setQueryData` でキャッシュに反映する |
 | 一時状態 | **Zustand** | v5 | 在席・入力中など、永続化しない状態を TanStack Query と分けて持つ |
 | スタイル | **Tailwind CSS** | 4.x | 密度の高い UI を素早く組む。画面数に対して独自 CSS は割に合わない |
@@ -313,6 +313,16 @@ AWS の[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/Postgre
 | **typescript-eslint** | **8.69.0** | 8.69.0 | 最新。ESLint 10 と TypeScript 5.9 の両方を受け入れる |
 | **unplugin-swc** | **1.5.11** | 1.5.11 | 最新。**テストの実行にのみ使う。** 下記「テストの変換に SWC を使う理由」を参照 |
 | **@swc/core** | **1.16.1** | 1.16.1 | 最新。`unplugin-swc` が呼ぶ変換器の本体 |
+
+#### 追加で確認した項目 — Markdown の描画（2026-09-13。#379）
+
+`npm view` で最新を確かめて入れた。3つとも `apps/web` の依存で、ルートの `node_modules` に巻き上がることを確かめた（[README](../README.md)「依存の版を上げない方針」の jsdom の実測と同じ確かめ方）。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **react-markdown** | **^10.1.0** | 最新。`react` の peer は `>=18` で、React 19.2 を受け入れる |
+| **remark-gfm** | **^4.0.1** | 最新。react-markdown の README は、取り消し線を remark-gfm が足す記法として挙げている（F-14 の取り消し線に要る） |
+| **rehype-sanitize** | **^6.0.0** | 最新。react-markdown の README の Security の節が、プラグインを使うときの安全の確保に勧めている |
 
 #### 追加で確認した項目 — PR #40（2026-09-06。#42）
 
