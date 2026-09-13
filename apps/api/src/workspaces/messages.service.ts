@@ -1,9 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import type { MessageNewPayload, paths } from '@workspace-chat/shared';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
-import { assertChannelParticipant, lockedChannelFor } from './channel-access';
+import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED } from './channel-errors';
 import { WorkspacesService } from './workspaces.service';
 
@@ -85,15 +85,7 @@ export class MessagesService {
     query: { before?: string; limit?: string | number },
   ): Promise<MessagePage> {
     await this.workspaces.membershipOf(userId, workspaceId);
-    const channel = await this.prisma.channel.findFirst({
-      where: { id: channelId, workspaceId },
-      select: { visibility: true, members: { where: { userId }, select: { id: true } } },
-    });
-    if (!channel) throw new NotFoundException();
-    assertChannelParticipant({
-      visibility: channel.visibility,
-      joined: channel.members.length > 0,
-    });
+    assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
 
     // 既定値（50）と範囲（1〜100）は仕様の `limit` が持ち、openapi-validation.ts が要求に入れてから届く。
     const limit = Number(query.limit);

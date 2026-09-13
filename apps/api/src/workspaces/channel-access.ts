@@ -21,7 +21,20 @@ export async function lockedChannelFor(
   channelId: string,
 ): Promise<ChannelAccess> {
   await lockChannelRow(tx, workspaceId, channelId, 'share');
-  const row = await tx.channel.findFirst({
+  return channelFor(tx, userId, workspaceId, channelId);
+}
+
+/**
+ * 要求する側から見たチャンネルを読む（`(id, workspaceId)` で引く）。別のワークスペースのチャンネル・無いチャンネルは 404。
+ * **行を掴まない**——アーカイブ済みかを読んで書くかを決める経路は `lockedChannelFor` を使う。
+ */
+export async function channelFor(
+  db: Pick<PrismaService, 'channel'>,
+  userId: string,
+  workspaceId: string,
+  channelId: string,
+): Promise<ChannelAccess> {
+  const row = await db.channel.findFirst({
     where: { id: channelId, workspaceId },
     select: {
       visibility: true,
