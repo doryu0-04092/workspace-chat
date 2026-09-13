@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard';
 import { UserRateLimitGuard } from '../rate-limit/user-rate-limit.guard';
@@ -31,6 +43,32 @@ export class MessagesController {
     @Body() body: PostMessageRequest,
   ): Promise<Message> {
     return this.messages.post(user.id, workspaceId, channelId, body);
+  }
+
+  @Patch(':messageId')
+  @UseGuards(UserRateLimitGuard)
+  @Throttle({ default: MESSAGE_POST_LIMIT })
+  edit(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+    @Param('channelId') channelId: string,
+    @Param('messageId') messageId: string,
+    @Body() body: PostMessageRequest,
+  ): Promise<Message> {
+    return this.messages.edit(user.id, workspaceId, channelId, messageId, body);
+  }
+
+  @Delete(':messageId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(UserRateLimitGuard)
+  @Throttle({ default: MESSAGE_POST_LIMIT })
+  remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+    @Param('channelId') channelId: string,
+    @Param('messageId') messageId: string,
+  ): Promise<void> {
+    return this.messages.remove(user.id, workspaceId, channelId, messageId);
   }
 
   @Get()

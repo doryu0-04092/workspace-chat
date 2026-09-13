@@ -974,6 +974,95 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/messages/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MessageId'
+    patch:
+      operationId: editMessage
+      summary: メッセージの編集（F-13）
+      description: >-
+        自分のメッセージだけを編集できる（作者でなければ 403 not_message_author。オーナーでも同じ。機能一覧 4.2）。
+        判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404 →
+        そのチャンネルに無い・削除済みのメッセージは 404 → 作者でなければ 403 not_message_author → アーカイブ済みのチャンネルは 409 channel_archived。
+        本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。編集したメッセージを message:updated としてチャンネルの部屋へ配る（機能一覧 5.2）。
+        利用者単位で1分に60回まで（投稿と同じ値。実装時に決めた値。機能一覧 4.2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostMessageRequest'
+      responses:
+        '200':
+          description: 編集したメッセージ（editedAt を持つ）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）か、自分のメッセージではない（not_message_author）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteMessage
+      summary: メッセージの削除（F-13）
+      description: >-
+        論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、
+        以後の応答と配信では返さない（body: null・deleted: true。要件定義書 3.4）。message:deleted（本文を載せない）をチャンネルの部屋へ配る。
+        利用者単位で1分に60回まで（投稿と同じ値。実装時に決めた値。機能一覧 4.2）
+      responses:
+        '204':
+          description: 削除した
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）か、自分のメッセージではない（not_message_author）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /invitations:
     get:
       operationId: listMyInvitations
@@ -1069,6 +1158,14 @@ components:
       in: path
       required: true
       description: チャンネルの id。形が uuid でなければ 400
+      schema:
+        type: string
+        format: uuid
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      description: メッセージの id。形が uuid でなければ 400
       schema:
         type: string
         format: uuid
@@ -1212,6 +1309,7 @@ components:
             - channel_archived
             - channel_not_private
             - channel_not_archived
+            - not_message_author
             - request_rejected
             - internal_error
         message:
@@ -1545,6 +1643,8 @@ components:
         - author
         - body
         - createdAt
+        - editedAt
+        - deleted
       properties:
         id:
           description: UUIDv7。一覧のカーソル（before）にそのまま使う
@@ -1559,10 +1659,22 @@ components:
             - $ref: '#/components/schemas/UserSummary'
             - type: 'null'
         body:
-          type: string
+          description: 本文。削除済みなら null（本文は DB に残るが返さない。機能一覧 4.2）
+          type:
+            - string
+            - 'null'
         createdAt:
           type: string
           format: date-time
+        editedAt:
+          description: 最後に編集した時刻。編集していなければ null（「編集済み」の表示に使う。機能一覧 4.2）
+          type:
+            - string
+            - 'null'
+          format: date-time
+        deleted:
+          description: 削除済みか（「このメッセージは削除されました」に置き換えて表示する。機能一覧 4.2）
+          type: boolean
     MessagePage:
       type: object
       additionalProperties: false

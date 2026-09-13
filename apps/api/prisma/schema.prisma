@@ -700,6 +700,12 @@ model Message {
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
 
+  /// 最後に編集した時刻。編集していなければ null（「編集済み」の表示。機能一覧 4.2）。
+  editedAt DateTime? @db.Timestamptz(3)
+
+  /// 削除した時刻（論理削除）。**削除しても本文は残す**（要件定義書 3.4・機能一覧 4.2）。返さないのは応答と配信の側である。
+  deletedAt DateTime? @db.Timestamptz(3)
+
   channel Channel @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
