@@ -75,14 +75,21 @@ function f14Syntax(this: unknown) {
   (data.fromMarkdownExtensions ??= []).push(gfmStrikethroughFromMarkdown());
 }
 
-/** 記法として解釈しない節を、書いた元の文字（本文のうち、その節の範囲）の `text` に置き換える。 */
+/** 行頭の引用の記号（前の空白・`>`・続く空白1つ）。 */
+const QUOTE_MARKER = /^[ \t]*>[ \t]?/;
+
+/**
+ * 記法として解釈しない節を、書いた元の文字（本文のうち、その節の範囲）の `text` に置き換える。
+ * **節が引用の中で行をまたぐときは、2行目以降の行頭から、引用の深さの数だけ引用の記号を除く**——
+ * 本文の範囲には容器の記号も入るため、除かないと書いていない `>` が本文の文字に出る。
+ */
 function asWrittenText() {
   return (tree: MarkdownNode, file: { value: unknown }) => {
     const source = String(file.value);
-    const walk = (node: MarkdownNode) => {
+    const walk = (node: MarkdownNode, quoteDepth: number) => {
       node.children?.forEach((child, index, siblings) => {
         if (F14_NODE_TYPES.has(child.type)) {
-          walk(child);
+          walk(child, quoteDepth + (child.type === 'blockquote' ? 1 : 0));
           return;
         }
         const start = child.position?.start.offset;
@@ -92,12 +99,25 @@ function asWrittenText() {
           value:
             start === undefined || end === undefined
               ? (child.value ?? '')
-              : source.slice(start, end),
+              : withoutQuoteMarkers(source.slice(start, end), quoteDepth),
         };
       });
     };
-    walk(tree);
+    walk(tree, 0);
   };
+}
+
+function withoutQuoteMarkers(written: string, quoteDepth: number): string {
+  if (quoteDepth === 0) return written;
+  return written
+    .split('\n')
+    .map((line, index) => {
+      if (index === 0) return line;
+      let rest = line;
+      for (let depth = 0; depth < quoteDepth; depth += 1) rest = rest.replace(QUOTE_MARKER, '');
+      return rest;
+    })
+    .join('\n');
 }
 
 /**
