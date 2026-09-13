@@ -92,7 +92,7 @@ export class ValkeyModule {}
  * 超過したときの応答を ErrorResponse の形（`code` / `message`）にする。
  * `Retry-After` はガードが先に付ける（名前が `default` の制限なので、ヘッダー名は `Retry-After` のまま）。
  *
- * **超過の記録（`rate_limit_exceeded`）はここで書かない。** 429 は投げた経路によらず ErrorResponseFilter が記録する
+ * **超過の記録（`rate_limit_exceeded`）はここで書かない。** HTTP の 429 は投げた経路によらず ErrorResponseFilter が記録する
  * （アカウント単位の RetryAfterException と同じ1箇所。#270）。
  */
 @Injectable()
@@ -109,6 +109,7 @@ export class RateLimitGuard extends ThrottlerGuard {
  * レート制限（要件定義書 4.3・機能一覧 1.1）。**ガードは全体には掛けない。** 使う側が `@UseGuards(RateLimitGuard)` と
  * `@Throttle({ default: … })` で、ルートごとに上限を決める（登録・ログイン・照合で数値が違うため）。
  * 発信元は `req.ip`（Express の `trust proxy`。app-setup.ts が TRUST_PROXY_HOPS から設定する）。
+ * **ガードを通らない WebSocket の入室要求は、ThrottlerModule が出す保存先（`ThrottlerStorage`）で直接数える**（ChannelRoomsGateway）。
  */
 @Module({
   imports: [
@@ -131,6 +132,6 @@ export class RateLimitGuard extends ThrottlerGuard {
     }),
   ],
   providers: [RateLimitGuard],
-  exports: [RateLimitGuard],
+  exports: [RateLimitGuard, ThrottlerModule],
 })
 export class RateLimitModule {}

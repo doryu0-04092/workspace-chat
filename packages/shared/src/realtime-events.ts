@@ -103,7 +103,7 @@ export type ChannelRoomRequest = { readonly channelId: string };
 
 /**
  * 入室要求・退室要求を断ったときの acknowledgement。HTTP と同じ状態コードとエラーの本体を返す
- * （コードは参加者一覧と同じ2段階。本体は REST の ErrorResponse と同じ形。機能一覧 9.2）。
+ * （コードは参加者一覧と同じ2段階。入室要求が上限を超えたら 429。本体は REST の ErrorResponse と同じ形。機能一覧 9.2）。
  */
 export type ChannelRoomRejection = {
   readonly ok: false;

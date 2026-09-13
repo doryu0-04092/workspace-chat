@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import type { AddressInfo } from 'node:net';
-import type { INestApplication } from '@nestjs/common';
+import type { INestApplication, LoggerService } from '@nestjs/common';
 import type { StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import type { paths } from '@workspace-chat/shared';
 import type { Socket } from 'socket.io-client';
@@ -55,8 +55,14 @@ async function listen(app: INestApplication): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-/** `ipPrefix` はテストのファイルごとに変える（ログインのレート制限を発信元で数えるため、同じファイルの中で重ねない）。 */
-export async function startTwoTasks(ipPrefix: string): Promise<TwoTasks> {
+/**
+ * `ipPrefix` はテストのファイルごとに変える（ログインのレート制限を発信元で数えるため、同じファイルの中で重ねない）。
+ * `logger` を渡すと、2つのタスクのログをそこへ出す（渡さなければ出さない）。
+ */
+export async function startTwoTasks(
+  ipPrefix: string,
+  options: { logger?: LoggerService } = {},
+): Promise<TwoTasks> {
   const postgres: StartedPostgreSqlContainer = await startMigratedPostgres();
   const started = await startValkey();
   stubApiEnv({
@@ -64,8 +70,9 @@ export async function startTwoTasks(ipPrefix: string): Promise<TwoTasks> {
     REDIS_URL: started.url,
     TRUST_PROXY_HOPS: '1',
   });
-  const first = await createApp({ logger: false });
-  const second = await createApp({ logger: false });
+  const logger = options.logger ?? false;
+  const first = await createApp({ logger });
+  const second = await createApp({ logger });
   const firstBase = await listen(first);
   const secondBase = await listen(second);
   const prisma = first.get(PrismaService);
