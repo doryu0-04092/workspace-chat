@@ -190,7 +190,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 |---|---|---|
 | IaC | **Terraform** 1.x | 既存プロジェクトで実績あり |
 | フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**閲覧者との HTTPS を終端する**（ブラウザ通知に必要な HTTPS。[要件定義書](requirements.md) 5。下の「本番の HTTPS・秘密情報・state の置き場」） |
-| ロードバランサ | **ALB** | WebSocket にネイティブ対応。**プライベートサブネットに置き、CloudFront の VPC オリジンとして HTTP で受ける**（TLS は終端しない。**閲覧者との HTTPS は CloudFront が終端する**。下の「本番の HTTPS・秘密情報・state の置き場」）。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト、または VPC オリジンを作ると AWS が作る `CloudFront-VPCOrigins-Service-SG`）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB を直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
+| ロードバランサ | **ALB** | WebSocket にネイティブ対応。**プライベートサブネットに置き、CloudFront の VPC オリジンとして HTTP で受ける**（TLS は終端しない。**閲覧者との HTTPS は CloudFront が終端する**。下の「本番の HTTPS・秘密情報・state の置き場」）。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト、または VPC オリジンを作ると AWS が作る `CloudFront-VPCOrigins-Service-SG`）。**タスクのセキュリティグループも、ALB のセキュリティグループからだけ到達できるようにする**（タスクは公開 IP を持つ。下の「ECS のタスクの置き場」の行）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB やタスクを直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
 | **配信の共有・レート制限の回数** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。**レート制限の回数も置く**（`@nest-lab/throttler-storage-redis` が `ioredis` の接続で Lua の `eval` を使う。#245）。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
@@ -212,6 +212,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 - **CloudFront と ALB の間は暗号化しない。** この区間を、ログイン時のパスワード・リカバリーコード・アクセストークン・リフレッシュトークンの Cookie・メッセージの本文が、TLS のかからない HTTP で通る。ALB はプライベートサブネットにあり CloudFront からしか届かないが、**AWS の文書が暗号化を明記しているのは、リージョン間（施設を出る前の物理層）と AZ 間だけである**（EC2 のデータ保護「All data flowing across AWS Regions over the AWS global network is automatically encrypted at the physical layer before it leaves AWS secured facilities. All traffic between AZs is encrypted.」）。**エッジからリージョンまでの区間と、同じ AZ の中の区間が暗号化されるかは未確認である**
 - **経路のすべての暗号化を求められる用途**（決済などの規格に従う・実際の利用者のデータを長く預かる）**には、この構成を使えない。** その場合は独自ドメインと ACM の証明書を持ち、CloudFront と ALB の両方を HTTPS にする形へ切り替える（オリジンの HTTPS には信頼された認証局の証明書が要り、自己署名は使えない）
 - **提出物の URL が CloudFront の既定のドメインの形になる**（[要件定義書](requirements.md) 5）
+- **既定のドメインは、他の利用者のディストリビューションと同じ `cloudfront.net` の下のホストである。** リフレッシュトークンの Cookie の `SameSite=Strict` と、`Origin` / `Sec-Fetch-Site` の検証（[要件定義書](requirements.md) 4.3 の CSRF の対処）が別のディストリビューションを別のサイトとして扱うことは、**`cloudfront.net` が Public Suffix List に載っていること**に依存する（載っている: Public Suffix List の「// Amazon CloudFront」の項に `cloudfront.net`。2026-09-13 に確かめた）。独自ドメインへ切り替えると、この依存はそのドメインの境界に移る
 - **state のバケットは `terraform destroy` の対象外として残る**（[要件定義書](requirements.md) 4.2 の「バックアップ」）
 - **タスクへの受信を止めるのは、セキュリティグループの1層だけである**（AWS 公式「When you first create a security group, it has no inbound rules. Therefore, no inbound traffic is allowed until you add inbound rules to the security group.」）。規則を広げる誤りをすると、CloudFront を経ずに api へ直接届き、平文の HTTP でトークンが流れ、X-Forwarded-For を偽ってレート制限を迂回できる（上の ALB の行の `TRUST_PROXY_HOPS=2` の前提が崩れる）。**規則は Terraform だけで書き（送信元を ALB のセキュリティグループに限る）、`apply` の後に実際の規則を確かめる**。プライベートサブネットと NAT ゲートウェイの形なら、同じ誤りでも外から届かない
 - **公開 IPv4 アドレスの料金がかかる**（AWS 公式「Effective February 1, 2024 there will be a charge of $0.005 per IP per hour for all public IPv4 addresses」。タスク 2 つで月におよそ 7 ドル）
@@ -266,8 +267,9 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | ALB | 約 $16 |
 | RDS db.t4g.micro（Single-AZ） | 約 $13 |
 | ElastiCache for Valkey cache.t4g.micro（価格は未確認。「Valkey の版（ローカル）」にあるのは Redis 比の相対値のみで、この額の根拠にならない） | 約 $9 |
+| 公開 IPv4 アドレス（ECS のタスク × 2。1 IP・1 時間 0.005 ドル。上の「ECS のタスクの置き場」） | 約 $7 |
 | S3 + CloudFront | 数ドル |
-| **合計** | **約 $55〜65 / 月** |
+| **合計** | **約 $62〜72 / 月** |
 
 **デモ後に `terraform destroy` する運用**（[要件定義書](requirements.md) 4.2 の決定。ここには書かない）により、実費を数ドルに抑える。
 
