@@ -104,7 +104,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 言語 | **TypeScript** | 5.x | **難-3 の解決**。バックエンドと WebSocket のイベント型を共有する |
 | ビルド | **Vite** | **7.x** | Vite 8（2026-03 安定版）は内部バンドラを Rolldown / Oxc に刷新しており、プラグイン互換の実績が積み上がるまで見送る |
 | **メッセージ一覧** | **react-virtuoso** | 4.x | **難-1 の解決**。`firstItemIndex` は「先頭に要素を足しても表示位置を維持する」ための機能で、チャット用途を想定して用意されている。自前だと `scrollHeight` の差分補正が必要になる |
-| **Markdown 描画** | **react-markdown** + GFM の取り消し線の拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。取り消し線（F-14）は GFM の記法であり、その拡張が要る（区分: 派生）。**URL の自動リンクの拡張は入れない**——F-14 の記法に含まれず、無くてもリンクは書ける（入れるなら、機能として提案し承認を得てからにする）。**GFM をまとめて入れる remark-gfm は使わない**——表・タスクリスト・脚注まで記法として読み、F-14 の外の記法の文字が消えたり、書いていない文字が出たりする（[機能一覧](features.md) 4.3）。remark-breaks は段落の中の改行（入力欄の Enter）を改行として表示するために使う（Markdown の既定は空白1つに畳み、複数行のメッセージが1行に潰れる。提案・承認済〔2026-09-13・依頼側〕。[機能一覧](features.md) 4.3）。**選定時に挙げた rehype-highlight（コードの色付け）は入れない**——色付けは F-14 の記法に含まれない（[機能一覧](features.md) 4.3）。入れるなら、機能として提案し承認を得てからにする |
+| **Markdown 描画** | **react-markdown** + GFM の取り消し線の拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線の拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。選定時に挙げた rehype-highlight は採っていない。**解釈する記法と、その区分・承認（取り消し線・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
 | データ取得 | **TanStack Query** | v5 | `useInfiniteQuery` がカーソルページネーションに直結する。WebSocket 受信を `setQueryData` でキャッシュに反映する |
 | 一時状態 | **Zustand** | v5 | 在席・入力中など、永続化しない状態を TanStack Query と分けて持つ |
 | スタイル | **Tailwind CSS** | 4.x | 密度の高い UI を素早く組む。画面数に対して独自 CSS は割に合わない |
