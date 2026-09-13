@@ -1,28 +1,19 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { StrictMode } from 'react';
-import { MemoryRouter } from 'react-router';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { App } from './App';
-import { createSessionStore } from './auth/session-store';
 import { error, fakeFetch, json, loggedIn, PROFILE, token } from './testing/fake-api';
+import { renderApp } from './testing/render-app';
 
 const RECOVERY_CODE = '0123-4567-89AB-CDEF';
 
-function renderAt(path: string, { strict = false } = {}) {
-  const store = createSessionStore({ locks: undefined });
-  const tree = (
-    <MemoryRouter initialEntries={[path]}>
-      <App store={store} />
-    </MemoryRouter>
-  );
-  render(strict ? <StrictMode>{tree}</StrictMode> : tree);
-  return store;
+function renderAt(path: string, options: { strict?: boolean } = {}) {
+  return renderApp(path, options).store;
 }
 
 const signedOut = { 'POST /api/auth/refresh': () => error(401, 'invalid_token') };
 const signedIn = {
   'POST /api/auth/refresh': () => token('t1'),
   'GET /api/users/me': () => json(200, PROFILE),
+  'GET /api/workspaces': () => json(200, []),
 };
 
 function type(label: string, value: string) {
@@ -54,11 +45,7 @@ describe('起動時の復元と行き先', () => {
   it('ログインしている利用者がログインの画面・登録の画面・知らない URL を開くと、ワークスペースの画面へ移る', async () => {
     for (const path of ['/login', '/register', '/', '/nope']) {
       fakeFetch(signedIn);
-      const { unmount } = render(
-        <MemoryRouter initialEntries={[path]}>
-          <App store={createSessionStore({ locks: undefined })} />
-        </MemoryRouter>,
-      );
+      const { unmount } = renderApp(path);
       expect(await screen.findByText('アリス'), path).toBeDefined();
       unmount();
     }
@@ -85,7 +72,10 @@ describe('ログインの画面', () => {
   }
 
   it('ログインするとワークスペースの画面へ移り、トークンをブラウザの保存領域に書かない', async () => {
-    const { calls } = await openLogin({ 'POST /api/auth/login': () => loggedIn('t1') });
+    const { calls } = await openLogin({
+      'POST /api/auth/login': () => loggedIn('t1'),
+      'GET /api/workspaces': () => json(200, []),
+    });
 
     expect(await screen.findByText('アリス')).toBeDefined();
     const login = calls.find((c) => c.key === 'POST /api/auth/login')!;
@@ -210,6 +200,7 @@ describe('ログアウト', () => {
   it('ログアウトに失敗したら理由を出し、ログインしたまま留まる', async () => {
     fakeFetch({ ...signedIn, 'POST /api/auth/logout': () => error(500, 'internal_error') });
     renderAt('/workspaces');
+    await screen.findByText('所属しているワークスペースはありません。');
 
     fireEvent.click(await screen.findByRole('button', { name: 'ログアウト' }));
 
