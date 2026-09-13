@@ -21,10 +21,16 @@ export const ALREADY_CHANNEL_MEMBER: ErrorResponse = {
   message: '既にこのチャンネルの参加者です',
 };
 
-/** アーカイブ済みのチャンネルには人を増やせない（409。参加・招待。機能一覧 3.2）。 */
+/** アーカイブ済みのチャンネルである（409。参加・招待では人を増やせない・アーカイブでは再びアーカイブできない。機能一覧 3.2）。 */
 export const CHANNEL_ARCHIVED: ErrorResponse = {
   code: 'channel_archived',
   message: 'アーカイブ済みのチャンネルです',
+};
+
+/** アーカイブしていないチャンネルは復元できない（409。機能一覧 3.2）。 */
+export const CHANNEL_NOT_ARCHIVED: ErrorResponse = {
+  code: 'channel_not_archived',
+  message: 'アーカイブしていないチャンネルです',
 };
 
 /** パブリックチャンネルへは招待しない（422。自由に参加できるため。機能一覧 2.2・3.1）。 */

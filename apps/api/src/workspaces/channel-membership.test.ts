@@ -186,7 +186,7 @@ describe('チャンネルへの参加・退出・招待・キック（F-10・F-0
       await expectRejected(await join(owner, workspace.id, open), 409, 'already_channel_member');
     });
 
-    // プライベートチャンネルには招待で参加する（機能一覧 2.2）。参加していなければ存在を隠す（CLAUDE.md 2。オーナーの例外は一覧・取得 API だけ）。
+    // プライベートチャンネルには招待で参加する（機能一覧 2.2）。参加していなければ存在を隠す（CLAUDE.md 2。オーナーの例外は一覧・取得 API とアーカイブ・復元の応答だけ）。
     it('プライベートチャンネルは、参加していなければオーナーでも 404 で、参加は作られない', async () => {
       const owner = await login();
       const member = await login();
@@ -347,7 +347,7 @@ describe('チャンネルへの参加・退出・招待・キック（F-10・F-0
       );
     });
 
-    // 招待できるのはそのチャンネルの参加者だけ（機能一覧 2.2）。オーナーの例外は一覧・取得 API だけに及ぶ（CLAUDE.md 2）。
+    // 招待できるのはそのチャンネルの参加者だけ（機能一覧 2.2）。オーナーの例外は一覧・取得 API とアーカイブ・復元の応答だけに及ぶ（CLAUDE.md 2）。
     it('要求する側が参加していなければ、プライベートはオーナーでも 404。所属していなければ 404', async () => {
       const owner = await login();
       const member = await login();

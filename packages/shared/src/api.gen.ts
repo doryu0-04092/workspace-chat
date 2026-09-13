@@ -445,6 +445,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/channels/{channelId}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * チャンネルのアーカイブ（F-35）
+         * @description オーナーだけ（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。参加していないプライベートチャンネルもアーカイブできる。 アーカイブの時点で名前に番号を付ける（基底名ごとに、その名前がまだ空いている最小の番号。general → general-1）。 既に番号を持つチャンネル（復元したもの）は、採番も改名もしない。アーカイブ済みなら 409 channel_archived。 アーカイブすると一般の一覧から外れる（機能一覧 3.2）
+         */
+        post: operations["archiveChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * チャンネルの復元（F-35）
+         * @description オーナーだけ（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。復元しても名前と番号は外れない（general-1 のまま）。 アーカイブしていなければ 409 channel_not_archived（機能一覧 3.2）
+         */
+        post: operations["restoreChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invitations": {
         parameters: {
             query?: never;
@@ -520,7 +570,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -1632,6 +1682,102 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    archiveChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description アーカイブしたチャンネル（管理用の一覧の項目と同じ形） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedChannel"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description オーナーでない（owner_only） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済み（channel_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    restoreChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 復元したチャンネル（管理用の一覧の項目と同じ形） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedChannel"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description オーナーでない（owner_only） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブしていない（channel_not_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             500: components["responses"]["InternalServerError"];
         };
     };

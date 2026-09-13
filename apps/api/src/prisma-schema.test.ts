@@ -723,6 +723,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       //
       // **検査制約はこれを止めない。** 据え置きも採番し直しも、どちらも通る。
       // 規則を文書とテストの両方に置かないと、実装側で決まってしまう。
+      // **実装で守るときは、採番を持つかを読む前に行を掴む**（schema.prisma の Channel.archiveSequence の並行性の段落）。
       const id = await createChannel('arch-h');
       const archive = `UPDATE "Channel"
          SET "archivedAt" = now(), "archiveSequence" = 1, "name" = "baseName" || '-1'
