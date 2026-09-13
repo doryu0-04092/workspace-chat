@@ -16,7 +16,7 @@ import {
   CHANNEL_NOT_PRIVATE,
   NOT_A_CHANNEL_MEMBER,
 } from './channel-errors';
-import { lockChannelRow } from './channel-row-lock';
+import { lockedChannelFor } from './channel-access';
 import { WorkspacesService } from './workspaces.service';
 
 export type InviteChannelMemberRequest =
@@ -136,28 +136,4 @@ export class ChannelMembershipService {
     if (count !== 1) throw new NotFoundException();
     this.rooms.removeFromChannels(memberId, [channelId]);
   }
-}
-
-/** 要求する側から見たチャンネル。行を共有ロックで掴んでから読む（channel-row-lock.ts）。別のワークスペースのチャンネル・無いチャンネルは 404。 */
-async function lockedChannelFor(
-  tx: Pick<PrismaService, 'channel' | '$queryRaw'>,
-  userId: string,
-  workspaceId: string,
-  channelId: string,
-) {
-  await lockChannelRow(tx, workspaceId, channelId, 'share');
-  const row = await tx.channel.findFirst({
-    where: { id: channelId, workspaceId },
-    select: {
-      visibility: true,
-      archivedAt: true,
-      members: { where: { userId }, select: { id: true } },
-    },
-  });
-  if (!row) throw new NotFoundException();
-  return {
-    visibility: row.visibility,
-    archived: row.archivedAt !== null,
-    joined: row.members.length > 0,
-  };
 }

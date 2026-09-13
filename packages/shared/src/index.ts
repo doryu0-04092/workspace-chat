@@ -9,6 +9,7 @@ export type {
   ChannelRoomAck,
   ChannelRoomRequest,
   InvitationNewPayload,
+  MessageNewPayload,
   RealtimeEventKind,
   RealtimeEventName,
 } from './realtime-events';

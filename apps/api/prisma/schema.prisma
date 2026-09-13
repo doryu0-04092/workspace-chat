@@ -261,6 +261,7 @@ model User {
   /// 自分宛ての未承諾の招待（F-38）と、自分が出した招待（F-08）。
   invitationsReceived Invitation[]   @relation("InvitationInvitee")
   invitationsSent     Invitation[]   @relation("InvitationInviter")
+  messages            Message[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -595,6 +596,7 @@ model Channel {
 
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   members   ChannelMember[]
+  messages  Message[]
 
   /// ワークスペース内で名前は一意。**ワークスペースをまたげば同じ名前を使える。**
   /// 一意制約の範囲が広すぎないことは、テストが別ワークスペースへの作成で確かめている。
@@ -678,4 +680,29 @@ model ChannelMember {
   /// **可視性の判定はこの向きで引く**（「この利用者が参加しているチャンネル」）。
   /// 索引が無いと、チャンネル一覧のたびに全走査になる。
   @@index([userId])
+}
+
+/// チャンネルのメッセージ（F-11。機能一覧 4.1）。
+model Message {
+  /// UUIDv7。一覧のカーソル（`before`）にそのまま使う。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  channelId String @db.Uuid
+
+  /// **チャンネルと同じワークスペース。** 複合外部キーで、別のワークスペースのチャンネルを指せない。
+  workspaceId String @db.Uuid
+
+  /// 投稿者。**退会しても行は残る**（利用者は論理削除。機能一覧 1.5）。
+  authorId String @db.Uuid
+
+  /// 1〜4000 文字で、空白だけではない（検査制約 `Message_body_check`。マイグレーションに置く）。
+  body String
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  channel Channel @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /// **一覧（新しい順・`before` より古いもの）はこの向きで引く。**
+  @@index([channelId, id(sort: Desc)])
 }
