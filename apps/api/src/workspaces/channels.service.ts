@@ -25,7 +25,7 @@ export type ChannelMember =
  * - **要求する側の所属（`Membership`・退会していない）を最初に確かめ、無ければ存在の有無を区別せず 404**
  *   （`WorkspacesService.membershipOf`。機能一覧 1.4 の2段構えの1段目もここで満たす）
  * - **プライベートチャンネルの可視性の根拠は `ChannelMember` の有無である**（CLAUDE.md 2。`schema.prisma` の `ChannelMember`）。
- *   **オーナーでも、参加していなければ一般の一覧には出さない**——オーナーの例外は管理用の一覧と参加者一覧（人の出入りの管理）だけ
+ *   **オーナーでも、参加していなければ一般の一覧には出さない**——オーナーの例外は管理用の一覧と参加者一覧（人の出入りの管理）と、アーカイブ・復元の応答（管理用の一覧と同じ項目）だけ
  * - 条件の形は `apps/api/src/prisma-schema.test.ts` の参照実装（`visibleChannels` / `manageableChannels` / `channelMemberViewers` /
  *   `channelMemberList`）に揃える。値はクライアントの問い合わせ API で渡す（文字列に埋め込まない）
  */
