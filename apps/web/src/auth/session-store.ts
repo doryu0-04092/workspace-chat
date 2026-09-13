@@ -100,6 +100,18 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
     }
   }
 
+  /** アクセストークンを取り直す。取り直せなければログインしていない状態にし、null を返す。 */
+  async function renew(): Promise<string | null> {
+    const renewed = await refreshToken();
+    if (renewed === null) {
+      set({ status: 'signedOut' });
+      return null;
+    }
+    if (state.status === 'signedIn' && state.accessToken !== renewed)
+      set({ ...state, accessToken: renewed });
+    return renewed;
+  }
+
   function send(path: string, init: RequestInit, accessToken: string): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${accessToken}`);
@@ -167,15 +179,12 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
       const used = state.accessToken;
       const response = await send(path, init, used);
       if (response.status !== 401) return response;
-      const renewed = await refreshToken();
-      if (renewed === null) {
-        set({ status: 'signedOut' });
-        return response;
-      }
-      if (state.status === 'signedIn' && state.accessToken !== renewed)
-        set({ ...state, accessToken: renewed });
+      const renewed = await renew();
+      if (renewed === null) return response;
       return send(path, init, renewed);
     },
+
+    renew,
   };
 }
 

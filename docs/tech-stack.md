@@ -408,7 +408,7 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 | **socket.io** | **^4.8.3** | 最新（上表「リアルタイム」の 4.x）。`@nestjs/platform-socket.io` 11.2.3 が同じ 4.8.3 を依存に持つ |
 | **@nestjs/websockets**・**@nestjs/platform-socket.io** | **^11.2.3** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（peerDependencies は `@nestjs/common` の ^11.0.0） |
 | **@socket.io/redis-adapter** | **^8.3.0** | 最新（上表「難-2」）。`ioredis` の接続をそのまま渡せる。**アダプタはコマンドの Promise を待たずに捨てる**（`publish`・終了時の `unsubscribe`）ため、Valkey が止まっていると未処理の reject でプロセスが落ちる。接続に失敗の受け手を付けてから渡す（`apps/api/src/realtime/realtime-valkey.ts`） |
-| **socket.io-client**（開発依存） | **^4.8.3** | テストで実際に接続する（Origin・トークン・タスクをまたぐ配信）。web が使うときに web の依存へ足す |
+| **socket.io-client**（開発依存） | **^4.8.3** | テストで実際に接続する（Origin・トークン・タスクをまたぐ配信）。web の依存にも同じ版を足した（下の「追加で確認した項目 — web のリアルタイムの反映」） |
 
 #### 追加で確認した項目 — web の認証の画面（2026-09-13。#379）
 
@@ -427,6 +427,12 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 | 対象 | 採用 | 判断 |
 |---|---|---|
 | **react-virtuoso** | **^4.18.13** | 最新（上表「メッセージ一覧」の 4.x）。`apps/web` の dependencies。依存は無く、peerDependencies は `react`・`react-dom` の `>=16 \|\| >=17 \|\| >=18 \|\| >=19`（上表の React 19.2 を満たす）。ライセンスは MIT。`firstItemIndex` の型の説明「Use when implementing inverse infinite scrolling - decrease the value this property in combination with `data` or `totalCount` to prepend items to the top of the list.」（`dist/index.d.ts`）。**検査は同梱の `VirtuosoMockContext`（「React context for mocking Virtuoso component measurements in tests.」）で表示域と行の高さを固定する。** そのもとでは `initialTopMostItemIndex` に 0 以外を渡すと行が1つも描かれないため、開いたときに最新へ移るのは ref の `scrollToIndex` で行う。jsdom は要素の `scrollBy` を持たず、先頭に足すと例外になるため、検査の下地に空の `scrollBy` を置く（`apps/web/src/test-setup.ts`） |
+
+#### 追加で確認した項目 — web のリアルタイムの反映（2026-09-14。#379）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **socket.io-client** | **^4.8.3** | 最新（上表「WebSocket」の 4.x。ルートの開発依存と同じ版）。`apps/web` の dependencies。依存は `@socket.io/component-emitter`・`debug`・`engine.io-client`・`socket.io-parser`、ライセンスは MIT。**`auth` を関数で渡すと、接続を開くたびに呼ばれる**（4.8.3 の `build/esm/socket.js` の `onopen`）ため、再接続でもいまのアクセストークンが載る。**ミドルウェアで断られた接続は自動では繋ぎ直さない**（公式文書 The Socket instance の `connect_error` の表「The connection was denied by the server in a middleware function ❌ NO」「`socket.connect()` must be manually called in order to reconnect」）。検査は偽のソケット（`apps/web/src/testing/fake-socket.ts`）に差し替え、本番の組み立て（パス・transports・`autoConnect`・`auth`）は `io` を差し替えて確かめる（`apps/web/src/realtime/connect.test.ts`） |
 
 #### TypeScript 7 を採らない理由
 

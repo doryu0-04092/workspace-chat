@@ -11,10 +11,51 @@ import { useSessionStore } from '../auth/session-context';
 type Schemas = components['schemas'];
 export type Message = Schemas['Message'];
 type MessagePage = Schemas['MessagePage'];
-type Pages = InfiniteData<MessagePage, string | null>;
+export type MessagePages = InfiniteData<MessagePage, string | null>;
 
-function messagesKey(workspaceId: string, channelId: string) {
+export function messagesKey(workspaceId: string, channelId: string) {
   return ['workspaces', workspaceId, 'channels', channelId, 'messages'] as const;
+}
+
+/** 最新のページの先頭（画面の最後）に足す。同じ id が既にあれば足さない（投稿の応答と配信のどちらが先に届いても1行にする）。 */
+export function addMessage(
+  data: MessagePages | undefined,
+  message: Message,
+): MessagePages | undefined {
+  const [newest, ...older] = data?.pages ?? [];
+  if (!data || !newest) return data;
+  if (data.pages.some((page) => page.messages.some((m) => m.id === message.id))) return data;
+  return {
+    ...data,
+    pages: [{ ...newest, messages: [message, ...newest.messages] }, ...older],
+  };
+}
+
+/** 同じ id のメッセージを置き換える（編集。機能一覧 4.2）。 */
+export function replaceMessage(
+  data: MessagePages | undefined,
+  message: Message,
+): MessagePages | undefined {
+  return mapMessages(data, (m) => (m.id === message.id ? message : m));
+}
+
+/** 削除済みにする（本文を持たない。機能一覧 4.2）。 */
+export function markDeleted(
+  data: MessagePages | undefined,
+  messageId: string,
+): MessagePages | undefined {
+  return mapMessages(data, (m) => (m.id === messageId ? { ...m, body: null, deleted: true } : m));
+}
+
+function mapMessages(
+  data: MessagePages | undefined,
+  change: (message: Message) => Message,
+): MessagePages | undefined {
+  if (!data) return data;
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({ ...page, messages: page.messages.map(change) })),
+  };
 }
 
 function messagesPath(workspaceId: string, channelId: string): string {
@@ -52,13 +93,8 @@ export function usePostMessage(workspaceId: string, channelId: string) {
         body: { body } satisfies Schemas['PostMessageRequest'],
       }),
     onSuccess: (message) =>
-      queryClient.setQueryData<Pages>(messagesKey(workspaceId, channelId), (data) => {
-        const [newest, ...older] = data?.pages ?? [];
-        if (!data || !newest) return data;
-        return {
-          ...data,
-          pages: [{ ...newest, messages: [message, ...newest.messages] }, ...older],
-        };
-      }),
+      queryClient.setQueryData<MessagePages>(messagesKey(workspaceId, channelId), (data) =>
+        addMessage(data, message),
+      ),
   });
 }

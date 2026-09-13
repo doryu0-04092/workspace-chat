@@ -1,9 +1,11 @@
 import { Link, useParams } from 'react-router';
+import { failureMessage } from '../auth/failure-message';
 import { MessageList } from '../messages/MessageList';
 import { PostMessageForm } from '../messages/PostMessageForm';
+import { useChannelRealtime } from '../realtime/use-channel-realtime';
 import { useChannels } from './queries';
 
-/** チャンネルの画面。メッセージの一覧と投稿（F-11・F-12）。リアルタイムの反映は #379 の3つ目の後半の2つ目。 */
+/** チャンネルの画面。参加しているチャンネルだけを開き、メッセージの一覧・投稿・リアルタイムの反映を置く（F-11・F-12・F-16）。 */
 export function ChannelPage() {
   const { workspaceId = '', channelId = '' } = useParams();
   const channels = useChannels(workspaceId);
@@ -32,10 +34,25 @@ export function ChannelPage() {
       <Link to={`/workspaces/${workspaceId}`} className="text-sm underline">
         チャンネルの一覧へ
       </Link>
+      <ChannelMessages key={channelId} workspaceId={workspaceId} channelId={channelId} />
+    </main>
+  );
+}
+
+/** 参加しているチャンネルの本体。入室要求は、参加していると分かったチャンネルにだけ送る。 */
+function ChannelMessages({ workspaceId, channelId }: { workspaceId: string; channelId: string }) {
+  const rejected = useChannelRealtime(workspaceId, channelId);
+  return (
+    <>
+      {rejected && (
+        <p role="alert" className="mt-4 text-red-700">
+          リアルタイムの反映を始められませんでした。{failureMessage(rejected)}
+        </p>
+      )}
       <section aria-label="メッセージの一覧" className="mt-4">
-        <MessageList key={channelId} workspaceId={workspaceId} channelId={channelId} />
+        <MessageList workspaceId={workspaceId} channelId={channelId} />
       </section>
       <PostMessageForm workspaceId={workspaceId} channelId={channelId} />
-    </main>
+    </>
   );
 }

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router';
 import { createQueryClient } from './api/query-client';
 import { App } from './App';
 import { createSessionStore } from './auth/session-store';
+import { connectRealtime } from './realtime/connect';
 import './index.css';
 
 const container = document.getElementById('root');
@@ -16,7 +17,7 @@ const queryClient = createQueryClient();
 createRoot(container).render(
   <StrictMode>
     <BrowserRouter>
-      <App store={store} queryClient={queryClient} />
+      <App store={store} queryClient={queryClient} connectRealtime={connectRealtime} />
     </BrowserRouter>
   </StrictMode>,
 );
