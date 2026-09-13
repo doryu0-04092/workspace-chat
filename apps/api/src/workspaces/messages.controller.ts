@@ -13,7 +13,7 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard';
-import { UserRateLimitGuard } from '../rate-limit/user-rate-limit.guard';
+import { MessageWriteRateLimitGuard } from '../rate-limit/message-write-rate-limit.guard';
 import {
   type Message,
   type MessagePage,
@@ -22,8 +22,8 @@ import {
 } from './messages.service';
 
 /**
- * 投稿・編集・削除の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1・4.2）。
- * **枠はルートごとに別**で、同じ利用者が3つを合わせて1分に最大 180 回書ける。
+ * 投稿・編集・削除の上限（利用者単位で1分に60回。機能一覧 4.1・4.2）。
+ * **3つのルートで1つの枠を分け合う**（`MessageWriteRateLimitGuard`。提案・承認済・2026-09-13・依頼側）。
  */
 export const MESSAGE_POST_LIMIT = { limit: 60, ttl: 60 * 1000 } as const;
 
@@ -37,7 +37,7 @@ export class MessagesController {
   constructor(private readonly messages: MessagesService) {}
 
   @Post()
-  @UseGuards(UserRateLimitGuard)
+  @UseGuards(MessageWriteRateLimitGuard)
   @Throttle({ default: MESSAGE_POST_LIMIT })
   post(
     @CurrentUser() user: AuthenticatedUser,
@@ -49,7 +49,7 @@ export class MessagesController {
   }
 
   @Patch(':messageId')
-  @UseGuards(UserRateLimitGuard)
+  @UseGuards(MessageWriteRateLimitGuard)
   @Throttle({ default: MESSAGE_POST_LIMIT })
   edit(
     @CurrentUser() user: AuthenticatedUser,
@@ -63,7 +63,7 @@ export class MessagesController {
 
   @Delete(':messageId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @UseGuards(UserRateLimitGuard)
+  @UseGuards(MessageWriteRateLimitGuard)
   @Throttle({ default: MESSAGE_POST_LIMIT })
   remove(
     @CurrentUser() user: AuthenticatedUser,
