@@ -8,6 +8,7 @@ import {
 import type { paths } from '@workspace-chat/shared';
 import { isForeignKeyViolation, isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
+import { RealtimeRooms } from '../realtime/realtime-rooms';
 import {
   ALREADY_CHANNEL_MEMBER,
   CHANNEL_ARCHIVED,
@@ -29,13 +30,15 @@ export type InviteChannelMemberRequest =
  * - **人を増やす操作（参加・招待）はアーカイブ済みでは拒む。減らす操作（退出・キック）は拒まない**（機能一覧 3.2）。
  *   人を増やす操作は、チャンネルの行を掴んでからアーカイブ済みかを読み、同じトランザクションで参加を作る（`lockedChannelFor`）
  * - **参加の記録は物理削除**（機能一覧 F-38 の代償）
- * - 接続をチャンネルの部屋へ入れる・部屋から外す処理は、チャンネルの部屋の実装と同時に入れる（#331）
+ * - **参加者でなくなった（退出・キック）ら、その利用者の接続をそのチャンネルの部屋から外す**（2.2。`RealtimeRooms`）。
+ *   参加・招待では部屋に入れない（入るのはチャンネルを開いたときの入室要求。9.2）
  */
 @Injectable()
 export class ChannelMembershipService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspacesService,
+    private readonly rooms: RealtimeRooms,
   ) {}
 
   /**
@@ -72,6 +75,7 @@ export class ChannelMembershipService {
       where: { channelId, workspaceId, userId },
     });
     if (count !== 1) throw new NotFoundException();
+    this.rooms.removeFromChannels(userId, [channelId]);
   }
 
   /**
@@ -130,6 +134,7 @@ export class ChannelMembershipService {
       where: { channelId, workspaceId, userId: memberId },
     });
     if (count !== 1) throw new NotFoundException();
+    this.rooms.removeFromChannels(memberId, [channelId]);
   }
 }
 
