@@ -4,6 +4,7 @@ import {
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from '@nestjs/common';
+import { errorKind } from '../logging/error-kind';
 import { RealtimeGateway, channelRoom } from './realtime.gateway';
 
 /** 一覧を取り直す間隔（機能一覧 9.2「各タスクは5分ごとに一覧を取り直す」）。 */
@@ -112,7 +113,9 @@ export class PresenceRegistry implements OnApplicationBootstrap, OnModuleDestroy
       );
       return undefined;
     } catch (error) {
-      return failureKind(error);
+      // code が無ければメッセージを書く——この経路で Redis アダプタ（fetchSockets の待ち時間の超過）と ioredis（止まっている・切れた）が
+      // 拒否するときのメッセージは、接続先を含まない決まった文字列である（名前だけでは、どれも Error になり区別できない）
+      return errorKind(error, 'message');
     }
   }
 
@@ -123,14 +126,4 @@ export class PresenceRegistry implements OnApplicationBootstrap, OnModuleDestroy
       );
     }
   }
-}
-
-/**
- * 失敗の種類。**code があれば code だけを書く**（接続の失敗は code を持ち、メッセージに接続先が入りうる）。
- * code が無ければメッセージを書く——この経路で Redis アダプタ（fetchSockets の待ち時間の超過）と ioredis（止まっている・切れた）が
- * 拒否するときのメッセージは、接続先を含まない決まった文字列である。
- */
-function failureKind(error: unknown): string {
-  if (!(error instanceof Error)) return 'unknown';
-  return (error as NodeJS.ErrnoException).code ?? error.message;
 }

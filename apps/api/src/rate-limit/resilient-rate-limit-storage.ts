@@ -1,4 +1,5 @@
 import type { ThrottlerStorage } from '@nestjs/throttler';
+import { errorKind } from '../logging/error-kind';
 
 type StorageRecord = Awaited<ReturnType<ThrottlerStorage['increment']>>;
 
@@ -55,7 +56,7 @@ export class ResilientRateLimitStorage implements ThrottlerStorage {
     } catch (error) {
       if (!this.degraded) {
         this.options.logger.warn(
-          `Valkey に書けないため、レート制限を各タスクのメモリで数える（上限はタスク数 ${this.options.taskCount} で割る）: ${describe(error)}`,
+          `Valkey に書けないため、レート制限を各タスクのメモリで数える（上限はタスク数 ${this.options.taskCount} で割る）: ${errorKind(error, 'name')}`,
         );
       }
       this.degraded = true;
@@ -74,13 +75,4 @@ export class ResilientRateLimitStorage implements ThrottlerStorage {
     const perTaskLimit = Math.max(1, Math.floor(limit / this.options.taskCount));
     return this.fallback.increment(key, ttl, perTaskLimit, blockDuration, throttlerName);
   }
-}
-
-/** 失敗の種類だけを書く。メッセージには接続先が入りうるため、code があればそれを使う。 */
-function describe(error: unknown): string {
-  if (error instanceof Error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code ?? error.name;
-  }
-  return 'unknown';
 }
