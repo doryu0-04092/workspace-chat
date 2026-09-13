@@ -6,10 +6,13 @@ export {
   REALTIME_TRANSPORTS,
 } from './realtime-events';
 export type {
+  ChannelEnterAck,
   ChannelRoomAck,
+  ChannelRoomRejection,
   ChannelRoomRequest,
   InvitationNewPayload,
   MessageNewPayload,
+  PresenceChangedPayload,
   RealtimeEventKind,
   RealtimeEventName,
 } from './realtime-events';

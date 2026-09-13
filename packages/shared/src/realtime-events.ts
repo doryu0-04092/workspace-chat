@@ -111,13 +111,33 @@ export const REALTIME_REQUESTS = {
 export type ChannelRoomRequest = { readonly channelId: string };
 
 /**
- * 入室要求・退室要求の acknowledgement。断るときは HTTP と同じ状態コードとエラーの本体を返す
+ * 入室要求・退室要求を断ったときの acknowledgement。HTTP と同じ状態コードとエラーの本体を返す
  * （コードは参加者一覧と同じ2段階。入室要求が上限を超えたら 429。本体は REST の ErrorResponse と同じ形。機能一覧 9.2）。
  */
-export type ChannelRoomAck =
-  | { readonly ok: true }
-  | {
-      readonly ok: false;
-      readonly status: number;
-      readonly error: components['schemas']['ErrorResponse'];
-    };
+export type ChannelRoomRejection = {
+  readonly ok: false;
+  readonly status: number;
+  readonly error: components['schemas']['ErrorResponse'];
+};
+
+/**
+ * 入室要求の acknowledgement。入れたら、その時点でその部屋に入っている参加者の利用者 ID
+ * （自分と、他のタスクに繋いだ人を含む）を返す（機能一覧 9.2「在席を画面へ渡す経路は、部屋の側だけにする」）。
+ */
+export type ChannelEnterAck =
+  { readonly ok: true; readonly present: readonly string[] } | ChannelRoomRejection;
+
+/** 退室要求の acknowledgement。 */
+export type ChannelRoomAck = { readonly ok: true } | ChannelRoomRejection;
+
+/**
+ * `presence:changed` の payload（F-22。機能一覧 9.2）。そのチャンネルの部屋へ送る。
+ * 利用者の最初の接続が部屋に入ったとき `present: true`、最後の接続が外れたとき `present: false`。
+ * `sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため（機能一覧 5.2）。
+ */
+export type PresenceChangedPayload = {
+  readonly channelId: string;
+  readonly userId: string;
+  readonly present: boolean;
+  readonly sentAt: string;
+};
