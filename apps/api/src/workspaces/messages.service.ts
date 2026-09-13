@@ -12,9 +12,6 @@ export type PostMessageRequest = MessagesPath['post']['requestBody']['content'][
 export type Message = MessagesPath['post']['responses'][201]['content']['application/json'];
 export type MessagePage = MessagesPath['get']['responses'][200]['content']['application/json'];
 
-/** 一覧の件数の既定値（実装時に決めた値。機能一覧 4.1）。上限は仕様（`limit` の maximum）が確かめる。 */
-export const MESSAGE_PAGE_DEFAULT_LIMIT = 50;
-
 const MESSAGE_SELECT = {
   id: true,
   channelId: true,
@@ -98,7 +95,8 @@ export class MessagesService {
       joined: channel.members.length > 0,
     });
 
-    const limit = query.limit === undefined ? MESSAGE_PAGE_DEFAULT_LIMIT : Number(query.limit);
+    // 既定値（50）と範囲（1〜100）は仕様の `limit` が持ち、openapi-validation.ts が要求に入れてから届く。
+    const limit = Number(query.limit);
     const rows = await this.prisma.message.findMany({
       where: { channelId, ...(query.before === undefined ? {} : { id: { lt: query.before } }) },
       orderBy: { id: 'desc' },
