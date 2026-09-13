@@ -190,7 +190,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 項目 | 採用 | 備考 |
 |---|---|---|
 | IaC | **Terraform** 1.x | 既存プロジェクトで実績あり |
-| フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77） |
+| フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**既定のビヘイビアに viewer request の CloudFront Functions を置き、拡張子の無いパス（画面の URL。[機能一覧](features.md) 1.2）を `/index.html` に書き換える**（AWS の例 `url-rewrite-single-page-apps` と同じ形。例はパスの下の `index.html` を付けるが、画面は根の `index.html` 1つである）。**カスタムエラー応答で `index.html` を返す形は採らない**——API リファレンスで `CustomErrorResponses` は `DistributionConfig` にあり `CacheBehavior` には無く、`/api/*` の 404 の本体まで置き換わる |
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。TLS 終端。**ブラウザ通知に必要な HTTPS を提供する**。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB を直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
