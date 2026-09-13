@@ -41,9 +41,14 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       }
     });
 
-    it('画像は描画しない（F-14 の記法に含まない。外部への読み込みを起こさない）', () => {
-      const container = renderBody('![画像](https://example.com/a.png)');
-      expect(container.querySelector('img')).toBeNull();
+    it('画像は描画せず（外部への読み込みを起こさない）、代わりの文字を残す。代わりの文字が無ければ URL を残す', () => {
+      const withAlt = renderBody('![画像の説明](https://example.com/a.png)');
+      expect(withAlt.querySelector('img')).toBeNull();
+      expect(withAlt.textContent).toContain('画像の説明');
+
+      const withoutAlt = renderBody('![](https://example.com/b.png)');
+      expect(withoutAlt.querySelector('img')).toBeNull();
+      expect(withoutAlt.textContent).toContain('https://example.com/b.png');
     });
 
     it('src のソースに dangerouslySetInnerHTML を使う箇所が無い', () => {
@@ -69,6 +74,13 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       const element = renderBody(body).querySelector(selector);
       expect(element).not.toBeNull();
       expect(element?.textContent).toContain(text);
+    });
+
+    it('段落の中の改行（入力欄の Enter の改行）は、改行の要素になる', () => {
+      const paragraph = renderBody('一行目\n二行目').querySelector('p');
+      expect(paragraph?.querySelector('br')).not.toBeNull();
+      expect(paragraph?.textContent).toContain('一行目');
+      expect(paragraph?.textContent).toContain('二行目');
     });
 
     it('リンクは http / https の URL を href に持つ', () => {
