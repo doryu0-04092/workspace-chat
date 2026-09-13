@@ -100,6 +100,28 @@ describe('Prisma のスキーマとマイグレーション', () => {
     return output;
   }
 
+  /** 呼んだテスト専用のワークスペース・その所属の利用者（オーナー）・プライベートチャンネルを作る。他のテストの行を触らない。 */
+  async function createWorkspaceWithMember(): Promise<{
+    workspaceId: string;
+    userId: string;
+    channelId: string;
+  }> {
+    const workspaceId = randomUUID();
+    const userId = randomUUID();
+    const channelId = randomUUID();
+    const name = `ch-${channelId.slice(0, 8)}`;
+    await expectSqlToSucceed(`
+      INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+        VALUES ('${userId}', 'u-${userId.slice(0, 8)}', '検査用', 'argon2id-placeholder');
+      INSERT INTO "Workspace" ("id", "name") VALUES ('${workspaceId}', '検査用ワークスペース');
+      INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+        VALUES ('${randomUUID()}', '${workspaceId}', '${userId}', 'OWNER');
+      INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
+        VALUES ('${channelId}', '${workspaceId}', '${name}', '${name}', 'PRIVATE');
+    `);
+    return { workspaceId, userId, channelId };
+  }
+
   /**
    * `Membership` と `ChannelMember` を残したまま退会した利用者を作る。
    *
@@ -181,7 +203,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('マイグレーションの適用', () => {
-    it('8つのモデルの表がすべて作られている', async () => {
+    it('9つのモデルの表がすべて作られている', async () => {
       const output = await expectSqlToSucceed(
         `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -194,6 +216,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
           'ChannelMember',
           'Invitation',
           'Membership',
+          'Message',
           'RecoveryCode',
           'RefreshToken',
           'User',
@@ -213,7 +236,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **この検査は検査制約・部分一意索引・式に対する索引（`lower(...)`）を見ない。**
       // Prisma がそれらをスキーマとして扱わないためである
       // （検査制約を消して確かめた。`User_userId_lower_key` を足しても差分は出ない）。
-      // **手書きした制約は4つあり、その4つは下の各テストが個別に見ている。**
+      // **手書きした制約は5つあり、その5つは下の各テストが個別に見ている。**
       // ここが通ったからといって、マイグレーションの手書き部分まで
       // 守られているわけではない。列挙は `schema.prisma` の冒頭と揃えてある。
       expect(() =>
@@ -549,28 +572,6 @@ describe('Prisma のスキーマとマイグレーション', () => {
      * アプリ側の実装に委ねず、複合外部キーで DB に守らせる。
      */
 
-    /** このブロック専用のワークスペースと利用者を作る。他のテストの行を触らない。 */
-    async function createWorkspaceWithMember(): Promise<{
-      workspaceId: string;
-      userId: string;
-      channelId: string;
-    }> {
-      const workspaceId = randomUUID();
-      const userId = randomUUID();
-      const channelId = randomUUID();
-      const name = `ch-${channelId.slice(0, 8)}`;
-      await expectSqlToSucceed(`
-        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
-          VALUES ('${userId}', 'u-${userId.slice(0, 8)}', '検査用', 'argon2id-placeholder');
-        INSERT INTO "Workspace" ("id", "name") VALUES ('${workspaceId}', '検査用ワークスペース');
-        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
-          VALUES ('${randomUUID()}', '${workspaceId}', '${userId}', 'OWNER');
-        INSERT INTO "Channel" ("id", "workspaceId", "name", "baseName", "visibility")
-          VALUES ('${channelId}', '${workspaceId}', '${name}', '${name}', 'PRIVATE');
-      `);
-      return { workspaceId, userId, channelId };
-    }
-
     it('ワークスペースに参加していない利用者はチャンネルに参加できない', async () => {
       // 機能一覧 2.2「プライベートチャンネルへの招待で、ワークスペース外の利用者は
       // 指定できない」を、DB が受け入れない形にする。
@@ -613,6 +614,34 @@ describe('Prisma のスキーマとマイグレーション', () => {
          VALUES ('${randomUUID()}', '${first.channelId}', '${second.workspaceId}', '${second.userId}');`,
       );
       expect(output).toContain('ChannelMember_channelId_workspaceId_fkey');
+    });
+  });
+
+  // 機能一覧 4.1: 本文は 1〜4000 文字で、空白だけではない。仕様の検証（openapi）を通らない経路でも DB が止める。
+  describe('メッセージの本文', () => {
+    async function insertMessage(body: string): Promise<{ exitCode: number; output: string }> {
+      const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
+      return psql(
+        `INSERT INTO "Message" ("id", "channelId", "workspaceId", "authorId", "body")
+         VALUES ('${randomUUID()}', '${channelId}', '${workspaceId}', '${userId}', ${body});`,
+      );
+    }
+
+    it.each([
+      ['空', `''`],
+      ['空白だけ', `E' \\n\\t'`],
+      ['4001 文字', `repeat('あ', 4001)`],
+    ])('%s の本文は入れられない', async (_name, body) => {
+      const { exitCode, output } = await insertMessage(body);
+      expect(exitCode).not.toBe(0);
+      expect(output).toContain('Message_body_check');
+    });
+
+    it('1 文字と 4000 文字の本文は入れられる', async () => {
+      for (const body of [`'あ'`, `repeat('あ', 4000)`]) {
+        const { exitCode, output } = await insertMessage(body);
+        expect(exitCode, output).toBe(0);
+      }
     });
   });
 

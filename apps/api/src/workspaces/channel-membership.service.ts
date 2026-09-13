@@ -1,6 +1,5 @@
 import {
   ConflictException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
@@ -14,9 +13,8 @@ import {
   CHANNEL_ARCHIVED,
   CHANNEL_INVITEE_NOT_FOUND,
   CHANNEL_NOT_PRIVATE,
-  NOT_A_CHANNEL_MEMBER,
 } from './channel-errors';
-import { lockedChannelFor } from './channel-access';
+import { assertChannelParticipant, lockedChannelFor } from './channel-access';
 import { WorkspacesService } from './workspaces.service';
 
 export type InviteChannelMemberRequest =
@@ -95,10 +93,7 @@ export class ChannelMembershipService {
     try {
       await this.prisma.$transaction(async (tx) => {
         const channel = await lockedChannelFor(tx, userId, workspaceId, channelId);
-        if (!channel.joined) {
-          if (channel.visibility === 'PRIVATE') throw new NotFoundException();
-          throw new ForbiddenException(NOT_A_CHANNEL_MEMBER);
-        }
+        assertChannelParticipant(channel);
         if (channel.visibility === 'PUBLIC')
           throw new UnprocessableEntityException(CHANNEL_NOT_PRIVATE);
         if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
