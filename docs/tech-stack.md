@@ -366,7 +366,7 @@ F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の 
 | **@nestjs/throttler** | **^6.5.0** | 最新。レート制限（[要件定義書](requirements.md) 4.3 のレート制限の行）。ガードは全体に掛けず、ルートごとに `@UseGuards` と `@Throttle` で上限を決める。**WebSocket のチャンネルの部屋への入室要求は、ガードを通らないため、同じ保存先（`ThrottlerStorage`）で直接数える**（[機能一覧](features.md) 9.2）。**同梱のメモリの保存先（`ThrottlerStorageService`）は使わない**——記録を Map から消さず、要求1回ごとにタイマーを1つ作るため、発信元を変えながら叩かれるとメモリが増え続ける（`apps/api/src/rate-limit/memory-rate-limit-storage.ts` に自前で置いた） |
 | **@nest-lab/throttler-storage-redis** | **^1.2.0** | 最新。状態を Valkey に置き、タスクをまたいで数える（Lua の `eval` で原子的に数える）。`@nestjs/throttler` の >=6.0.0 を受け入れる。旧 `nestjs-throttler-storage-redis` は npm で非推奨 |
 | **ioredis** | **^5.11.1** | 上の保存先が要求する接続（peerDependencies の >=5.0.0）。**`enableOfflineQueue: false`・`commandTimeout` で、Valkey が止まっているときにすぐ失敗させる**（既定は接続が切れている間のコマンドを溜め、要求が詰まる） |
-| **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動する（`GenericContainer`）。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
+| **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動し（`apps/api/src/testing/valkey.ts` の `GenericContainer`）、起動のたびに土台のイメージを取り直す（`valkey.ts`・`postgres.ts` の `PullPolicy`）。起動したコンテナの型（`StartedTestContainer`）も、コンテナを持つテストが直接読む。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
 
 #### 追加で確認した項目 — api のコンテナイメージ（2026-09-12。#271）
 
