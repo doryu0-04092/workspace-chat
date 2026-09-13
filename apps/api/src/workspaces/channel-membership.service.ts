@@ -43,7 +43,7 @@ export class ChannelMembershipService {
 
   /**
    * パブリックチャンネルへの参加（機能一覧 3.1「自由に参加・退出できる」）。
-   * **プライベートは、参加していなければオーナーでも 404**（招待で参加する。オーナーの例外は一覧・取得 API だけ。CLAUDE.md 2）。
+   * **プライベートは、参加していなければオーナーでも 404**（招待で参加する。オーナーの例外は一覧・取得 API とアーカイブ・復元の応答だけ。CLAUDE.md 2）。
    * 既に参加していれば 409 `already_channel_member`、アーカイブ済みは 409 `channel_archived`。
    */
   async join(userId: string, workspaceId: string, channelId: string): Promise<void> {
