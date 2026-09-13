@@ -20,7 +20,7 @@ import { WorkspacesService } from './workspaces.service';
  * ワークスペース（F-06）と招待（F-08 / F-38）とキック（F-09）とチャンネル（F-10）とチャンネルのアーカイブ（F-35）とメッセージの投稿・一覧・編集・削除（F-11 / F-12 / F-13）。
  * チャンネルの部屋への入室要求（ChannelRoomsGateway）もここで受ける（入室の判定が所属とチャンネルの参加を見るため）。
  * 招待の通知とメッセージの投稿・編集・削除の配信に RealtimeEmitter、参加資格を失った接続を部屋から外すのに RealtimeRooms、
- * 入室要求とメッセージの投稿・編集・削除の上限に RateLimitModule（保存先と UserRateLimitGuard）を使う。
+ * 入室要求とメッセージの投稿・編集・削除の上限に RateLimitModule（保存先と MessageWriteRateLimitGuard）を使う。
  */
 @Module({
   imports: [RealtimeModule, RateLimitModule],
