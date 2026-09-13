@@ -51,7 +51,7 @@ export class ChannelArchiveService {
             data,
           });
           if (count !== 1) throw new ConflictException(CHANNEL_ARCHIVED);
-          return this.view(tx, channelId);
+          return this.view(tx, workspaceId, channelId);
         });
       } catch (error) {
         if (isUniqueViolation(error) && attempt < MAX_NUMBERING_ATTEMPTS) continue;
@@ -74,16 +74,17 @@ export class ChannelArchiveService {
         data: { archivedAt: null },
       });
       if (count !== 1) throw new ConflictException(CHANNEL_NOT_ARCHIVED);
-      return this.view(tx, channelId);
+      return this.view(tx, workspaceId, channelId);
     });
   }
 
   private async view(
     client: Pick<PrismaService, 'channel'>,
+    workspaceId: string,
     channelId: string,
   ): Promise<ManagedChannel> {
-    const row = await client.channel.findUniqueOrThrow({
-      where: { id: channelId },
+    const row = await client.channel.findFirstOrThrow({
+      where: { id: channelId, workspaceId },
       select: MANAGED_CHANNEL_SELECT,
     });
     return toManagedChannel(row);
