@@ -68,22 +68,30 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
     return locks ? locks.request(REFRESH_LOCK, task) : task();
   }
 
-  /** 新しいアクセストークン。使えなければ null。 */
+  async function sendRefresh(): Promise<string | null> {
+    try {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'X-Requested-By': REQUESTED_BY },
+      });
+      if (!response.ok) return null;
+      return ((await response.json()) as Schemas['RefreshResponse']).accessToken;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 新しいアクセストークン。使えなければ null。
+   * **ロックそのものが断られたら（文書が fully active でない `InvalidStateError` など）、ロックの外で送る**——
+   * 断られたまま投げると `restore` が状態を決めずに終わり、確かめる途中のまま戻れない。ロックの外で送る代償は、ロックの無いブラウザと同じである。
+   */
   function refreshToken(): Promise<string | null> {
-    refreshing ??= withLock(async () => {
-      try {
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: { 'X-Requested-By': REQUESTED_BY },
-        });
-        if (!response.ok) return null;
-        return ((await response.json()) as Schemas['RefreshResponse']).accessToken;
-      } catch {
-        return null;
-      }
-    }).finally(() => {
-      refreshing = null;
-    });
+    refreshing ??= withLock(sendRefresh)
+      .catch(sendRefresh)
+      .finally(() => {
+        refreshing = null;
+      });
     return refreshing;
   }
 
