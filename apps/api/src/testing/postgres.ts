@@ -31,7 +31,7 @@ import { PullPolicy } from 'testcontainers';
 export const POSTGRES_IMAGE = 'postgres:17';
 
 /**
- * コンテナの起動とマイグレーションの適用を待つ時間（10 分）。初回はイメージの取得が入る。
+ * コンテナの起動とマイグレーションの適用を待つ時間（10 分）。起動のたびにレジストリへイメージを問い合わせ、手元に無い・版が変わったときは取得が入る。
  *
  * **ci.yml の timeout-minutes（15）より小さくする。** あちらはジョブ全体に掛かる。
  * ここに大きい値を置くと、先に GitHub Actions がジョブごと打ち切り、
