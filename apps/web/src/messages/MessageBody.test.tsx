@@ -45,14 +45,14 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       }
     });
 
-    it('画像は描画せず（外部への読み込みを起こさない）、書いた文字（代わりの文字と URL）を残す', () => {
+    it('画像は描画せず（外部への読み込みを起こさない）、書いた文字のまま残す', () => {
       const withAlt = renderBody('![画像の説明](https://example.com/a.png)');
       expect(withAlt.querySelector('img')).toBeNull();
-      expect(withAlt.textContent).toContain('画像の説明');
+      expect(withAlt.textContent).toContain('![画像の説明](https://example.com/a.png)');
 
       const withoutAlt = renderBody('![](https://example.com/b.png)');
       expect(withoutAlt.querySelector('img')).toBeNull();
-      expect(withoutAlt.textContent).toContain('https://example.com/b.png');
+      expect(withoutAlt.textContent).toContain('![](https://example.com/b.png)');
     });
 
     it('src のソースに dangerouslySetInnerHTML を使う箇所が無い', () => {
