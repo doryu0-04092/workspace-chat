@@ -1,27 +1,219 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { MemoryRouter } from 'react-router';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
+import { createSessionStore } from './auth/session-store';
+import { error, fakeFetch, json, loggedIn, PROFILE, token } from './testing/fake-api';
 
-// 共有パッケージのうち、この画面が読んでいる値だけを差し替える。
-// 実数（7）を期待値にすると、App が数値を直書きしてもテストが通ってしまい、
-// 「共有パッケージから読んでいる」ことを検証できない。
-//
-// モジュール全体を置き換えず、元の中身を広げてから1つだけ上書きする。
-// 全体を置き換えると、共有パッケージに export が増えたときに
-// それらが undefined になり、この画面と関係のない理由で落ちる。
-vi.mock('@workspace-chat/shared', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@workspace-chat/shared')>()),
-  REALTIME_EVENT_KINDS: ['a', 'b', 'c'],
-}));
+const RECOVERY_CODE = '0123-4567-89AB-CDEF';
 
-describe('App', () => {
-  it('描画される', () => {
-    render(<App />);
-    expect(screen.getByRole('heading', { name: 'workspace-chat' })).toBeDefined();
+function renderAt(path: string, { strict = false } = {}) {
+  const store = createSessionStore({ locks: undefined });
+  const tree = (
+    <MemoryRouter initialEntries={[path]}>
+      <App store={store} />
+    </MemoryRouter>
+  );
+  render(strict ? <StrictMode>{tree}</StrictMode> : tree);
+  return store;
+}
+
+const signedOut = { 'POST /api/auth/refresh': () => error(401, 'invalid_token') };
+const signedIn = {
+  'POST /api/auth/refresh': () => token('t1'),
+  'GET /api/users/me': () => json(200, PROFILE),
+};
+
+function type(label: string, value: string) {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+  sessionStorage.clear();
+});
+
+describe('起動時の復元と行き先', () => {
+  it('復元の間は読み込み中を出し、リフレッシュが通ればワークスペースの画面に表示名を出す', async () => {
+    fakeFetch(signedIn);
+    renderAt('/workspaces');
+
+    expect(screen.getByRole('status').textContent).toContain('読み込み中');
+    expect(await screen.findByText('アリス')).toBeDefined();
   });
 
-  it('種類数を共有パッケージから読んでいる', () => {
-    render(<App />);
-    expect(screen.getByText(/3 種類/)).toBeDefined();
+  it('ログインしていなければ、ワークスペースの画面からログインの画面へ移る', async () => {
+    fakeFetch(signedOut);
+    renderAt('/workspaces');
+
+    expect(await screen.findByRole('heading', { name: 'ログイン' })).toBeDefined();
+  });
+
+  it('ログインしている利用者がログインの画面・登録の画面・知らない URL を開くと、ワークスペースの画面へ移る', async () => {
+    for (const path of ['/login', '/register', '/', '/nope']) {
+      fakeFetch(signedIn);
+      const { unmount } = render(
+        <MemoryRouter initialEntries={[path]}>
+          <App store={createSessionStore({ locks: undefined })} />
+        </MemoryRouter>,
+      );
+      expect(await screen.findByText('アリス'), path).toBeDefined();
+      unmount();
+    }
+  });
+
+  it('StrictMode で描画しても、リフレッシュの要求は1回だけ送る', async () => {
+    const { count } = fakeFetch(signedIn);
+    renderAt('/workspaces', { strict: true });
+
+    await screen.findByText('アリス');
+    expect(count('POST /api/auth/refresh')).toBe(1);
+  });
+});
+
+describe('ログインの画面', () => {
+  async function openLogin(routes: Parameters<typeof fakeFetch>[0]) {
+    const fetch = fakeFetch({ ...signedOut, ...routes });
+    renderAt('/login');
+    await screen.findByRole('heading', { name: 'ログイン' });
+    type('ユーザーID', 'alice');
+    type('パスワード', 'password-1');
+    fireEvent.click(screen.getByRole('button', { name: 'ログイン' }));
+    return fetch;
+  }
+
+  it('ログインするとワークスペースの画面へ移り、トークンをブラウザの保存領域に書かない', async () => {
+    const { calls } = await openLogin({ 'POST /api/auth/login': () => loggedIn('t1') });
+
+    expect(await screen.findByText('アリス')).toBeDefined();
+    const login = calls.find((c) => c.key === 'POST /api/auth/login')!;
+    expect(JSON.parse(String(login.init.body))).toEqual({
+      userId: 'alice',
+      password: 'password-1',
+    });
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('ユーザーID かパスワードが違えば理由を出し、ログインの画面に留まる', async () => {
+    await openLogin({ 'POST /api/auth/login': () => error(401, 'invalid_credentials') });
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'ユーザーID かパスワードが違います',
+    );
+    expect(screen.getByRole('heading', { name: 'ログイン' })).toBeDefined();
+  });
+
+  it('試行が多すぎれば、待つ秒数を出す', async () => {
+    await openLogin({
+      'POST /api/auth/login': () => error(429, 'too_many_requests', { 'Retry-After': '32' }),
+    });
+
+    expect((await screen.findByRole('alert')).textContent).toContain('32 秒');
+  });
+
+  it('登録の画面へのリンクがある', async () => {
+    fakeFetch(signedOut);
+    renderAt('/login');
+
+    fireEvent.click(await screen.findByRole('link', { name: '新規登録' }));
+    expect(await screen.findByRole('heading', { name: '新規登録' })).toBeDefined();
+  });
+});
+
+describe('登録の画面', () => {
+  async function submitRegister(routes: Parameters<typeof fakeFetch>[0]) {
+    const fetch = fakeFetch({ ...signedOut, ...routes });
+    renderAt('/register');
+    await screen.findByRole('heading', { name: '新規登録' });
+    type('ユーザーID', 'alice');
+    type('パスワード', 'password-1');
+    type('表示名', 'アリス');
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    return fetch;
+  }
+
+  it('リカバリーコードを失うと復旧できないことを、登録の前に出す（機能一覧 1.1）', async () => {
+    fakeFetch(signedOut);
+    renderAt('/register');
+
+    await screen.findByRole('heading', { name: '新規登録' });
+    expect(document.body.textContent).toContain(
+      'リカバリーコードを失うと、アカウントを復旧できません',
+    );
+  });
+
+  it('登録するとリカバリーコードを表示し、控えたことを選ぶまで先へ進めない。進むとログインの画面へ移り、コードは画面にも保存領域にも残らない', async () => {
+    const { calls } = await submitRegister({
+      'POST /api/auth/register': () =>
+        json(201, {
+          user: { id: PROFILE.id, userId: 'alice', displayName: 'アリス' },
+          recoveryCode: RECOVERY_CODE,
+        }),
+    });
+
+    expect(await screen.findByText(RECOVERY_CODE)).toBeDefined();
+    const register = calls.find((c) => c.key === 'POST /api/auth/register')!;
+    expect(JSON.parse(String(register.init.body))).toEqual({
+      userId: 'alice',
+      password: 'password-1',
+      displayName: 'アリス',
+    });
+
+    const proceed = screen.getByRole('button', {
+      name: 'ログインの画面へ進む',
+    }) as HTMLButtonElement;
+    expect(proceed.disabled).toBe(true);
+    fireEvent.click(proceed);
+    expect(screen.queryByRole('heading', { name: 'ログイン' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'リカバリーコードを控えました' }));
+    expect(proceed.disabled).toBe(false);
+    fireEvent.click(proceed);
+
+    expect(await screen.findByRole('heading', { name: 'ログイン' })).toBeDefined();
+    expect(screen.queryByText(RECOVERY_CODE)).toBeNull();
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('ユーザーID が使われていれば理由を出し、入力を残す', async () => {
+    await submitRegister({ 'POST /api/auth/register': () => error(409, 'user_id_taken') });
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'このユーザーID は既に使われています',
+    );
+    expect((screen.getByLabelText('表示名') as HTMLInputElement).value).toBe('アリス');
+  });
+
+  it('新規登録を止めていれば理由を出す', async () => {
+    await submitRegister({ 'POST /api/auth/register': () => error(403, 'registration_disabled') });
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      '新規登録を受け付けていません',
+    );
+  });
+});
+
+describe('ログアウト', () => {
+  it('ログアウトするとログインの画面へ移る', async () => {
+    fakeFetch({ ...signedIn, 'POST /api/auth/logout': () => new Response(null, { status: 204 }) });
+    renderAt('/workspaces');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'ログアウト' }));
+
+    expect(await screen.findByRole('heading', { name: 'ログイン' })).toBeDefined();
+  });
+
+  it('ログアウトに失敗したら理由を出し、ログインしたまま留まる', async () => {
+    fakeFetch({ ...signedIn, 'POST /api/auth/logout': () => error(500, 'internal_error') });
+    renderAt('/workspaces');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'ログアウト' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('ログアウトできませんでした');
+    await waitFor(() => expect(screen.getByText('アリス')).toBeDefined());
   });
 });

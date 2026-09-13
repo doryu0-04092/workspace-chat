@@ -103,6 +103,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | ライブラリ | **React** | **19.2** | 下記3ライブラリを使うため。チャット固有の課題に対する解が React 側に揃っている |
 | 言語 | **TypeScript** | 5.x | **難-3 の解決**。バックエンドと WebSocket のイベント型を共有する |
 | ビルド | **Vite** | **7.x** | Vite 8（2026-03 安定版）は内部バンドラを Rolldown / Oxc に刷新しており、プラグイン互換の実績が積み上がるまで見送る |
+| ルーティング | **React Router** | **8.x** | 決定・2026-09-13・依頼側。宣言型（`BrowserRouter`・`Routes`・`Route`）で使う。画面と URL は [機能一覧](features.md) 1.2 |
 | **メッセージ一覧** | **react-virtuoso** | 4.x | **難-1 の解決**。`firstItemIndex` は「先頭に要素を足しても表示位置を維持する」ための機能で、チャット用途を想定して用意されている。自前だと `scrollHeight` の差分補正が必要になる |
 | **Markdown 描画** | **react-markdown** + rehype-sanitize + rehype-highlight | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない** |
 | データ取得 | **TanStack Query** | v5 | `useInfiniteQuery` がカーソルページネーションに直結する。WebSocket 受信を `setQueryData` でキャッシュに反映する |
@@ -397,6 +398,12 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 | **@nestjs/websockets**・**@nestjs/platform-socket.io** | **^11.2.3** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（peerDependencies は `@nestjs/common` の ^11.0.0） |
 | **@socket.io/redis-adapter** | **^8.3.0** | 最新（上表「難-2」）。`ioredis` の接続をそのまま渡せる。**アダプタはコマンドの Promise を待たずに捨てる**（`publish`・終了時の `unsubscribe`）ため、Valkey が止まっていると未処理の reject でプロセスが落ちる。接続に失敗の受け手を付けてから渡す（`apps/api/src/realtime/realtime-valkey.ts`） |
 | **socket.io-client**（開発依存） | **^4.8.3** | テストで実際に接続する（Origin・トークン・タスクをまたぐ配信）。web が使うときに web の依存へ足す |
+
+#### 追加で確認した項目 — web の認証の画面（2026-09-13。#379）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **react-router** | **^8.3.1** | 最新（上表「ルーティング」。決定・2026-09-13・依頼側）。`apps/web` の dependencies。8.3.1 の `react-router` 自体が `BrowserRouter`・`Routes`・`Route`・`Navigate`・`MemoryRouter` を出している（`dist/production/index.d.ts`）ため、`react-router-dom` は入れない。engines は `node >=22.22.0`、peerDependencies は `react`・`react-dom` の `>=19.2.7`（上表の Node.js 24・React 19.2 を満たす）。使い方は同梱の `docs/start/declarative`（`BrowserRouter` で包み、`Routes`・`Route` で組む） |
 
 #### TypeScript 7 を採らない理由
 
