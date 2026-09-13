@@ -11,12 +11,15 @@
   },
   "dependencies": {
     "@workspace-chat/shared": "*",
+    "mdast-util-gfm-autolink-literal": "^2.0.1",
+    "mdast-util-gfm-strikethrough": "^2.0.0",
+    "micromark-extension-gfm-autolink-literal": "^2.1.0",
+    "micromark-extension-gfm-strikethrough": "^2.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
     "rehype-sanitize": "^6.0.0",
-    "remark-breaks": "^4.0.0",
-    "remark-gfm": "^4.0.1"
+    "remark-breaks": "^4.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
