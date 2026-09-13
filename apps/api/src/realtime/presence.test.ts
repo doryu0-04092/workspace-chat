@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import {
   type ChannelEnterAck,
@@ -9,7 +10,9 @@ import type { Socket } from 'socket.io-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { POSTGRES_STARTUP_TIMEOUT_MS } from '../testing/postgres';
 import { type LoggedIn, type TwoTasks, startTwoTasks } from '../testing/two-tasks';
+import { ChannelRoomsService } from '../workspaces/channel-rooms.service';
 import { PresenceRegistry } from './presence-registry';
+import { RealtimeGateway } from './realtime.gateway';
 import { RoomMembershipReconciler } from './room-membership-reconciler';
 
 /** 届かないことを確かめるときに待つ時間（届くものは vi.waitFor で待つ）。 */
@@ -214,6 +217,61 @@ describe('在席（F-22）', () => {
       await quiet();
 
       expect(ownerReceived).toEqual([]);
+    });
+  });
+
+  describe('退室と、入室の取り消し', () => {
+    // 退室要求は数えない（機能一覧 9.2）。入っていない部屋への退室要求が在席の通知（Valkey への publish）を起こすと、
+    // 1本の接続から際限なく publish を起こせる。
+    it('部屋に入っていないチャンネルへの退室要求は、在席の変化もサーバー間の通知も起こさない', async () => {
+      const { alice, bob, channelId } = await channelOfThree();
+      const aliceSocket = await t.open(t.firstBase, alice);
+      const bobSocket = await t.open(t.firstBase, bob);
+      await enter(bobSocket, channelId);
+      const received = await collectAfterEntries(bobSocket);
+      const serverSideEmit = vi.spyOn(t.first.get(RealtimeGateway).server, 'serverSideEmit');
+      try {
+        for (const target of [channelId, randomUUID()]) {
+          expect(await exit(aliceSocket, target)).toEqual({ ok: true });
+        }
+        expect(serverSideEmit).not.toHaveBeenCalled();
+      } finally {
+        serverSideEmit.mockRestore();
+      }
+      await quiet();
+      expect(received).toEqual([]);
+    });
+
+    // 機能一覧 9.2「外れる契機はどれでも同じである」: 入室し直しの途中で確かめに落ちて部屋から外したときも、
+    // その接続は要求の前から在席の一覧に載っているため、外す処理の側が在席の変化を配る。
+    it('入室し直しで2回目の確かめに落ちて部屋から外したら、最後の接続なら present: false を配り、一覧から外す', async () => {
+      const { alice, bob, channelId } = await channelOfThree();
+      const aliceSocket = await t.open(t.firstBase, alice);
+      const bobSocket = await t.open(t.firstBase, bob);
+      await enter(aliceSocket, channelId);
+      await enter(bobSocket, channelId);
+      await untilBothSee(channelId, alice.id, true);
+      const received = await collectAfterEntries(bobSocket);
+      const rooms = t.first.get(ChannelRoomsService);
+      const real = rooms.assertCanEnter.bind(rooms);
+      const check = vi
+        .spyOn(rooms, 'assertCanEnter')
+        .mockImplementationOnce(real)
+        .mockRejectedValueOnce(new Error('一時的な失敗'));
+      try {
+        expect(await enter(aliceSocket, channelId)).toMatchObject({ ok: false, status: 500 });
+      } finally {
+        check.mockRestore();
+      }
+
+      await vi.waitFor(
+        () =>
+          expect(received).toContainEqual(
+            expect.objectContaining({ channelId, userId: alice.id, present: false }),
+          ),
+        { timeout: 3_000, interval: 50 },
+      );
+      await untilBothSee(channelId, alice.id, false);
     });
   });
 

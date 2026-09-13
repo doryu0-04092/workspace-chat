@@ -30,7 +30,10 @@ const CHANNEL_ENTER_THROTTLER = 'channel-enter';
  * - **入室要求は、利用者単位で `CHANNEL_ENTER_LIMIT` までに限る**——本体の形を見る前に数え（形の誤った要求も1回）、
  *   超えたら 429 で断り、`rate_limit_exceeded`（`limit: 'user'`）を warn で残す（ErrorResponseFilter を通らないため、ここで残す）。退室要求は数えない
  * - **確かめてから部屋に入れた後に、もう一度確かめ、参加者でなくなっていれば外して断る**——確かめてから入れるまでの間に
- *   キック・退出が走ると、その処理が外す時点ではこの接続はまだ部屋に入っておらず、参加者でない接続が部屋に残る
+ *   キック・退出が走ると、その処理が外す時点ではこの接続はまだ部屋に入っておらず、参加者でない接続が部屋に残る。
+ *   **入室し直しの取り消しなら、在席からも外す**（要求の前から在席に載っている。外れる契機はどれでも同じ。機能一覧 9.2）
+ * - **入っていない部屋への退室要求は何もしない**——退室要求は数えないため、在席の変化や他のタスクへの通知（Valkey への publish）を起こすと、
+ *   1本の接続から際限なく起こせる（機能一覧 9.2）
  * - **入室できたら、その時点で部屋に入っている参加者を acknowledgement で返す**（在席を画面へ渡す経路は部屋の側だけ。9.2）
  * - **切断では、部屋から出る前（`disconnecting`）に入っていたチャンネルの部屋を取り出して在席の変化を配る**
  *   （`disconnect` を待つと入っていた部屋を取り出せない。公式文書 Server socket instance）
@@ -72,6 +75,7 @@ export class ChannelRoomsGateway implements OnGatewayConnection<RealtimeSocket> 
         await this.rooms.assertCanEnter(userId, channelId);
       } catch (error) {
         await socket.leave(channelRoom(channelId));
+        if (reentering) this.presence.left(channelId, userId, socket.id);
         throw error;
       }
       const present = reentering
@@ -88,6 +92,7 @@ export class ChannelRoomsGateway implements OnGatewayConnection<RealtimeSocket> 
   ): Promise<ChannelRoomAck> {
     return this.acknowledge(async () => {
       const channelId = channelIdOf(body);
+      if (!socket.rooms.has(channelRoom(channelId))) return { ok: true } as const;
       await socket.leave(channelRoom(channelId));
       this.presence.left(channelId, userIdOf(socket), socket.id);
       return { ok: true } as const;
