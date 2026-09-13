@@ -12,7 +12,7 @@ export type ChannelAccess = {
 
 /**
  * 要求する側から見たチャンネルを、行を共有ロックで掴んでから読む（channel-row-lock.ts の `share`）。
- * **アーカイブ済みかを読んで書くかを決める経路（参加・招待・投稿）で使う**（機能一覧 3.2）。別のワークスペースのチャンネル・無いチャンネルは 404。
+ * **アーカイブ済みかを読んで書くかを決める経路（参加・招待・投稿・編集・削除）で使う**（機能一覧 3.2）。別のワークスペースのチャンネル・無いチャンネルは 404。
  */
 export async function lockedChannelFor(
   tx: Pick<PrismaService, 'channel' | '$queryRaw'>,
@@ -52,7 +52,7 @@ export async function channelFor(
 
 /**
  * 参加者でなければ断る。**コードは参加者一覧と同じ2段階の、所属している側**——パブリックは 403 `not_a_channel_member`、
- * プライベートは 404（存在を隠す。機能一覧 3.1）。**オーナーの例外はここに持たない**（メッセージに及ばない。3.1・4.1）。
+ * プライベートは 404（存在を隠す。機能一覧 3.1）。**オーナーの例外はここに持たない**（メッセージの読み書きに及ばない。3.1・4.1・4.2）。
  * 所属していない側の 404 は、呼ぶ前に `WorkspacesService.membershipOf` が返す。
  */
 export function assertChannelParticipant(
