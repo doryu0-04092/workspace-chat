@@ -22,6 +22,8 @@ export function failureMessage(failure: Failure): string {
       return 'このワークスペースには同じ名前のチャンネルがあります。別の名前を選んでください。';
     case 'channel_archived':
       return 'アーカイブ済みのチャンネルです。';
+    case 'not_a_channel_member':
+      return 'このチャンネルに参加していません。';
     case 'already_channel_member':
       return '既に参加しています。';
     case 'owner_only':
