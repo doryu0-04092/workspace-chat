@@ -831,7 +831,7 @@ Range リクエストの再試行**をクライアントに実装することに
 - 使用言語は **TypeScript** と **SQL** とする。フロントエンド・バックエンドとも TypeScript を用い、
   WebSocket のイベント型を共有する
 - **ブラウザ通知（Notification API）は HTTPS でのみ動作する**（`localhost` を除く）。
-  そのためデプロイ先は HTTPS が必須である（**閲覧者から CloudFront までを HTTPS にする。CloudFront と ALB の間は暗号化しない**。決定と代償は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）
+  そのためデプロイ先は HTTPS が必須である（**閲覧者から CloudFront までを HTTPS にする。CloudFront から先（ALB・タスク）は暗号化しない**。決定と代償は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）
 - **ブラウザ通知には利用者の許可が必要であり、拒否された場合は通知を出せない。**
   その場合は画面内の未読バッジで代替する
 - 提出物は **GitHub のリポジトリ URL と、デプロイ済みの URL** とする

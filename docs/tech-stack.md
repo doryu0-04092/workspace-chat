@@ -190,7 +190,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 |---|---|---|
 | IaC | **Terraform** 1.x | 既存プロジェクトで実績あり |
 | フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**閲覧者との HTTPS を終端する**（ブラウザ通知に必要な HTTPS。[要件定義書](requirements.md) 5。下の「本番の HTTPS・秘密情報・state の置き場」） |
-| ロードバランサ | **ALB** | WebSocket にネイティブ対応。**プライベートサブネットに置き、CloudFront の VPC オリジンとして HTTP で受ける**（TLS は終端しない。**閲覧者との HTTPS は CloudFront が終端する**。下の「本番の HTTPS・秘密情報・state の置き場」）。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト、または VPC オリジンを作ると AWS が作る `CloudFront-VPCOrigins-Service-SG`）。**タスクのセキュリティグループも、ALB のセキュリティグループからだけ到達できるようにする**（タスクは公開 IP を持つ。下の「ECS のタスクの置き場」の行）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB やタスクを直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
+| ロードバランサ | **ALB** | WebSocket にネイティブ対応。**プライベートサブネットに置き、CloudFront の VPC オリジンとして HTTP で受ける**（TLS は終端せず、タスクへも HTTP で渡す。**閲覧者との HTTPS は CloudFront が終端する**。下の「本番の HTTPS・秘密情報・state の置き場」）。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト、または VPC オリジンを作ると AWS が作る `CloudFront-VPCOrigins-Service-SG`）。**タスクのセキュリティグループも、ALB のセキュリティグループからだけ到達できるようにする**（タスクは公開 IP を持つ。下の「ECS のタスクの置き場」の行）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB やタスクを直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
 | **配信の共有・レート制限の回数** | **ElastiCache for Valkey** | **難-2 の解決**。Socket.IO の Redis アダプタ（`@socket.io/redis-adapter`）が使う。**レート制限の回数も置く**（`@nest-lab/throttler-storage-redis` が `ioredis` の接続で Lua の `eval` を使う。#245）。プロトコル互換のため、アダプタ名・接続 URL（`redis://` / `rediss://`）は変わらない |
@@ -202,15 +202,15 @@ ESM で出すと `apps/api` から素直に `import` できない。
 
 | 項目 | 決定 |
 |---|---|
-| HTTPS とドメイン | **独自ドメインを持たない。** 閲覧者から CloudFront までは、CloudFront の既定のドメイン（`d111111abcdef8.cloudfront.net` の形）で HTTPS を必須にする（ビヘイビアの Viewer Protocol Policy。AWS 公式「In that configuration, CloudFront provides the SSL/TLS certificate.」）。**CloudFront から ALB までは VPC オリジンで HTTP にする**（ALB はプライベートサブネット。オリジンのプロトコルは `http-only`）。**VPC にはインターネットゲートウェイが要る**（AWS 公式「The internet gateway is required to denote that the VPC can receive traffic from the internet. The internet gateway is not used for routing traffic to origins inside the subnet」） |
+| HTTPS とドメイン | **独自ドメインを持たない。** 閲覧者から CloudFront までは、CloudFront の既定のドメイン（`d111111abcdef8.cloudfront.net` の形）で HTTPS を必須にする（ビヘイビアの Viewer Protocol Policy。AWS 公式「In that configuration, CloudFront provides the SSL/TLS certificate.」）。**CloudFront から ALB までは VPC オリジンで HTTP にする**（ALB はプライベートサブネット。オリジンのプロトコルは `http-only`）。**ALB からタスクまでも HTTP にする**（ALB は TLS を終端せず、ターゲットグループのプロトコルも HTTP）。**VPC にはインターネットゲートウェイが要る**（AWS 公式「The internet gateway is required to denote that the VPC can receive traffic from the internet. The internet gateway is not used for routing traffic to origins inside the subnet」） |
 | 秘密情報（DB のパスワード・トークンの署名鍵など） | **Systems Manager Parameter Store の暗号化パラメータ（標準の区分）**。ECS のコンテナ定義の `secrets` で環境変数として渡す。Secrets Manager の自動ローテーション・アカウント間の共有は、デモ後に destroy する運用では使わない |
 | Terraform の state | **S3 バケット（バージョニングあり）＋ `use_lockfile`**。バケットは本体の構成の外で先に作る（`dynamodb_table` は非推奨） |
 | ECS のタスクの置き場 | **パブリックサブネットに公開 IP 付きで置き、受信は ALB のセキュリティグループからだけにする**（NAT ゲートウェイ・インターフェースエンドポイントを置かない）。Fargate がイメージを取るには経路が要り（AWS 公式「When using a public subnet, you can assign a public IP address to the task ENI.」）、内部の ALB はタスクを ENI のプライベート IP で登録する（AWS 公式「When the target type is ip, you can specify IP addresses from … The subnets of the VPC for the target group」「You can't specify publicly routable IP addresses.」）。RDS と ElastiCache はプライベートサブネットに置く |
 
 **代償**（[CLAUDE.md](../CLAUDE.md) 4）
 
-- **CloudFront と ALB の間は暗号化しない。** この区間を、ログイン時のパスワード・リカバリーコード・アクセストークン・リフレッシュトークンの Cookie・メッセージの本文が、TLS のかからない HTTP で通る。ALB はプライベートサブネットにあり CloudFront からしか届かないが、**AWS の文書が暗号化を明記しているのは、リージョン間（施設を出る前の物理層）と AZ 間だけである**（EC2 のデータ保護「All data flowing across AWS Regions over the AWS global network is automatically encrypted at the physical layer before it leaves AWS secured facilities. All traffic between AZs is encrypted.」）。**エッジからリージョンまでの区間と、同じ AZ の中の区間が暗号化されるかは未確認である**
-- **経路のすべての暗号化を求められる用途**（決済などの規格に従う・実際の利用者のデータを長く預かる）**には、この構成を使えない。** その場合は独自ドメインと ACM の証明書を持ち、CloudFront と ALB の両方を HTTPS にする形へ切り替える（オリジンの HTTPS には信頼された認証局の証明書が要り、自己署名は使えない）
+- **CloudFront から先（CloudFront → ALB → タスク）は暗号化しない。** この区間を、ログイン時のパスワード・リカバリーコード・アクセストークン・リフレッシュトークンの Cookie・メッセージの本文が、TLS のかからない HTTP で通る。ALB はプライベートサブネットにあり CloudFront からしか届かず、タスクへの受信はセキュリティグループで ALB からだけに絞る（この1層だけである。下の項）が、**AWS の文書が暗号化を明記しているのは、リージョン間（施設を出る前の物理層）と AZ 間だけである**（EC2 のデータ保護「All data flowing across AWS Regions over the AWS global network is automatically encrypted at the physical layer before it leaves AWS secured facilities. All traffic between AZs is encrypted.」）。**エッジからリージョンまでの区間と、同じ AZ の中の区間が暗号化されるかは未確認である**
+- **経路のすべての暗号化を求められる用途**（決済などの規格に従う・実際の利用者のデータを長く預かる）**には、この構成を使えない。** その場合は独自ドメインと ACM の証明書を持ち、CloudFront から ALB まで・ALB からタスクまでの両方を HTTPS にする形へ切り替える（CloudFront からオリジンへの HTTPS には信頼された認証局の証明書が要り、自己署名は使えない。ALB からタスクまでは、ターゲットグループのプロトコルも HTTPS にする）
 - **提出物の URL が CloudFront の既定のドメインの形になる**（[要件定義書](requirements.md) 5）
 - **既定のドメインは、他の利用者のディストリビューションと同じ `cloudfront.net` の下のホストである。** リフレッシュトークンの Cookie の `SameSite=Strict` と、`Origin` / `Sec-Fetch-Site` の検証（[要件定義書](requirements.md) 4.3 の CSRF の対処）が別のディストリビューションを別のサイトとして扱うことは、**`cloudfront.net` が Public Suffix List に載っていること**に依存する（載っている: Public Suffix List の「// Amazon CloudFront」の項に `cloudfront.net`。2026-09-13 に確かめた）。独自ドメインへ切り替えると、この依存はそのドメインの境界に移る
 - **state のバケットは `terraform destroy` の対象外として残る**（[要件定義書](requirements.md) 4.2 の「バックアップ」）
@@ -269,7 +269,7 @@ ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は�
 | ElastiCache for Valkey cache.t4g.micro（価格は未確認。「Valkey の版（ローカル）」にあるのは Redis 比の相対値のみで、この額の根拠にならない） | 約 $9 |
 | 公開 IPv4 アドレス（ECS のタスク × 2。1 IP・1 時間 0.005 ドル。上の「ECS のタスクの置き場」） | 約 $7 |
 | S3 + CloudFront | 数ドル |
-| **合計** | **約 $62〜72 / 月** |
+| **合計** | **約 $65〜75 / 月** |
 
 **デモ後に `terraform destroy` する運用**（[要件定義書](requirements.md) 4.2 の決定。ここには書かない）により、実費を数ドルに抑える。
 
