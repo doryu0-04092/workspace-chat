@@ -4,6 +4,7 @@ import {
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from '@nestjs/common';
+import { errorKind } from '../logging/error-kind';
 import { RealtimeGateway, channelRoom } from './realtime.gateway';
 
 /** 一覧を取り直す間隔（機能一覧 9.2「各タスクは5分ごとに一覧を取り直す」）。 */
@@ -16,7 +17,7 @@ type Connection = { readonly id: string; readonly userId: string };
  *
  * - **在席は利用者単位**: チャンネル → 利用者 → 部屋に入っている接続の ID。**最初の1本が入ったときと最後の1本が外れたときだけ、在席が変わったと返す**
  * - 他のタスクの接続も、サーバー間の通知（realtime-presence.ts）で同じ一覧に載せる。**取りこぼした通知によるずれは、5分ごとの取り直しで直る**
- * - **取り直しに失敗したチャンネルは今の一覧を残し、例外にしない**（要件定義書 4.2。Valkey が止まっていると、
+ * - **取り直しに失敗したチャンネルは今の一覧を残し、例外にしない。warn には件数と最初の失敗の種類を残す**（要件定義書 4.2。Valkey が止まっていると、
  *   Redis アダプタの fetchSockets は購読者数の問い合わせで失敗する——`@socket.io/redis-adapter` の fetchSockets と serverCount）
  */
 @Injectable()
@@ -85,19 +86,22 @@ export class PresenceRegistry implements OnApplicationBootstrap, OnModuleDestroy
 
   /** 一覧にあるチャンネルごとに、部屋に入っている接続（全タスク）を問い合わせて置き換える。 */
   async refresh(): Promise<void> {
-    let failed = 0;
+    const failures: string[] = [];
     for (const channelId of [...this.channels.keys()]) {
-      if (!(await this.refreshChannel(channelId))) failed += 1;
+      const failure = await this.refreshChannel(channelId);
+      if (failure !== undefined) failures.push(failure);
     }
-    this.warnIfFailed(failed);
+    this.warnIfFailed(failures);
   }
 
   /** そのチャンネルの一覧を取り直す（入室し直した接続に返す前。機能一覧 9.2 の画面の側の取り直し）。失敗したら今の一覧を残す。 */
   async refreshOne(channelId: string): Promise<void> {
-    this.warnIfFailed((await this.refreshChannel(channelId)) ? 0 : 1);
+    const failure = await this.refreshChannel(channelId);
+    this.warnIfFailed(failure === undefined ? [] : [failure]);
   }
 
-  private async refreshChannel(channelId: string): Promise<boolean> {
+  /** 取り直す。失敗したら今の一覧を残し、失敗の種類を返す（取り直せたら undefined）。 */
+  private async refreshChannel(channelId: string): Promise<string | undefined> {
     try {
       const sockets = await this.gateway.server.in(channelRoom(channelId)).fetchSockets();
       this.replace(
@@ -107,15 +111,19 @@ export class PresenceRegistry implements OnApplicationBootstrap, OnModuleDestroy
           return userId === undefined ? [] : [{ id: socket.id, userId }];
         }),
       );
-      return true;
-    } catch {
-      return false;
+      return undefined;
+    } catch (error) {
+      // code が無ければメッセージを書く——この経路で Redis アダプタ（fetchSockets の待ち時間の超過）と ioredis（止まっている・切れた）が
+      // 拒否するときのメッセージは、接続先を含まない決まった文字列である（名前だけでは、どれも Error になり区別できない）
+      return errorKind(error, 'message');
     }
   }
 
-  private warnIfFailed(failed: number): void {
-    if (failed > 0) {
-      this.logger.warn(`在席の一覧を取り直せなかったため、今の一覧を残す（${failed} チャンネル）`);
+  private warnIfFailed(failures: readonly string[]): void {
+    if (failures.length > 0) {
+      this.logger.warn(
+        `在席の一覧を取り直せなかったため、今の一覧を残す（${failures.length} チャンネル。最初の失敗: ${failures[0]}）`,
+      );
     }
   }
 }
