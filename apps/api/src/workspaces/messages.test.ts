@@ -686,6 +686,53 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       expect((await page(alice, workspace.id, channelId)).messages).toEqual([message]);
     });
 
+    // CLAUDE.md「必ずテストを書く箇所」: オーナーが、参加していないプライベートチャンネルのメッセージを取得できないこと
+    // （編集の応答は本文を返す）。オーナーの例外はメッセージに及ばない（機能一覧 3.1・4.1）。
+    it('参加していないオーナーも、編集・削除はパブリックは 403 not_a_channel_member・プライベートは 404 で断る', async () => {
+      const publicCase = await postedByAlice('PUBLIC');
+      const privateCase = await postedByAlice('PRIVATE');
+
+      for (const res of [
+        await edit(
+          publicCase.owner,
+          publicCase.workspace.id,
+          publicCase.channelId,
+          publicCase.message.id,
+          'オーナー',
+        ),
+        await remove(
+          publicCase.owner,
+          publicCase.workspace.id,
+          publicCase.channelId,
+          publicCase.message.id,
+        ),
+      ]) {
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ code: 'not_a_channel_member' });
+      }
+      for (const res of [
+        await edit(
+          privateCase.owner,
+          privateCase.workspace.id,
+          privateCase.channelId,
+          privateCase.message.id,
+          'オーナー',
+        ),
+        await remove(
+          privateCase.owner,
+          privateCase.workspace.id,
+          privateCase.channelId,
+          privateCase.message.id,
+        ),
+      ]) {
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual(NOT_FOUND);
+      }
+      expect(
+        (await page(privateCase.alice, privateCase.workspace.id, privateCase.channelId)).messages,
+      ).toEqual([privateCase.message]);
+    });
+
     it('参加の判定は作者の判定より先で、所属していなければ 404、パブリックの非参加者は 403 not_a_channel_member、プライベートの非参加者は 404', async () => {
       const outsider = await login();
       const publicCase = await postedByAlice('PUBLIC');
