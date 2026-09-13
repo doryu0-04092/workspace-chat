@@ -24,8 +24,9 @@ import { PullPolicy } from 'testcontainers';
  *
  * **npm test の起動（startMigratedPostgres・valkey.ts の startValkey）も、起動のたびにイメージを取り直す**——
  * Testcontainers の既定は手元に同じタグがあれば取り直さず、手元の緑が CI と同じ版の土台で出ない。
- * **代償: テストのファイルごとにレジストリへ問い合わせるため手元の npm test が遅くなり、レジストリに届かない環境では、
- * 手元にイメージがあっても起動できない**（scripts/api-image.test.sh と同じ）。
+ * **代償: 土台を起動するたびにレジストリへ問い合わせるため npm test が遅くなり（手元でも CI でも。CI も同じジョブの中では
+ * 2回目以降の起動で手元のイメージを使っていた）、レジストリに届かない環境では、手元にイメージがあっても起動できない**
+ * （scripts/api-image.test.sh と同じ）。
  */
 export const POSTGRES_IMAGE = 'postgres:17';
 
