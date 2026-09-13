@@ -120,7 +120,7 @@ function asWrittenText() {
  * - **HTML 文字列を作らず、React の要素を直接組み立てる**（react-markdown）
  * - **記法として解釈するのは機能一覧 4.3 の記法だけで、それ以外は書いた文字のまま出す**（生の HTML も文字のまま出る）
  * - **リンクの URL は http / https / mailto など安全なスキームと相対 URL だけを残す**（react-markdown の既定の `urlTransform`）。
- *   **`urlTransform` を差し替えない**——`javascript:` のリンクが通る
+ *   **`urlTransform` と下の rehype-sanitize の両方を残す**——片方だけを外しても `javascript:` の href は残らないが、両方を外すと通る
  * - プラグインが足した要素も、描画の前に rehype-sanitize の既定のスキーマで落とす
  * - 段落の中の改行（入力欄の Enter）は改行の要素にする（remark-breaks。Markdown の既定は空白1つに畳む）
  * - **踏むと壊れる: `remarkPlugins` の並びを変えない。** `remarkBreaks` を `asWrittenText` より前に置くと、
