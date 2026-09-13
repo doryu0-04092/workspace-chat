@@ -31,7 +31,7 @@ function nextIp(): string {
 type LoggedIn = { authorization: string; id: string; loginId: string };
 
 // 機能一覧 2.2（F-09 のワークスペースからのキック）・招待の承諾と退出（F-38 の退出）。#330。
-// 接続をチャンネルの部屋から外すことは、チャンネルの部屋の実装と同時に入れる（#331）。
+// 接続をチャンネルの部屋から外すことは realtime/channel-rooms.test.ts が確かめる（サーバーを2つ立てる必要があるため）。
 describe('ワークスペースからのキックと退出（F-09 / F-38）', () => {
   let postgres: StartedPostgreSqlContainer;
   let valkey: StartedTestContainer;

@@ -56,6 +56,27 @@ function isErrorResponse(value: unknown): value is ErrorResponse {
   return typeof code === 'string' && typeof message === 'string';
 }
 
+/**
+ * 例外（要求の検証の失敗を除く）を、状態コードと本体にする。**HTTP の応答（下の ErrorResponseFilter）と、
+ * WebSocket の acknowledgement（チャンネルの部屋への入室要求。機能一覧 9.2）が同じ決めを使う。**
+ *
+ * - `code` を持つ本体で投げた HttpException → その本体のまま。**ただし 404 だけは、何を載せても状態コードの本体にする**
+ *   （機能一覧 1.4。ハンドラごとの文言で存在を認めさせない）
+ * - `code` を持たない HttpException → 状態コードごとの本体。**例外のメッセージは載せない**
+ * - 5xx の HttpException と、それ以外（想定外の失敗）→ internal_error。**例外のメッセージを載せない**
+ *   （Prisma のメッセージは呼び出し箇所のソースの抜き出しを含む）。ログに残すのは呼ぶ側である
+ */
+export function errorResponseOf(exception: unknown): { status: number; body: ErrorResponse } {
+  if (!(exception instanceof HttpException)) {
+    return { status: HttpStatus.INTERNAL_SERVER_ERROR, body: INTERNAL };
+  }
+  const status = exception.getStatus();
+  const given = exception.getResponse();
+  const body =
+    status < 500 && status !== 404 && isErrorResponse(given) ? given : errorBodyForStatus(status);
+  return { status, body };
+}
+
 /** 429 と `Retry-After`（秒）を返す例外。**ヘッダーは ErrorResponseFilter が付ける**（投げる経路ごとに付けない）。 */
 export class RetryAfterException extends HttpException {
   constructor(readonly retryAfterSeconds: number) {
@@ -91,13 +112,9 @@ export class BearerUnauthorizedException extends UnauthorizedException {
  *
  * - 要求の検証の失敗（express-openapi-validator）→ 状態コードごとの本体。400 には落ちた箇所（`path`）と
  *   規則の説明（`message`）だけを `errors` に載せる。**送られた値は載せない**
- * - `code` を持つ本体で投げた HttpException（登録の 403・409、レート制限の 429 など）→ その本体のまま。
- *   **ただし 404 だけは、何を載せても状態コードの本体にする**（機能一覧 1.4。ハンドラごとの文言で存在を認めさせない）
- * - `code` を持たない HttpException（前置き /api の外の Nest の既定の 404 など）→ 状態コードごとの本体。
- *   **例外のメッセージは載せない**（Nest の既定の 404 は「Cannot GET /…」とパスを述べる）
- * - それ以外（想定外の失敗）→ 500（internal_error）。**例外のメッセージを応答に載せない**
- *   （Prisma のメッセージは呼び出し箇所のソースの抜き出しを含む）。ログには今までどおり error で出す
- * - **429 は、投げた経路（発信元単位のガード・アカウント単位の RetryAfterException）によらず、ここで `rate_limit_exceeded` として記録する**
+ * - それ以外の例外の状態コードと本体は `errorResponseOf` による。5xx はログに error で出す
+ * - **HTTP の 429 は、投げた経路（発信元単位のガード・アカウント単位の RetryAfterException）によらず、ここで `rate_limit_exceeded` として記録する**
+ *   （WebSocket の入室要求の 429 はこのフィルタを通らない。ChannelRoomsGateway が `limit: 'user'` で記録する）
  *   （制限の種類・発信元・パス。決定・2026-09-12・依頼側。#270・#324。1件では鳴らさない——閾値は Terraform 側。要件定義書 4.2）。
  *   **制限の種類を `limit` に載せる**（`account`: RetryAfterException、`ip`: それ以外の 429＝発信元単位のガード。#324）。
  *   ログイン・リカバリーコードの照合では2種類が同じパスで出るため、パスでは分けられない。**踏むと壊れる: 429 を投げる経路を足したら、ここで種類を分ける**
@@ -124,38 +141,28 @@ export class ErrorResponseFilter implements ExceptionFilter {
       return;
     }
 
-    if (exception instanceof HttpException) {
-      const status = exception.getStatus();
-      const given = exception.getResponse();
-      // 5xx は、本体に何を載せて投げても internal_error にし、想定外の失敗としてログに残す。
-      if (status >= 500) {
-        this.logger.error(exception.message, exception.stack);
-        response.status(status).json(errorBodyForStatus(status));
-        return;
-      }
-      // 404 は、投げた側が何を載せても「見つかりません」にする（機能一覧 1.4。本体の文言で存在を認めない）。
-      const body = status !== 404 && isErrorResponse(given) ? given : errorBodyForStatus(status);
-      if (status === HttpStatus.TOO_MANY_REQUESTS) {
-        const request = host.switchToHttp().getRequest<Request>();
-        this.logger.warn({
-          event: 'rate_limit_exceeded',
-          limit: exception instanceof RetryAfterException ? 'account' : 'ip',
-          ip: request.ip,
-          path: request.originalUrl,
-        });
-      }
-      if (exception instanceof RetryAfterException) {
-        response.setHeader('Retry-After', String(exception.retryAfterSeconds));
-      }
-      if (exception instanceof BearerUnauthorizedException) {
-        response.setHeader('WWW-Authenticate', exception.challenge);
-      }
+    const { status, body } = errorResponseOf(exception);
+    if (status >= 500) {
+      const error = exception instanceof Error ? exception : new Error(String(exception));
+      this.logger.error(error.message, error.stack);
       response.status(status).json(body);
       return;
     }
-
-    const error = exception instanceof Error ? exception : new Error(String(exception));
-    this.logger.error(error.message, error.stack);
-    response.status(HttpStatus.INTERNAL_SERVER_ERROR).json(INTERNAL);
+    if (status === HttpStatus.TOO_MANY_REQUESTS) {
+      const request = host.switchToHttp().getRequest<Request>();
+      this.logger.warn({
+        event: 'rate_limit_exceeded',
+        limit: exception instanceof RetryAfterException ? 'account' : 'ip',
+        ip: request.ip,
+        path: request.originalUrl,
+      });
+    }
+    if (exception instanceof RetryAfterException) {
+      response.setHeader('Retry-After', String(exception.retryAfterSeconds));
+    }
+    if (exception instanceof BearerUnauthorizedException) {
+      response.setHeader('WWW-Authenticate', exception.challenge);
+    }
+    response.status(status).json(body);
   }
 }

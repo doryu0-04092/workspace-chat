@@ -35,6 +35,8 @@
  * 要求とその応答（acknowledgement）・`@here` の受け取りの返事は、サーバーが自発的に配るイベントではない。**足すときは、この2つとは別の定義として置く。**
  */
 
+import type { components } from './api.gen';
+
 /** ハンドシェイクの `path`（上の「踏むと壊れる」）。サーバーとクライアントはこれを読む。 */
 export const REALTIME_PATH = '/api/socket.io/';
 
@@ -84,3 +86,29 @@ export type InvitationNewPayload = {
   };
   readonly sentAt: string;
 };
+
+/**
+ * クライアントからサーバーへの要求の名前（機能一覧 9.2「部屋（Socket.IO の room）」）。**配信の対象イベントではない**ため、
+ * 上の `REALTIME_EVENT_KINDS` / `REALTIME_EVENT_NAMES` には入れない。
+ * - `channelEnter`: チャンネルを開いたときの入室要求。サーバーが参加者であることを確かめてから、その接続をチャンネルの部屋に入れる
+ * - `channelExit`: チャンネルを閉じたときの退室要求
+ */
+export const REALTIME_REQUESTS = {
+  channelEnter: 'channel:enter',
+  channelExit: 'channel:exit',
+} as const;
+
+/** 入室要求・退室要求の本体。 */
+export type ChannelRoomRequest = { readonly channelId: string };
+
+/**
+ * 入室要求・退室要求の acknowledgement。断るときは HTTP と同じ状態コードとエラーの本体を返す
+ * （コードは参加者一覧と同じ2段階。入室要求が上限を超えたら 429。本体は REST の ErrorResponse と同じ形。機能一覧 9.2）。
+ */
+export type ChannelRoomAck =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly status: number;
+      readonly error: components['schemas']['ErrorResponse'];
+    };
