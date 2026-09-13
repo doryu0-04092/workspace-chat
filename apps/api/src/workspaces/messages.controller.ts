@@ -21,13 +21,13 @@ import {
   type PostMessageRequest,
 } from './messages.service';
 
-/** 投稿の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1）。 */
+/** 投稿・編集・削除の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1・4.2）。 */
 export const MESSAGE_POST_LIMIT = { limit: 60, ttl: 60 * 1000 } as const;
 
 /**
- * チャンネルのメッセージの投稿と一覧（F-11・F-12。機能一覧 4.1）。アクセストークンを求める（AccessTokenGuard の既定）。
+ * チャンネルのメッセージの投稿・一覧・編集・削除（F-11・F-12・F-13。機能一覧 4.1・4.2）。アクセストークンを求める（AccessTokenGuard の既定）。
  *
- * **入力の形（本文の長さと空白だけか・`before` の形・`limit` の範囲）はここでは確かめない**（openapi-validation.ts が仕様で確かめる）。
+ * **入力の形（本文の長さと空白だけか・`before` と `messageId` の形・`limit` の範囲）はここでは確かめない**（openapi-validation.ts が仕様で確かめる）。
  */
 @Controller('workspaces/:id/channels/:channelId/messages')
 export class MessagesController {

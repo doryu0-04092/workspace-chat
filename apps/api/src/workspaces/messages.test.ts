@@ -28,7 +28,7 @@ const TOO_MANY_REQUESTS = {
 const MISSING_ID = '00000000-0000-7000-8000-000000000000';
 const LAST_ID = 'ffffffff-ffff-7fff-bfff-ffffffffffff';
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-/** 投稿の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1）。 */
+/** 投稿・編集・削除の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1・4.2）。 */
 const POST_LIMIT = 60;
 
 let sequence = 0;
@@ -40,10 +40,10 @@ function nextIp(): string {
 
 type LoggedIn = { authorization: string; token: string; id: string; loginId: string };
 
-// 機能一覧 4.1（F-11・F-12）: メッセージの投稿と一覧、5.2 の message:new。#371。
+// 機能一覧 4.1・4.2（F-11・F-12・F-13）: メッセージの投稿・一覧・編集・削除、5.2 の message:new / message:updated / message:deleted。#371。
 // CLAUDE.md「必ずテストを書く箇所」: WebSocket が非参加者にイベントを配信しないこと／
-// オーナーが、参加していないプライベートチャンネルのメッセージを取得できないこと。
-describe('メッセージの投稿と一覧（F-11・F-12）', () => {
+// オーナーが、参加していないプライベートチャンネルのメッセージを取得できないこと／自分以外のメッセージを編集・削除できないこと。
+describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-13）', () => {
   let postgres: StartedPostgreSqlContainer;
   let valkey: StartedTestContainer;
   let app: INestApplication;

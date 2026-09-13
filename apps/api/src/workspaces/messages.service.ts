@@ -78,12 +78,12 @@ async function assertAuthoredMessage(
 }
 
 /**
- * チャンネルのメッセージの投稿と一覧（F-11・F-12。機能一覧 4.1）。
+ * チャンネルのメッセージの投稿・一覧・編集・削除（F-11・F-12・F-13。機能一覧 4.1・4.2）。
  *
  * - **読めるのも書けるのも参加者だけ**。所属していなければ 404（`membershipOf`）、所属していれば 2段階（`assertChannelParticipant`）。
  *   **オーナーの例外は及ばない**
- * - **投稿はチャンネルの行を掴んでからアーカイブ済みかを読む**（`lockedChannelFor`。機能一覧 3.2）。アーカイブ済みなら 409 `channel_archived`
- * - **`message:new` は確定の後にチャンネルの部屋へ送る**（確定しなかった投稿を配らない。機能一覧 5.2）
+ * - **投稿・編集・削除はチャンネルの行を掴んでからアーカイブ済みかを読む**（`lockedChannelFor`。機能一覧 3.2）。アーカイブ済みなら 409 `channel_archived`
+ * - **`message:new` / `message:updated` / `message:deleted` は確定の後にチャンネルの部屋へ送る**（確定しなかった書き込みを配らない。機能一覧 5.2）
  * - 一覧は id の新しい順。`before` より古いものを `limit + 1` 件引き、続きの有無を決める（`OFFSET` を使わない）
  */
 @Injectable()
