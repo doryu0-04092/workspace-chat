@@ -1,12 +1,15 @@
+import { gfmAutolinkLiteralFromMarkdown } from 'mdast-util-gfm-autolink-literal';
 import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough';
+import { gfmAutolinkLiteral } from 'micromark-extension-gfm-autolink-literal';
 import { gfmStrikethrough } from 'micromark-extension-gfm-strikethrough';
 import Markdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkBreaks from 'remark-breaks';
 
 /**
- * 構文解析の段で読ませない CommonMark の構文（micromark の構文の名前）。**機能一覧 4.3 の記法に含まれないブロックと、生の HTML と定義**。
+ * 構文解析の段で読ませない構文（micromark の構文の名前）。**機能一覧 4.3 の記法に含まれないブロックと、生の HTML と定義と、メールアドレスの自動リンク**。
  * 読ませなければ、書いた文字はふつうの段落の文字として残る——改行も、引用・箇条書きの中の字下げの扱いも、解析器がそのまま受け持つ。
+ * 自動リンクの承認の範囲は URL であり、メールアドレスは含まない（提案・承認済・2026-09-13・依頼側。#385）。
  */
 const DISABLED_CONSTRUCTS = [
   'headingAtx',
@@ -15,7 +18,15 @@ const DISABLED_CONSTRUCTS = [
   'htmlFlow',
   'htmlText',
   'definition',
+  'emailAutolink',
 ];
+
+/**
+ * URL の自動リンクの、構文木への変換（`www.`・`http://`・`https://` の構文の印をリンクの節にする）。
+ * **踏むと壊れる: `transforms` を外したまま使う。** 同梱の `transforms` は、構文の印によらず本文の文字から
+ * URL とメールアドレスを正規表現で探してリンクにするため、上でメールアドレスの構文を読ませなくても、メールアドレスがリンクになる。
+ */
+const urlAutolinkFromMarkdown = { ...gfmAutolinkLiteralFromMarkdown(), transforms: [] };
 
 /**
  * 記法として解釈する mdast の節の種類（機能一覧 4.3 の太字・斜体・取り消し線・リンク・引用・箇条書き・インラインコード・コードブロックと、
@@ -62,17 +73,20 @@ type MarkdownNode = {
 };
 
 /**
- * 構文解析を F-14 の記法に絞る。GFM のうち取り消し線だけを積み（表・タスクリスト・脚注は読ませない）、
+ * 構文解析を F-14 の記法に絞る。GFM のうち取り消し線と URL の自動リンクだけを積み（表・タスクリスト・脚注は読ませない）、
  * `DISABLED_CONSTRUCTS` を読ませない。remark-gfm と同じく、構文の拡張を processor の data に積む。
  */
 function f14Syntax(this: unknown) {
   const data = (
     this as { data(): { micromarkExtensions?: unknown[]; fromMarkdownExtensions?: unknown[] } }
   ).data();
-  (data.micromarkExtensions ??= []).push(gfmStrikethrough(), {
+  (data.micromarkExtensions ??= []).push(gfmStrikethrough(), gfmAutolinkLiteral(), {
     disable: { null: DISABLED_CONSTRUCTS },
   });
-  (data.fromMarkdownExtensions ??= []).push(gfmStrikethroughFromMarkdown());
+  (data.fromMarkdownExtensions ??= []).push(
+    gfmStrikethroughFromMarkdown(),
+    urlAutolinkFromMarkdown,
+  );
 }
 
 /** 記法として解釈しない節を、書いた元の文字（本文のうち、その節の範囲）の `text` に置き換える。 */

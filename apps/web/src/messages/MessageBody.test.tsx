@@ -24,7 +24,11 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       '<b onmouseover="alert(1)">太字</b>',
     ])('生の HTML は要素にならず、文字のまま表示する（%s）', (body) => {
       const container = renderBody(body);
-      expect(container.querySelector('script, img, iframe, a, b')).toBeNull();
+      expect(container.querySelector('script, img, iframe, b')).toBeNull();
+      // 文字のまま出した HTML の中の URL は自動リンクになりうる（#385）。そのリンクも http / https だけである
+      for (const link of container.querySelectorAll('a')) {
+        expect(link.getAttribute('href') ?? '').toMatch(/^https?:\/\//);
+      }
       expect(container.textContent).toContain(body);
     });
 
@@ -83,10 +87,50 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(paragraph?.textContent).toContain('二行目');
     });
 
-    it('URL をそのまま書いても、リンクにせず文字のまま残す（GFM の自動リンクは F-14 の記法に含まない）', () => {
-      const container = renderBody('https://example.com/x を見て');
+    // 自動リンク（提案・承認済・2026-09-13・依頼側。#385）。承認の範囲は URL であり、メールアドレスは含まない。
+    it.each([
+      ['https', 'https://example.com/x を見て', 'https://example.com/x', 'https://example.com/x'],
+      [
+        'http',
+        'http://example.com/a?b=1 です',
+        'http://example.com/a?b=1',
+        'http://example.com/a?b=1',
+      ],
+      ['www. で始まる', 'www.example.com を見て', 'http://www.example.com', 'www.example.com'],
+    ])('URL をそのまま書くと、その URL へのリンクになる（%s）', (_name, body, href, text) => {
+      const container = renderBody(body);
+      const links = container.querySelectorAll('a');
+      expect(links).toHaveLength(1);
+      expect(links[0]?.getAttribute('href')).toBe(href);
+      expect(links[0]?.textContent).toBe(text);
+      expect(container.textContent).toBe(body);
+    });
+
+    it('メールアドレスはリンクにせず、文字のまま残す（承認の範囲は URL）', () => {
+      const container = renderBody('alice@example.com に連絡する');
       expect(container.querySelector('a')).toBeNull();
-      expect(container.textContent).toContain('https://example.com/x を見て');
+      expect(container.textContent).toBe('alice@example.com に連絡する');
+    });
+
+    it.each([
+      ['javascript', 'javascript:alert(1) を押す'],
+      ['data', 'data:text/html;base64,PHNjcmlwdD4= を開く'],
+      ['vbscript', 'vbscript:msgbox(1) を押す'],
+    ])('危険なスキームは、そのまま書いてもリンクにならない（%s）', (_name, body) => {
+      const container = renderBody(body);
+      expect(container.querySelector('a')).toBeNull();
+      expect(container.textContent).toBe(body);
+    });
+
+    it('コードの中の URL はリンクにせず、記法のリンクの中の URL を重ねてリンクにしない', () => {
+      const inCode = renderBody('`https://example.com/code`');
+      expect(inCode.querySelector('a')).toBeNull();
+      expect(inCode.querySelector('code')?.textContent).toBe('https://example.com/code');
+
+      const inLink = renderBody('[https://example.com/a](https://example.com/b)');
+      const links = inLink.querySelectorAll('a');
+      expect(links).toHaveLength(1);
+      expect(links[0]?.getAttribute('href')).toBe('https://example.com/b');
     });
 
     it('リンクは http / https の URL を href に持つ', () => {
@@ -117,12 +161,19 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
         'img',
         '[logo]: https://example.com/logo.png',
       ],
-      ['参照形式のリンク', '[例][ref]\n\n[ref]: https://example.com/', 'a', '[例][ref]'],
       ['脚注', '本文[^1]\n\n[^1]: 注', 'sup, section', '[^1]: 注'],
     ])('%s', (_name, body, selector, text) => {
       const container = renderBody(body);
       expect(container.querySelector(selector)).toBeNull();
       expect(container.textContent).toContain(text);
+    });
+
+    it('参照形式のリンク（参照の側はリンクにしない。定義の行の URL は自動リンクになりうる。#385）', () => {
+      const container = renderBody('[例][ref]\n\n[ref]: https://example.com/');
+      const texts = [...container.querySelectorAll('a')].map((link) => link.textContent);
+      expect(texts).not.toContain('例');
+      expect(container.textContent).toContain('[例][ref]');
+      expect(container.textContent).toContain('[ref]: https://example.com/');
     });
 
     it.each([
