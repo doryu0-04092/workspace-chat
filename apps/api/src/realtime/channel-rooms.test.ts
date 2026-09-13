@@ -11,6 +11,7 @@ import { createApp } from '../app-setup';
 import { hashSecret } from '../auth/secret-hash';
 import { PrismaService } from '../prisma.service';
 import { stubApiEnv } from '../testing/api-env';
+import { CapturingLogger } from '../testing/capturing-logger';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
 import { connectRealtime, nextEvent } from '../testing/realtime-client';
 import { startValkey } from '../testing/valkey';
@@ -20,6 +21,12 @@ type Workspace = paths['/workspaces']['post']['responses'][201]['content']['appl
 
 const NOT_FOUND = { code: 'not_found', message: '見つかりません' };
 const MISSING_ID = '00000000-0000-7000-8000-000000000000';
+const TOO_MANY_REQUESTS = {
+  code: 'too_many_requests',
+  message: '要求が多すぎます。しばらく待ってからやり直してください',
+};
+/** 入室要求の上限（利用者単位で1分に60回。決定・2026-09-13・依頼側）。 */
+const ENTER_LIMIT = 60;
 
 let sequence = 0;
 let ipSequence = 0;
@@ -42,6 +49,7 @@ describe('チャンネルの部屋への入室・退室と、参加資格を失�
   let secondBase: string;
   let prisma: PrismaService;
   const opened: Socket[] = [];
+  const logger = new CapturingLogger();
 
   async function listen(app: INestApplication): Promise<string> {
     await app.listen(0, '127.0.0.1');
@@ -181,8 +189,8 @@ describe('チャンネルの部屋への入室・退室と、参加資格を失�
       REDIS_URL: started.url,
       TRUST_PROXY_HOPS: '1',
     });
-    first = await createApp({ logger: false });
-    second = await createApp({ logger: false });
+    first = await createApp({ logger });
+    second = await createApp({ logger });
     firstBase = await listen(first);
     secondBase = await listen(second);
     prisma = first.get(PrismaService);
@@ -304,6 +312,73 @@ describe('チャンネルの部屋への入室・退室と、参加資格を失�
           error: { code: 'validation_failed' },
         });
       }
+    });
+  });
+
+  // 機能一覧 9.2「入室要求の上限」（決定・2026-09-13・依頼側。サーバーの負荷の歯止め）。
+  describe('入室要求の上限', () => {
+    it('同じ利用者の入室要求は、接続とタスクをまたいで数え、形の誤った要求も1回として数え、上限を超えたら 429 で断って部屋に入れない', async () => {
+      const owner = await login();
+      const alice = await login();
+      const workspace = await workspaceWith(owner, alice);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice]);
+      const lateId = await channelRow(workspace.id, 'PUBLIC', [alice]);
+      const onFirst = await open(firstBase, alice);
+      const onSecond = await open(secondBase, alice);
+
+      for (let i = 0; i < ENTER_LIMIT / 2; i += 1) {
+        expect(await enter(onFirst, channelId)).toEqual({ ok: true });
+        expect(await enter(onSecond, 'not-a-uuid')).toMatchObject({ ok: false, status: 400 });
+      }
+
+      expect(await enter(onFirst, lateId)).toEqual({
+        ok: false,
+        status: 429,
+        error: TOO_MANY_REQUESTS,
+      });
+      expect(await reached([onFirst], lateId)).toEqual([false]);
+    });
+
+    it('上限を超えた利用者がいても、別の利用者の入室は断らない', async () => {
+      const owner = await login();
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(owner, alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [bob]);
+      const aliceSocket = await open(firstBase, alice);
+      const bobSocket = await open(firstBase, bob);
+      for (let i = 0; i < ENTER_LIMIT; i += 1) await enter(aliceSocket, 'not-a-uuid');
+      expect(await enter(aliceSocket, 'not-a-uuid')).toMatchObject({ ok: false, status: 429 });
+
+      expect(await enter(bobSocket, channelId)).toEqual({ ok: true });
+    });
+
+    it('退室要求は数えない（上限を超える回数の退室の後も、入室を断らない）', async () => {
+      const owner = await login();
+      const alice = await login();
+      const workspace = await workspaceWith(owner, alice);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice]);
+      const socket = await open(firstBase, alice);
+
+      for (let i = 0; i <= ENTER_LIMIT; i += 1) {
+        expect(await exit(socket, channelId)).toEqual({ ok: true });
+      }
+
+      expect(await enter(socket, channelId)).toEqual({ ok: true });
+    });
+
+    it('上限の超過を、制限の種類（user）・利用者の ID・要求の名前とともに記録する', async () => {
+      const alice = await login();
+      const socket = await open(secondBase, alice);
+      const before = logger.lines.length;
+
+      for (let i = 0; i <= ENTER_LIMIT; i += 1) await enter(socket, 'not-a-uuid');
+
+      const line = logger.lines.slice(before).find((l) => l.includes('rate_limit_exceeded'));
+      expect(line).toBeDefined();
+      expect(line).toContain('"limit":"user"');
+      expect(line).toContain(alice.id);
+      expect(line).toContain(REALTIME_REQUESTS.channelEnter);
     });
   });
 

@@ -121,7 +121,7 @@ describe('例外フィルタの BearerUnauthorizedException', () => {
   );
 });
 
-// レート制限の超過は、投げる経路（発信元単位のガードの 429・アカウント単位の RetryAfterException）によらず、
+// HTTP のレート制限の超過は、投げる経路（発信元単位のガードの 429・アカウント単位の RetryAfterException）によらず、
 // フィルタの1箇所で rate_limit_exceeded として記録する（#270 第3巡）。
 describe('例外フィルタの 429 の記録', () => {
   afterEach(() => {

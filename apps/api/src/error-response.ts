@@ -113,7 +113,8 @@ export class BearerUnauthorizedException extends UnauthorizedException {
  * - 要求の検証の失敗（express-openapi-validator）→ 状態コードごとの本体。400 には落ちた箇所（`path`）と
  *   規則の説明（`message`）だけを `errors` に載せる。**送られた値は載せない**
  * - それ以外の例外の状態コードと本体は `errorResponseOf` による。5xx はログに error で出す
- * - **429 は、投げた経路（発信元単位のガード・アカウント単位の RetryAfterException）によらず、ここで `rate_limit_exceeded` として記録する**
+ * - **HTTP の 429 は、投げた経路（発信元単位のガード・アカウント単位の RetryAfterException）によらず、ここで `rate_limit_exceeded` として記録する**
+ *   （WebSocket の入室要求の 429 はこのフィルタを通らない。ChannelRoomsGateway が `limit: 'user'` で記録する）
  *   （制限の種類・発信元・パス。決定・2026-09-12・依頼側。#270・#324。1件では鳴らさない——閾値は Terraform 側。要件定義書 4.2）。
  *   **制限の種類を `limit` に載せる**（`account`: RetryAfterException、`ip`: それ以外の 429＝発信元単位のガード。#324）。
  *   ログイン・リカバリーコードの照合では2種類が同じパスで出るため、パスでは分けられない。**踏むと壊れる: 429 を投げる経路を足したら、ここで種類を分ける**
