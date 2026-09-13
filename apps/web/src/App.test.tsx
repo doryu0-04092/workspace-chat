@@ -135,6 +135,18 @@ describe('登録の画面', () => {
     return fetch;
   }
 
+  it('パスワードと表示名の入力欄は、文字数で入力を切らない（文字数はコードポイントで数えるため、長さはサーバーが判定する）', async () => {
+    fakeFetch(signedOut);
+    renderAt('/register');
+    await screen.findByRole('heading', { name: '新規登録' });
+
+    for (const label of ['パスワード', '表示名']) {
+      const input = screen.getByLabelText(label) as HTMLInputElement;
+      expect(input.maxLength).toBe(-1);
+      expect(input.minLength).toBe(-1);
+    }
+  });
+
   it('リカバリーコードを失うと復旧できないことを、登録の前に出す（機能一覧 1.1）', async () => {
     fakeFetch(signedOut);
     renderAt('/register');

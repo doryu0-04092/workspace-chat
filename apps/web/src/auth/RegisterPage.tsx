@@ -93,8 +93,6 @@ export function RegisterPage() {
             type="password"
             autoComplete="new-password"
             required
-            minLength={8}
-            maxLength={128}
             aria-describedby="register-password-hint"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
@@ -110,7 +108,6 @@ export function RegisterPage() {
             className="rounded border px-2 py-1"
             name="displayName"
             required
-            maxLength={50}
             aria-describedby="register-displayName-hint"
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
