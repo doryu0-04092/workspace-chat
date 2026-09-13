@@ -12,6 +12,7 @@ import { POSTGRES_STARTUP_TIMEOUT_MS } from '../testing/postgres';
 import { type LoggedIn, type TwoTasks, startTwoTasks } from '../testing/two-tasks';
 import { ChannelRoomsService } from '../workspaces/channel-rooms.service';
 import { PresenceRegistry } from './presence-registry';
+import { RealtimeEmitter } from './realtime.emitter';
 import { RealtimeGateway } from './realtime.gateway';
 import { RoomMembershipReconciler } from './room-membership-reconciler';
 
@@ -89,6 +90,27 @@ describe('在席（F-22）', () => {
   function sorted(ids: readonly string[]): string[] {
     return [...ids].sort();
   }
+
+  // CLAUDE.md 3「リアルタイム配信のイベント型は1箇所で定義する」。イベント名も共有の定義（RealtimeEventName）と型で結ぶため、
+  // チャンネルの部屋への送信は配信の出口（RealtimeEmitter.toChannel）を通す（#377）。
+  describe('配信の出口', () => {
+    it('在席の変化は RealtimeEmitter.toChannel を通して、そのチャンネルの部屋へ presence:changed で送る', async () => {
+      const { alice, channelId } = await channelOfThree();
+      const toChannel = vi.spyOn(t.first.get(RealtimeEmitter), 'toChannel');
+      try {
+        const aliceSocket = await t.open(t.firstBase, alice);
+        expect((await enter(aliceSocket, channelId)).ok).toBe(true);
+
+        expect(toChannel).toHaveBeenCalledWith(
+          channelId,
+          'presence:changed',
+          expect.objectContaining({ channelId, userId: alice.id, present: true }),
+        );
+      } finally {
+        toChannel.mockRestore();
+      }
+    });
+  });
 
   describe('入室の acknowledgement', () => {
     it('その時点で部屋に入っている参加者（他のタスクに繋いだ人と自分を含む）が返る', async () => {

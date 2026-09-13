@@ -28,7 +28,7 @@ const TOO_MANY_REQUESTS = {
 const MISSING_ID = '00000000-0000-7000-8000-000000000000';
 const LAST_ID = 'ffffffff-ffff-7fff-bfff-ffffffffffff';
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-/** 投稿・編集・削除の上限（ルートごとに、利用者単位で1分に60回。枠は別。実装時に決めた値。機能一覧 4.1・4.2）。 */
+/** 投稿・編集・削除の上限（利用者単位で1分に60回。3つのルートで1つの枠。機能一覧 4.1・4.2）。 */
 const POST_LIMIT = 60;
 
 let sequence = 0;
@@ -908,21 +908,30 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       expect(await deleted).toBeUndefined();
     });
 
-    it('編集と削除も、ルートごとに同じ利用者で1分に60回を超えたら 429 で断る（枠はルートごとに別）', async () => {
-      const { alice, workspace, channelId, message } = await postedByAlice();
-
-      for (let i = 0; i < POST_LIMIT; i += 1) {
-        expect((await edit(alice, workspace.id, channelId, message.id, `直し${i}`)).status).toBe(
+    // #384: 投稿・編集・削除は3つのルートで1つの枠を分け合う（提案・承認済・2026-09-13・依頼側）。
+    it('投稿・編集・削除は、同じ利用者で合わせて1分に60回を超えたら、どれも 429 で断る。別の利用者は断らない', async () => {
+      // 最初の投稿（postedByAlice）も同じ枠を1回使う。
+      const { alice, bob, workspace, channelId, message } = await postedByAlice();
+      let used = 1;
+      for (; used < 20; used += 1) {
+        expect((await post(alice, workspace.id, channelId, `投稿${used}`)).status).toBe(201);
+      }
+      for (; used < 40; used += 1) {
+        expect((await edit(alice, workspace.id, channelId, message.id, `直し${used}`)).status).toBe(
           200,
         );
       }
-      expect((await edit(alice, workspace.id, channelId, message.id, '多すぎる')).status).toBe(429);
-
-      for (let i = 0; i < POST_LIMIT; i += 1) {
+      for (; used < POST_LIMIT; used += 1) {
         // 無いメッセージの削除も 404 として数える（ガードはサービスより前に数える）。
         expect((await remove(alice, workspace.id, channelId, MISSING_ID)).status).toBe(404);
       }
+
+      expect((await post(alice, workspace.id, channelId, '多すぎる')).status).toBe(429);
+      expect((await edit(alice, workspace.id, channelId, message.id, '多すぎる')).status).toBe(429);
       expect((await remove(alice, workspace.id, channelId, message.id)).status).toBe(429);
+
+      // 利用者で数えるため、別の利用者は断らない。
+      expect((await post(bob, workspace.id, channelId, '別の人')).status).toBe(201);
     });
   });
 
