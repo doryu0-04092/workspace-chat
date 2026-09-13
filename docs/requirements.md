@@ -416,7 +416,7 @@
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
 | **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 | **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
-| **ElastiCache Valkey** | **手順を持たない**（この節の「代償」）。**作り直して接続先が変わったら、`REDIS_URL` のパラメータの `value_wo_version` を同じ `apply` で上げる**（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
+| **ElastiCache Valkey** | **手順を持たない**（この節の「代償」）。**作り直して接続先が変わったら、`REDIS_URL` のパラメータの `value_wo_version` を同じ `apply` で上げ、その後に ECS のタスクを入れ替える**（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 
 **ただしデータとしては閉じていない。** RDS のメッセージレコードと S3 の添付ファイルは互いを
 参照する関係にあり、**RDS だけを過去の時点へ復元すると、復元時点より後に投稿された添付ファイルは
@@ -436,7 +436,7 @@ S3 に残ったまま、どのメッセージからも参照されなくなる**
    最後のスナップショット以降のデータを余分に失う**
 2. 決めた時点へ復元し、新しいインスタンスを作る
 3. 接続先（エンドポイント）を差し替える。**復元と差し替えは Terraform 側で行い、state を
-   復元後のインスタンスに一致させる**（下記）。**同じ `apply` で、`DATABASE_URL` のパラメータの `value_wo_version` と RDS の `password_wo_version` を上げる**——接続先とパスワードは write-only 引数で渡しており、上げないとパラメータが古い値のまま残る（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）
+   復元後のインスタンスに一致させる**（下記）。**同じ `apply` で、`DATABASE_URL` のパラメータの `value_wo_version` と RDS の `password_wo_version` を上げる**——接続先とパスワードは write-only 引数で渡しており、上げないとパラメータが古い値のまま残る（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。**復元で作るインスタンスにも、同じ `apply` の乱数がマスターパスワードとして当たる**（AWS プロバイダー 5.88.0 の `internal/service/rds/instance.go` は、`RestoreDBInstanceFromDBSnapshot` と `RestoreDBInstanceToPointInTime` のどちらの経路でも、作った後の変更に `MasterUserPassword = aws.String(passwordWO)` を入れる）
 4. ECS のタスクを再起動し、新しい接続先を読ませる
 5. **復元後のインスタンスへ直接問い合わせ、復元した時点のデータが入っていることを確かめる。**
    **あわせて、アプリケーションが復元後のインスタンスを読んでいることを確かめる**——
