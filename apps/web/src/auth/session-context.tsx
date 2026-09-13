@@ -1,4 +1,5 @@
-import { createContext, type ReactNode, useContext, useSyncExternalStore } from 'react';
+import { createContext, type ReactNode, useContext } from 'react';
+import { useStore } from 'zustand';
 import type { SessionState, SessionStore } from './session-store';
 
 const SessionContext = createContext<SessionStore | null>(null);
@@ -14,6 +15,5 @@ export function useSessionStore(): SessionStore {
 }
 
 export function useSession(): SessionState {
-  const store = useSessionStore();
-  return useSyncExternalStore(store.subscribe, store.getState);
+  return useStore(useSessionStore().state);
 }
