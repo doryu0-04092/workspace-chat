@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { RealtimeEventName } from '@workspace-chat/shared';
-import { RealtimeGateway, userRoom } from './realtime.gateway';
+import { RealtimeGateway, channelRoom, userRoom } from './realtime.gateway';
 
 /**
  * 配信の出口。**複数の部屋へは1回で送る**——Socket.IO は複数の部屋へ1回で送ると和集合をとり、両方に入っている接続にも1回だけ届ける
@@ -16,5 +16,10 @@ export class RealtimeEmitter {
     // **宛先が空なら送らない。** Socket.IO は部屋を1つも指定しない配信を、名前空間の全接続へ送る。
     if (userIds.length === 0) return;
     this.gateway.server.to(userIds.map(userRoom)).emit(event, payload);
+  }
+
+  /** チャンネルの部屋へ送る（チャンネル本体のイベント。機能一覧 5.2）。受け取れるのは入室の関門を通って部屋に入っている接続だけである。 */
+  toChannel(channelId: string, event: RealtimeEventName, payload: unknown): void {
+    this.gateway.server.to(channelRoom(channelId)).emit(event, payload);
   }
 }

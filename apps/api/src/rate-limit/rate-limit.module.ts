@@ -13,6 +13,7 @@ import { API_CONFIG, type ApiConfig } from '../config/api-config';
 import { errorBodyForStatus } from '../error-response';
 import { MemoryRateLimitStorage } from './memory-rate-limit-storage';
 import { ResilientRateLimitStorage } from './resilient-rate-limit-storage';
+import { UserRateLimitGuard } from './user-rate-limit.guard';
 
 /** Valkey（ElastiCache for Valkey / ローカルは compose の redis）への接続を注入するトークン。 */
 export const VALKEY_CLIENT = Symbol('VALKEY_CLIENT');
@@ -109,6 +110,7 @@ export class RateLimitGuard extends ThrottlerGuard {
  * レート制限（要件定義書 4.3・機能一覧 1.1）。**ガードは全体には掛けない。** 使う側が `@UseGuards(RateLimitGuard)` と
  * `@Throttle({ default: … })` で、ルートごとに上限を決める（登録・ログイン・照合で数値が違うため）。
  * 発信元は `req.ip`（Express の `trust proxy`。app-setup.ts が TRUST_PROXY_HOPS から設定する）。
+ * **利用者で数えるルート（メッセージの投稿）は `UserRateLimitGuard` を使う**（user-rate-limit.guard.ts）。
  * **ガードを通らない WebSocket の入室要求は、ThrottlerModule が出す保存先（`ThrottlerStorage`）で直接数える**（ChannelRoomsGateway）。
  */
 @Module({
@@ -131,7 +133,7 @@ export class RateLimitGuard extends ThrottlerGuard {
       }),
     }),
   ],
-  providers: [RateLimitGuard],
-  exports: [RateLimitGuard, ThrottlerModule],
+  providers: [RateLimitGuard, UserRateLimitGuard],
+  exports: [RateLimitGuard, UserRateLimitGuard, ThrottlerModule],
 })
 export class RateLimitModule {}
