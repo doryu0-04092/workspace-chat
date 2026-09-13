@@ -188,7 +188,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 
 | 項目 | 採用 | 備考 |
 |---|---|---|
-| IaC | **Terraform** 1.x | 既存プロジェクトで実績あり |
+| IaC | **Terraform** **1.11 以上** | 既存プロジェクトで実績あり。**1.11 以上とするのは、state のロックに S3 バックエンドの `use_lockfile` を使うためである**（HashiCorp の S3 バックエンドの文書: 1.9 の版には `use_lockfile` が無く、1.10 は「(Experimental, Optional)」、1.11 は「(Optional)」。下の「本番の HTTPS・秘密情報・state の置き場」）。これより古い版では `terraform init` がバックエンドの設定を受け付けない |
 | フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**閲覧者との HTTPS を終端する**（ブラウザ通知に必要な HTTPS。[要件定義書](requirements.md) 5。下の「本番の HTTPS・秘密情報・state の置き場」） |
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。**プライベートサブネットに置き、CloudFront の VPC オリジンとして HTTP で受ける**（TLS は終端せず、タスクへも HTTP で渡す。**閲覧者との HTTPS は CloudFront が終端する**。下の「本番の HTTPS・秘密情報・state の置き場」）。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト、または VPC オリジンを作ると AWS が作る `CloudFront-VPCOrigins-Service-SG`）。**タスクのセキュリティグループも、ALB のセキュリティグループからだけ到達できるようにする**（タスクは公開 IP を持つ。下の「ECS のタスクの置き場」の行）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB やタスクを直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
@@ -203,7 +203,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 項目 | 決定 |
 |---|---|
 | HTTPS とドメイン | **独自ドメインを持たない。** 閲覧者から CloudFront までは、CloudFront の既定のドメイン（`d111111abcdef8.cloudfront.net` の形）で HTTPS を必須にする（ビヘイビアの Viewer Protocol Policy。AWS 公式「In that configuration, CloudFront provides the SSL/TLS certificate.」）。**CloudFront から ALB までは VPC オリジンで HTTP にする**（ALB はプライベートサブネット。オリジンのプロトコルは `http-only`）。**ALB からタスクまでも HTTP にする**（ALB は TLS を終端せず、ターゲットグループのプロトコルも HTTP）。**VPC にはインターネットゲートウェイが要る**（AWS 公式「The internet gateway is required to denote that the VPC can receive traffic from the internet. The internet gateway is not used for routing traffic to origins inside the subnet」） |
-| 秘密情報（DB のパスワード・トークンの署名鍵など） | **Systems Manager Parameter Store の暗号化パラメータ（標準の区分）**。ECS のコンテナ定義の `secrets` で環境変数として渡す。Secrets Manager の自動ローテーション・アカウント間の共有は、デモ後に destroy する運用では使わない |
+| 秘密情報 | **Systems Manager Parameter Store の暗号化パラメータ（標準の区分）**。ECS のコンテナ定義の `secrets` で環境変数として渡す。**対象は、api が `secret: true` と宣言した設定のすべて**（`apps/api/src/config/api-config.ts` の `API_SETTINGS` が正本。いまは `DATABASE_URL`・`REDIS_URL`・`JWT_SECRET`）。**パスワード単体ではなく、環境変数の値そのもの（接続 URL 全体など）をパラメータに入れる**——`secrets` はパラメータの値をそのまま環境変数の値にし、組み立てる場所が無い。`secret: true` の設定をタスク定義の `environment` に書かない（平文でタスク定義と Terraform の state に残る）。Secrets Manager の自動ローテーション・アカウント間の共有は、デモ後に destroy する運用では使わない |
 | Terraform の state | **S3 バケット（バージョニングあり）＋ `use_lockfile`**。バケットは本体の構成の外で先に作る（`dynamodb_table` は非推奨） |
 | ECS のタスクの置き場 | **パブリックサブネットに公開 IP 付きで置き、受信は ALB のセキュリティグループからだけにする**（NAT ゲートウェイ・インターフェースエンドポイントを置かない）。Fargate がイメージを取るには経路が要り（AWS 公式「When using a public subnet, you can assign a public IP address to the task ENI.」）、内部の ALB はタスクを ENI のプライベート IP で登録する（AWS 公式「When the target type is ip, you can specify IP addresses from … The subnets of the VPC for the target group」「You can't specify publicly routable IP addresses.」）。RDS と ElastiCache はプライベートサブネットに置く |
 
