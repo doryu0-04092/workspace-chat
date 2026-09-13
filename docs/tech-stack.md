@@ -188,7 +188,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 
 | 項目 | 採用 | 備考 |
 |---|---|---|
-| IaC | **Terraform** **1.11 以上** | 既存プロジェクトで実績あり。**1.11 以上とするのは、state のロックに S3 バックエンドの `use_lockfile` を使うためである**（HashiCorp の S3 バックエンドの文書: 1.9 の版には `use_lockfile` が無く、1.10 は「(Experimental, Optional)」、1.11 は「(Optional)」。下の「本番の HTTPS・秘密情報・state の置き場」） |
+| IaC | **Terraform** **1.11 以上** | 既存プロジェクトで実績あり。**1.11 以上とするのは、state のロックに S3 バックエンドの `use_lockfile` を使うためである**（HashiCorp の S3 バックエンドの文書: 1.9 の版には `use_lockfile` が無く、1.10 は「(Experimental, Optional)」、1.11 は「(Optional)」。下の「本番の HTTPS・秘密情報・state の置き場」）。**秘密の値を state に残さない write-only 引数も 1.11 以上を要する**（Terraform の文書「To use write-only arguments, you must use Terraform v.1.11 or later」） |
 | フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**閲覧者との HTTPS を終端する**（ブラウザ通知に必要な HTTPS。[要件定義書](requirements.md) 5。下の「本番の HTTPS・秘密情報・state の置き場」） |
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。**プライベートサブネットに置き、CloudFront の VPC オリジンとして HTTP で受ける**（TLS は終端せず、タスクへも HTTP で渡す。**閲覧者との HTTPS は CloudFront が終端する**。下の「本番の HTTPS・秘密情報・state の置き場」）。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト、または VPC オリジンを作ると AWS が作る `CloudFront-VPCOrigins-Service-SG`）。**タスクのセキュリティグループも、ALB のセキュリティグループからだけ到達できるようにする**（タスクは公開 IP を持つ。下の「ECS のタスクの置き場」の行）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB やタスクを直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
@@ -203,7 +203,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 項目 | 決定 |
 |---|---|
 | HTTPS とドメイン | **独自ドメインを持たない。** 閲覧者から CloudFront までは、CloudFront の既定のドメイン（`d111111abcdef8.cloudfront.net` の形）で HTTPS を必須にする（ビヘイビアの Viewer Protocol Policy。AWS 公式「In that configuration, CloudFront provides the SSL/TLS certificate.」）。**CloudFront から ALB までは VPC オリジンで HTTP にする**（ALB はプライベートサブネット。オリジンのプロトコルは `http-only`）。**ALB からタスクまでも HTTP にする**（ALB は TLS を終端せず、ターゲットグループのプロトコルも HTTP）。**VPC にはインターネットゲートウェイが要る**（AWS 公式「The internet gateway is required to denote that the VPC can receive traffic from the internet. The internet gateway is not used for routing traffic to origins inside the subnet」） |
-| 秘密情報 | **Systems Manager Parameter Store の暗号化パラメータ（標準の区分）**。ECS のコンテナ定義の `secrets` で環境変数として渡す。**対象は、api が `secret: true` と宣言した設定のすべて**（`apps/api/src/config/api-config.ts` の `API_SETTINGS` が正本。いまは `DATABASE_URL`・`REDIS_URL`・`JWT_SECRET`）。**パスワード単体ではなく、環境変数の値そのもの（接続 URL 全体など）をパラメータに入れる**——`secrets` はパラメータの値をそのまま環境変数の値にし、組み立てる場所が無い。`secret: true` の設定をタスク定義の `environment` に書かない（平文でタスク定義と Terraform の state に残る）。Secrets Manager の自動ローテーション・アカウント間の共有は、デモ後に destroy する運用では使わない |
+| 秘密情報 | **Systems Manager Parameter Store の暗号化パラメータ（標準の区分）**。ECS のコンテナ定義の `secrets` で環境変数として渡す。**対象は、api が `secret: true` と宣言した設定のすべて**（`apps/api/src/config/api-config.ts` の `API_SETTINGS` が正本。いまは `DATABASE_URL`・`REDIS_URL`・`JWT_SECRET`）。**パスワード単体ではなく、環境変数の値そのもの（接続 URL 全体など）をパラメータに入れる**——`secrets` はパラメータの値をそのまま環境変数の値にし、組み立てる場所が無い。`secret: true` の設定をタスク定義の `environment` に書かない（平文でタスク定義と Terraform の state に残る）。**秘密の値を Terraform の state とプランに残さない**——パラメータの値は `aws_ssm_parameter` の write-only 引数 `value_wo`、RDS のマスターパスワードは `aws_db_instance` の `password_wo` で渡し、値の出どころは `ephemeral` の変数か `ephemeral` のリソースにする（Terraform の文書「Write-only arguments let you securely pass temporary values to Terraform's managed resources during an operation without persisting those values to state or plan files.」「You can also mark your sensitive data in variables as `ephemeral` to prevent Terraform from writing those variables to your state and plan files.」）。`value`・`password` の引数と、値を読むデータソース `aws_ssm_parameter` は使わない（AWS プロバイダーの文書「The unencrypted value of a SecureString will be stored in the raw state as plain-text.」）。Secrets Manager の自動ローテーション・アカウント間の共有は、デモ後に destroy する運用では使わない |
 | Terraform の state | **S3 バケット（バージョニングあり）＋ `use_lockfile`**。バケットは本体の構成の外で先に作る（`dynamodb_table` は非推奨） |
 | ECS のタスクの置き場 | **パブリックサブネットに公開 IP 付きで置き、受信は ALB のセキュリティグループからだけにする**（NAT ゲートウェイ・インターフェースエンドポイントを置かない）。Fargate がイメージを取るには経路が要り（AWS 公式「When using a public subnet, you can assign a public IP address to the task ENI.」）、内部の ALB はタスクを ENI のプライベート IP で登録する（AWS 公式「When the target type is ip, you can specify IP addresses from … The subnets of the VPC for the target group」「You can't specify publicly routable IP addresses.」）。RDS と ElastiCache はプライベートサブネットに置く |
 
@@ -214,12 +214,14 @@ ESM で出すと `apps/api` から素直に `import` できない。
 - **提出物の URL が CloudFront の既定のドメインの形になる**（[要件定義書](requirements.md) 5）
 - **既定のドメインは、他の利用者のディストリビューションと同じ `cloudfront.net` の下のホストである。** リフレッシュトークンの Cookie の `SameSite=Strict` と、`Origin` / `Sec-Fetch-Site` の検証（[要件定義書](requirements.md) 4.3 の CSRF の対処）が別のディストリビューションを別のサイトとして扱うことは、**`cloudfront.net` が Public Suffix List に載っていること**に依存する（載っている: Public Suffix List の「// Amazon CloudFront」の項に `cloudfront.net`。2026-09-13 に確かめた）。独自ドメインへ切り替えると、この依存はそのドメインの境界に移る
 - **state のバケットは `terraform destroy` の対象外として残る**（[要件定義書](requirements.md) 4.2 の「バックアップ」）
+- **秘密の値は state に無いため、`plan` は値の変更を差分として出さない。** 値を替えるときは `value_wo_version`・`password_wo_version` を上げる（Terraform の文書「Terraform does not store write-only arguments in state files, so Terraform has no way of knowing if a write-only argument value has changed.」）
 - **タスクへの受信を止めるのは、セキュリティグループの1層だけである**（AWS 公式「When you first create a security group, it has no inbound rules. Therefore, no inbound traffic is allowed until you add inbound rules to the security group.」）。規則を広げる誤りをすると、CloudFront を経ずに api へ直接届き、平文の HTTP でトークンが流れ、X-Forwarded-For を偽ってレート制限を迂回できる（上の ALB の行の `TRUST_PROXY_HOPS=2` の前提が崩れる）。**規則は Terraform だけで書き（送信元を ALB のセキュリティグループに限る）、`apply` の後に実際の規則を確かめる**。プライベートサブネットと NAT ゲートウェイの形なら、同じ誤りでも外から届かない
 - **公開 IPv4 アドレスの料金がかかる**（AWS 公式「Effective February 1, 2024 there will be a charge of $0.005 per IP per hour for all public IPv4 addresses」。タスク 2 つで月におよそ 7 ドル）
 
 **未確認**
 
 - **暗号化パラメータに使う KMS の鍵の費用**
+- **`aws_db_instance` の `password_wo` の値が、実際に state に残らないこと**（Terraform の文書は write-only 引数を state に残さないとして `password_wo` を例に挙げるが、AWS プロバイダーの文書の `password_wo` の説明には `password` と同じ「it will be stored in the state file」が残っている。`apply` の後に state を開いて確かめる）
 - **VPC オリジンを経ても、api が受け取る X-Forwarded-For が「CloudFront → ALB」の2段の形になること**（`TRUST_PROXY_HOPS=2` の前提。上の ALB の行）
 
 #### WebSocket と複数インスタンスの問題
