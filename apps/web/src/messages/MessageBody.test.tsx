@@ -168,6 +168,22 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(container.textContent).toContain(text);
     });
 
+    it('画像の中の URL はリンクにしない（画像は読んだ後に書いた文字へ替える。#385）', () => {
+      const container = renderBody('![代わり](https://example.com/a.png)');
+      expect(container.querySelector('a')).toBeNull();
+      expect(container.textContent).toContain('![代わり](https://example.com/a.png)');
+    });
+
+    it.each([
+      ['定義', '[ref]: https://example.com/def', 'https://example.com/def'],
+      ['見出し', '# https://example.com/h', 'https://example.com/h'],
+    ])('構文として読ませない%sの中の URL はリンクになる（#385）', (_name, body, href) => {
+      const links = [...renderBody(body).querySelectorAll('a')].map((link) =>
+        link.getAttribute('href'),
+      );
+      expect(links).toEqual([href]);
+    });
+
     it('参照形式のリンク（参照の側はリンクにしない。定義の行の URL は自動リンクになりうる。#385）', () => {
       const container = renderBody('[例][ref]\n\n[ref]: https://example.com/');
       const texts = [...container.querySelectorAll('a')].map((link) => link.textContent);
