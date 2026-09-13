@@ -4,7 +4,7 @@ import { authenticatedUserOf } from '../auth/access-token.guard';
 import { UserRateLimitException } from '../error-response';
 
 /**
- * 利用者単位のレート制限（メッセージの投稿。機能一覧 4.1）。数える単位は発信元（`req.ip`）ではなく、AccessTokenGuard が解決した利用者である。
+ * 利用者単位のレート制限（メッセージの投稿・編集・削除。機能一覧 4.1・4.2）。数える単位は発信元（`req.ip`）ではなく、AccessTokenGuard が解決した利用者である。
  *
  * - **AccessTokenGuard（APP_GUARD）の後に走る**——全体のガードはルートのガードより先に走るため、ここでは利用者が必ず載っている
  * - 使う側は `@UseGuards(UserRateLimitGuard)` と `@Throttle({ default: … })` で上限を決める。保存先は RateLimitGuard と同じ

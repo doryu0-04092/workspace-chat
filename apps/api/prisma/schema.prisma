@@ -539,8 +539,8 @@ model Channel {
 
   /// アーカイブした時刻（F-35）。null なら現役。
   ///
-  /// **この列を読んで、人を増やす・投稿するかを決める経路（参加・招待・投稿）は、読む前にその行を掴むこと。**
-  /// 掴まずに読むと、アーカイブの確定の直前に読んだ古い値に基づいて、アーカイブの後に参加・招待・投稿が成立する。
+  /// **この列を読んで、人を増やす・メッセージを書くかを決める経路（参加・招待・投稿・編集・削除）は、読む前にその行を掴むこと。**
+  /// 掴まずに読むと、アーカイブの確定の直前に読んだ古い値に基づいて、アーカイブの後に参加・招待・投稿・編集・削除が成立する。
   /// DB の制約はこれを止めない。実装は apps/api/src/workspaces/channel-access.ts の `lockedChannelFor`（行を強さ `share` で掴んでから読む）を使う。
   archivedAt DateTime? @db.Timestamptz(3)
 
@@ -700,6 +700,12 @@ model Message {
   body String
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  /// 最後に編集した時刻。編集していなければ null（「編集済み」の表示。機能一覧 4.2）。
+  editedAt DateTime? @db.Timestamptz(3)
+
+  /// 削除した時刻（論理削除）。**削除しても本文は残す**（要件定義書 3.4・機能一覧 4.2）。返さないのは応答と配信の側である。
+  deletedAt DateTime? @db.Timestamptz(3)
 
   channel Channel @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)

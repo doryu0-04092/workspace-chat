@@ -12,7 +12,7 @@ export type ChannelAccess = {
 
 /**
  * 要求する側から見たチャンネルを、行を共有ロックで掴んでから読む（channel-row-lock.ts の `share`）。
- * **アーカイブ済みかを読んで書くかを決める経路（参加・招待・投稿）で使う**（機能一覧 3.2）。別のワークスペースのチャンネル・無いチャンネルは 404。
+ * **アーカイブ済みかを読んで書くかを決める経路（参加・招待・投稿・編集・削除）で使う**（機能一覧 3.2）。別のワークスペースのチャンネル・無いチャンネルは 404。
  */
 export async function lockedChannelFor(
   tx: Pick<PrismaService, 'channel' | '$queryRaw'>,

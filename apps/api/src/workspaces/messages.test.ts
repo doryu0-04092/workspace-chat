@@ -28,7 +28,7 @@ const TOO_MANY_REQUESTS = {
 const MISSING_ID = '00000000-0000-7000-8000-000000000000';
 const LAST_ID = 'ffffffff-ffff-7fff-bfff-ffffffffffff';
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-/** 投稿の上限（利用者単位で1分に60回。実装時に決めた値。機能一覧 4.1）。 */
+/** 投稿・編集・削除の上限（ルートごとに、利用者単位で1分に60回。枠は別。実装時に決めた値。機能一覧 4.1・4.2）。 */
 const POST_LIMIT = 60;
 
 let sequence = 0;
@@ -40,10 +40,10 @@ function nextIp(): string {
 
 type LoggedIn = { authorization: string; token: string; id: string; loginId: string };
 
-// 機能一覧 4.1（F-11・F-12）: メッセージの投稿と一覧、5.2 の message:new。#371。
+// 機能一覧 4.1・4.2（F-11・F-12・F-13）: メッセージの投稿・一覧・編集・削除、5.2 の message:new / message:updated / message:deleted。#371。
 // CLAUDE.md「必ずテストを書く箇所」: WebSocket が非参加者にイベントを配信しないこと／
-// オーナーが、参加していないプライベートチャンネルのメッセージを取得できないこと。
-describe('メッセージの投稿と一覧（F-11・F-12）', () => {
+// オーナーが、参加していないプライベートチャンネルのメッセージを取得できないこと／自分以外のメッセージを編集・削除できないこと。
+describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-13）', () => {
   let postgres: StartedPostgreSqlContainer;
   let valkey: StartedTestContainer;
   let app: INestApplication;
@@ -247,6 +247,8 @@ describe('メッセージの投稿と一覧（F-11・F-12）', () => {
         author: { id: alice.id, userId: alice.loginId, displayName: expect.any(String) },
         body: 'こんにちは',
         createdAt: expect.any(String),
+        editedAt: null,
+        deleted: false,
       });
       expect(Number.isNaN(Date.parse(message.createdAt))).toBe(false);
       expect(await prisma.message.count({ where: { channelId } })).toBe(1);
@@ -585,6 +587,342 @@ describe('メッセージの投稿と一覧（F-11・F-12）', () => {
       expect((await post(bob, workspace.id, archivedId, '非参加者')).status).toBe(403);
 
       expect(await received).toBeUndefined();
+    });
+  });
+
+  // 機能一覧 4.2（F-13）: 編集と削除。CLAUDE.md「必ずテストを書く箇所」: 自分以外のメッセージを編集・削除できないこと。
+  describe('編集と削除', () => {
+    function messagePath(workspaceId: string, channelId: string, messageId: string): string {
+      return `${base}/api/workspaces/${workspaceId}/channels/${channelId}/messages/${messageId}`;
+    }
+
+    function edit(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      messageId: string,
+      body: unknown,
+    ): Promise<Response> {
+      return fetch(messagePath(workspaceId, channelId, messageId), {
+        method: 'PATCH',
+        headers: { authorization: by.authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+    }
+
+    function remove(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      messageId: string,
+    ): Promise<Response> {
+      return fetch(messagePath(workspaceId, channelId, messageId), {
+        method: 'DELETE',
+        headers: { authorization: by.authorization },
+      });
+    }
+
+    /** オーナーのワークスペースに alice と bob が参加するパブリックチャンネルを作り、alice が1件投稿する。 */
+    async function postedByAlice(visibility: 'PUBLIC' | 'PRIVATE' = 'PUBLIC') {
+      const owner = await login();
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const workspace = await workspaceWith(owner, alice, bob, carol);
+      const channelId = await channelRow(workspace.id, visibility, [alice, bob]);
+      const message = await posted(alice, workspace.id, channelId, 'もとの本文');
+      return { owner, alice, bob, carol, workspace, channelId, message };
+    }
+
+    async function archive(channelId: string): Promise<void> {
+      const { baseName } = await prisma.channel.findUniqueOrThrow({ where: { id: channelId } });
+      await prisma.channel.update({
+        where: { id: channelId },
+        data: { archivedAt: new Date(), archiveSequence: 1, name: `${baseName}-1` },
+      });
+    }
+
+    it('作者は編集でき、200 と編集後のメッセージ（本文と editedAt）を返し、一覧にも反映する', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+
+      const res = await edit(alice, workspace.id, channelId, message.id, '直した本文');
+
+      expect(res.status).toBe(200);
+      const edited = (await res.json()) as Message;
+      expect(edited).toEqual({
+        ...message,
+        body: '直した本文',
+        editedAt: expect.any(String),
+      });
+      expect(Number.isNaN(Date.parse(edited.editedAt ?? ''))).toBe(false);
+      expect((await page(alice, workspace.id, channelId)).messages).toEqual([edited]);
+    });
+
+    it('編集の本文の形は投稿と同じで、空白だけ・4001 文字は 400 validation_failed で断り、本文を変えない', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+
+      for (const body of [' \n', 'あ'.repeat(4001)]) {
+        const res = await edit(alice, workspace.id, channelId, message.id, body);
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({ code: 'validation_failed' });
+      }
+      expect((await page(alice, workspace.id, channelId)).messages).toEqual([message]);
+    });
+
+    it('作者でなければ、同じチャンネルの参加者でもオーナーでも、編集・削除を 403 not_message_author で断り、変えない', async () => {
+      const { owner, alice, bob, workspace, channelId, message } = await postedByAlice();
+      await prisma.channelMember.create({
+        data: { channelId, workspaceId: workspace.id, userId: owner.id },
+      });
+
+      for (const by of [bob, owner]) {
+        const edited = await edit(by, workspace.id, channelId, message.id, '乗っ取り');
+        expect(edited.status).toBe(403);
+        expect(await edited.json()).toMatchObject({ code: 'not_message_author' });
+        const removed = await remove(by, workspace.id, channelId, message.id);
+        expect(removed.status).toBe(403);
+        expect(await removed.json()).toMatchObject({ code: 'not_message_author' });
+      }
+      expect((await page(alice, workspace.id, channelId)).messages).toEqual([message]);
+    });
+
+    // CLAUDE.md「必ずテストを書く箇所」: オーナーが、参加していないプライベートチャンネルのメッセージを取得できないこと
+    // （編集の応答は本文を返す）。オーナーの例外はメッセージに及ばない（機能一覧 3.1・4.1）。
+    it('参加していないオーナーも、編集・削除はパブリックは 403 not_a_channel_member・プライベートは 404 で断る', async () => {
+      const publicCase = await postedByAlice('PUBLIC');
+      const privateCase = await postedByAlice('PRIVATE');
+
+      for (const res of [
+        await edit(
+          publicCase.owner,
+          publicCase.workspace.id,
+          publicCase.channelId,
+          publicCase.message.id,
+          'オーナー',
+        ),
+        await remove(
+          publicCase.owner,
+          publicCase.workspace.id,
+          publicCase.channelId,
+          publicCase.message.id,
+        ),
+      ]) {
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ code: 'not_a_channel_member' });
+      }
+      for (const res of [
+        await edit(
+          privateCase.owner,
+          privateCase.workspace.id,
+          privateCase.channelId,
+          privateCase.message.id,
+          'オーナー',
+        ),
+        await remove(
+          privateCase.owner,
+          privateCase.workspace.id,
+          privateCase.channelId,
+          privateCase.message.id,
+        ),
+      ]) {
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual(NOT_FOUND);
+      }
+      expect(
+        (await page(privateCase.alice, privateCase.workspace.id, privateCase.channelId)).messages,
+      ).toEqual([privateCase.message]);
+    });
+
+    it('参加の判定は作者の判定より先で、所属していなければ 404、パブリックの非参加者は 403 not_a_channel_member、プライベートの非参加者は 404', async () => {
+      const outsider = await login();
+      const publicCase = await postedByAlice('PUBLIC');
+      const privateCase = await postedByAlice('PRIVATE');
+
+      for (const { workspace, channelId, message } of [publicCase, privateCase]) {
+        for (const res of [
+          await edit(outsider, workspace.id, channelId, message.id, '外から'),
+          await remove(outsider, workspace.id, channelId, message.id),
+        ]) {
+          expect(res.status).toBe(404);
+          expect(await res.json()).toEqual(NOT_FOUND);
+        }
+      }
+      const { carol: publicCarol } = publicCase;
+      for (const res of [
+        await edit(
+          publicCarol,
+          publicCase.workspace.id,
+          publicCase.channelId,
+          publicCase.message.id,
+          'x',
+        ),
+        await remove(
+          publicCarol,
+          publicCase.workspace.id,
+          publicCase.channelId,
+          publicCase.message.id,
+        ),
+      ]) {
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ code: 'not_a_channel_member' });
+      }
+      const { carol: privateCarol } = privateCase;
+      for (const res of [
+        await edit(
+          privateCarol,
+          privateCase.workspace.id,
+          privateCase.channelId,
+          privateCase.message.id,
+          'x',
+        ),
+        await remove(
+          privateCarol,
+          privateCase.workspace.id,
+          privateCase.channelId,
+          privateCase.message.id,
+        ),
+      ]) {
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual(NOT_FOUND);
+      }
+    });
+
+    it('無いメッセージ・別のチャンネルのメッセージは、作者でも 404', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+      const otherChannel = await channelRow(workspace.id, 'PUBLIC', [alice]);
+
+      for (const [target, id] of [
+        [channelId, MISSING_ID],
+        [otherChannel, message.id],
+      ] as const) {
+        const edited = await edit(alice, workspace.id, target, id, 'どこにも無い');
+        expect(edited.status).toBe(404);
+        expect(await edited.json()).toEqual(NOT_FOUND);
+        expect((await remove(alice, workspace.id, target, id)).status).toBe(404);
+      }
+    });
+
+    it('作者は削除でき 204 を返す。一覧には削除済みとして残り（body: null・deleted: true）、本文は DB に残る', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+
+      const res = await remove(alice, workspace.id, channelId, message.id);
+
+      expect(res.status).toBe(204);
+      expect((await page(alice, workspace.id, channelId)).messages).toEqual([
+        { ...message, body: null, deleted: true },
+      ]);
+      const row = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+      expect(row.body).toBe('もとの本文');
+      expect(row.deletedAt).not.toBeNull();
+    });
+
+    it('削除済みのメッセージは、編集も2回目の削除も 404', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+      expect((await remove(alice, workspace.id, channelId, message.id)).status).toBe(204);
+
+      expect((await edit(alice, workspace.id, channelId, message.id, '削除の後')).status).toBe(404);
+      expect((await remove(alice, workspace.id, channelId, message.id)).status).toBe(404);
+      const row = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+      expect(row.body).toBe('もとの本文');
+    });
+
+    it('アーカイブ済みのチャンネルでは、作者でも編集・削除を 409 channel_archived で断る（機能一覧 3.2）', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+      await archive(channelId);
+
+      const edited = await edit(alice, workspace.id, channelId, message.id, 'アーカイブの後');
+      expect(edited.status).toBe(409);
+      expect(await edited.json()).toMatchObject({ code: 'channel_archived' });
+      const removed = await remove(alice, workspace.id, channelId, message.id);
+      expect(removed.status).toBe(409);
+      expect((await page(alice, workspace.id, channelId)).messages).toEqual([message]);
+    });
+
+    // 機能一覧 3.2: アーカイブ済みかを読んで書くかを決める経路は、チャンネルの行を掴んでから読む。
+    it('アーカイブの確定の前に届いた編集は、確定を待ってから読み、409 で断る', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+      const { baseName } = await prisma.channel.findUniqueOrThrow({ where: { id: channelId } });
+      const held = await holdWith((tx) =>
+        tx.channel.update({
+          where: { id: channelId },
+          data: { archivedAt: new Date(), archiveSequence: 1, name: `${baseName}-1` },
+        }),
+      );
+      try {
+        const pending = edit(alice, workspace.id, channelId, message.id, '同時に');
+        await vi.waitFor(async () => expect(await waitingOnLock()).toBeGreaterThan(0), {
+          timeout: 3_000,
+          interval: 50,
+        });
+        held.release();
+        await held.done;
+
+        expect((await pending).status).toBe(409);
+      } finally {
+        held.release();
+        await held.done.catch(() => undefined);
+      }
+    });
+
+    it('編集は message:updated（編集後のメッセージ）、削除は message:deleted（本文を載せない）として、チャンネルの部屋に入っている接続にだけ届く', async () => {
+      const { alice, bob, carol, workspace, channelId, message } = await postedByAlice();
+      const bobSocket = await open(bob);
+      const carolSocket = await open(carol);
+      expect(await enter(bobSocket, channelId)).toMatchObject({ ok: true });
+      expect(await enter(carolSocket, channelId)).toMatchObject({ ok: false, status: 403 });
+
+      const updatedToBob = nextEvent(bobSocket, 'message:updated', 2_000);
+      const updatedToCarol = nextEvent(carolSocket, 'message:updated', 1_000);
+      const editRes = await edit(alice, workspace.id, channelId, message.id, '配る本文');
+      const edited = (await editRes.json()) as Message;
+      expect(await updatedToBob).toEqual({ message: edited, sentAt: expect.any(String) });
+      expect(await updatedToCarol).toBeUndefined();
+
+      const deletedToBob = nextEvent(bobSocket, 'message:deleted', 2_000);
+      const deletedToCarol = nextEvent(carolSocket, 'message:deleted', 1_000);
+      expect((await remove(alice, workspace.id, channelId, message.id)).status).toBe(204);
+      expect(await deletedToBob).toEqual({
+        channelId,
+        messageId: message.id,
+        sentAt: expect.any(String),
+      });
+      expect(await deletedToCarol).toBeUndefined();
+    });
+
+    it('断った編集・削除（作者でない・アーカイブ済み）は配らない', async () => {
+      const { alice, bob, workspace, channelId, message } = await postedByAlice();
+      const bobSocket = await open(bob);
+      expect(await enter(bobSocket, channelId)).toMatchObject({ ok: true });
+
+      const updated = nextEvent(bobSocket, 'message:updated', 3_000);
+      const deleted = nextEvent(bobSocket, 'message:deleted', 3_000);
+      expect((await edit(bob, workspace.id, channelId, message.id, '他人の')).status).toBe(403);
+      expect((await remove(bob, workspace.id, channelId, message.id)).status).toBe(403);
+
+      // アーカイブ済みでは、作者でも 409 で断る。部屋に入っている接続はアーカイブの後も残る。
+      await archive(channelId);
+      expect((await edit(alice, workspace.id, channelId, message.id, '作者の')).status).toBe(409);
+      expect((await remove(alice, workspace.id, channelId, message.id)).status).toBe(409);
+
+      expect(await updated).toBeUndefined();
+      expect(await deleted).toBeUndefined();
+    });
+
+    it('編集と削除も、ルートごとに同じ利用者で1分に60回を超えたら 429 で断る（枠はルートごとに別）', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+
+      for (let i = 0; i < POST_LIMIT; i += 1) {
+        expect((await edit(alice, workspace.id, channelId, message.id, `直し${i}`)).status).toBe(
+          200,
+        );
+      }
+      expect((await edit(alice, workspace.id, channelId, message.id, '多すぎる')).status).toBe(429);
+
+      for (let i = 0; i < POST_LIMIT; i += 1) {
+        // 無いメッセージの削除も 404 として数える（ガードはサービスより前に数える）。
+        expect((await remove(alice, workspace.id, channelId, MISSING_ID)).status).toBe(404);
+      }
+      expect((await remove(alice, workspace.id, channelId, message.id)).status).toBe(429);
     });
   });
 
