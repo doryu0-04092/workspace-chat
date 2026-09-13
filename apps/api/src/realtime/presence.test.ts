@@ -275,6 +275,61 @@ describe('在席（F-22）', () => {
     });
   });
 
+  describe('入室し直しの間のキック', () => {
+    // 機能一覧 2.2・9.2: キックされた利用者は、他の参加者の一覧で在席のまま残らない。
+    // 入室し直しは一覧を取り直す（Valkey への往復を待つ）ため、その待ちの間にキックが挟まっても、外れた利用者を在席に足し直さない。
+    it('入室し直しで一覧を取り直している間にキックされたら、在席に足し直さず、present: true を配らない', async () => {
+      const { owner, alice, bob, workspace, channelId } = await channelOfThree();
+      const aliceSocket = await t.open(t.firstBase, alice);
+      const bobSocket = await t.open(t.firstBase, bob);
+      await enter(aliceSocket, channelId);
+      await enter(bobSocket, channelId);
+      await untilBothSee(channelId, alice.id, true);
+      const received = await collectAfterEntries(bobSocket);
+      const registry = t.first.get(PresenceRegistry);
+      const refresh = registry.refreshOne.bind(registry);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let markWaiting!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        markWaiting = resolve;
+      });
+      const paused = vi.spyOn(registry, 'refreshOne').mockImplementationOnce(async (id) => {
+        markWaiting();
+        await gate;
+        return refresh(id);
+      });
+      try {
+        const pending = enter(aliceSocket, channelId);
+        await waiting;
+        const kicked = await t.send(
+          'DELETE',
+          `/workspaces/${workspace.id}/channels/${channelId}/members/${alice.id}`,
+          owner,
+        );
+        expect(kicked.status).toBe(204);
+        await vi.waitFor(
+          () =>
+            expect(received).toContainEqual(
+              expect.objectContaining({ channelId, userId: alice.id, present: false }),
+            ),
+          { timeout: 3_000, interval: 50 },
+        );
+        release();
+
+        expect(await pending).toMatchObject({ ok: false, status: 404 });
+      } finally {
+        release();
+        paused.mockRestore();
+      }
+      await quiet();
+      expect(received.filter((p) => p.userId === alice.id && p.present)).toEqual([]);
+      await untilBothSee(channelId, alice.id, false);
+    });
+  });
+
   describe('参加資格を失ったとき（機能一覧 2.2）', () => {
     it('チャンネルからキックされると、在席していた利用者の present: false が1回届き、以後の入室の acknowledgement に残らない', async () => {
       const { owner, alice, bob, workspace, channelId } = await channelOfThree();

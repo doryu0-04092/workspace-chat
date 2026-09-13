@@ -70,6 +70,7 @@ export class ChannelRoomsGateway implements OnGatewayConnection<RealtimeSocket> 
       const channelId = channelIdOf(body);
       await this.rooms.assertCanEnter(userId, channelId);
       const reentering = socket.rooms.has(channelRoom(channelId));
+      if (reentering) await this.presence.refresh(channelId);
       await socket.join(channelRoom(channelId));
       try {
         await this.rooms.assertCanEnter(userId, channelId);
@@ -78,9 +79,7 @@ export class ChannelRoomsGateway implements OnGatewayConnection<RealtimeSocket> 
         if (reentering) this.presence.left(channelId, userId, socket.id);
         throw error;
       }
-      const present = reentering
-        ? await this.presence.reentered(channelId, userId, socket.id)
-        : this.presence.entered(channelId, userId, socket.id);
+      const present = this.presence.entered(channelId, userId, socket.id);
       return { ok: true, present } as const;
     });
   }

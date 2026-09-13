@@ -48,12 +48,13 @@ export class RealtimePresence implements OnApplicationBootstrap {
   }
 
   /**
-   * 既に部屋に入っている接続が入室し直した（画面の側の5分ごとの取り直し。機能一覧 9.2）。
-   * **一覧を取り直してから返す**——このタスクの一覧は通知の取りこぼしでずれうるため、そのまま返すと表示のずれが5分を超えうる。
+   * そのチャンネルの一覧を取り直す（既に部屋に入っている接続が入室し直したとき。画面の側の5分ごとの取り直し。機能一覧 9.2）。
+   * このタスクの一覧は通知の取りこぼしでずれうるため、入室し直しの応答はこれを済ませてから返す。
+   * **参加の確認より前に呼ぶ**——取り直しは Valkey への往復を待つため、確認と `entered` の間に呼ぶと、その待ちの間に
+   * キック・退出が挟まり、部屋から外れた利用者を在席に足し直す。
    */
-  async reentered(channelId: string, userId: string, socketId: string): Promise<string[]> {
+  async refresh(channelId: string): Promise<void> {
     await this.registry.refreshOne(channelId);
-    return this.entered(channelId, userId, socketId);
   }
 
   /** 接続が部屋から外れた（退室・切断）。 */
@@ -62,7 +63,10 @@ export class RealtimePresence implements OnApplicationBootstrap {
     this.gateway.server.serverSideEmit(LEFT, { channelId, userId, socketId } satisfies Entered);
   }
 
-  /** 利用者のすべての接続が、サーバーによってそれらのチャンネルの部屋から外された（契機は問わない）。 */
+  /**
+   * 利用者がそれらのチャンネルの参加資格を失い、サーバーが接続を部屋から外した（契機は問わない）。
+   * **他のタスクに接続が残っていても、利用者単位で在席から外す**（参加の照合は自タスクの接続だけを外す）。
+   */
   userRemoved(channelIds: readonly string[], userId: string): void {
     for (const channelId of channelIds) {
       if (this.registry.removeUser(channelId, userId)) this.broadcast(channelId, userId, false);
