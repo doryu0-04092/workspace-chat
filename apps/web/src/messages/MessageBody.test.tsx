@@ -208,6 +208,27 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(quote?.textContent).not.toContain('> </div>');
     });
 
+    // 画像は構文を読ませたまま、書いた元の文字に替える唯一の節である（MessageBody.tsx の asWrittenText）。
+    it.each([
+      ['引用', '> ![画像の\n> 説明](https://example.com/x.png)', 'blockquote'],
+      [
+        '入れ子の引用',
+        '> > ![画像の\n> > 説明](https://example.com/x.png)',
+        'blockquote blockquote',
+      ],
+      ['箇条書き', '- ![画像の\n  説明](https://example.com/x.png)', 'li'],
+    ])(
+      '%sの中で行をまたぐ画像も、容器の記号と字下げを本文の文字に足さない',
+      (_name, body, selector) => {
+        const container = renderBody(body).querySelector(selector);
+        expect(container).not.toBeNull();
+        expect(container?.textContent).toContain('![画像の');
+        expect(container?.textContent).toContain('説明](https://example.com/x.png)');
+        expect(container?.textContent).not.toMatch(/>\s*説明/);
+        expect(container?.textContent).not.toMatch(/[ \t]説明/);
+      },
+    );
+
     it('書いていない文字を足さない（脚注の見出しなど）', () => {
       const container = renderBody('本文[^1]\n\n[^1]: 注');
       expect(container.textContent).not.toContain('Footnotes');
