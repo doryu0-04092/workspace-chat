@@ -5,9 +5,22 @@ import rehypeSanitize from 'rehype-sanitize';
 import remarkBreaks from 'remark-breaks';
 
 /**
+ * 構文解析の段で読ませない CommonMark の構文（micromark の構文の名前）。**機能一覧 4.3 の記法に含まれないブロックと、生の HTML と定義**。
+ * 読ませなければ、書いた文字はふつうの段落の文字として残る——改行も、引用・箇条書きの中の字下げの扱いも、解析器がそのまま受け持つ。
+ */
+const DISABLED_CONSTRUCTS = [
+  'headingAtx',
+  'setextUnderline',
+  'thematicBreak',
+  'htmlFlow',
+  'htmlText',
+  'definition',
+];
+
+/**
  * 記法として解釈する mdast の節の種類（機能一覧 4.3 の太字・斜体・取り消し線・リンク・引用・箇条書き・インラインコード・コードブロックと、
- * それを入れる段落・文字・改行）。**ここに無い節は、書いた元の文字に置き換える**（`asWrittenText`）——
- * 見出し・水平線・画像・参照形式のリンクと定義・生の HTML など、種類を列挙しなくても文字のまま残る。
+ * それを入れる段落・文字・改行）。**ここに無い節は、書いた元の文字に置き換える**（`asWrittenText`）。
+ * 上の構文を読ませないため、ここに届く集合の外の節は段落の中のもの（画像）だけである。
  */
 const F14_NODE_TYPES = new Set([
   'root',
@@ -49,14 +62,16 @@ type MarkdownNode = {
 };
 
 /**
- * GFM のうち、取り消し線だけを解釈させる。**表・タスクリスト・脚注・URL の自動リンクは記法として読ませない**
- * （F-14 の記法に含まれない）。remark-gfm と同じく、構文の拡張を processor の data に積む。
+ * 構文解析を F-14 の記法に絞る。GFM のうち取り消し線だけを積み（表・タスクリスト・脚注は読ませない）、
+ * `DISABLED_CONSTRUCTS` を読ませない。remark-gfm と同じく、構文の拡張を processor の data に積む。
  */
-function strikethrough(this: unknown) {
+function f14Syntax(this: unknown) {
   const data = (
     this as { data(): { micromarkExtensions?: unknown[]; fromMarkdownExtensions?: unknown[] } }
   ).data();
-  (data.micromarkExtensions ??= []).push(gfmStrikethrough());
+  (data.micromarkExtensions ??= []).push(gfmStrikethrough(), {
+    disable: { null: DISABLED_CONSTRUCTS },
+  });
   (data.fromMarkdownExtensions ??= []).push(gfmStrikethroughFromMarkdown());
 }
 
@@ -95,13 +110,13 @@ function asWrittenText() {
  * - プラグインが足した要素も、描画の前に rehype-sanitize の既定のスキーマで落とす
  * - 段落の中の改行（入力欄の Enter）は改行の要素にする（remark-breaks。Markdown の既定は空白1つに畳む）
  * - **踏むと壊れる: `remarkPlugins` の並びを変えない。** `remarkBreaks` を `asWrittenText` より前に置くと、
- *   `asWrittenText` が後から作る文字（表・複数行の生の HTML など）の中の改行が、改行の要素にならない
+ *   `asWrittenText` が後から作る文字の中の改行が、改行の要素にならない
  */
 export function MessageBody({ body }: { body: string }) {
   return (
     <div className="break-words">
       <Markdown
-        remarkPlugins={[strikethrough, asWrittenText, remarkBreaks]}
+        remarkPlugins={[f14Syntax, asWrittenText, remarkBreaks]}
         rehypePlugins={[rehypeSanitize]}
         allowedElements={ALLOWED_ELEMENTS}
         unwrapDisallowed

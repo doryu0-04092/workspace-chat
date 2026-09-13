@@ -107,6 +107,7 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
   describe('対応しない記法は、記法として解釈せず、書いた文字のまま残す', () => {
     it.each([
       ['見出し', '# 見出し', 'h1, h2, h3, h4, h5, h6', '# 見出し'],
+      ['下線で書く見出し', '見出し\n===', 'h1, h2', '==='],
       ['表', '| a | b |\n| - | - |\n| 1 | 2 |', 'table, td, th', '| 1 | 2 |'],
       ['水平線', '上\n\n---\n\n下', 'hr', '---'],
       ['タスクリスト', '- [x] 買い物', 'input', '[x] 買い物'],
@@ -122,6 +123,38 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       const container = renderBody(body);
       expect(container.querySelector(selector)).toBeNull();
       expect(container.textContent).toContain(text);
+    });
+
+    it.each([
+      ['見出し', '# 今日の予定\n## 午前'],
+      ['下線で書く見出し', '見出し\n===\n次\n==='],
+      ['水平線', '***\n***'],
+      ['定義', '[a]: https://example.com/a\n[b]: https://example.com/b'],
+    ])(
+      '対応しない記法（%s）が続けて書かれても、書いた改行をすべて改行として残す',
+      (_name, body) => {
+        const container = renderBody(body);
+        const lines = body.split('\n');
+        expect(container.querySelectorAll('br')).toHaveLength(lines.length - 1);
+        for (const line of lines) expect(container.textContent).toContain(line);
+      },
+    );
+
+    it('引用の中で行をまたぐ生の HTML のタグも、引用の記号を本文の文字に足さない', () => {
+      const quote = renderBody('> <span\n> title="x">').querySelector('blockquote');
+      expect(quote).not.toBeNull();
+      expect(quote?.textContent).toContain('title="x">');
+      expect(quote?.textContent).not.toContain('> title');
+    });
+
+    it('引用の中の複数行の生の HTML は、引用の記号を本文の文字に足さない', () => {
+      const quote = renderBody('> <div>\n> こんにちは\n> </div>').querySelector('blockquote');
+      expect(quote).not.toBeNull();
+      expect(quote?.textContent).toContain('<div>');
+      expect(quote?.textContent).toContain('こんにちは');
+      // 書いた `<div>` 自体は `>` を含むため、行頭に引用の記号が付いた形が出ないことを見る。
+      expect(quote?.textContent).not.toContain('> こんにちは');
+      expect(quote?.textContent).not.toContain('> </div>');
     });
 
     it('書いていない文字を足さない（脚注の見出しなど）', () => {
