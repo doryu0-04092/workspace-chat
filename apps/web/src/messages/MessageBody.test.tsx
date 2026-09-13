@@ -41,7 +41,7 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       }
     });
 
-    it('画像は描画せず（外部への読み込みを起こさない）、代わりの文字を残す。代わりの文字が無ければ URL を残す', () => {
+    it('画像は描画せず（外部への読み込みを起こさない）、書いた文字（代わりの文字と URL）を残す', () => {
       const withAlt = renderBody('![画像の説明](https://example.com/a.png)');
       expect(withAlt.querySelector('img')).toBeNull();
       expect(withAlt.textContent).toContain('画像の説明');
@@ -83,6 +83,11 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(paragraph?.textContent).toContain('二行目');
     });
 
+    it('URL をそのまま書くと、その URL へのリンクになる（GFM の自動リンク）', () => {
+      const link = renderBody('https://example.com/x を見て').querySelector('a');
+      expect(link?.getAttribute('href')).toBe('https://example.com/x');
+    });
+
     it('リンクは http / https の URL を href に持つ', () => {
       const link = renderBody('[例](https://example.com/path?q=1)').querySelector('a');
       expect(link?.getAttribute('href')).toBe('https://example.com/path?q=1');
@@ -98,14 +103,29 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
     });
   });
 
-  describe('対応しない記法は、要素にせず中の文字を残す', () => {
+  describe('対応しない記法は、記法として解釈せず、書いた文字のまま残す', () => {
     it.each([
-      ['見出し', '# 見出し', 'h1', '見出し'],
-      ['表', '| a | b |\n| - | - |\n| 1 | 2 |', 'table', '1'],
+      ['見出し', '# 見出し', 'h1, h2, h3, h4, h5, h6', '# 見出し'],
+      ['表', '| a | b |\n| - | - |\n| 1 | 2 |', 'table, td, th', '| 1 | 2 |'],
+      ['水平線', '上\n\n---\n\n下', 'hr', '---'],
+      ['タスクリスト', '- [x] 買い物', 'input', '[x] 買い物'],
+      [
+        '参照形式の画像と定義',
+        '![][logo]\n\n[logo]: https://example.com/logo.png',
+        'img',
+        '[logo]: https://example.com/logo.png',
+      ],
+      ['参照形式のリンク', '[例][ref]\n\n[ref]: https://example.com/', 'a', '[例][ref]'],
+      ['脚注', '本文[^1]\n\n[^1]: 注', 'sup, section', '[^1]: 注'],
     ])('%s', (_name, body, selector, text) => {
       const container = renderBody(body);
       expect(container.querySelector(selector)).toBeNull();
       expect(container.textContent).toContain(text);
+    });
+
+    it('書いていない文字を足さない（脚注の見出しなど）', () => {
+      const container = renderBody('本文[^1]\n\n[^1]: 注');
+      expect(container.textContent).not.toContain('Footnotes');
     });
   });
 });
