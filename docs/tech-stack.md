@@ -104,7 +104,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 言語 | **TypeScript** | 5.x | **難-3 の解決**。バックエンドと WebSocket のイベント型を共有する |
 | ビルド | **Vite** | **7.x** | Vite 8（2026-03 安定版）は内部バンドラを Rolldown / Oxc に刷新しており、プラグイン互換の実績が積み上がるまで見送る |
 | **メッセージ一覧** | **react-virtuoso** | 4.x | **難-1 の解決**。`firstItemIndex` は「先頭に要素を足しても表示位置を維持する」ための機能で、チャット用途を想定して用意されている。自前だと `scrollHeight` の差分補正が必要になる |
-| **Markdown 描画** | **react-markdown** + rehype-sanitize + rehype-highlight | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない** |
+| **Markdown 描画** | **react-markdown** + GFM の取り消し線の拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線の拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。選定時に挙げた rehype-highlight は採っていない。**解釈する記法と、その区分・承認（取り消し線・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
 | データ取得 | **TanStack Query** | v5 | `useInfiniteQuery` がカーソルページネーションに直結する。WebSocket 受信を `setQueryData` でキャッシュに反映する |
 | 一時状態 | **Zustand** | v5 | 在席・入力中など、永続化しない状態を TanStack Query と分けて持つ |
 | スタイル | **Tailwind CSS** | 4.x | 密度の高い UI を素早く組む。画面数に対して独自 CSS は割に合わない |
@@ -314,6 +314,17 @@ AWS の[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/Postgre
 | **unplugin-swc** | **1.5.11** | 1.5.11 | 最新。**テストの実行にのみ使う。** 下記「テストの変換に SWC を使う理由」を参照 |
 | **@swc/core** | **1.16.1** | 1.16.1 | 最新。`unplugin-swc` が呼ぶ変換器の本体 |
 
+#### 追加で確認した項目 — Markdown の描画（2026-09-13。#379）
+
+`npm view` で最新を確かめて入れた。5つとも `apps/web` の依存で、ルートの `node_modules` に巻き上がることを確かめた（[README](../README.md)「依存の版を上げない方針」の jsdom の実測と同じ確かめ方）。
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **react-markdown** | **^10.1.0** | 最新。`react` の peer は `>=18` で、React 19.2 を受け入れる |
+| **micromark-extension-gfm-strikethrough** / **mdast-util-gfm-strikethrough** | **^2.1.0** / **^2.0.0** | 最新。取り消し線の構文と、その構文木への変換。remark-gfm が内部で積んでいるものと同じ部品を、取り消し線だけ積む |
+| **rehype-sanitize** | **^6.0.0** | 最新。react-markdown の README の Security の節が、プラグインを使うときの安全の確保に勧めている |
+| **remark-breaks** | **^4.0.0** | 最新。README は「段落の中の改行（soft line ending）を `<br>` にする」「利用者が改行を入れたら、そのとおりに見せたいときに使う」と書いている。CSS の `white-space: pre-wrap` は、ブロックの要素のあいだの改行文字まで空行として出すため採らない |
+
 #### 追加で確認した項目 — PR #40（2026-09-06。#42）
 
 PR #40（Prisma のスキーマとマイグレーション）で追加した依存と `overrides` の判断を記す。
@@ -363,7 +374,7 @@ F-01 / F-03 / F-37 の発行で追加した依存（いずれも `apps/api` の 
 | **argon2** | **^0.45.1** | 最新。パスワードとリカバリーコードの Argon2id のハッシュ化（上表「パスワード」）。パラメータは OWASP Password Storage Cheat Sheet の最小構成「m=19456 (19 MiB), t=2, p=1」を**コードで明示する**（ライブラリの既定値 m=65536, t=3, p=4 に寄りかからない。`apps/api/src/auth/secret-hash.ts`）。**ペッパーは使わない**——同シートはペッパーを「secrets vaults」や HSM に置くとしており、この構成にはまだその置き場が無い。**代償: DB のハッシュが漏れたとき、オフラインの総当たりをペッパーで遅らせられない**（Argon2id のコストだけが頼りになる） |
 | **@prisma/adapter-pg** | **^7.10.0** | `prisma` と同じ版。**Prisma 7 のクライアントはドライバアダプタを必須とする**。`pg` を依存として引く |
 | **express-openapi-validator** | **^5.6.2** | 最新。要求を REST の仕様どおりか確かめる（要件定義書 4.7 の「仕様を唯一の正とする」をサーバーの入力の側に当てる）。OpenAPI 3.1 は 5.4.0 以降、Express 5（NestJS 11 の既定）は 5.5.0 以降で対応と README が明記している。**`fileUploader: false` で使う**——この依存は `multer` を引き（`@nestjs/platform-express` が完全固定する 2.2.0 に重なる）、multipart を受け取らせると [scripts/audit-allowlist.json](../scripts/audit-allowlist.json) の until「サーバーが multipart を受け取る経路を実装するまで」の前提が崩れる。**採らなかったもの**: `ajv` を直接使って Pipe を自作する（パス・メソッド・メディア型の突き合わせを自前で書くことになる）／`openapi-backend`（NestJS への組み込みの公式の例が無い） |
-| **@nestjs/throttler** | **^6.5.0** | 最新。レート制限（[要件定義書](requirements.md) 4.3 のレート制限の行）。ガードは全体に掛けず、ルートごとに `@UseGuards` と `@Throttle` で上限を決める。**WebSocket のチャンネルの部屋への入室要求は、ガードを通らないため、同じ保存先（`ThrottlerStorage`）で直接数える**（[機能一覧](features.md) 9.2）。**メッセージの投稿・編集・削除は、発信元ではなく利用者で数えるガード（`UserRateLimitGuard`。`getTracker` を利用者の ID にする）を使う**（[機能一覧](features.md) 4.1・4.2。**枠はルートごとに別**で、3つを合わせて1分に最大 180 回通る）。**同梱のメモリの保存先（`ThrottlerStorageService`）は使わない**——記録を Map から消さず、要求1回ごとにタイマーを1つ作るため、発信元を変えながら叩かれるとメモリが増え続ける（`apps/api/src/rate-limit/memory-rate-limit-storage.ts` に自前で置いた） |
+| **@nestjs/throttler** | **^6.5.0** | 最新。レート制限（[要件定義書](requirements.md) 4.3 のレート制限の行）。ガードは全体に掛けず、ルートごとに `@UseGuards` と `@Throttle` で上限を決める。**WebSocket のチャンネルの部屋への入室要求は、ガードを通らないため、同じ保存先（`ThrottlerStorage`）で直接数える**（[機能一覧](features.md) 9.2）。**メッセージの投稿・編集・削除は、発信元ではなく利用者で数え（`UserRateLimitGuard`。`getTracker` を利用者の ID にする）、3つのルートで1つの枠を分け合う**（`MessageWriteRateLimitGuard` が `generateKey` をハンドラによらないキーにする。[機能一覧](features.md) 4.1・4.2）。**同梱のメモリの保存先（`ThrottlerStorageService`）は使わない**——記録を Map から消さず、要求1回ごとにタイマーを1つ作るため、発信元を変えながら叩かれるとメモリが増え続ける（`apps/api/src/rate-limit/memory-rate-limit-storage.ts` に自前で置いた） |
 | **@nest-lab/throttler-storage-redis** | **^1.2.0** | 最新。状態を Valkey に置き、タスクをまたいで数える（Lua の `eval` で原子的に数える）。`@nestjs/throttler` の >=6.0.0 を受け入れる。旧 `nestjs-throttler-storage-redis` は npm で非推奨 |
 | **ioredis** | **^5.11.1** | 上の保存先が要求する接続（peerDependencies の >=5.0.0）。**`enableOfflineQueue: false`・`commandTimeout` で、Valkey が止まっているときにすぐ失敗させる**（既定は接続が切れている間のコマンドを溜め、要求が詰まる） |
 | **testcontainers**（開発依存） | **^12.1.0** | テストで実際の Valkey を起動し（`apps/api/src/testing/valkey.ts` の `GenericContainer`）、起動のたびに土台のイメージを取り直す（`valkey.ts`・`postgres.ts` の `PullPolicy`）。起動したコンテナの型（`StartedTestContainer`）も、コンテナを持つテストが直接読む。`@testcontainers/postgresql` と同じ版。推移依存としては既に入っていたが、直接読むため明示した |
