@@ -416,7 +416,7 @@
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
 | **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 | **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
-| **ElastiCache Valkey** | **手順を持たない**（この節の「代償」）。**作り直して接続先が変わったら、`REDIS_URL` のパラメータの `value_wo_version` と ElastiCache の `auth_token_wo_version` を同じ `apply` で上げ、その後に ECS のタスクを入れ替える**（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
+| **ElastiCache Valkey** | **手順を持たない**（この節の「代償」）。**作り直したら（接続先が変わらなくても、AUTH トークンは作成時に新しい乱数になる）、`REDIS_URL` のパラメータの `value_wo_version` と ElastiCache の `auth_token_wo_version` を同じ `apply` で上げ、その後に ECS のタスクを入れ替える**（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 
 **ただしデータとしては閉じていない。** RDS のメッセージレコードと S3 の添付ファイルは互いを
 参照する関係にあり、**RDS だけを過去の時点へ復元すると、復元時点より後に投稿された添付ファイルは
