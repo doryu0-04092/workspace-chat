@@ -172,6 +172,22 @@ describe('チャンネルのメッセージの表示', () => {
     expect(await screen.findByText('まだメッセージはありません。')).toBeDefined();
   });
 
+  it('URL のパラメータは符号化してメッセージの api のパスに埋め、パスの区切りとして読ませない（利用者が書ける値のため）', async () => {
+    // react-router の useParams は %2F を / に復号して返す。符号化しないと /api/auth/logout などへ要求が向く
+    const encoded = encodeURIComponent('../../auth/logout');
+    const { calls } = fakeFetch(
+      routes({
+        [`GET /api/workspaces/${encoded}/channels`]: () => json(200, [GENERAL]),
+        [`GET /api/workspaces/${encoded}/channels/${GENERAL.id}/messages`]: () =>
+          page([message(1)]),
+      }),
+    );
+    renderApp(`/workspaces/${encoded}/channels/${GENERAL.id}`);
+
+    expect(await screen.findByText('メッセージ 1')).toBeDefined();
+    expect(calls.map((c) => c.key).filter((key) => key.includes('../'))).toEqual([]);
+  });
+
   it('読み込めなければ理由を出す。参加していなければ（403）、参加していないことを出す', async () => {
     fakeFetch(routes({ [`GET ${MESSAGES}`]: () => error(403, 'not_a_channel_member') }));
     renderApp(CHANNEL_PATH);
