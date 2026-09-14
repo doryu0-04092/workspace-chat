@@ -9,6 +9,7 @@ import remarkBreaks from 'remark-breaks';
 /**
  * 構文解析の段で読ませない構文（micromark の構文の名前）。**機能一覧 4.3 の記法に含まれないブロックと、生の HTML と定義と、メールアドレスの自動リンク**。
  * 読ませなければ、書いた文字はふつうの段落の文字として残る——改行も、引用・箇条書きの中の字下げの扱いも、解析器がそのまま受け持つ。
+ * **その文字の中の URL は、自動リンクの構文に拾われてリンクになる**（機能一覧 4.3）。
  * 自動リンクの承認の範囲は URL であり、メールアドレスは含まない（提案・承認済・2026-09-13・依頼側。#385）。
  */
 const DISABLED_CONSTRUCTS = [
@@ -138,7 +139,8 @@ function withoutQuoteMarkers(written: string, quoteDepth: number): string {
  * メッセージの本文を Markdown として描画する（F-14・F-15）。
  *
  * - **HTML 文字列を作らず、React の要素を直接組み立てる**（react-markdown）
- * - **記法として解釈するのは機能一覧 4.3 の記法だけで、それ以外は書いた文字のまま出す**（生の HTML も文字のまま出る）
+ * - **記法として解釈するのは機能一覧 4.3 の記法だけで、それ以外は書いた文字のまま出す**（生の HTML も文字のまま出る）。
+ *   文字のまま出したものの中の URL は自動リンクになる。画像の記法の中だけは、読んだ後に文字へ替えるためリンクにならない（4.3）
  * - **リンクの URL は http / https / mailto など安全なスキームと相対 URL だけを残す**（react-markdown の既定の `urlTransform`）。
  *   **`urlTransform` と下の rehype-sanitize の両方を残す**——片方だけを外しても `javascript:` の href は残らないが、両方を外すと通る
  * - プラグインが足した要素も、描画の前に rehype-sanitize の既定のスキーマで落とす
