@@ -14,11 +14,23 @@ import { WorkspacesPage } from './workspaces/WorkspacesPage';
 /**
  * 画面の入口。ルーターは呼ぶ側が包む（本番は BrowserRouter、テストは MemoryRouter）。
  * 起動時に1回、リフレッシュでログインの状態を取り直す（store が同時の呼び出しを1本に束ねる）。
+ *
+ * **踏むと壊れる: ログインの状態が切れたら（ログアウト・リフレッシュの失敗）、読み込みの記憶を捨てる。**
+ * 読み込みの鍵は利用者を含まないため、捨てないと、同じタブで次にログインした別の利用者に、
+ * 前の利用者のワークスペース名やプライベートチャンネル名が、取り直しが終わるまで出る。
  */
 export function App({ store, queryClient }: { store: SessionStore; queryClient: QueryClient }) {
   useEffect(() => {
     void store.restore();
   }, [store]);
+
+  useEffect(
+    () =>
+      store.state.subscribe((state, previous) => {
+        if (state.status === 'signedOut' && previous.status !== 'signedOut') queryClient.clear();
+      }),
+    [store, queryClient],
+  );
 
   return (
     <SessionProvider store={store}>
