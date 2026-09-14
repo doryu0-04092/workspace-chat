@@ -1,4 +1,5 @@
 import type { components } from '@workspace-chat/shared';
+import { createStore } from 'zustand/vanilla';
 
 type Schemas = components['schemas'];
 
@@ -51,39 +52,48 @@ function browserLocks(): RefreshLocks | undefined {
  * 発行から1日を過ぎたリフレッシュトークンを同時に2回送ると、後の側が再利用とみなされ、そのログインの系列ごと失効する
  * （機能一覧 1.2）。開発時の StrictMode は effect を2回走らせるため、ここで1本に束ねないと再読み込みのたびに起こりうる。
  * 直列にすれば、後の側は入れ替え後の Cookie を送る。
+ *
+ * 状態は Zustand の store（`zustand/vanilla`）に置き、画面は `useStore(store.state)` で読む
+ * （技術スタックの「一時状態」。ログインの状態もその射程に含める。決定・2026-09-14・依頼側）。
  */
 export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
   const locks = 'locks' in options ? options.locks : browserLocks();
-  let state: SessionState = { status: 'checking' };
-  const listeners = new Set<() => void>();
+  const state = createStore<SessionState>()(() => ({ status: 'checking' }));
   let refreshing: Promise<string | null> | null = null;
   let restoring: Promise<void> | null = null;
 
   function set(next: SessionState): void {
-    state = next;
-    for (const listener of listeners) listener();
+    state.setState(next, true);
   }
 
   function withLock<T>(task: () => Promise<T>): Promise<T> {
     return locks ? locks.request(REFRESH_LOCK, task) : task();
   }
 
-  /** 新しいアクセストークン。使えなければ null。 */
+  async function sendRefresh(): Promise<string | null> {
+    try {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'X-Requested-By': REQUESTED_BY },
+      });
+      if (!response.ok) return null;
+      return ((await response.json()) as Schemas['RefreshResponse']).accessToken;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 新しいアクセストークン。使えなければ null。
+   * **ロックそのものが断られたら（文書が fully active でない `InvalidStateError` など）、ロックの外で送る**——
+   * 断られたまま投げると `restore` が状態を決めずに終わり、確かめる途中のまま戻れない。ロックの外で送る代償は、ロックの無いブラウザと同じである。
+   */
   function refreshToken(): Promise<string | null> {
-    refreshing ??= withLock(async () => {
-      try {
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: { 'X-Requested-By': REQUESTED_BY },
-        });
-        if (!response.ok) return null;
-        return ((await response.json()) as Schemas['RefreshResponse']).accessToken;
-      } catch {
-        return null;
-      }
-    }).finally(() => {
-      refreshing = null;
-    });
+    refreshing ??= withLock(sendRefresh)
+      .catch(sendRefresh)
+      .finally(() => {
+        refreshing = null;
+      });
     return refreshing;
   }
 
@@ -107,8 +117,9 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
       set({ status: 'signedOut' });
       return null;
     }
-    if (state.status === 'signedIn' && state.accessToken !== renewed)
-      set({ ...state, accessToken: renewed });
+    const latest = state.getState();
+    if (latest.status === 'signedIn' && latest.accessToken !== renewed)
+      set({ ...latest, accessToken: renewed });
     return renewed;
   }
 
@@ -119,12 +130,10 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
   }
 
   return {
-    getState: (): SessionState => state,
+    /** 画面が `useStore` で読む Zustand の store。 */
+    state,
 
-    subscribe(listener: () => void): () => void {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    getState: (): SessionState => state.getState(),
 
     /** 起動時に1回だけ、リフレッシュで状態を取り直す。何度呼んでも同じ1回を待つ。 */
     restore(): Promise<void> {
@@ -174,10 +183,10 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
 
     /** アクセストークンを付けて送る。401 なら1回だけリフレッシュしてやり直し、それも駄目ならログインしていない状態にする。 */
     async authorizedFetch(path: string, init: RequestInit = {}): Promise<Response> {
-      if (state.status !== 'signedIn')
+      const current = state.getState();
+      if (current.status !== 'signedIn')
         throw new Error('ログインしていない状態では authorizedFetch を呼ばない');
-      const used = state.accessToken;
-      const response = await send(path, init, used);
+      const response = await send(path, init, current.accessToken);
       if (response.status !== 401) return response;
       const renewed = await renew();
       if (renewed === null) return response;
