@@ -1,18 +1,17 @@
 import type { components } from '@workspace-chat/shared';
 import { createStore } from 'zustand/vanilla';
+import type { Failure } from './failure';
+import { postJson } from './post-json';
 
 type Schemas = components['schemas'];
 
 export type SessionUser = Schemas['UserSummary'];
-export type ErrorCode = Schemas['ErrorResponse']['code'];
 
 export type SessionState =
   | { status: 'checking' }
   | { status: 'signedOut' }
   | { status: 'signedIn'; accessToken: string; user: SessionUser };
 
-/** 断られた要求。`status` が 0 のときは通信そのものに失敗した。 */
-export type Failure = { ok: false; status: number; code?: ErrorCode; retryAfterSeconds?: number };
 export type LoginResult = { ok: true } | Failure;
 export type LogoutResult = { ok: true } | { ok: false };
 
@@ -24,18 +23,6 @@ export interface RefreshLocks {
 /** Cookie を使う要求（リフレッシュ・ログアウト）に付ける独自のヘッダーの値。綴りは REST の仕様の列挙を型が見る。 */
 const REQUESTED_BY: components['parameters']['RequestedBy'] = 'workspace-chat';
 const REFRESH_LOCK = 'workspace-chat:refresh';
-
-/** 断られた応答から、エラーの種類と（429 なら）待つ秒数を読む。 */
-export async function readFailure(response: Response): Promise<Failure> {
-  const failure: Failure = { ok: false, status: response.status };
-  const body = (await response.json().catch(() => null)) as { code?: unknown } | null;
-  if (typeof body?.code === 'string') failure.code = body.code as ErrorCode;
-  const retryAfter = response.headers.get('Retry-After');
-  if (response.status === 429 && retryAfter !== null && /^[0-9]+$/.test(retryAfter)) {
-    failure.retryAfterSeconds = Number(retryAfter);
-  }
-  return failure;
-}
 
 function browserLocks(): RefreshLocks | undefined {
   const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
@@ -173,26 +160,20 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
       return restoring;
     },
 
+    /** 失敗は投げずに戻り値で表す（`postJson`）。 */
     async login(userId: string, password: string): Promise<LoginResult> {
-      let response: Response;
-      try {
-        response = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, password } satisfies Schemas['LoginRequest']),
-        });
-      } catch {
-        return { ok: false, status: 0 };
-      }
-      if (!response.ok) return readFailure(response);
-      let body: Schemas['LoginResponse'];
-      try {
-        body = (await response.json()) as Schemas['LoginResponse'];
-      } catch {
-        // 成功の応答でも本体が JSON でなければ（`/api/*` が静的配信に落ちて index.html が返るなど）、投げずに失敗として返す
-        return { ok: false, status: response.status };
-      }
-      changeLogin({ status: 'signedIn', accessToken: body.accessToken, user: body.user });
+      const result = await postJson<Schemas['LoginResponse']>('/api/auth/login', {
+        userId,
+        password,
+      } satisfies Schemas['LoginRequest']);
+      if (!result.ok) return result;
+      // 成功の応答でも本体が JSON の null なら、投げずに失敗として返す
+      if (result.body === null) return { ok: false, status: result.status };
+      changeLogin({
+        status: 'signedIn',
+        accessToken: result.body.accessToken,
+        user: result.body.user,
+      });
       return { ok: true };
     },
 
