@@ -235,6 +235,103 @@ describe('チャンネルの部屋（機能一覧 9.2）', () => {
     expect(alert.textContent).toContain('リアルタイムの反映を始められませんでした');
     expect(alert.textContent).toContain('見つかりません');
   });
+
+  describe('入室要求が上限（429）で断られたとき（機能一覧 9.2「画面は時間をおいてやり直す」）', () => {
+    const TOO_MANY = { ok: false, status: 429, error: { code: 'too_many_requests', message: 'x' } };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('理由を出し、1分おいて入室要求を送り直す。入れたら一覧を読み直し、理由を消す', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { socket, count } = await openChannel();
+      let enters = 0;
+      socket.acknowledge = () => (++enters === 1 ? TOO_MANY : { ok: true, present: [] });
+
+      act(() => socket.open());
+      expect((await screen.findByRole('alert')).textContent).toContain('試行が多すぎます');
+
+      act(() => vi.advanceTimersByTime(59_000));
+      expect(socket.sentCount(REALTIME_REQUESTS.channelEnter)).toBe(1);
+
+      act(() => vi.advanceTimersByTime(1_000));
+      await waitFor(() => expect(count(`GET ${MESSAGES}`)).toBe(2));
+      expect(socket.sentCount(REALTIME_REQUESTS.channelEnter)).toBe(2);
+      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    });
+
+    it('送り直す前にチャンネルを離れたら、送り直さない', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { socket } = await openChannel();
+      socket.acknowledge = () => TOO_MANY;
+      act(() => socket.open());
+      await screen.findByRole('alert');
+
+      fireEvent.click(screen.getByRole('link', { name: 'チャンネルの一覧へ' }));
+      await screen.findByRole('heading', { name: '開発チーム' });
+      act(() => vi.advanceTimersByTime(60_000));
+      await pause();
+
+      expect(socket.sentCount(REALTIME_REQUESTS.channelEnter)).toBe(1);
+    });
+
+    it('チャンネルを離れた後に 429 の acknowledgement が届いても、送り直さない', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { socket } = await openChannel();
+      const pending: ((response: unknown) => void)[] = [];
+      socket.emit = (event: string, body: unknown, ack?: (response: unknown) => void) => {
+        socket.sent.push({ event, body });
+        if (ack) pending.push(ack);
+        return socket;
+      };
+      act(() => socket.open());
+      expect(pending).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole('link', { name: 'チャンネルの一覧へ' }));
+      await screen.findByRole('heading', { name: '開発チーム' });
+      act(() => pending[0]!(TOO_MANY));
+      act(() => vi.advanceTimersByTime(60_000));
+      await pause();
+
+      expect(socket.sentCount(REALTIME_REQUESTS.channelEnter)).toBe(1);
+    });
+
+    it('送り直す時点で繋がっていなければ送らず、繋がり直したときに入室要求を送る', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { socket } = await openChannel();
+      let enters = 0;
+      socket.acknowledge = () => (++enters === 1 ? TOO_MANY : { ok: true, present: [] });
+      act(() => socket.open());
+      await screen.findByRole('alert');
+
+      act(() => socket.drop());
+      act(() => vi.advanceTimersByTime(60_000));
+      await pause();
+      expect(socket.sentCount(REALTIME_REQUESTS.channelEnter)).toBe(1);
+
+      act(() => socket.open());
+      await pause();
+      expect(socket.sentCount(REALTIME_REQUESTS.channelEnter)).toBe(2);
+    });
+
+    it('上限でない断り（404 など）は、時間をおいても送り直さない', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { socket } = await openChannel();
+      socket.acknowledge = () => ({
+        ok: false,
+        status: 404,
+        error: { code: 'not_found', message: 'x' },
+      });
+      act(() => socket.open());
+      await screen.findByRole('alert');
+
+      act(() => vi.advanceTimersByTime(60_000));
+      await pause();
+
+      expect(socket.sentCount(REALTIME_REQUESTS.channelEnter)).toBe(1);
+    });
+  });
 });
 
 describe('配信の反映（機能一覧 5.2）', () => {
