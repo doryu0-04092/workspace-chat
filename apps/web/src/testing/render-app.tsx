@@ -2,8 +2,12 @@ import { QueryClient } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router';
+import { VirtuosoMockContext } from 'react-virtuoso';
 import { App } from '../App';
 import { createSessionStore } from '../auth/session-store';
+
+/** jsdom は要素の大きさを測れないため、Virtuoso には表示域と行の高さを固定で渡す（react-virtuoso の VirtuosoMockContext）。 */
+const VIRTUOSO_SIZES = { viewportHeight: 2000, itemHeight: 40 };
 
 /** テスト用の QueryClient。失敗をやり直さない（やり直すと、失敗の表示を待つ検査が遅れて時間切れになる）。 */
 export function testQueryClient(): QueryClient {
@@ -17,7 +21,9 @@ export function renderApp(path: string, { strict = false } = {}) {
   const store = createSessionStore({ locks: undefined });
   const tree = (
     <MemoryRouter initialEntries={[path]}>
-      <App store={store} queryClient={testQueryClient()} />
+      <VirtuosoMockContext.Provider value={VIRTUOSO_SIZES}>
+        <App store={store} queryClient={testQueryClient()} />
+      </VirtuosoMockContext.Provider>
     </MemoryRouter>
   );
   return { store, ...render(strict ? <StrictMode>{tree}</StrictMode> : tree) };
