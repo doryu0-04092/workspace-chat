@@ -87,7 +87,7 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(paragraph?.textContent).toContain('二行目');
     });
 
-    // 自動リンク（提案・承認済・2026-09-13・依頼側。#385）。承認の範囲は URL であり、メールアドレスは含まない。
+    // 自動リンク（提案・承認済・2026-09-13・依頼側。#385）。承認の範囲は URL であり、素のメールアドレスは含まない。
     it.each([
       ['https', 'https://example.com/x を見て', 'https://example.com/x', 'https://example.com/x'],
       [
@@ -106,7 +106,20 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(container.textContent).toBe(body);
     });
 
-    it('メールアドレスはリンクにせず、文字のまま残す（承認の範囲は URL）', () => {
+    it.each([
+      ['メールアドレス', '<alice@example.com>', 'mailto:alice@example.com'],
+      ['URL', '<https://example.com/a>', 'https://example.com/a'],
+    ])(
+      '山括弧で囲んだ%sは、Markdown の自動リンクの記法としてリンクになる（素の形とは別）',
+      (_name, body, href) => {
+        const links = [...renderBody(body).querySelectorAll('a')].map((link) =>
+          link.getAttribute('href'),
+        );
+        expect(links).toEqual([href]);
+      },
+    );
+
+    it('素のメールアドレスはリンクにせず、文字のまま残す（承認の範囲は URL）', () => {
       const container = renderBody('alice@example.com に連絡する');
       expect(container.querySelector('a')).toBeNull();
       expect(container.textContent).toBe('alice@example.com に連絡する');

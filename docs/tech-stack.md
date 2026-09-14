@@ -322,7 +322,7 @@ AWS の[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/Postgre
 |---|---|---|
 | **react-markdown** | **^10.1.0** | 最新。`react` の peer は `>=18` で、React 19.2 を受け入れる |
 | **micromark-extension-gfm-strikethrough** / **mdast-util-gfm-strikethrough** | **^2.1.0** / **^2.0.0** | 最新。取り消し線の構文と、その構文木への変換。remark-gfm が内部で積んでいるものと同じ部品を、取り消し線だけ積む |
-| **micromark-extension-gfm-autolink-literal** / **mdast-util-gfm-autolink-literal** | **^2.1.0** / **^2.0.1** | 最新（#385）。URL の自動リンクの構文と、その構文木への変換。**メールアドレスの構文（`emailAutolink`）は読ませず、構文木への変換は `transforms` を空にして使う**——同梱の `transforms` は、構文の印によらず本文の文字から URL とメールアドレスを正規表現で探してリンクにする（`mdast-util-gfm-autolink-literal` の `lib/index.js` の `transformGfmAutolinkLiterals`）。micromark 側の README は、構文の段の探し方（1つ目）と、構文木の段の探し方（2つ目。`mdast-util-gfm-autolink-literal` が行う）を分けて書いている |
+| **micromark-extension-gfm-autolink-literal** / **mdast-util-gfm-autolink-literal** | **^2.1.0** / **^2.0.1** | 最新（#385）。URL の自動リンクの構文と、その構文木への変換。**素のメールアドレスの構文（`emailAutolink`）は読ませず、構文木への変換は `transforms` を空にして使う**（山括弧で囲んだ URL とメールアドレスは CommonMark の `autolink` で従来どおりリンクになる。機能一覧 4.3）——同梱の `transforms` は、構文の印によらず本文の文字から URL とメールアドレスを正規表現で探してリンクにする（`mdast-util-gfm-autolink-literal` の `lib/index.js` の `transformGfmAutolinkLiterals`）。micromark 側の README は、構文の段の探し方（1つ目）と、構文木の段の探し方（2つ目。`mdast-util-gfm-autolink-literal` が行う）を分けて書いている |
 | **rehype-sanitize** | **^6.0.0** | 最新。react-markdown の README の Security の節が、プラグインを使うときの安全の確保に勧めている |
 | **remark-breaks** | **^4.0.0** | 最新。README は「段落の中の改行（soft line ending）を `<br>` にする」「利用者が改行を入れたら、そのとおりに見せたいときに使う」と書いている。CSS の `white-space: pre-wrap` は、ブロックの要素のあいだの改行文字まで空行として出すため採らない |
 
