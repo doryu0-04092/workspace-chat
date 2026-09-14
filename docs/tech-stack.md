@@ -103,10 +103,11 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | ライブラリ | **React** | **19.2** | 下記3ライブラリを使うため。チャット固有の課題に対する解が React 側に揃っている |
 | 言語 | **TypeScript** | 5.x | **難-3 の解決**。バックエンドと WebSocket のイベント型を共有する |
 | ビルド | **Vite** | **7.x** | Vite 8（2026-03 安定版）は内部バンドラを Rolldown / Oxc に刷新しており、プラグイン互換の実績が積み上がるまで見送る |
+| ルーティング | **React Router** | **8.x** | 決定・2026-09-13・依頼側。宣言型（`BrowserRouter`・`Routes`・`Route`）で使う。画面と URL は [機能一覧](features.md) 1.2 |
 | **メッセージ一覧** | **react-virtuoso** | 4.x | **難-1 の解決**。`firstItemIndex` は「先頭に要素を足しても表示位置を維持する」ための機能で、チャット用途を想定して用意されている。自前だと `scrollHeight` の差分補正が必要になる |
-| **Markdown 描画** | **react-markdown** + GFM の取り消し線の拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線の拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。選定時に挙げた rehype-highlight は採っていない。**解釈する記法と、その区分・承認（取り消し線・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
+| **Markdown 描画** | **react-markdown** + GFM の取り消し線と URL の自動リンクの拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線と URL の自動リンクの拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。選定時に挙げた rehype-highlight は採っていない。**解釈する記法と、その区分・承認（取り消し線・URL の自動リンク・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
 | データ取得 | **TanStack Query** | v5 | `useInfiniteQuery` がカーソルページネーションに直結する。WebSocket 受信を `setQueryData` でキャッシュに反映する |
-| 一時状態 | **Zustand** | v5 | 在席・入力中など、永続化しない状態を TanStack Query と分けて持つ |
+| 一時状態 | **Zustand** | v5 | 在席・入力中・ログインの状態（アクセストークンを含む）など、永続化しない状態を TanStack Query と分けて持つ（ログインの状態を含めるのは決定・2026-09-14・依頼側） |
 | スタイル | **Tailwind CSS** | 4.x | 密度の高い UI を素早く組む。画面数に対して独自 CSS は割に合わない |
 | WebSocket | **socket.io-client** | 4.x | サーバーと対 |
 | テスト | Vitest / Playwright（axe-core 同梱） | — | 既存プロジェクトで運用実績あり |
@@ -189,7 +190,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 項目 | 採用 | 備考 |
 |---|---|---|
 | IaC | **Terraform** **1.11 以上** | 既存プロジェクトで実績あり。**1.11 以上とするのは、state のロックに S3 バックエンドの `use_lockfile` を使うためである**（HashiCorp の S3 バックエンドの文書: 1.9 の版には `use_lockfile` が無く、1.10 は「(Experimental, Optional)」、1.11 は「(Optional)」。下の「本番の HTTPS・秘密情報・state の置き場」）。**秘密の値を state に残さない write-only 引数も 1.11 以上を要する**（Terraform の文書「To use write-only arguments, you must use Terraform v.1.11 or later」）。**AWS プロバイダーは 6.62 以上とする**——使う write-only 引数がそろう版である（プロバイダーのリリースノートの 5.87.0「resource/aws_ssm_parameter: Add `value_wo` write-only attribute」、5.88.0「resource/aws_db_instance: Add `password_wo` write-only attribute」、6.62.0「resource/aws_elasticache_replication_group: Add `auth_token_wo` and `auth_token_wo_version` write-only arguments」）。**random プロバイダーは 3.7.1 以上とする**——秘密の乱数を作る `ephemeral` の `random_password` が入った版である（CHANGELOG の 3.7.1「ephemeral/random_password: New ephemeral resource that generates a password string.」） |
-| フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**閲覧者との HTTPS を終端する**（ブラウザ通知に必要な HTTPS。[要件定義書](requirements.md) 5。下の「本番の HTTPS・秘密情報・state の置き場」） |
+| フロント配信 | CloudFront + S3 | **静的配信・添付とアバターの配信・API と WebSocket を1つのドメインで兼ねる**（オリジンを3つ・ビヘイビアを4つ。下の「本番構成のサイジング」の CloudFront の行。#77）。**閲覧者との HTTPS を終端する**（ブラウザ通知に必要な HTTPS。[要件定義書](requirements.md) 5。下の「本番の HTTPS・秘密情報・state の置き場」）。**既定のビヘイビアに viewer request の CloudFront Functions を置き、拡張子の無いパス（画面の URL。[機能一覧](features.md) 1.2）を `/index.html` に書き換える**（AWS の例 `url-rewrite-single-page-apps` と同じ形。例はパスの下の `index.html` を付けるが、画面は根の `index.html` 1つである）。**カスタムエラー応答で `index.html` を返す形は採らない**——API リファレンスで `CustomErrorResponses` は `DistributionConfig` にあり `CacheBehavior` には無く、`/api/*` の 404 の本体まで置き換わる |
 | ロードバランサ | **ALB** | WebSocket にネイティブ対応。**プライベートサブネットに置き、CloudFront の VPC オリジンとして HTTP で受ける**（TLS は終端せず、タスクへも HTTP で渡す。**閲覧者との HTTPS は CloudFront が終端する**。下の「本番の HTTPS・秘密情報・state の置き場」）。**セキュリティグループは CloudFront からだけ到達できるようにする**（CloudFront の origin-facing のプレフィックスリスト、または VPC オリジンを作ると AWS が作る `CloudFront-VPCOrigins-Service-SG`）。**タスクのセキュリティグループも、ALB のセキュリティグループからだけ到達できるようにする**（タスクは公開 IP を持つ。下の「ECS のタスクの置き場」の行）——満たさないと、api の `TRUST_PROXY_HOPS=2` のもとで ALB やタスクを直接叩く側が X-Forwarded-For で任意の発信元を名乗れ、レート制限（[機能一覧](features.md) 1.1）が効かない。起動時にもログにも現れない（`apps/api/src/rate-limit/rate-limit-config.ts`。#252） |
 | コンテナ | ECS Fargate | |
 | DB | RDS PostgreSQL 17（Single-AZ） | 学習用途のため冗長化しない |
@@ -345,12 +346,13 @@ AWS の[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/Postgre
 
 #### 追加で確認した項目 — Markdown の描画（2026-09-13。#379）
 
-`npm view` で最新を確かめて入れた。5つとも `apps/web` の依存で、ルートの `node_modules` に巻き上がることを確かめた（[README](../README.md)「依存の版を上げない方針」の jsdom の実測と同じ確かめ方）。
+`npm view` で最新を確かめて入れた。7つとも `apps/web` の依存で、ルートの `node_modules` に巻き上がることを確かめた（[README](../README.md)「依存の版を上げない方針」の jsdom の実測と同じ確かめ方）。
 
 | 対象 | 採用 | 判断 |
 |---|---|---|
 | **react-markdown** | **^10.1.0** | 最新。`react` の peer は `>=18` で、React 19.2 を受け入れる |
 | **micromark-extension-gfm-strikethrough** / **mdast-util-gfm-strikethrough** | **^2.1.0** / **^2.0.0** | 最新。取り消し線の構文と、その構文木への変換。remark-gfm が内部で積んでいるものと同じ部品を、取り消し線だけ積む |
+| **micromark-extension-gfm-autolink-literal** / **mdast-util-gfm-autolink-literal** | **^2.1.0** / **^2.0.1** | 最新（#385）。URL の自動リンクの構文と、その構文木への変換。**素のメールアドレスの構文（`emailAutolink`）は読ませず、構文木への変換は `transforms` を空にして使う**（山括弧で囲んだ URL とメールアドレスは CommonMark の `autolink` で従来どおりリンクになる。機能一覧 4.3）——同梱の `transforms` は、構文の印によらず本文の文字から URL とメールアドレスを正規表現で探してリンクにする（`mdast-util-gfm-autolink-literal` の `lib/index.js` の `transformGfmAutolinkLiterals`）。micromark 側の README は、構文の段の探し方（1つ目）と、構文木の段の探し方（2つ目。`mdast-util-gfm-autolink-literal` が行う）を分けて書いている |
 | **rehype-sanitize** | **^6.0.0** | 最新。react-markdown の README の Security の節が、プラグインを使うときの安全の確保に勧めている |
 | **remark-breaks** | **^4.0.0** | 最新。README は「段落の中の改行（soft line ending）を `<br>` にする」「利用者が改行を入れたら、そのとおりに見せたいときに使う」と書いている。CSS の `white-space: pre-wrap` は、ブロックの要素のあいだの改行文字まで空行として出すため採らない |
 
@@ -437,6 +439,13 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 | **@nestjs/websockets**・**@nestjs/platform-socket.io** | **^11.2.3** | 11 系の最新（npm の最新は 12.0.1）。NestJS 11 に留める方針に合わせる（peerDependencies は `@nestjs/common` の ^11.0.0） |
 | **@socket.io/redis-adapter** | **^8.3.0** | 最新（上表「難-2」）。`ioredis` の接続をそのまま渡せる。**アダプタはコマンドの Promise を待たずに捨てる**（`publish`・終了時の `unsubscribe`）ため、Valkey が止まっていると未処理の reject でプロセスが落ちる。接続に失敗の受け手を付けてから渡す（`apps/api/src/realtime/realtime-valkey.ts`） |
 | **socket.io-client**（開発依存） | **^4.8.3** | テストで実際に接続する（Origin・トークン・タスクをまたぐ配信）。web が使うときに web の依存へ足す |
+
+#### 追加で確認した項目 — web の認証の画面（2026-09-13。#379）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **react-router** | **^8.3.1** | 最新（上表「ルーティング」。決定・2026-09-13・依頼側）。`apps/web` の dependencies。8.3.1 の `react-router` 自体が `BrowserRouter`・`Routes`・`Route`・`Navigate`・`MemoryRouter` を出している（`dist/production/index.d.ts`）ため、`react-router-dom` は入れない。engines は `node >=22.22.0`、peerDependencies は `react`・`react-dom` の `>=19.2.7`（上表の Node.js 24・React 19.2 を満たす）。使い方は同梱の `docs/start/declarative`（`BrowserRouter` で包み、`Routes`・`Route` で組む） |
+| **zustand** | **^5.0.15** | 最新（上表「一時状態」の v5）。`apps/web` の dependencies。依存は無く、peerDependencies（`react`・`@types/react`・`immer`・`use-sync-external-store`）はすべて任意。ライセンスは MIT。ログインの状態を `zustand/vanilla` の `createStore` に置き（`vanilla.d.ts` の `createStore`）、画面は `zustand` の `useStore` で読む（`react.d.ts` の `useStore(api)`。`apps/web/src/auth/session-store.ts`・`session-context.tsx`） |
 
 #### TypeScript 7 を採らない理由
 
