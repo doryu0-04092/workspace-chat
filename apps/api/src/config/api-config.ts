@@ -27,7 +27,13 @@ export interface ApiConfig {
 /** ApiConfig を注入するトークン。 */
 export const API_CONFIG = Symbol('API_CONFIG');
 
-/** JWT_SECRET の下限（バイト）。RFC 7518 3.2: HS256 の鍵はハッシュの出力（256 ビット）以上でなければならない（MUST）。 */
+/**
+ * JWT_SECRET の下限（バイト）。RFC 7518 3.2: HS256 の鍵はハッシュの出力（256 ビット）以上でなければならない（MUST）。
+ *
+ * **踏むと壊れる: 本番の JWT_SECRET はこの下限ちょうどの長さで作る**（技術スタックの「本番の HTTPS・秘密情報・state の置き場」。
+ * Terraform の `random_password` で英数字・長さ 32）。この定数だけを上げると、本番の api は起動時に落ちる。
+ * 上げるときは、同じ `apply` で `random_password` の `length` とパラメータの `value_wo_version` を上げ、ECS のタスクを入れ替える。
+ */
 const JWT_SECRET_MIN_BYTES = 32;
 
 /**
@@ -80,6 +86,9 @@ export function resolveWebOrigin(raw: string | undefined): string {
 /**
  * 設定1つの読み方。**`secret` はすべての行に必ず書く**（書かないと型検査で落ちる）——値に秘密（資格情報・鍵）が入るなら
  * `secret: true` と、不正なときに代わりに示す `hint` を書く。
+ * **踏むと壊れる: `secret: true` は、本番で Systems Manager Parameter Store の暗号化パラメータと ECS の `secrets` で渡す対象を決める。**
+ * `secret: true` の設定を足したら Terraform の側にもパラメータを足し、タスク定義の `environment` には書かない
+ * （docs/tech-stack.md の「本番の HTTPS・秘密情報・state の置き場」）。
  */
 type Setting<T> = {
   readonly env: string;

@@ -31,6 +31,10 @@ const VALKEY_READY_TIMEOUT_MS = 3_000;
  * - `commandTimeout`: 繋がっていても返らないときに打ち切る
  * - `maxRetriesPerRequest: 0`: 1つのコマンドを再送しない
  * 再接続そのものは ioredis が裏で続ける。**`error` を受ける処理を必ず付ける**（無いと未処理の error でプロセスが落ちる）。
+ *
+ * **踏むと壊れる: `REDIS_URL` をそのまま `new Redis(url)` に渡す形を崩さない。** 本番の ElastiCache は転送時暗号化（`rediss://`）と
+ * AUTH トークンを持ち、どちらも URL に入っている（技術スタックの「本番の HTTPS・秘密情報・state の置き場」）。`{ host, port }` などに
+ * 組み替えると TLS と AUTH が黙って落ち、繋がらなくても api は止まらずメモリへ迂回するため気づけない。配信のアダプタの接続（`duplicate`）はこの接続の設定を引き継ぐ。
  */
 async function createValkeyClient(redisUrl: string, logger: Logger): Promise<Redis> {
   const client = new Redis(redisUrl, {
