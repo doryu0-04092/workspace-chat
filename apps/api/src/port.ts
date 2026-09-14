@@ -17,6 +17,9 @@
  * 例外になり、api の起動だけでなく web のビルドとテストも落ちる。
  * api と web は別プロセスで環境変数を共有しないため、**両方の端末に同じ PORT を渡す**
  * （README「動かす」）。片方にだけ渡すと、web は 3000 に繋ぎに行き、api のログには何も出ない。
+ *
+ * **踏むと壊れる: 既定の 3000 は、本番のセキュリティグループ（infra/production/network.tf）も同じ値で持つ。**
+ * 既定を変えるならそちらも直す。食い違うと ALB からタスクへ届かず、CI は緑のまま、デプロイ後に初めて落ちる。
  */
 export function resolvePort(raw: string | undefined): number {
   if (raw === undefined) {
