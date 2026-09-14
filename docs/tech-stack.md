@@ -105,7 +105,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | ビルド | **Vite** | **7.x** | Vite 8（2026-03 安定版）は内部バンドラを Rolldown / Oxc に刷新しており、プラグイン互換の実績が積み上がるまで見送る |
 | ルーティング | **React Router** | **8.x** | 決定・2026-09-13・依頼側。宣言型（`BrowserRouter`・`Routes`・`Route`）で使う。画面と URL は [機能一覧](features.md) 1.2 |
 | **メッセージ一覧** | **react-virtuoso** | 4.x | **難-1 の解決**。`firstItemIndex` は「先頭に要素を足しても表示位置を維持する」ための機能で、チャット用途を想定して用意されている。自前だと `scrollHeight` の差分補正が必要になる |
-| **Markdown 描画** | **react-markdown** + GFM の取り消し線の拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線の拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。選定時に挙げた rehype-highlight は採っていない。**解釈する記法と、その区分・承認（取り消し線・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
+| **Markdown 描画** | **react-markdown** + GFM の取り消し線と URL の自動リンクの拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線と URL の自動リンクの拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。選定時に挙げた rehype-highlight は採っていない。**解釈する記法と、その区分・承認（取り消し線・URL の自動リンク・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
 | データ取得 | **TanStack Query** | v5 | `useInfiniteQuery` がカーソルページネーションに直結する。WebSocket 受信を `setQueryData` でキャッシュに反映する |
 | 一時状態 | **Zustand** | v5 | 在席・入力中・ログインの状態（アクセストークンを含む）など、永続化しない状態を TanStack Query と分けて持つ（ログインの状態を含めるのは決定・2026-09-14・依頼側） |
 | スタイル | **Tailwind CSS** | 4.x | 密度の高い UI を素早く組む。画面数に対して独自 CSS は割に合わない |
@@ -317,12 +317,13 @@ AWS の[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/Postgre
 
 #### 追加で確認した項目 — Markdown の描画（2026-09-13。#379）
 
-`npm view` で最新を確かめて入れた。5つとも `apps/web` の依存で、ルートの `node_modules` に巻き上がることを確かめた（[README](../README.md)「依存の版を上げない方針」の jsdom の実測と同じ確かめ方）。
+`npm view` で最新を確かめて入れた。7つとも `apps/web` の依存で、ルートの `node_modules` に巻き上がることを確かめた（[README](../README.md)「依存の版を上げない方針」の jsdom の実測と同じ確かめ方）。
 
 | 対象 | 採用 | 判断 |
 |---|---|---|
 | **react-markdown** | **^10.1.0** | 最新。`react` の peer は `>=18` で、React 19.2 を受け入れる |
 | **micromark-extension-gfm-strikethrough** / **mdast-util-gfm-strikethrough** | **^2.1.0** / **^2.0.0** | 最新。取り消し線の構文と、その構文木への変換。remark-gfm が内部で積んでいるものと同じ部品を、取り消し線だけ積む |
+| **micromark-extension-gfm-autolink-literal** / **mdast-util-gfm-autolink-literal** | **^2.1.0** / **^2.0.1** | 最新（#385）。URL の自動リンクの構文と、その構文木への変換。**素のメールアドレスの構文（`emailAutolink`）は読ませず、構文木への変換は `transforms` を空にして使う**（山括弧で囲んだ URL とメールアドレスは CommonMark の `autolink` で従来どおりリンクになる。機能一覧 4.3）——同梱の `transforms` は、構文の印によらず本文の文字から URL とメールアドレスを正規表現で探してリンクにする（`mdast-util-gfm-autolink-literal` の `lib/index.js` の `transformGfmAutolinkLiterals`）。micromark 側の README は、構文の段の探し方（1つ目）と、構文木の段の探し方（2つ目。`mdast-util-gfm-autolink-literal` が行う）を分けて書いている |
 | **rehype-sanitize** | **^6.0.0** | 最新。react-markdown の README の Security の節が、プラグインを使うときの安全の確保に勧めている |
 | **remark-breaks** | **^4.0.0** | 最新。README は「段落の中の改行（soft line ending）を `<br>` にする」「利用者が改行を入れたら、そのとおりに見せたいときに使う」と書いている。CSS の `white-space: pre-wrap` は、ブロックの要素のあいだの改行文字まで空行として出すため採らない |
 
