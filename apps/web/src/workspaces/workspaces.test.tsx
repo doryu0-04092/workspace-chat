@@ -268,6 +268,30 @@ describe('ワークスペースの画面', () => {
     expect(await screen.findByRole('heading', { name: '# general' })).toBeDefined();
   });
 
+  it('ログアウトしたら読み込みの記憶を捨て、同じタブで次にログインした別の利用者に、前の利用者のワークスペースを出さない', async () => {
+    /** テストで使うもう1人の利用者（実在の人物ではない）。 */
+    const BOB = { id: '01920000-0000-7000-8000-000000000002', userId: 'bob', displayName: 'ボブ' };
+    fakeFetch({
+      ...session,
+      // 2回目（ボブの一覧）は返さない。記憶を捨てていなければ、その間に前の利用者の一覧が出る
+      'GET /api/workspaces': [() => json(200, [OWNED]), () => new Promise<Response>(() => {})],
+      'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+      'POST /api/auth/login': () =>
+        json(200, { accessToken: 't2', tokenType: 'Bearer', expiresIn: 900, user: BOB }),
+    });
+    renderApp('/workspaces');
+    await screen.findByRole('link', { name: '開発チーム' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }));
+    await screen.findByRole('heading', { name: 'ログイン' });
+    type('ユーザーID', 'bob');
+    type('パスワード', 'password-2');
+    fireEvent.click(screen.getByRole('button', { name: 'ログイン' }));
+
+    expect(await screen.findByText('ボブ')).toBeDefined();
+    expect(screen.queryByRole('link', { name: '開発チーム' })).toBeNull();
+  });
+
   it('参加していないチャンネルの URL を直接開いても、チャンネルの画面を出さない', async () => {
     fakeFetch(routesFor(OWNED));
     renderApp(`/workspaces/${OWNED.id}/channels/${RANDOM.id}`);
