@@ -14,7 +14,7 @@ ephemeral "random_password" "valkey_auth_token" {
 }
 
 ephemeral "random_password" "jwt_secret" {
-  length  = 32
+  length  = 64
   special = false
 }
 
