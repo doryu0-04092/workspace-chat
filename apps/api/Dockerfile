@@ -47,6 +47,8 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # prisma の CLI は prod-deps に入っている——@prisma/client が peerDependencies に持ち（任意）、package-lock.json で devOptional のため
 # --omit=dev でも lock の版で入る。ここで npm install しない（lock と違う版に解決される経路を作らない）。
 # 踏むと壊れる: @prisma/client が prisma を peer から外すと CLI が消える。scripts/api-image.test.sh の 1 が落ちて気づく。
+# 踏むと壊れる: 運用者が ECS Exec で RDS に入る先もこの段のイメージである（技術スタックのコンテナの行・要件定義書 4.2 手順 5 の代償）。
+# CMD は migrate deploy を流して終わるため、入るときは run-task で command を上書きして常駐させる。上書きを忘れると本番の DB に migrate deploy が走る。
 FROM ${NODE_IMAGE} AS migrate
 ENV NODE_ENV=production
 WORKDIR /app

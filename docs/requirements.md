@@ -461,6 +461,9 @@ S3 に残ったまま、どのメッセージからも参照されなくなる**
    4.3 の「非参加者にデータを渡さない」も、3.5.1 の「オーナーの例外もメッセージには及ばない」も、
    **この経路には掛からない。**
    **ECS Exec で入る先は、api のタスクではなく、マイグレーション用のイメージを run-task で動かしたタスクにする**（[技術スタック](tech-stack.md) のコンテナの行。#274・#452）——
+   **入るときは run-task でコンテナの command を上書きして常駐させる**——イメージの CMD は `prisma migrate deploy` を流して終わり（`apps/api/Dockerfile` の migrate 段）、
+   ECS Exec が繋がるのは動いているコンテナである（AWS 公式「run commands in or get a shell to a container running on」。上書きは ECS の API リファレンス ContainerOverride「The command to send to the container that overrides the default command from the Docker image or the task definition.」）。
+   **上書きしないと入る先が残らず、復旧の途中で本番の DB に `migrate deploy` が1回走る。**
    ECS Exec のコマンドは root で動き（AWS 公式「these commands are run as the root user.」）、**入ったタスクのコンテナが環境変数として持つ値にも届くものとして扱う**（Fargate の上で届かないことは確かめていない）。
    api のタスクは `secret: true` の設定（`JWT_SECRET` を含む）を持ち（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）、
    **`JWT_SECRET` に届けば、任意の利用者のアクセストークンを署名して作れる**（署名と検証は HS256 の共有鍵。`apps/api/src/auth/auth.module.ts`）——**アプリの認証そのものの外に出る。**
