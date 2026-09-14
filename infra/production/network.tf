@@ -83,8 +83,11 @@ resource "aws_route_table_association" "public" {
 }
 
 # プライベートサブネットは VPC の中だけに経路を持つ（外への経路を足さない）。
+# route を空で明示する: 省くと、手で足された経路を Terraform が無視し、plan の差分にも出ない
+# （プロバイダーの文書「omitting this argument is interpreted as ignoring any existing routes」）。
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
+  route  = []
 
   tags = {
     Name = "workspace-chat-private"
@@ -105,6 +108,8 @@ resource "aws_route_table_association" "private" {
 #
 # 踏むと壊れる: タスクへの受信を止めるのは、タスクのセキュリティグループの1層だけである（技術スタックの代償）。
 # 送信元を ALB のセキュリティグループ以外に広げると、CloudFront を経ずに api へ直接届く。
+# 広げる誤りは validate でも plan でも落ちないため、apply の後に、タスクのセキュリティグループの受信が
+# ALB のセキュリティグループからの 3000 だけであることを実物で確かめる（技術スタックの同じ代償）。
 
 resource "aws_security_group" "alb" {
   name   = "workspace-chat-alb"
