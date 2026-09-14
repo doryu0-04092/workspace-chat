@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Link, Outlet } from 'react-router';
+import { failureMessage } from '../auth/failure-message';
 import { useSession, useSessionStore } from '../auth/session-context';
+import { useRealtime } from '../realtime/realtime-context';
 
-/** ログインした画面の共通の枠。表示名とログアウトを持つ。 */
+/** ログインした画面の共通の枠。表示名とログアウトを持ち、リアルタイムの接続を断られたら理由を出す。 */
 export function SignedInLayout() {
   const store = useSessionStore();
   const session = useSession();
+  const { refused } = useRealtime();
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -40,6 +43,11 @@ export function SignedInLayout() {
       {message && (
         <p role="alert" className="px-6 pt-4 text-red-700">
           {message}
+        </p>
+      )}
+      {refused && (
+        <p role="alert" className="px-6 pt-4 text-red-700">
+          リアルタイムの反映に接続できませんでした。{failureMessage(refused)}
         </p>
       )}
       <Outlet />

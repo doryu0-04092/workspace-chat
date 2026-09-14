@@ -48,13 +48,16 @@ docker pull --quiet "$postgres_image" >/dev/null
 # 値はこの検査の中だけで使う使い捨ての資格情報である。
 docker run --detach --name "$postgres" --network "$network" \
   --env POSTGRES_PASSWORD=image-test --env POSTGRES_DB=chat "$postgres_image" >/dev/null
+# **踏むと壊れる: 起動の待ち合わせは TCP（--host 127.0.0.1）で引く。** 公式イメージは初回に、ソケットだけで待ち受ける
+# 一時のサーバー（listen_addresses=''）で初期化し、止めてから本来のサーバーを起動し直す。ソケットで引くと一時のサーバーに
+# ready と答えられ、直後の停止の間に落ちる。TCP で答えるのは本来のサーバーだけである。
 for _ in $(seq 1 60); do
-  if docker exec "$postgres" pg_isready --username postgres --dbname chat >/dev/null 2>&1; then
+  if docker exec "$postgres" pg_isready --host 127.0.0.1 --username postgres --dbname chat >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
-docker exec "$postgres" pg_isready --username postgres --dbname chat >/dev/null ||
+docker exec "$postgres" pg_isready --host 127.0.0.1 --username postgres --dbname chat >/dev/null ||
   fail "PostgreSQL が起動しない"
 database_url="postgresql://postgres:image-test@$postgres:5432/chat"
 docker run --rm --network "$network" --env DATABASE_URL="$database_url" "$migrate_image" ||
