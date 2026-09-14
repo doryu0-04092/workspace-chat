@@ -9,6 +9,15 @@ export class ApiError extends Error {
 }
 
 /**
+ * api のパスの1区切りに埋める値を符号化する。
+ * **踏むと壊れる: URL のパラメータ（`useParams`）は、react-router が `%2F` などを復号して返す**（8.3.1 で確かめた。`..%2F..%2Fauth%2Flogout` は `../../auth/logout` になる）。
+ * そのまま埋めると `..` や `/` がパスの区切りとして読まれ、別の api へアクセストークン付きで要求が向く。
+ */
+export function segment(value: string): string {
+  return encodeURIComponent(value);
+}
+
+/**
  * アクセストークンを付けて JSON の要求を送り、本体を返す（204 は undefined）。
  * 401 のやり直しとログインの状態の切り替えは `authorizedFetch` が持つ。
  */

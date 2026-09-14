@@ -1,6 +1,6 @@
 import type { components } from '@workspace-chat/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { requestJson } from '../api/client';
+import { requestJson, segment } from '../api/client';
 import { useSessionStore } from '../auth/session-context';
 
 type Schemas = components['schemas'];
@@ -12,15 +12,6 @@ const keys = {
   workspace: (workspaceId: string) => ['workspaces', workspaceId] as const,
   channels: (workspaceId: string) => ['workspaces', workspaceId, 'channels'] as const,
 };
-
-/**
- * api のパスの1区切りに埋める値を符号化する。
- * **踏むと壊れる: URL のパラメータ（`useParams`）は、react-router が `%2F` などを復号して返す**（8.3.1 で確かめた。`..%2F..%2Fauth%2Flogout` は `../../auth/logout` になる）。
- * そのまま埋めると `..` や `/` がパスの区切りとして読まれ、別の api へアクセストークン付きで要求が向く。
- */
-function segment(value: string): string {
-  return encodeURIComponent(value);
-}
 
 /** 所属するワークスペース（参加した順。REST の仕様の listMyWorkspaces）。 */
 export function useWorkspaces() {

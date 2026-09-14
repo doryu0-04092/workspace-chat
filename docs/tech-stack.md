@@ -424,6 +424,12 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 |---|---|---|
 | **@tanstack/react-query** | **^5.102.8** | 最新（上表「データ取得」の v5）。`apps/web` の dependencies。peerDependencies は `react` の `^18` または `^19`（上表の React 19.2 を満たす）。依存は `@tanstack/query-core` 5.102.8 だけ。`QueryClientProvider`・`useQuery`・`useMutation`・`useQueryClient` を出している（`build/modern/index.d.ts`）。**api が 4xx で断った読み込みはやり直さない**（やり直しても結果が変わらず、404 の表示が遅れるだけになる。`apps/web/src/api/query-client.ts`） |
 
+#### 追加で確認した項目 — web のメッセージの画面（2026-09-14。#379）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **react-virtuoso** | **^4.18.13** | 最新（上表「メッセージ一覧」の 4.x）。`apps/web` の dependencies。依存は無く、peerDependencies は `react`・`react-dom` の `>=16 \|\| >=17 \|\| >=18 \|\| >=19`（上表の React 19.2 を満たす）。ライセンスは MIT。`firstItemIndex` の型の説明「Use when implementing inverse infinite scrolling - decrease the value this property in combination with `data` or `totalCount` to prepend items to the top of the list.」（`dist/index.d.ts`）。**検査は同梱の `VirtuosoMockContext`（「React context for mocking Virtuoso component measurements in tests.」）で表示域と行の高さを固定する。** そのもとでは `initialTopMostItemIndex` に 0 以外を渡すと行が1つも描かれないため、開いたときに最新へ移るのは ref の `scrollToIndex` で行う。jsdom は要素の `scrollBy` を持たず、先頭に足すと例外になるため、検査の下地に空の `scrollBy` を置く（`apps/web/src/test-setup.ts`） |
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。
