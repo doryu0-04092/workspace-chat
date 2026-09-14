@@ -22,6 +22,10 @@ export const REALTIME_VALKEY_CLIENTS = Symbol('REALTIME_VALKEY_CLIENTS');
  * - publish はレート制限と同じ接続（止まっていればすぐ失敗する）を使う
  * - **subscribe は専用の接続にし、繋がるまで溜める**（`enableOfflineQueue: true`）。アダプタは作ったときに1回だけ subscribe するため、
  *   起動の時点で繋がっていないと購読が失われる。購読は ioredis が再接続のたびにやり直す（`autoResubscribe` の既定）
+ *
+ * **踏むと壊れる: subscribe の接続は `base.duplicate` で作り、`base` の設定を引き継ぐ。ここで接続を新しく組み立て直さない。**
+ * 本番の ElastiCache は転送時暗号化（`rediss://`）と AUTH トークンを持ち、どちらも `base` の設定に入っている（技術スタックの「本番の HTTPS・秘密情報・state の置き場」）。
+ * `{ host, port }` などで組み立てると TLS と AUTH が黙って落ち、購読が繋がらなくても api は止まらないため気づけない。
  */
 export function createRealtimeValkeyClients(base: Redis, logger: Logger): RealtimeValkeyClients {
   const subscriber = base.duplicate({
