@@ -99,6 +99,7 @@ npm run typecheck
 npm run build
 npm test
 bash scripts/api-image.test.sh
+bash scripts/terraform.test.sh
 bash scripts/check-audit.test.sh
 npm audit --json > audit-report.json || true
 node scripts/check-audit.mjs audit-report.json
