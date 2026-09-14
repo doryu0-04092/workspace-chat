@@ -61,9 +61,11 @@ resource "aws_iam_role_policy" "task_execution_parameters" {
   policy = data.aws_iam_policy_document.task_execution_parameters.json
 }
 
-# タスクロール: 運用者が ECS Exec で api のタスクに入るための権限（#274 の決定。#458）。
-resource "aws_iam_role" "task" {
-  name               = "workspace-chat-task"
+# マイグレーションのタスクのタスクロール: 運用者が ECS Exec で入るための権限（#274 の決定。入る先は api のタスクではなく、
+# マイグレーションのイメージを run-task で動かしたタスク——要件定義書 4.2「RDS の障害から復旧するとき」手順 5 の代償。#452・#458）。
+# 踏むと壊れる: この権限を api のタスクのタスクロールに付けない。api のタスクに入ると JWT_SECRET に届き、認証の外に出る。
+resource "aws_iam_role" "migrate_task" {
+  name               = "workspace-chat-migrate-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
@@ -81,7 +83,7 @@ data "aws_iam_policy_document" "task_exec_command" {
 
 resource "aws_iam_role_policy" "task_exec_command" {
   name   = "exec-command"
-  role   = aws_iam_role.task.id
+  role   = aws_iam_role.migrate_task.id
   policy = data.aws_iam_policy_document.task_exec_command.json
 }
 
