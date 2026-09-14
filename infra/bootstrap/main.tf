@@ -30,6 +30,16 @@ resource "aws_s3_bucket" "state" {
   }
 }
 
+# パブリックアクセスを全面的に遮断する（要件定義書 4.3 のストレージの行）。
+resource "aws_s3_bucket_public_access_block" "state" {
+  bucket = aws_s3_bucket.state.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 # 誤削除と誤った書き込みから state を戻す（要件定義書 4.2「バックアップ」・「復旧手順」）。
 resource "aws_s3_bucket_versioning" "state" {
   bucket = aws_s3_bucket.state.id

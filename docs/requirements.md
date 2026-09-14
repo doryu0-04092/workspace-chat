@@ -384,6 +384,7 @@
 | RDS | 自動バックアップを有効にする（**日次スナップショット＋トランザクションログの退避**。保持期間内の任意の時点へ復元できる）。保持期間と取得時間帯は Terraform に置く |
 | S3（添付ファイル） | バージョニングで誤削除に備える。**ライフサイクルは置かない。例外は `quarantine/`（検証前の隔離用のキー）だけ**である（[機能一覧](features.md) 11.1） |
 | Terraform の state のバケット | バージョニングで誤削除と誤った書き込みに備える（HashiCorp の S3 バックエンドの文書「enable Bucket Versioning on the S3 bucket to allow for state recovery in the case of accidental deletions and human error」。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。**state を失うと、本体の構成を Terraform から操作できなくなる** |
+| `infra/bootstrap` の state（手元のファイル） | **対象外。写しを持たない**（state のバケットを作る前には置き場が無いため、手元のファイルに置く。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の state の行）。失ったら取り込み直す（下の「復旧手順」） |
 | Systems Manager Parameter Store（`secret: true` の設定の値） | **対象外。値の写しを持たない**（state にもプランにも残さない。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。失ったら作り直して入れ直す（下の「復旧手順」） |
 | ElastiCache Valkey | **対象外**（この節の「代償」） |
 
@@ -409,13 +410,14 @@
 
 #### 復旧手順
 
-**対象は5つあり、復旧の手順としてはそれぞれ閉じている。**
+**対象は6つあり、復旧の手順としてはそれぞれ閉じている。**
 
 | 対象 | 復旧の方式 |
 |---|---|
 | **RDS** | 下記の手順 1〜5 |
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
 | **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
+| **`infra/bootstrap` の state** | **取り込み直す**——state のバケットは `prevent_destroy` で残るため、`terraform import` でバケット・バージョニング・パブリックアクセスの遮断（`infra/bootstrap/main.tf` の3つのリソース）を state に戻す |
 | **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
 | **ElastiCache Valkey** | **データを戻す手順は持たない**（持つのは配信の共有と期限つきの回数だけで、蓄積しない。この節の「代償」）。**作り直したら、接続先が変わらなくても AUTH トークンは作成時に新しい乱数になるため、版を上げてから ECS のタスクを入れ替える一手が要る**（手順は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の「踏むと壊れる」） |
 
