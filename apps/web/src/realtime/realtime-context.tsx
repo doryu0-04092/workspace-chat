@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
 import { useSessionStore } from '../auth/session-context';
-import type { ErrorCode, Failure } from '../auth/session-store';
+import type { ErrorCode, Failure } from '../auth/failure';
 import type { ConnectRealtime, RealtimeSocket } from './connect';
 
 type Realtime = { socket: RealtimeSocket; refused: Failure | null };

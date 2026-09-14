@@ -1,4 +1,4 @@
-import type { Failure } from './session-store';
+import type { Failure } from './failure';
 
 /** 断られた要求を、利用者に見せる文にする。ログインの失敗の理由は区別しない（機能一覧 1.2）。 */
 export function failureMessage(failure: Failure): string {
