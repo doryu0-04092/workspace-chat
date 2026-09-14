@@ -292,6 +292,20 @@ describe('ワークスペースの画面', () => {
     expect(screen.queryByRole('link', { name: '開発チーム' })).toBeNull();
   });
 
+  it('URL のパラメータは符号化して api のパスに埋め、パスの区切りとして読ませない（利用者が書ける値のため）', async () => {
+    // react-router の useParams は %2F を / に復号して返す。符号化しないと /api/auth/logout などへ要求が向く
+    const encoded = encodeURIComponent('../../auth/logout');
+    const { calls } = fakeFetch({
+      ...session,
+      [`GET /api/workspaces/${encoded}`]: () => error(404, 'not_found'),
+      [`GET /api/workspaces/${encoded}/channels`]: () => error(404, 'not_found'),
+    });
+    renderApp(`/workspaces/${encoded}`);
+
+    expect(await screen.findByText('ワークスペースが見つかりません。')).toBeDefined();
+    expect(calls.map((c) => c.key).filter((key) => key.includes('../'))).toEqual([]);
+  });
+
   it('参加していないチャンネルの URL を直接開いても、チャンネルの画面を出さない', async () => {
     fakeFetch(routesFor(OWNED));
     renderApp(`/workspaces/${OWNED.id}/channels/${RANDOM.id}`);

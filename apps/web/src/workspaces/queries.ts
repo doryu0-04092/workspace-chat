@@ -13,6 +13,15 @@ const keys = {
   channels: (workspaceId: string) => ['workspaces', workspaceId, 'channels'] as const,
 };
 
+/**
+ * api のパスの1区切りに埋める値を符号化する。
+ * **踏むと壊れる: URL のパラメータ（`useParams`）は、react-router が `%2F` などを復号して返す**（8.3.1 で確かめた。`..%2F..%2Fauth%2Flogout` は `../../auth/logout` になる）。
+ * そのまま埋めると `..` や `/` がパスの区切りとして読まれ、別の api へアクセストークン付きで要求が向く。
+ */
+function segment(value: string): string {
+  return encodeURIComponent(value);
+}
+
 /** 所属するワークスペース（参加した順。REST の仕様の listMyWorkspaces）。 */
 export function useWorkspaces() {
   const store = useSessionStore();
@@ -26,7 +35,7 @@ export function useWorkspace(workspaceId: string) {
   const store = useSessionStore();
   return useQuery({
     queryKey: keys.workspace(workspaceId),
-    queryFn: () => requestJson<Workspace>(store, `/api/workspaces/${workspaceId}`),
+    queryFn: () => requestJson<Workspace>(store, `/api/workspaces/${segment(workspaceId)}`),
   });
 }
 
@@ -35,7 +44,8 @@ export function useChannels(workspaceId: string) {
   const store = useSessionStore();
   return useQuery({
     queryKey: keys.channels(workspaceId),
-    queryFn: () => requestJson<Channel[]>(store, `/api/workspaces/${workspaceId}/channels`),
+    queryFn: () =>
+      requestJson<Channel[]>(store, `/api/workspaces/${segment(workspaceId)}/channels`),
   });
 }
 
@@ -54,9 +64,13 @@ export function useJoinChannel(workspaceId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (channelId: string) =>
-      requestJson<void>(store, `/api/workspaces/${workspaceId}/channels/${channelId}/join`, {
-        method: 'POST',
-      }),
+      requestJson<void>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/join`,
+        {
+          method: 'POST',
+        },
+      ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
   });
 }
@@ -66,7 +80,7 @@ export function useCreateChannel(workspaceId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: Schemas['CreateChannelRequest']) =>
-      requestJson<Channel>(store, `/api/workspaces/${workspaceId}/channels`, {
+      requestJson<Channel>(store, `/api/workspaces/${segment(workspaceId)}/channels`, {
         method: 'POST',
         body,
       }),
