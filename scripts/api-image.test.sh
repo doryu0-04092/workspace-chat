@@ -58,7 +58,7 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 docker exec "$postgres" pg_isready --host 127.0.0.1 --username postgres --dbname chat >/dev/null ||
-  fail "PostgreSQL が起動しない"
+  { docker logs "$postgres" >&2 || true; fail "PostgreSQL が起動しない"; }
 database_url="postgresql://postgres:image-test@$postgres:5432/chat"
 docker run --rm --network "$network" --env DATABASE_URL="$database_url" "$migrate_image" ||
   fail "マイグレーションを適用できない"
