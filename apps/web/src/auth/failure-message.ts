@@ -18,6 +18,16 @@ export function failureMessage(failure: Failure): string {
     case 'validation_failed':
     case 'invalid_body':
       return '入力の形が正しくありません。各項目の条件を確かめてください。';
+    case 'channel_name_taken':
+      return 'このワークスペースには同じ名前のチャンネルがあります。別の名前を選んでください。';
+    case 'channel_archived':
+      return 'アーカイブ済みのチャンネルです。';
+    case 'already_channel_member':
+      return '既に参加しています。';
+    case 'owner_only':
+      return 'この操作は、ワークスペースのオーナーだけが行えます。';
+    case 'not_found':
+      return '見つかりません。一覧を開き直してください。';
     default:
       return 'うまくいきませんでした。時間をおいて、やり直してください。';
   }

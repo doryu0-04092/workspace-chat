@@ -1,44 +1,70 @@
-import { useState } from 'react';
-import { useSession, useSessionStore } from '../auth/session-context';
+import { type FormEvent, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
+import { errorMessage } from '../api/client';
+import { useCreateWorkspace, useWorkspaces } from './queries';
 
-/** ワークスペースの画面。この段ではログインしている利用者の表示名とログアウトだけを持つ（中身は #379 の3つ目）。 */
+/** ワークスペースの一覧と作成（F-06）。作成したら、そのワークスペースの画面へ移る。 */
 export function WorkspacesPage() {
-  const store = useSessionStore();
-  const session = useSession();
-  const [message, setMessage] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const workspaces = useWorkspaces();
+  const create = useCreateWorkspace();
+  const navigate = useNavigate();
+  const [name, setName] = useState('');
 
-  async function logout() {
-    setPending(true);
-    setMessage(null);
-    const result = await store.logout();
-    if (!result.ok) {
-      setMessage('ログアウトできませんでした。時間をおいて、やり直してください。');
-      setPending(false);
-    }
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    create.mutate({ name }, { onSuccess: (workspace) => navigate(`/workspaces/${workspace.id}`) });
   }
 
   return (
-    <main className="p-8">
-      <header className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">ワークスペース</h1>
-        <div className="flex items-center gap-3">
-          {session.status === 'signedIn' && <span>{session.user.displayName}</span>}
-          <button
-            type="button"
-            className="rounded border px-3 py-1 disabled:opacity-50"
-            disabled={pending}
-            onClick={logout}
-          >
-            ログアウト
-          </button>
-        </div>
-      </header>
-      {message && (
-        <p role="alert" className="mt-4 text-red-700">
-          {message}
+    <main className="mx-auto max-w-xl p-6">
+      <h1 className="text-2xl font-bold">ワークスペース</h1>
+      {workspaces.isPending && (
+        <p role="status" className="mt-4 text-slate-600">
+          読み込み中…
         </p>
       )}
+      {workspaces.isError && (
+        <p role="alert" className="mt-4 text-red-700">
+          ワークスペースを読み込めませんでした。{errorMessage(workspaces.error)}
+        </p>
+      )}
+      {workspaces.data?.length === 0 && (
+        <p className="mt-4">所属しているワークスペースはありません。</p>
+      )}
+      {workspaces.data && workspaces.data.length > 0 && (
+        <ul aria-label="所属するワークスペース" className="mt-4 flex flex-col gap-2">
+          {workspaces.data.map((workspace) => (
+            <li key={workspace.id}>
+              <Link to={`/workspaces/${workspace.id}`} className="underline">
+                {workspace.name}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form className="mt-8 flex flex-col gap-2" onSubmit={submit}>
+        <label htmlFor="workspace-name">ワークスペース名</label>
+        <input
+          id="workspace-name"
+          className="rounded border px-2 py-1"
+          required
+          maxLength={50}
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+        {create.isError && (
+          <p role="alert" className="text-red-700">
+            {errorMessage(create.error)}
+          </p>
+        )}
+        <button
+          className="self-start rounded bg-slate-800 px-3 py-2 text-white disabled:opacity-50"
+          disabled={create.isPending}
+        >
+          ワークスペースを作成する
+        </button>
+      </form>
     </main>
   );
 }

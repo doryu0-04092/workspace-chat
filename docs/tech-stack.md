@@ -418,6 +418,12 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 | **react-router** | **^8.3.1** | 最新（上表「ルーティング」。決定・2026-09-13・依頼側）。`apps/web` の dependencies。8.3.1 の `react-router` 自体が `BrowserRouter`・`Routes`・`Route`・`Navigate`・`MemoryRouter` を出している（`dist/production/index.d.ts`）ため、`react-router-dom` は入れない。engines は `node >=22.22.0`、peerDependencies は `react`・`react-dom` の `>=19.2.7`（上表の Node.js 24・React 19.2 を満たす）。使い方は同梱の `docs/start/declarative`（`BrowserRouter` で包み、`Routes`・`Route` で組む） |
 | **zustand** | **^5.0.15** | 最新（上表「一時状態」の v5）。`apps/web` の dependencies。依存は無く、peerDependencies（`react`・`@types/react`・`immer`・`use-sync-external-store`）はすべて任意。ライセンスは MIT。ログインの状態を `zustand/vanilla` の `createStore` に置き（`vanilla.d.ts` の `createStore`）、画面は `zustand` の `useStore` で読む（`react.d.ts` の `useStore(api)`。`apps/web/src/auth/session-store.ts`・`session-context.tsx`） |
 
+#### 追加で確認した項目 — web のワークスペースとチャンネルの画面（2026-09-13。#379）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **@tanstack/react-query** | **^5.102.8** | 最新（上表「データ取得」の v5）。`apps/web` の dependencies。peerDependencies は `react` の `^18` または `^19`（上表の React 19.2 を満たす）。依存は `@tanstack/query-core` 5.102.8 だけ。`QueryClientProvider`・`useQuery`・`useMutation`・`useQueryClient` を出している（`build/modern/index.d.ts`）。**api が 4xx で断った読み込みはやり直さない**（やり直しても結果が変わらず、404 の表示が遅れるだけになる。`apps/web/src/api/query-client.ts`） |
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。
