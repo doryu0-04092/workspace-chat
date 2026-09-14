@@ -275,6 +275,165 @@ describe('トークンを付けた要求', () => {
     expect(store.getState()).toEqual({ status: 'signedOut' });
   });
 
+  it('リフレッシュを待つ間にログアウトしたら、リフレッシュが後から通っても送り直さず、最初の 401 を返す', async () => {
+    const store = await signedInStore();
+    let finishRefresh: ((response: Response) => void) | undefined;
+    const { count } = fakeFetch({
+      'GET /api/workspaces': [
+        () => json(401, { code: 'invalid_token', message: 'x' }),
+        () => json(200, []),
+      ],
+      'POST /api/auth/refresh': () =>
+        new Promise<Response>((resolve) => {
+          finishRefresh = resolve;
+        }),
+      'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+    });
+
+    const pending = store.authorizedFetch('/api/workspaces');
+    await vi.waitFor(() => expect(finishRefresh).toBeDefined());
+    await store.logout();
+    finishRefresh!(token('t2'));
+    const response = await pending;
+
+    expect(response.status).toBe(401);
+    expect(count('GET /api/workspaces')).toBe(1);
+    expect(store.getState()).toEqual({ status: 'signedOut' });
+  });
+
+  describe('リフレッシュを待つ間に、ログアウトして別の利用者がログインし直したとき', () => {
+    /** テストで使うもう1人の利用者（実在の人物ではない）。 */
+    const BOB = { id: '01920000-0000-7000-8000-000000000002', userId: 'bob', displayName: 'ボブ' };
+    const unauthorized = () => json(401, { code: 'invalid_token', message: 'x' });
+    const bobLogin = () =>
+      json(200, { accessToken: 't-bob', tokenType: 'Bearer', expiresIn: 900, user: BOB });
+
+    it('前の利用者のリフレッシュが後から通っても、そのトークンを入れず、前の要求も送り直さない', async () => {
+      const store = await signedInStore();
+      let finishRefresh: ((response: Response) => void) | undefined;
+      const { count } = fakeFetch({
+        'GET /api/workspaces': [unauthorized, () => json(200, [])],
+        'POST /api/auth/refresh': () =>
+          new Promise<Response>((resolve) => {
+            finishRefresh = resolve;
+          }),
+        'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+        'POST /api/auth/login': bobLogin,
+      });
+
+      const pending = store.authorizedFetch('/api/workspaces');
+      await vi.waitFor(() => expect(finishRefresh).toBeDefined());
+      await store.logout();
+      await store.login('bob', 'password-2');
+      finishRefresh!(token('t2'));
+      const response = await pending;
+
+      expect(response.status).toBe(401);
+      expect(count('GET /api/workspaces')).toBe(1);
+      expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't-bob', user: BOB });
+    });
+
+    it('前の利用者のリフレッシュが後から失敗しても、ログインし直した利用者をログアウトさせない', async () => {
+      const store = await signedInStore();
+      let finishRefresh: ((response: Response) => void) | undefined;
+      fakeFetch({
+        'GET /api/workspaces': unauthorized,
+        'POST /api/auth/refresh': () =>
+          new Promise<Response>((resolve) => {
+            finishRefresh = resolve;
+          }),
+        'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+        'POST /api/auth/login': bobLogin,
+      });
+
+      const pending = store.authorizedFetch('/api/workspaces');
+      await vi.waitFor(() => expect(finishRefresh).toBeDefined());
+      await store.logout();
+      await store.login('bob', 'password-2');
+      finishRefresh!(unauthorized());
+      await pending;
+
+      expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't-bob', user: BOB });
+    });
+
+    it('ログインし直した利用者の 401 は、前の利用者の待っているリフレッシュを使い回さず、新しく送る', async () => {
+      const store = await signedInStore();
+      let finishAliceRefresh: ((response: Response) => void) | undefined;
+      const { calls, count } = fakeFetch({
+        'GET /api/workspaces': [unauthorized, unauthorized, () => json(200, [])],
+        'POST /api/auth/refresh': [
+          () =>
+            new Promise<Response>((resolve) => {
+              finishAliceRefresh = resolve;
+            }),
+          () => token('t-bob2'),
+        ],
+        'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+        'POST /api/auth/login': bobLogin,
+      });
+
+      const alice = store.authorizedFetch('/api/workspaces');
+      await vi.waitFor(() => expect(finishAliceRefresh).toBeDefined());
+      await store.logout();
+      await store.login('bob', 'password-2');
+      const bob = store.authorizedFetch('/api/workspaces');
+
+      await vi.waitFor(() => expect(count('POST /api/auth/refresh')).toBe(2));
+      expect((await bob).status).toBe(200);
+      const retried = calls.filter((c) => c.key === 'GET /api/workspaces').at(-1)!;
+      expect(headerOf(retried.init, 'Authorization')).toBe('Bearer t-bob2');
+
+      finishAliceRefresh!(token('t2'));
+      await alice;
+      expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't-bob2', user: BOB });
+    });
+
+    it('前の利用者のリフレッシュが終わっても、ログインし直した利用者の待っているリフレッシュは束ねたままにする', async () => {
+      const store = await signedInStore();
+      let finishAliceRefresh: ((response: Response) => void) | undefined;
+      let finishBobRefresh: ((response: Response) => void) | undefined;
+      const { count } = fakeFetch({
+        'GET /api/workspaces': [
+          unauthorized,
+          unauthorized,
+          unauthorized,
+          () => json(200, []),
+          () => json(200, []),
+        ],
+        'POST /api/auth/refresh': [
+          () =>
+            new Promise<Response>((resolve) => {
+              finishAliceRefresh = resolve;
+            }),
+          () =>
+            new Promise<Response>((resolve) => {
+              finishBobRefresh = resolve;
+            }),
+          () => token('t-extra'),
+        ],
+        'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+        'POST /api/auth/login': bobLogin,
+      });
+
+      const alice = store.authorizedFetch('/api/workspaces');
+      await vi.waitFor(() => expect(finishAliceRefresh).toBeDefined());
+      await store.logout();
+      await store.login('bob', 'password-2');
+      const bobFirst = store.authorizedFetch('/api/workspaces');
+      await vi.waitFor(() => expect(finishBobRefresh).toBeDefined());
+      finishAliceRefresh!(token('t2'));
+      await alice;
+
+      const bobSecond = store.authorizedFetch('/api/workspaces');
+      await vi.waitFor(() => expect(count('GET /api/workspaces')).toBe(3));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      finishBobRefresh!(token('t-bob2'));
+
+      expect([(await bobFirst).status, (await bobSecond).status]).toEqual([200, 200]);
+      expect(count('POST /api/auth/refresh')).toBe(2);
+    });
+  });
+
   it('同時に2本が 401 になっても、リフレッシュは1回だけ送る', async () => {
     const store = await signedInStore();
     const { count } = fakeFetch({
