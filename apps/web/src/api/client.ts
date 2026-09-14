@@ -26,16 +26,19 @@ export async function requestJson<T>(
   path: string,
   { method, body }: { method?: string; body?: unknown } = {},
 ): Promise<T> {
+  const init: RequestInit = {
+    method,
+    ...(body === undefined
+      ? {}
+      : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  };
   let response: Response;
   try {
-    response = await store.authorizedFetch(path, {
-      method,
-      ...(body === undefined
-        ? {}
-        : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-    });
-  } catch {
-    throw new ApiError({ ok: false, status: 0 });
+    response = await store.authorizedFetch(path, init);
+  } catch (cause) {
+    // 通信の失敗（fetch は TypeError で断る）だけを status 0 にする。実装の誤りを通信の失敗に畳まない
+    if (cause instanceof TypeError) throw new ApiError({ ok: false, status: 0 });
+    throw cause;
   }
   if (!response.ok) throw new ApiError(await readFailure(response));
   if (response.status === 204) return undefined as T;
