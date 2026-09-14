@@ -160,6 +160,8 @@ resource "aws_vpc_security_group_ingress_rule" "db_from_task" {
   to_port                      = 5432
 }
 
+# 踏むと壊れる: この規則を壊しても api は止まらず、5xx も出ず、Valkey のアラートも鳴らない（要件定義書 4.2「アラート」の
+# 「ECS と Valkey の間の経路が切れた場合」）。配信の共有と在席だけが、api の warn ログを見ない限り気づかれないまま止まる。
 resource "aws_vpc_security_group_ingress_rule" "valkey_from_task" {
   security_group_id            = aws_security_group.valkey.id
   referenced_security_group_id = aws_security_group.task.id
