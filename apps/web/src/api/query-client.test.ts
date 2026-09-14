@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './client';
-import { shouldRetry } from './query-client';
+import { createQueryClient, shouldRetry } from './query-client';
 
 describe('読み込みのやり直し', () => {
+  it('本番の QueryClient は、読み込みのやり直しを shouldRetry で決める', () => {
+    // 画面のテストは retry: false の別の QueryClient を使うため、本番の配線はここでしか通らない
+    expect(createQueryClient().getDefaultOptions().queries?.retry).toBe(shouldRetry);
+  });
+
   it('api が 4xx で断ったものはやり直さない（404 の表示を遅らせない）', () => {
     for (const status of [400, 403, 404, 409]) {
       expect(shouldRetry(0, new ApiError({ ok: false, status })), String(status)).toBe(false);
