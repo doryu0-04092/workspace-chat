@@ -181,6 +181,18 @@ describe('登録の画面', () => {
     expect(sessionStorage.length).toBe(0);
   });
 
+  it('登録の応答の本体が読めなければ（JSON でない）、理由を出し、もう一度押せる状態に戻す', async () => {
+    await submitRegister({
+      'POST /api/auth/register': () =>
+        new Response('<!doctype html>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+    });
+
+    expect((await screen.findByRole('alert')).textContent).toContain('うまくいきませんでした');
+    expect((screen.getByRole('button', { name: '登録する' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
   it('ユーザーID が使われていれば理由を出し、入力を残す', async () => {
     await submitRegister({ 'POST /api/auth/register': () => error(409, 'user_id_taken') });
 
