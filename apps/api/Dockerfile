@@ -48,7 +48,7 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # --omit=dev でも lock の版で入る。ここで npm install しない（lock と違う版に解決される経路を作らない）。
 # 踏むと壊れる: @prisma/client が prisma を peer から外すと CLI が消える。scripts/api-image.test.sh の 1 が落ちて気づく。
 # 踏むと壊れる: 運用者が ECS Exec で RDS に入る先もこの段のイメージである（技術スタックのコンテナの行・要件定義書 4.2 手順 5 の代償）。
-# 入るときの起動の形（--enable-execute-command・command の上書き・終わったら止める）は要件定義書 4.2 手順 5 の代償による。
+# 入る手順はまだ書いていない（実際に入って確かめてから書く。#458）。
 # CMD のまま起動すると、入る先が残らず、本番の DB に migrate deploy が走る。
 FROM ${NODE_IMAGE} AS migrate
 ENV NODE_ENV=production
