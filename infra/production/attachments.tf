@@ -8,6 +8,9 @@ data "aws_caller_identity" "current" {}
 resource "aws_s3_bucket" "attachments" {
   # バケット名はすべての AWS アカウントで一意である。アカウント ID を含めて衝突を避ける。
   bucket = "workspace-chat-attachments-${data.aws_caller_identity.current.account_id}"
+
+  # destroy で旧バージョンとデリートマーカーごと消す（要件定義書 4.2。個人情報を destroy の外に残さない）。
+  force_destroy = true
 }
 
 # 誤削除に備える（要件定義書 4.2「バックアップ」）。
