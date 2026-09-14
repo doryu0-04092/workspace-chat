@@ -149,6 +149,19 @@ describe('ログイン', () => {
     expect(store.getState()).not.toMatchObject({ status: 'signedIn' });
   });
 
+  it('200 でも本体が読めなければ（JSON でない）、失敗を返し、ログインしていない状態のまま', async () => {
+    fakeFetch({
+      'POST /api/auth/login': () =>
+        new Response('<!doctype html>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+    });
+    const store = createSessionStore();
+
+    const result = await store.login('alice', 'password-1');
+
+    expect(result).toEqual({ ok: false, status: 200 });
+    expect(store.getState()).not.toMatchObject({ status: 'signedIn' });
+  });
+
   it('429 なら Retry-After の秒数を返す', async () => {
     fakeFetch({
       'POST /api/auth/login': () =>

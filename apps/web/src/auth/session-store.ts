@@ -148,7 +148,13 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
         return { ok: false, status: 0 };
       }
       if (!response.ok) return readFailure(response);
-      const body = (await response.json()) as Schemas['LoginResponse'];
+      let body: Schemas['LoginResponse'];
+      try {
+        body = (await response.json()) as Schemas['LoginResponse'];
+      } catch {
+        // 成功の応答でも本体が JSON でなければ（`/api/*` が静的配信に落ちて index.html が返るなど）、投げずに失敗として返す
+        return { ok: false, status: response.status };
+      }
       set({ status: 'signedIn', accessToken: body.accessToken, user: body.user });
       return { ok: true };
     },
