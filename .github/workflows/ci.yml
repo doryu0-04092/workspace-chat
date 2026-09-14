@@ -100,6 +100,17 @@ jobs:
       - name: api のコンテナイメージの確認
         run: bash scripts/api-image.test.sh
 
+      # 本番の構成（infra/）を AWS に接続せずに確かめる（#452）。plan / apply はここで行わない。
+      # 版は動くことを確かめた版に固定する（ロックの作成と検査の確認は 1.15.7 で行った）。
+      # ラッパーは切る。terraform の呼び出しを包み、出力を GitHub Actions の出力へ写す仕組みで、この検査には要らない。
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.7
+          terraform_wrapper: false
+
+      - name: Terraform の整形・プロバイダーのロック・構文の確認
+        run: bash scripts/terraform.test.sh
+
       # テストが失敗したときこそ残す。CI を実行した事実と結果を成果物として残すのが目的。
       # ただしレポートが実際に出ている場合に限る。前段で落ちたときや、テストの
       # ステップ自体が junit を書く前に落ちたときは reports/ が存在せず、
