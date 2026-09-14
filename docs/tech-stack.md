@@ -616,7 +616,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 ローカルは `valkey/valkey:8-alpine` とする。**本番と同系統に寄せた暫定である**
 （`redis-server` / `redis-cli` 等の Redis 互換コマンド名がそのまま使えることを実行して確認した。
 `compose.yaml` の `command` とヘルスチェックは**値は変えていない**。コメントは加筆した）。
-**本番の ElastiCache のエンジンは Valkey 8.2 とする**（ローカルと同じ 8 系。ElastiCache の文書〔Engine versions〕に Valkey 9.1・9.0・8.2・8.1・8.0 の節がある。上の「配信の共有・レート制限の回数」の行）。
+**本番の ElastiCache のエンジンの版は、上の「配信の共有・レート制限の回数」の行が持つ**（ローカルと同じ 8 系にする。ElastiCache の文書〔Engine versions〕に Valkey 9.1・9.0・8.2・8.1・8.0 の節がある）。
 
 > **代償を明記する。** **Valkey は Redis のフォークである。** 現時点では Redis 互換の機能
 > （Pub/Sub と Lua の `eval`）しか使っておらず問題は無いが、**Redis 8 以降で入る、
