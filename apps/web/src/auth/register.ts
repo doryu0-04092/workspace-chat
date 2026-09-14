@@ -1,6 +1,6 @@
 import type { components } from '@workspace-chat/shared';
 import { postJson } from './post-json';
-import type { Failure } from './session-store';
+import type { Failure } from './failure';
 
 export type RegisterResult = { ok: true; recoveryCode: string } | Failure;
 

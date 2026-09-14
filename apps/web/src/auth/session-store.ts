@@ -1,23 +1,17 @@
 import type { components } from '@workspace-chat/shared';
 import { createStore } from 'zustand/vanilla';
+import type { Failure } from './failure';
 import { postJson } from './post-json';
 
 type Schemas = components['schemas'];
 
 export type SessionUser = Schemas['UserSummary'];
-export type ErrorCode = Schemas['ErrorResponse']['code'];
 
 export type SessionState =
   | { status: 'checking' }
   | { status: 'signedOut' }
   | { status: 'signedIn'; accessToken: string; user: SessionUser };
 
-/**
- * 断られた要求。`status` が 0 のときは通信そのものに失敗した。
- * `status` が -1 のときは HTTP の応答が無い失敗である——要求を送っていない実装の誤り（本体を JSON にできないなど）・
- * `ApiError` でない例外（`errorMessage`）・WebSocket のハンドシェイクの拒否（`realtime-context.tsx`）。画面は既定の文を出す。
- */
-export type Failure = { ok: false; status: number; code?: ErrorCode; retryAfterSeconds?: number };
 export type LoginResult = { ok: true } | Failure;
 export type LogoutResult = { ok: true } | { ok: false };
 
@@ -29,18 +23,6 @@ export interface RefreshLocks {
 /** Cookie を使う要求（リフレッシュ・ログアウト）に付ける独自のヘッダーの値。綴りは REST の仕様の列挙を型が見る。 */
 const REQUESTED_BY: components['parameters']['RequestedBy'] = 'workspace-chat';
 const REFRESH_LOCK = 'workspace-chat:refresh';
-
-/** 断られた応答から、エラーの種類と（429 なら）待つ秒数を読む。 */
-export async function readFailure(response: Response): Promise<Failure> {
-  const failure: Failure = { ok: false, status: response.status };
-  const body = (await response.json().catch(() => null)) as { code?: unknown } | null;
-  if (typeof body?.code === 'string') failure.code = body.code as ErrorCode;
-  const retryAfter = response.headers.get('Retry-After');
-  if (response.status === 429 && retryAfter !== null && /^[0-9]+$/.test(retryAfter)) {
-    failure.retryAfterSeconds = Number(retryAfter);
-  }
-  return failure;
-}
 
 function browserLocks(): RefreshLocks | undefined {
   const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;

@@ -9,7 +9,7 @@ import {
   type RealtimeEventName,
 } from '@workspace-chat/shared';
 import { useEffect, useState } from 'react';
-import type { Failure } from '../auth/session-store';
+import type { Failure } from '../auth/failure';
 import {
   addMessage,
   markDeleted,

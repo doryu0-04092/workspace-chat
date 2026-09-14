@@ -1,7 +1,8 @@
 import { failureMessage } from '../auth/failure-message';
-import { type Failure, readFailure, type SessionStore } from '../auth/session-store';
+import { type Failure, readFailure } from '../auth/failure';
+import type { SessionStore } from '../auth/session-store';
 
-/** api が断った要求（通信の失敗は status 0）。画面は `failure` から文を作る。 */
+/** 成功しなかった api の要求（`status` の意味は `Failure`）。画面は `failure` から文を作る。 */
 export class ApiError extends Error {
   constructor(readonly failure: Failure) {
     super(`api が要求を断った（${failure.status}${failure.code ? ` ${failure.code}` : ''}）`);
