@@ -98,6 +98,8 @@ resource "aws_lb" "api" {
   security_groups    = [aws_security_group.alb.id]
 }
 
+# 踏むと壊れる: port の 3000 は api の既定の待ち受けポート（apps/api/src/port.ts）と、network.tf の ALB→タスクの規則と同じでなければならない。
+# 食い違うとヘルスチェックに落ち、CI は緑のまま、デプロイ後に初めて気づく。
 resource "aws_lb_target_group" "api" {
   name        = "workspace-chat-api"
   port        = 3000
