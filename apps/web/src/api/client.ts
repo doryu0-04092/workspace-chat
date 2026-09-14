@@ -21,6 +21,11 @@ export function segment(value: string): string {
 /**
  * アクセストークンを付けて JSON の要求を送り、本体を返す（204 は undefined）。
  * 401 のやり直しとログインの状態の切り替えは `authorizedFetch` が持つ。
+ *
+ * 失敗の返し方（`status` の意味は `Failure`）。**投げるものが `ApiError` とは限らない**:
+ * - api が断った応答・`fetch` の `TypeError`（通信の失敗。status 0）・成功の応答でも本体が JSON でない: `ApiError` を投げる
+ * - 本体を JSON にできない（`TypeError`）・`authorizedFetch` が投げる `Error`（ログインしていない状態での呼び出しなど）: そのまま投げる
+ *   （通信の失敗に畳まない。呼び出しは TanStack Query の問い合わせで投げを受け、`errorMessage` は `ApiError` でないものを既定の文にする）
  */
 export async function requestJson<T>(
   store: SessionStore,
