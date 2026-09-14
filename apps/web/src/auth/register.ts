@@ -18,6 +18,11 @@ export async function register(
     return { ok: false, status: 0 };
   }
   if (!response.ok) return readFailure(response);
-  const body = (await response.json()) as components['schemas']['RegisterResponse'];
-  return { ok: true, recoveryCode: body.recoveryCode };
+  try {
+    const body = (await response.json()) as components['schemas']['RegisterResponse'];
+    return { ok: true, recoveryCode: body.recoveryCode };
+  } catch {
+    // 成功の応答でも本体が JSON でなければ（`/api/*` が静的配信に落ちて index.html が返るなど）、投げずに失敗として返す
+    return { ok: false, status: response.status };
+  }
 }
