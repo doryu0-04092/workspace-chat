@@ -174,12 +174,13 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
     },
 
     async login(userId: string, password: string): Promise<LoginResult> {
+      const request = JSON.stringify({ userId, password } satisfies Schemas['LoginRequest']);
       let response: Response;
       try {
         response = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, password } satisfies Schemas['LoginRequest']),
+          body: request,
         });
       } catch {
         return { ok: false, status: 0 };

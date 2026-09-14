@@ -7,12 +7,13 @@ export type RegisterResult = { ok: true; recoveryCode: string } | Failure;
 export async function register(
   input: components['schemas']['RegisterRequest'],
 ): Promise<RegisterResult> {
+  const body = JSON.stringify(input);
   let response: Response;
   try {
     response = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
+      body,
     });
   } catch {
     return { ok: false, status: 0 };
