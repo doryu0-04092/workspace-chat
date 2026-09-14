@@ -1,9 +1,7 @@
 # Terraform の state を置く S3 バケット（#452）。本体の構成（infra/production）の外で先に作る
 # （技術スタック「本番の HTTPS・秘密情報・state の置き場」）。
 #
-# この構成の state は手元のファイルに置く（.gitignore の *.tfstate）。
-# 踏むと壊れる: この構成を infra/production と同じバケットのバックエンドに移さない。
-# 本体を destroy してもバケットが残る、という前提（要件定義書 4.2「バックアップ」）が崩れる。
+# この構成の state は手元のファイルに置く（.gitignore の *.tfstate）。作る前のバケットは置き場にできない。
 
 terraform {
   required_version = ">= 1.11"
