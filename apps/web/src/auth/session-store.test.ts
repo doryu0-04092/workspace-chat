@@ -162,6 +162,26 @@ describe('ログイン', () => {
     expect(store.getState()).not.toMatchObject({ status: 'signedIn' });
   });
 
+  it('200 でも本体が JSON の null なら、投げずに失敗を返し、ログインしていない状態のまま', async () => {
+    fakeFetch({ 'POST /api/auth/login': () => json(200, null) });
+    const store = createSessionStore();
+
+    const result = await store.login('alice', 'password-1').catch((error: unknown) => error);
+
+    expect(result).toEqual({ ok: false, status: 200 });
+    expect(store.getState()).not.toMatchObject({ status: 'signedIn' });
+  });
+
+  it('通信に失敗したら（fetch が TypeError で断る）、投げずに status 0 の失敗を返し、ログインしていない状態のまま', async () => {
+    fakeFetch({ 'POST /api/auth/login': () => Promise.reject(new TypeError('Failed to fetch')) });
+    const store = createSessionStore();
+
+    const result = await store.login('alice', 'password-1').catch((error: unknown) => error);
+
+    expect(result).toEqual({ ok: false, status: 0 });
+    expect(store.getState()).not.toMatchObject({ status: 'signedIn' });
+  });
+
   it('429 なら Retry-After の秒数を返す', async () => {
     fakeFetch({
       'POST /api/auth/login': () =>

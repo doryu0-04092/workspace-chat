@@ -1,5 +1,6 @@
 import type { components } from '@workspace-chat/shared';
 import { createStore } from 'zustand/vanilla';
+import { postJson } from './post-json';
 
 type Schemas = components['schemas'];
 
@@ -177,33 +178,20 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
       return restoring;
     },
 
+    /** 失敗は投げずに戻り値で表す（`postJson`）。 */
     async login(userId: string, password: string): Promise<LoginResult> {
-      let request: string;
-      try {
-        request = JSON.stringify({ userId, password } satisfies Schemas['LoginRequest']);
-      } catch {
-        // 本体を JSON にできない（実装の誤り）。送らずに失敗を返す——通信の失敗（status 0）にはしない
-        return { ok: false, status: -1 };
-      }
-      let response: Response;
-      try {
-        response = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: request,
-        });
-      } catch {
-        return { ok: false, status: 0 };
-      }
-      if (!response.ok) return readFailure(response);
-      let body: Schemas['LoginResponse'];
-      try {
-        body = (await response.json()) as Schemas['LoginResponse'];
-      } catch {
-        // 成功の応答でも本体が JSON でなければ（`/api/*` が静的配信に落ちて index.html が返るなど）、投げずに失敗として返す
-        return { ok: false, status: response.status };
-      }
-      changeLogin({ status: 'signedIn', accessToken: body.accessToken, user: body.user });
+      const result = await postJson<Schemas['LoginResponse']>('/api/auth/login', {
+        userId,
+        password,
+      } satisfies Schemas['LoginRequest']);
+      if (!result.ok) return result;
+      // 成功の応答でも本体が JSON の null なら、投げずに失敗として返す
+      if (result.body === null) return { ok: false, status: result.status };
+      changeLogin({
+        status: 'signedIn',
+        accessToken: result.body.accessToken,
+        user: result.body.user,
+      });
       return { ok: true };
     },
 
