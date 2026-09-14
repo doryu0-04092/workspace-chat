@@ -174,7 +174,13 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
     },
 
     async login(userId: string, password: string): Promise<LoginResult> {
-      const request = JSON.stringify({ userId, password } satisfies Schemas['LoginRequest']);
+      let request: string;
+      try {
+        request = JSON.stringify({ userId, password } satisfies Schemas['LoginRequest']);
+      } catch {
+        // 本体を JSON にできない（実装の誤り）。送らずに失敗を返す——通信の失敗（status 0）にはしない
+        return { ok: false, status: -1 };
+      }
       let response: Response;
       try {
         response = await fetch('/api/auth/login', {

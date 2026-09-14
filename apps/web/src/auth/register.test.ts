@@ -8,16 +8,14 @@ afterEach(() => {
 });
 
 describe('新規登録の送り方（register）', () => {
-  it('本体を JSON にできなければ、要求を送らずにそのまま投げる（通信の失敗にしない）', async () => {
+  it('本体を JSON にできなければ、要求を送らずに失敗を返す（投げない。通信の失敗〔status 0〕にもしない）', async () => {
     const { calls } = fakeFetch({});
     const circular: Record<string, unknown> = { userId: 'alice', password: 'password-1' };
     circular.self = circular;
 
-    const failure = await register(
-      circular as unknown as components['schemas']['RegisterRequest'],
-    ).catch((error: unknown) => error);
+    const result = await register(circular as unknown as components['schemas']['RegisterRequest']);
 
-    expect(failure).toBeInstanceOf(TypeError);
+    expect(result).toEqual({ ok: false, status: -1 });
     expect(calls).toHaveLength(0);
   });
 });
