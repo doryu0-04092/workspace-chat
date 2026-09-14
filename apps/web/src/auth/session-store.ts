@@ -11,7 +11,11 @@ export type SessionState =
   | { status: 'signedOut' }
   | { status: 'signedIn'; accessToken: string; user: SessionUser };
 
-/** 断られた要求。`status` が 0 のときは通信そのものに失敗した。 */
+/**
+ * 断られた要求。`status` が 0 のときは通信そのものに失敗した。
+ * `status` が -1 のときは HTTP の応答が無い失敗である——要求を送っていない実装の誤り（本体を JSON にできないなど）・
+ * `ApiError` でない例外（`errorMessage`）・WebSocket のハンドシェイクの拒否（`realtime-context.tsx`）。画面は既定の文を出す。
+ */
 export type Failure = { ok: false; status: number; code?: ErrorCode; retryAfterSeconds?: number };
 export type LoginResult = { ok: true } | Failure;
 export type LogoutResult = { ok: true } | { ok: false };
