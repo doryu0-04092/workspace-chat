@@ -5,7 +5,7 @@ import {
   useMutation,
   useQueryClient,
 } from '@tanstack/react-query';
-import { requestJson } from '../api/client';
+import { requestJson, segment } from '../api/client';
 import { useSessionStore } from '../auth/session-context';
 
 type Schemas = components['schemas'];
@@ -59,7 +59,7 @@ function mapMessages(
 }
 
 function messagesPath(workspaceId: string, channelId: string): string {
-  return `/api/workspaces/${workspaceId}/channels/${channelId}/messages`;
+  return `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/messages`;
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { components } from '@workspace-chat/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { requestJson } from '../api/client';
+import { requestJson, segment } from '../api/client';
 import { useSessionStore } from '../auth/session-context';
 
 type Schemas = components['schemas'];
@@ -26,7 +26,7 @@ export function useWorkspace(workspaceId: string) {
   const store = useSessionStore();
   return useQuery({
     queryKey: keys.workspace(workspaceId),
-    queryFn: () => requestJson<Workspace>(store, `/api/workspaces/${workspaceId}`),
+    queryFn: () => requestJson<Workspace>(store, `/api/workspaces/${segment(workspaceId)}`),
   });
 }
 
@@ -35,7 +35,8 @@ export function useChannels(workspaceId: string) {
   const store = useSessionStore();
   return useQuery({
     queryKey: keys.channels(workspaceId),
-    queryFn: () => requestJson<Channel[]>(store, `/api/workspaces/${workspaceId}/channels`),
+    queryFn: () =>
+      requestJson<Channel[]>(store, `/api/workspaces/${segment(workspaceId)}/channels`),
   });
 }
 
@@ -54,9 +55,13 @@ export function useJoinChannel(workspaceId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (channelId: string) =>
-      requestJson<void>(store, `/api/workspaces/${workspaceId}/channels/${channelId}/join`, {
-        method: 'POST',
-      }),
+      requestJson<void>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/join`,
+        {
+          method: 'POST',
+        },
+      ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
   });
 }
@@ -66,7 +71,7 @@ export function useCreateChannel(workspaceId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: Schemas['CreateChannelRequest']) =>
-      requestJson<Channel>(store, `/api/workspaces/${workspaceId}/channels`, {
+      requestJson<Channel>(store, `/api/workspaces/${segment(workspaceId)}/channels`, {
         method: 'POST',
         body,
       }),
