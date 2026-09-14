@@ -1,12 +1,17 @@
+import { gfmAutolinkLiteralFromMarkdown } from 'mdast-util-gfm-autolink-literal';
 import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough';
+import { gfmAutolinkLiteral } from 'micromark-extension-gfm-autolink-literal';
 import { gfmStrikethrough } from 'micromark-extension-gfm-strikethrough';
 import Markdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import remarkBreaks from 'remark-breaks';
 
 /**
- * 構文解析の段で読ませない CommonMark の構文（micromark の構文の名前）。**機能一覧 4.3 の記法に含まれないブロックと、生の HTML と定義**。
+ * 構文解析の段で読ませない構文（micromark の構文の名前）。**機能一覧 4.3 の記法に含まれないブロックと、生の HTML と定義と、素のメールアドレスの自動リンク**。
+ * 山括弧で囲んだ URL とメールアドレス（CommonMark の `autolink`）は読ませる——F-14 のリンクの記法である（機能一覧 4.3）。
  * 読ませなければ、書いた文字はふつうの段落の文字として残る——改行も、引用・箇条書きの中の字下げの扱いも、解析器がそのまま受け持つ。
+ * **その文字の中の URL は、自動リンクの構文に拾われてリンクになる**（機能一覧 4.3）。
+ * 自動リンクの承認の範囲は URL であり、素のメールアドレスは含まない（提案・承認済・2026-09-13・依頼側。#385）。
  */
 const DISABLED_CONSTRUCTS = [
   'headingAtx',
@@ -15,7 +20,15 @@ const DISABLED_CONSTRUCTS = [
   'htmlFlow',
   'htmlText',
   'definition',
+  'emailAutolink',
 ];
+
+/**
+ * URL の自動リンクの、構文木への変換（`www.`・`http://`・`https://` の構文の印をリンクの節にする）。
+ * **踏むと壊れる: `transforms` を外したまま使う。** 同梱の `transforms` は、構文の印によらず本文の文字から
+ * URL とメールアドレスを正規表現で探してリンクにするため、上でメールアドレスの構文を読ませなくても、メールアドレスがリンクになる。
+ */
+const urlAutolinkFromMarkdown = { ...gfmAutolinkLiteralFromMarkdown(), transforms: [] };
 
 /**
  * 記法として解釈する mdast の節の種類（機能一覧 4.3 の太字・斜体・取り消し線・リンク・引用・箇条書き・インラインコード・コードブロックと、
@@ -62,17 +75,20 @@ type MarkdownNode = {
 };
 
 /**
- * 構文解析を F-14 の記法に絞る。GFM のうち取り消し線だけを積み（表・タスクリスト・脚注は読ませない）、
+ * 構文解析を F-14 の記法に絞る。GFM のうち取り消し線と URL の自動リンクだけを積み（表・タスクリスト・脚注は読ませない）、
  * `DISABLED_CONSTRUCTS` を読ませない。remark-gfm と同じく、構文の拡張を processor の data に積む。
  */
 function f14Syntax(this: unknown) {
   const data = (
     this as { data(): { micromarkExtensions?: unknown[]; fromMarkdownExtensions?: unknown[] } }
   ).data();
-  (data.micromarkExtensions ??= []).push(gfmStrikethrough(), {
+  (data.micromarkExtensions ??= []).push(gfmStrikethrough(), gfmAutolinkLiteral(), {
     disable: { null: DISABLED_CONSTRUCTS },
   });
-  (data.fromMarkdownExtensions ??= []).push(gfmStrikethroughFromMarkdown());
+  (data.fromMarkdownExtensions ??= []).push(
+    gfmStrikethroughFromMarkdown(),
+    urlAutolinkFromMarkdown,
+  );
 }
 
 /** 行頭の引用の記号（前の空白・`>`・続く空白1つ）。 */
@@ -124,7 +140,8 @@ function withoutQuoteMarkers(written: string, quoteDepth: number): string {
  * メッセージの本文を Markdown として描画する（F-14・F-15）。
  *
  * - **HTML 文字列を作らず、React の要素を直接組み立てる**（react-markdown）
- * - **記法として解釈するのは機能一覧 4.3 の記法だけで、それ以外は書いた文字のまま出す**（生の HTML も文字のまま出る）
+ * - **記法として解釈するのは機能一覧 4.3 の記法だけで、それ以外は書いた文字のまま出す**（生の HTML も文字のまま出る）。
+ *   文字のまま出したものの中の URL は自動リンクになる。画像の記法の中だけは、読んだ後に文字へ替えるためリンクにならない（4.3）
  * - **リンクの URL は http / https / mailto など安全なスキームと相対 URL だけを残す**（react-markdown の既定の `urlTransform`）。
  *   **`urlTransform` と下の rehype-sanitize の両方を残す**——片方だけを外しても `javascript:` の href は残らないが、両方を外すと通る
  * - プラグインが足した要素も、描画の前に rehype-sanitize の既定のスキーマで落とす
