@@ -460,16 +460,6 @@ S3 に残ったまま、どのメッセージからも参照されなくなる**
    **守るのは AWS 側の権限であって、アプリの認可ではない**——
    4.3 の「非参加者にデータを渡さない」も、3.5.1 の「オーナーの例外もメッセージには及ばない」も、
    **この経路には掛からない。**
-   **ECS Exec で入る先は、api のタスクではなく、マイグレーション用のイメージを run-task で動かしたタスクにする**（[技術スタック](tech-stack.md) のコンテナの行。#274・#452）——
-   **入る手順**: `aws ecs run-task` に `--enable-execute-command` を付け（後から有効にはできない——AWS 公式「You can't turn on ECS Exec for existing tasks. It can only be turned on for new tasks.」）、
-   コンテナの command を常駐する形に上書きして起動し（イメージの CMD は `prisma migrate deploy` を流して終わる。`apps/api/Dockerfile` の migrate 段。ECS の API リファレンス ContainerOverride「The command to send to the container that overrides the default command from the Docker image or the task definition.」）、
-   ECS Exec で入り（問い合わせの手段の psql は、まだこのイメージに入っていない——#457）、確かめ終えたらそのタスクを止める。
-   **上書きしないと入る先が残らず（ECS Exec が繋がるのは動いているコンテナである。AWS 公式「run commands in or get a shell to a container running on」）、復旧の途中で本番の DB に `migrate deploy` が1回走る。止め忘れると、運用者が ECS Exec で入る経路が開いたまま残る。**
-   ECS Exec のコマンドは root で動き（AWS 公式「these commands are run as the root user.」）、**入ったタスクのコンテナが環境変数として持つ値と、タスクロールの権限にも届くものとして扱う**（環境変数は Fargate の上で届かないことを確かめていない。タスクロールは AWS 公式「The permissions granted in the IAM role are vended to containers running in the task.」「Containers are not a security boundary and the use of task IAM roles does not change this.」）。
-   api のタスクは `secret: true` の設定（`JWT_SECRET` を含む）を持ち（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）、
-   **`JWT_SECRET` に届けば、任意の利用者のアクセストークンを署名して作れる**（署名と検証は HS256 の共有鍵。`apps/api/src/auth/auth.module.ts`）——**アプリの認証そのものの外に出る。**
-   マイグレーション用のタスク定義は、`secrets` を `DATABASE_URL` だけにし、タスクロールを api のタスクと分けて ECS Exec に要る `ssmmessages` の4つの操作だけにして、運用者が ECS Exec で入る経路が届く先を DB にとどめる。
-   **踏むと壊れる: そのタスク定義に `DATABASE_URL` 以外の `secret: true` の設定を足す、またはタスクロールに権限を足すと、運用者が ECS Exec で入る経路が認証の外に出る。**
    **誰がこの経路を使えるかは、ネットワーク構成と AWS の権限を決めるときに定める**（#160）。
    **S3 側の復元手順も同じ経路であり、3つの手順すべてが認可の外に出る。**
    **S3 の手順 1・2（デリートマーカーの削除・旧バージョンのコピー）は添付ファイル本体に到達する**——
@@ -480,6 +470,16 @@ S3 に残ったまま、どのメッセージからも参照されなくなる**
    添付ファイル名が渡る。** **識別子に連番を使わない理由と同じである**（3.5.2）。
    4.3 の署名付き Cookie による参加者限定の配信も、3.5.1 の「オーナーの例外も添付ファイルには及ばない」も、
    **この経路には掛からない**（#160）。
+   **ECS Exec で入る先は、api のタスクではなく、マイグレーション用のイメージを run-task で動かしたタスクにする**（[技術スタック](tech-stack.md) のコンテナの行。#274・#452）——
+   **入る手順**: `aws ecs run-task` に `--enable-execute-command` を付け（後から有効にはできない——AWS 公式「You can't turn on ECS Exec for existing tasks. It can only be turned on for new tasks.」）、
+   コンテナの command を常駐する形に上書きして起動し（イメージの CMD は `prisma migrate deploy` を流して終わる。`apps/api/Dockerfile` の migrate 段。ECS の API リファレンス ContainerOverride「The command to send to the container that overrides the default command from the Docker image or the task definition.」）、
+   ECS Exec で入り（問い合わせの手段の psql は、まだこのイメージに入っていない——#457）、確かめ終えたらそのタスクを止める。
+   **上書きしないと入る先が残らず（ECS Exec が繋がるのは動いているコンテナである。AWS 公式「run commands in or get a shell to a container running on」）、復旧の途中で本番の DB に `migrate deploy` が1回走る。止め忘れると、運用者が ECS Exec で入る経路が開いたまま残る。**
+   ECS Exec のコマンドは root で動き（AWS 公式「these commands are run as the root user.」）、**入ったタスクのコンテナが環境変数として持つ値と、タスクロールの権限にも届くものとして扱う**（環境変数は Fargate の上で届かないことを確かめていない。タスクロールは AWS 公式「The permissions granted in the IAM role are vended to containers running in the task.」「Containers are not a security boundary and the use of task IAM roles does not change this.」）。
+   api のタスクは `secret: true` の設定（`JWT_SECRET` を含む）を持ち（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）、
+   **`JWT_SECRET` に届けば、任意の利用者のアクセストークンを署名して作れる**（署名と検証は HS256 の共有鍵。`apps/api/src/auth/auth.module.ts`）——**アプリの認証そのものの外に出る。**
+   マイグレーション用のタスク定義は、`secrets` を `DATABASE_URL` だけにし、タスクロールを api のタスクと分けて ECS Exec に要る `ssmmessages` の4つの操作だけにして、運用者が ECS Exec で入る経路が届く先を DB にとどめる。
+   **踏むと壊れる: そのタスク定義に `DATABASE_URL` 以外の `secret: true` の設定を足す、またはタスクロールに権限を足すと、運用者が ECS Exec で入る経路が認証の外に出る。**
 
 **手で作って手で差し替えてはならない。** この節はインフラの設定の正本を Terraform に置くと
 繰り返し宣言している（保持期間・取得時間帯・アラートの閾値）。手順 2〜3 を Terraform の外で行うと、
