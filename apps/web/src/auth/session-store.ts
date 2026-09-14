@@ -59,11 +59,23 @@ function browserLocks(): RefreshLocks | undefined {
 export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
   const locks = 'locks' in options ? options.locks : browserLocks();
   const state = createStore<SessionState>()(() => ({ status: 'checking' }));
-  let refreshing: Promise<string | null> | null = null;
+  /**
+   * ログインの世代。ログイン・ログアウト・起動時の復元・リフレッシュの失敗でログインが替わるたびに進む（アクセストークンの取り直しでは進まない）。
+   * **踏むと壊れる: 非同期の待ち（リフレッシュ）の後は、状態ではなく世代で「同じログインか」を確かめる。** 状態だけを見ると、待つ間に
+   * ログアウトして別の利用者がログインし終えたとき、前の利用者のアクセストークンがその利用者のセッションに入る（認可の破れ）。
+   */
+  let generation = 0;
+  let refreshing: { generation: number; promise: Promise<string | null> } | null = null;
   let restoring: Promise<void> | null = null;
 
   function set(next: SessionState): void {
     state.setState(next, true);
+  }
+
+  /** ログインを替える（世代を進める）。 */
+  function changeLogin(next: SessionState): void {
+    generation += 1;
+    set(next);
   }
 
   function withLock<T>(task: () => Promise<T>): Promise<T> {
@@ -89,12 +101,19 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
    * 断られたまま投げると `restore` が状態を決めずに終わり、確かめる途中のまま戻れない。ロックの外で送る代償は、ロックの無いブラウザと同じである。
    */
   function refreshToken(): Promise<string | null> {
-    refreshing ??= withLock(sendRefresh)
-      .catch(sendRefresh)
-      .finally(() => {
-        refreshing = null;
-      });
-    return refreshing;
+    // 同時の呼び出しは1本に束ねるが、束ねるのは同じログインの間だけ（前のログインの待っている分を使い回さない）
+    if (refreshing?.generation !== generation) {
+      const entry = {
+        generation,
+        promise: withLock(sendRefresh)
+          .catch(sendRefresh)
+          .finally(() => {
+            if (refreshing === entry) refreshing = null;
+          }),
+      };
+      refreshing = entry;
+    }
+    return refreshing.promise;
   }
 
   async function readMe(accessToken: string): Promise<SessionUser | null> {
@@ -110,11 +129,16 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
     }
   }
 
-  /** アクセストークンを取り直す。取り直せなければログインしていない状態にし、null を返す。 */
+  /**
+   * アクセストークンを取り直す。取り直せなければログインしていない状態にし、null を返す。
+   * 待つ間にログインが替わったら（ログアウト・別の利用者のログイン）、結果をいまのログインに当てず、null を返す。
+   */
   async function renew(): Promise<string | null> {
+    const started = generation;
     const renewed = await refreshToken();
+    if (generation !== started) return null;
     if (renewed === null) {
-      set({ status: 'signedOut' });
+      changeLogin({ status: 'signedOut' });
       return null;
     }
     const latest = state.getState();
@@ -140,7 +164,7 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
       restoring ??= (async () => {
         const accessToken = await refreshToken();
         const user = accessToken === null ? null : await readMe(accessToken);
-        set(
+        changeLogin(
           accessToken !== null && user !== null
             ? { status: 'signedIn', accessToken, user }
             : { status: 'signedOut' },
@@ -168,7 +192,7 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
         // 成功の応答でも本体が JSON でなければ（`/api/*` が静的配信に落ちて index.html が返るなど）、投げずに失敗として返す
         return { ok: false, status: response.status };
       }
-      set({ status: 'signedIn', accessToken: body.accessToken, user: body.user });
+      changeLogin({ status: 'signedIn', accessToken: body.accessToken, user: body.user });
       return { ok: true };
     },
 
@@ -183,7 +207,7 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
       } catch {
         return { ok: false };
       }
-      set({ status: 'signedOut' });
+      changeLogin({ status: 'signedOut' });
       return { ok: true };
     },
 
@@ -195,9 +219,8 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
       const response = await send(path, init, current.accessToken);
       if (response.status !== 401) return response;
       const renewed = await renew();
+      // null には、待つ間にログインが替わった場合を含む（ログアウトの後・別の利用者のログインの後に、前の要求を送り直さない）
       if (renewed === null) return response;
-      // リフレッシュを待つ間にログアウトしたら、通っても送り直さない（ログアウトの後に書き込みを成立させない）
-      if (state.getState().status !== 'signedIn') return response;
       return send(path, init, renewed);
     },
 
