@@ -5,9 +5,16 @@
 #
 # NAT ゲートウェイとインターフェースエンドポイントは置かない。
 # サブネットは2つの AZ に置く。ALB と RDS のサブネットグループが2つの AZ を要する（技術スタックの同じ行）。
+# AZ の数は local.azs だけが決め、サブネットと経路表の関連付けはその数に従う。
 
+# 通常の AZ だけを選ぶ（Local Zone・Wavelength Zone は、ALB と RDS のサブネットグループの前提を満たさない）。
 data "aws_availability_zones" "available" {
   state = "available"
+
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
+  }
 }
 
 locals {
@@ -32,7 +39,7 @@ resource "aws_internet_gateway" "main" {
 }
 
 resource "aws_subnet" "public" {
-  count = 2
+  count = length(local.azs)
 
   vpc_id            = aws_vpc.main.id
   availability_zone = local.azs[count.index]
@@ -44,7 +51,7 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_subnet" "private" {
-  count = 2
+  count = length(local.azs)
 
   vpc_id            = aws_vpc.main.id
   availability_zone = local.azs[count.index]
@@ -69,7 +76,7 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table_association" "public" {
-  count = 2
+  count = length(aws_subnet.public)
 
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
@@ -85,7 +92,7 @@ resource "aws_route_table" "private" {
 }
 
 resource "aws_route_table_association" "private" {
-  count = 2
+  count = length(aws_subnet.private)
 
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private.id
@@ -121,6 +128,8 @@ resource "aws_security_group" "valkey" {
 
 # ALB への受信（CloudFront から）は、VPC オリジンを作るときに足す。
 
+# 踏むと壊れる: 3000 は api の既定の待ち受けポート（apps/api/src/port.ts）と同じでなければならない。
+# 食い違うと ALB からタスクへ届かず、CI は緑のまま、デプロイ後のヘルスチェックで初めて落ちる。
 resource "aws_vpc_security_group_egress_rule" "alb_to_task" {
   security_group_id            = aws_security_group.alb.id
   referenced_security_group_id = aws_security_group.task.id
