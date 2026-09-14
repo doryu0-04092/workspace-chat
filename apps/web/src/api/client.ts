@@ -30,7 +30,12 @@ export async function requestJson<T>(
   }
   if (!response.ok) throw new ApiError(await readFailure(response));
   if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch {
+    // 成功の応答でも本体が JSON でなければ（`/api/*` が静的配信に落ちて index.html が返るなど）、応答の状態を持った ApiError にする
+    throw new ApiError({ ok: false, status: response.status });
+  }
 }
 
 /** 画面に出す文。api が断ったものは種類ごとの文、それ以外は一般の文。 */
