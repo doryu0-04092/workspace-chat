@@ -447,6 +447,18 @@ F-02 で追加した依存（`apps/api` の dependencies）。
 | **react-router** | **^8.3.1** | 最新（上表「ルーティング」。決定・2026-09-13・依頼側）。`apps/web` の dependencies。8.3.1 の `react-router` 自体が `BrowserRouter`・`Routes`・`Route`・`Navigate`・`MemoryRouter` を出している（`dist/production/index.d.ts`）ため、`react-router-dom` は入れない。engines は `node >=22.22.0`、peerDependencies は `react`・`react-dom` の `>=19.2.7`（上表の Node.js 24・React 19.2 を満たす）。使い方は同梱の `docs/start/declarative`（`BrowserRouter` で包み、`Routes`・`Route` で組む） |
 | **zustand** | **^5.0.15** | 最新（上表「一時状態」の v5）。`apps/web` の dependencies。依存は無く、peerDependencies（`react`・`@types/react`・`immer`・`use-sync-external-store`）はすべて任意。ライセンスは MIT。ログインの状態を `zustand/vanilla` の `createStore` に置き（`vanilla.d.ts` の `createStore`）、画面は `zustand` の `useStore` で読む（`react.d.ts` の `useStore(api)`。`apps/web/src/auth/session-store.ts`・`session-context.tsx`） |
 
+#### 追加で確認した項目 — web のワークスペースとチャンネルの画面（2026-09-13。#379）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **@tanstack/react-query** | **^5.102.8** | 最新（上表「データ取得」の v5）。`apps/web` の dependencies。peerDependencies は `react` の `^18` または `^19`（上表の React 19.2 を満たす）。依存は `@tanstack/query-core` 5.102.8 だけ。`QueryClientProvider`・`useQuery`・`useMutation`・`useQueryClient` を出している（`build/modern/index.d.ts`）。**api が 4xx で断った読み込みはやり直さない**（やり直しても結果が変わらず、404 の表示が遅れるだけになる。`apps/web/src/api/query-client.ts`） |
+
+#### 追加で確認した項目 — web のメッセージの画面（2026-09-14。#379）
+
+| 対象 | 採用 | 判断 |
+|---|---|---|
+| **react-virtuoso** | **^4.18.13** | 最新（上表「メッセージ一覧」の 4.x）。`apps/web` の dependencies。依存は無く、peerDependencies は `react`・`react-dom` の `>=16 \|\| >=17 \|\| >=18 \|\| >=19`（上表の React 19.2 を満たす）。ライセンスは MIT。`firstItemIndex` の型の説明「Use when implementing inverse infinite scrolling - decrease the value this property in combination with `data` or `totalCount` to prepend items to the top of the list.」（`dist/index.d.ts`）。**検査は同梱の `VirtuosoMockContext`（「React context for mocking Virtuoso component measurements in tests.」）で表示域と行の高さを固定する。** そのもとでは `initialTopMostItemIndex` に 0 以外を渡すと行が1つも描かれないため、開いたときに最新へ移るのは ref の `scrollToIndex` で行う。jsdom は要素の `scrollBy` を持たず、先頭に足すと例外になるため、検査の下地に空の `scrollBy` を置く（`apps/web/src/test-setup.ts`） |
+
 #### TypeScript 7 を採らない理由
 
 TypeScript 7 は**コンパイラを Go で書き直した実装**であり、5.x とは別系統である。
