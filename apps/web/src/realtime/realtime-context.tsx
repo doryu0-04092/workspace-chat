@@ -33,6 +33,7 @@ export function RealtimeProvider({
   const [refused, setRefused] = useState<Failure | null>(null);
 
   useEffect(() => {
+    let active = true;
     let renewed = false;
     const onConnect = () => {
       renewed = false;
@@ -43,8 +44,9 @@ export function RealtimeProvider({
       const code = error.data?.code;
       if (code === 'invalid_token' && !renewed) {
         renewed = true;
+        // リフレッシュを待つ間に枠が外れたら（ログアウトなど）、通っても繋ぎ直さない。枠の外に接続を残さない
         void store.renew().then((token) => {
-          if (token !== null) socket.connect();
+          if (active && token !== null) socket.connect();
         });
         return;
       }
@@ -54,6 +56,7 @@ export function RealtimeProvider({
     socket.on('connect_error', onConnectError);
     socket.connect();
     return () => {
+      active = false;
       socket.off('connect', onConnect);
       socket.off('connect_error', onConnectError);
       socket.disconnect();

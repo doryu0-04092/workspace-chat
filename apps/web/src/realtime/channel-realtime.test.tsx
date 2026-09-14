@@ -169,6 +169,32 @@ describe('リアルタイムの接続（F-16。機能一覧 5.2）', () => {
 
     await waitFor(() => expect(socket.disconnects).toBe(1));
   });
+
+  it('リフレッシュを待つ間にログアウトして枠が外れたら、リフレッシュが後から通っても繋ぎ直さない', async () => {
+    let finishRefresh: ((response: Response) => void) | undefined;
+    const { socket } = await openChannel({
+      'POST /api/auth/refresh': [
+        () => token('t1'),
+        () =>
+          new Promise<Response>((resolve) => {
+            finishRefresh = resolve;
+          }),
+      ],
+      'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+    });
+
+    act(() => socket.refuse('invalid_token'));
+    await waitFor(() => expect(finishRefresh).toBeDefined());
+    fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }));
+    await waitFor(() => expect(socket.disconnects).toBe(1));
+
+    await act(async () => {
+      finishRefresh!(token('t2'));
+    });
+    await pause();
+
+    expect(socket.connects).toBe(1);
+  });
 });
 
 describe('チャンネルの部屋（機能一覧 9.2）', () => {
