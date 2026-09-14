@@ -275,6 +275,32 @@ describe('トークンを付けた要求', () => {
     expect(store.getState()).toEqual({ status: 'signedOut' });
   });
 
+  it('リフレッシュを待つ間にログアウトしたら、リフレッシュが後から通っても送り直さず、最初の 401 を返す', async () => {
+    const store = await signedInStore();
+    let finishRefresh: ((response: Response) => void) | undefined;
+    const { count } = fakeFetch({
+      'GET /api/workspaces': [
+        () => json(401, { code: 'invalid_token', message: 'x' }),
+        () => json(200, []),
+      ],
+      'POST /api/auth/refresh': () =>
+        new Promise<Response>((resolve) => {
+          finishRefresh = resolve;
+        }),
+      'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+    });
+
+    const pending = store.authorizedFetch('/api/workspaces');
+    await vi.waitFor(() => expect(finishRefresh).toBeDefined());
+    await store.logout();
+    finishRefresh!(token('t2'));
+    const response = await pending;
+
+    expect(response.status).toBe(401);
+    expect(count('GET /api/workspaces')).toBe(1);
+    expect(store.getState()).toEqual({ status: 'signedOut' });
+  });
+
   it('同時に2本が 401 になっても、リフレッシュは1回だけ送る', async () => {
     const store = await signedInStore();
     const { count } = fakeFetch({

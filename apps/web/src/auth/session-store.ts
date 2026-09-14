@@ -196,6 +196,8 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
       if (response.status !== 401) return response;
       const renewed = await renew();
       if (renewed === null) return response;
+      // リフレッシュを待つ間にログアウトしたら、通っても送り直さない（ログアウトの後に書き込みを成立させない）
+      if (state.getState().status !== 'signedIn') return response;
       return send(path, init, renewed);
     },
 
