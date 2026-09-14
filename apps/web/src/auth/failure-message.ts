@@ -1,0 +1,24 @@
+import type { Failure } from './session-store';
+
+/** 断られた要求を、利用者に見せる文にする。ログインの失敗の理由は区別しない（機能一覧 1.2）。 */
+export function failureMessage(failure: Failure): string {
+  if (failure.status === 0) return '通信に失敗しました。接続を確かめてから、やり直してください。';
+  if (failure.status === 429) {
+    return failure.retryAfterSeconds === undefined
+      ? '試行が多すぎます。しばらく待ってから、やり直してください。'
+      : `試行が多すぎます。${failure.retryAfterSeconds} 秒ほど待ってから、やり直してください。`;
+  }
+  switch (failure.code) {
+    case 'invalid_credentials':
+      return 'ユーザーID かパスワードが違います。';
+    case 'user_id_taken':
+      return 'このユーザーID は既に使われています。別の ID を選んでください。';
+    case 'registration_disabled':
+      return '現在、新規登録を受け付けていません。';
+    case 'validation_failed':
+    case 'invalid_body':
+      return '入力の形が正しくありません。各項目の条件を確かめてください。';
+    default:
+      return 'うまくいきませんでした。時間をおいて、やり直してください。';
+  }
+}
