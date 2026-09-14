@@ -36,7 +36,8 @@ export async function requestJson<T>(
   try {
     response = await store.authorizedFetch(path, init);
   } catch (cause) {
-    // 通信の失敗（fetch は TypeError で断る）だけを status 0 にする。実装の誤りを通信の失敗に畳まない
+    // fetch が断った TypeError だけを status 0 にし、authorizedFetch が投げる Error（ログインしていない状態での呼び出しなど）は畳まない。
+    // fetch は要求の組み立ての誤り（GET に本体を渡す・不正なヘッダーなど）でも TypeError を投げるため、そちらは通信の失敗と分けられない
     if (cause instanceof TypeError) throw new ApiError({ ok: false, status: 0 });
     throw cause;
   }
