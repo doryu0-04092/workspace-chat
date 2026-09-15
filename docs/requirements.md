@@ -420,7 +420,7 @@
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
 | **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 | **`infra/bootstrap` の state** | **取り込み直す**——state のバケットは `prevent_destroy` で残るため、`terraform import` でバケット・バージョニング・パブリックアクセスの遮断（`infra/bootstrap/main.tf` の3つのリソース）を state に戻す |
-| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
+| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで `DATABASE_URL`・`REDIS_URL` を入れ替えるときは、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが DB に繋がらない）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
 | **ElastiCache Valkey** | **データを戻す手順は持たない**（持つのは配信の共有と期限つきの回数だけで、蓄積しない。この節の「代償」）。**作り直したら、接続先が変わらなくても AUTH トークンは作成時に新しい乱数になるため、版を上げてから ECS のタスクを入れ替える一手が要る**（手順は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の「踏むと壊れる」） |
 | **ECR のイメージ** | **作り直して push し直す**——ソースからイメージを作り（`scripts/api-image.test.sh` と同じ `apps/api/Dockerfile` の段）、ECR に push して、ECS のタスクを入れ替える（push の手順は、イメージを出す PR で書く） |
 
@@ -508,6 +508,19 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 **復元できる期間に上限は無い。** これはバージョニングを有効にし、ライフサイクルを置かない設定に由来する。
 **ただし上限が無いのは `terraform destroy` までである。** `terraform destroy` の時点では、
 添付のバケットは `force_destroy` を指定するため（上記「バックアップ」）、旧バージョンごと消える。
+
+**秘密の値が漏れた疑いがあるとき**、`DATABASE_URL`・`REDIS_URL` は次のとおり入れ替える（決定・2026-09-16・作業側。依頼側の委任による。#423）。定期の入れ替えはしない（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。
+
+- **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
+  1. api のサービスの desired count を 0 にし、タスクが無くなるのを待つ
+  2. `db_password_version` を上げ、RDS と `DATABASE_URL` のパラメータだけを対象に `apply` する（`-target=aws_db_instance.main -target=aws_ssm_parameter.database_url`。サービスの desired count を、この `apply` で戻さないため）。Terraform の文書は `-target` を例外の場合に限っており（「Use `-target=ADDRESS` in exceptional circumstances only, such as recovering from mistakes or working around Terraform limitations.」）、漏えいへの対処はその例外として扱う
+  3. RDS の `PendingModifiedValues` から `MasterUserPassword` が消えるのを待つ（RDS の API リファレンス「Between the time of the request and the completion of the request, the `MasterUserPassword` element exists in the `PendingModifiedValues` element of the operation response.」）
+  4. 対象を絞らない `apply` でサービスを戻す（起動するタスクは新しいパラメータを読む）
+  5. ログインとメッセージの一覧で、DB に繋がることを確かめる
+
+  **代償: 入れ替えの間（数分。測っていない）、サービス全体が止まる。** 一部の要求だけが失敗する状態は作らない
+- **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`-replace=aws_elasticache_replication_group.valkey` と `valkey_auth_token_version` の引き上げを同じ `apply` で行い、その後に ECS のタスクを入れ替える。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）
+- **2つの DB 利用者を交互に使い、止めずに入れ替える形は採らない**（Secrets Manager の文書が可用性の要る場合に勧める形。「After rotation, both `user` and `user_clone` credentials are valid.」）。DB は外から繋げないため、利用者の作成・権限の付与・パスワードの設定を、psql を持つマイグレーション用のタスクで流す仕組みが要る。**代償は、上の RDS の計画停止である**
 
 - **RTO（復旧までの目標時間）は定めない。** 学習用途であり、停止が業務に影響しないため
 - **RDS の RPO（失ってよいデータの範囲）は、トランザクションログの退避の間隔である。**
