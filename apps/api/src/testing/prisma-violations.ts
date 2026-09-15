@@ -13,3 +13,11 @@ export function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
     clientVersion: 'test',
   });
 }
+
+/** DB の応答を差し替えるための、Prisma の外部キーの違反（P2003）。規則は上の一意制約違反と同じ（`isForeignKeyViolation` は `code` だけを見る）。 */
+export function foreignKeyViolation(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+    code: 'P2003',
+    clientVersion: 'test',
+  });
+}
