@@ -56,6 +56,29 @@ describe('要求の送り方（requestJson）', () => {
     expect(sent).toBe(false);
   });
 
+  // 断られた応答と 204 は、通信の失敗（status 0）に畳まない（#449）。
+  it('api が断った応答は、その状態と code を持った ApiError にする', async () => {
+    const response = new Response(JSON.stringify({ code: 'owner_only' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const failure = await requestJson(storeReturning(response), '/api/workspaces/w1').catch(
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(ApiError);
+    expect((failure as ApiError).failure).toEqual({ ok: false, status: 403, code: 'owner_only' });
+  });
+
+  it('204 の応答は、本体を読まずに undefined を返す', async () => {
+    const response = new Response(null, { status: 204 });
+
+    await expect(
+      requestJson(storeReturning(response), '/api/workspaces/w1/join', { method: 'POST' }),
+    ).resolves.toBeUndefined();
+  });
+
   it('成功の応答でも本体が JSON でなければ、投げずに応答の状態を持った ApiError にする（/api/* が静的配信に落ちたときなど）', async () => {
     const response = new Response('<!doctype html>', {
       status: 200,
