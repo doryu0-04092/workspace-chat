@@ -65,15 +65,19 @@ docker push "$migrate_repository:$IMAGE_TAG"
 
 echo "== 3. マイグレーション用のタスク定義を新しいタグにし、run-task に要るものを揃える"
 # -target はそのリソースと依存だけを作る。マイグレーション用のタスク定義の依存（ロール・ECR・ロググループ・DATABASE_URL →
-# RDS）に入らない、クラスター・パブリックサブネットとその経路（イメージの取得）・タスクのセキュリティグループと送信の規則・
-# RDS への受信の規則も並べる。初回のリリースでは、これが無いと手順 4 の run-task が成り立たない。
+# RDS）に入らないものも並べる: クラスター・パブリックサブネットとその経路（イメージの取得）・タスクのセキュリティグループと
+# 送信の規則・RDS への受信の規則・ロールにぶら下がるポリシー（実行ロールの ECR とログの管理ポリシー・パラメータの読み出し、
+# マイグレーションのタスクロールの ECS Exec）。初回のリリースでは、これが無いと手順 4 の run-task が成り立たない。
 # api のタスク定義とサービスは手順 5 に残す（マイグレーションの前に新しいタスク定義へ切り替えない）。
 tf apply -input=false \
   -target=aws_ecs_task_definition.migrate \
   -target=aws_ecs_cluster.main \
   -target=aws_route_table_association.public \
   -target=aws_vpc_security_group_egress_rule.task_all \
-  -target=aws_vpc_security_group_ingress_rule.db_from_task
+  -target=aws_vpc_security_group_ingress_rule.db_from_task \
+  -target=aws_iam_role_policy_attachment.task_execution_managed \
+  -target=aws_iam_role_policy.task_execution_parameters \
+  -target=aws_iam_role_policy.task_exec_command
 
 echo "== 4. マイグレーションを流す"
 cluster=$(tf output -raw ecs_cluster_name)

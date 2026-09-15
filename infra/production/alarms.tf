@@ -6,7 +6,9 @@
 locals {
   alarm_period_seconds = 300
 
-  # 5xx 率（ALB の 5xx とターゲットの 5xx を要求の数で割った割合。単位は %）。タスクの全断は ALB が返す 503 で捕まえる。
+  # 5xx 率（ALB の 5xx とターゲットの 5xx を、要求の数で割った割合。単位は %）。タスクの全断は ALB が返す 503 で捕まえる——
+  # 健全なターゲットが無いときの 503 は RequestCount に数えられない（AWS の ALB のメトリクスの文書「This metric is only incremented for
+  # requests where the load balancer node was able to choose a target.」）ため、分母に ALB の 5xx を足し、全断のとき 100% にする。
   alarm_5xx_rate_threshold_percent  = 5
   alarm_5xx_rate_evaluation_periods = 2
 
@@ -53,7 +55,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx_rate" {
 
   metric_query {
     id          = "rate"
-    expression  = "100 * (FILL(elb5xx, 0) + FILL(target5xx, 0)) / requests"
+    expression  = "100 * (FILL(elb5xx, 0) + FILL(target5xx, 0)) / (FILL(requests, 0) + FILL(elb5xx, 0))"
     label       = "5xx rate (%)"
     return_data = true
   }
