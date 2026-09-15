@@ -820,6 +820,15 @@ export interface components {
             editedAt: string | null;
             /** @description 削除済みか（「このメッセージは削除されました」に置き換えて表示する。機能一覧 4.2） */
             deleted: boolean;
+            /** @description 本文のメンションの対象（機能一覧 9.1）。投稿・返信・編集のときに、そのチャンネルの参加者で退会していない利用者へ解決できた `@ユーザーID` だけを、本文に最初に現れた順に1人1件で載せる。削除済みのメッセージは空 */
+            mentions: components["schemas"]["MessageMention"][];
+        };
+        /** @description メンションの対象（表示時の参照先。機能一覧 9.1 の経路2。対象がいまそのチャンネルの参加者かは問わない） */
+        MessageMention: {
+            /** @description 対象のユーザーID（登録したときの大文字小文字のまま）。本文の `@ユーザーID` とは大文字小文字によらず照合する（機能一覧 1.1） */
+            userId: string;
+            /** @description 対象の利用者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            user: components["schemas"]["UserSummary"] | null;
         };
         MessagePage: {
             /** @description 新しい順 */

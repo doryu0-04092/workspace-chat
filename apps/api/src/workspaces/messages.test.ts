@@ -252,6 +252,7 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         parentId: null,
         replyCount: 0,
         replyParticipants: [],
+        mentions: [],
       });
       expect(Number.isNaN(Date.parse(message.createdAt))).toBe(false);
       expect(await prisma.message.count({ where: { channelId } })).toBe(1);
@@ -1098,6 +1099,7 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         parentId: parent.id,
         replyCount: 0,
         replyParticipants: [],
+        mentions: [],
       });
       const { messages } = await page(alice, workspace.id, channelId);
       expect(messages).toEqual([{ ...parent, replyCount: 1, replyParticipants: [summaryOf(bob)] }]);
@@ -1355,6 +1357,164 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       expect(limited.status).toBe(429);
       expect(await limited.json()).toEqual(TOO_MANY_REQUESTS);
       expect(await replyCountOf(parent.id)).toBe(30);
+    });
+  });
+
+  // 機能一覧 9.1（F-20）: 投稿・返信・編集のときに本文の `@ユーザーID` を解決して保存し、応答（表示時の参照先）と配信の宛先に使う。#494。
+  // CLAUDE.md「必ずテストを書く箇所」: WebSocket が非参加者にイベントを配信しないこと（メンションで宛先に加える利用者の部屋も、参加者に限る）。
+  describe('メンション（F-20）', () => {
+    function messagePath(workspaceId: string, channelId: string, messageId: string): string {
+      return `${base}/api/workspaces/${workspaceId}/channels/${channelId}/messages/${messageId}`;
+    }
+
+    function send(
+      method: 'POST' | 'PATCH',
+      by: LoggedIn,
+      path: string,
+      body: string,
+    ): Promise<Response> {
+      return fetch(path, {
+        method,
+        headers: { authorization: by.authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+    }
+
+    function mentionOf(user: LoggedIn) {
+      return {
+        userId: user.loginId,
+        user: { id: user.id, userId: user.loginId, displayName: expect.any(String) },
+      };
+    }
+
+    /** alice・bob・carol・erin が参加するチャンネルと、同じワークスペースにいて参加していない dave を用意する。 */
+    async function channelWithPeople() {
+      const owner = await login();
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const dave = await login();
+      const erin = await login();
+      const workspace = await workspaceWith(owner, alice, bob, carol, dave, erin);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob, carol, erin]);
+      return { alice, bob, carol, dave, erin, workspace, channelId };
+    }
+
+    it('本文の `@ユーザーID` を大文字小文字によらず解決し、本文に最初に現れた順に1人1件で、投稿の応答と一覧に載せる', async () => {
+      const { alice, bob, carol, workspace, channelId } = await channelWithPeople();
+      // 句読点と括弧は区切りとして扱う。carol は2回書く
+      const body = `@${carol.loginId.toUpperCase()}、（@${bob.loginId.toLowerCase()}）もう一度 @${carol.loginId}`;
+
+      const message = await posted(alice, workspace.id, channelId, body);
+
+      expect(message.mentions).toEqual([mentionOf(carol), mentionOf(bob)]);
+      expect((await page(alice, workspace.id, channelId)).messages).toEqual([message]);
+    });
+
+    it('そのチャンネルに参加していない利用者・退会した参加者・存在しないユーザーID・英数字に続く `@` は解決しない', async () => {
+      const { alice, bob, carol, dave, workspace, channelId } = await channelWithPeople();
+      // carol は退会の消し込みを取りこぼした状態（参加は残っている）
+      await prisma.user.update({ where: { id: carol.id }, data: { deletedAt: new Date() } });
+      const body = [
+        `@${dave.loginId}`,
+        `@${carol.loginId}`,
+        '@Nobody_404_here',
+        `mail@${bob.loginId}`,
+      ].join(' ');
+
+      const message = await posted(alice, workspace.id, channelId, body);
+
+      expect(message.mentions).toEqual([]);
+    });
+
+    it('保存したメンションは、対象がチャンネルを抜けても返し、退会したら user を null にする。削除済みのメッセージは空にする', async () => {
+      const { alice, bob, carol, workspace, channelId } = await channelWithPeople();
+      const kept = await posted(
+        alice,
+        workspace.id,
+        channelId,
+        `@${bob.loginId} と @${carol.loginId}`,
+      );
+      const removed = await posted(alice, workspace.id, channelId, `@${bob.loginId} 消す`);
+      await prisma.channelMember.deleteMany({ where: { channelId, userId: bob.id } });
+      await prisma.user.update({ where: { id: carol.id }, data: { deletedAt: new Date() } });
+      const res = await fetch(messagePath(workspace.id, channelId, removed.id), {
+        method: 'DELETE',
+        headers: { authorization: alice.authorization },
+      });
+      expect(res.status).toBe(204);
+
+      const { messages } = await page(alice, workspace.id, channelId);
+
+      expect(messages.map(({ id, mentions }) => ({ id, mentions }))).toEqual([
+        { id: removed.id, mentions: [] },
+        { id: kept.id, mentions: [mentionOf(bob), { userId: carol.loginId, user: null }] },
+      ]);
+    });
+
+    it('メンションした参加者には、チャンネルの部屋に入っていなくても message:new が届き、部屋に入っている参加者にも1回だけ届く。解決しなかった非参加者と、メンションしていない参加者の接続には届かない', async () => {
+      const { alice, bob, carol, dave, erin, workspace, channelId } = await channelWithPeople();
+      const bobSocket = await open(bob);
+      const carolSocket = await open(carol);
+      const daveSocket = await open(dave);
+      const erinSocket = await open(erin);
+      expect(await enter(carolSocket, channelId)).toMatchObject({ ok: true });
+      let toCarol = 0;
+      carolSocket.on('message:new', () => (toCarol += 1));
+      const toBob = nextEvent(bobSocket, 'message:new', 2_000);
+      const toDave = nextEvent(daveSocket, 'message:new', 1_000);
+      const toErin = nextEvent(erinSocket, 'message:new', 1_000);
+
+      const message = await posted(
+        alice,
+        workspace.id,
+        channelId,
+        `@${bob.loginId} @${carol.loginId} @${dave.loginId}`,
+      );
+
+      expect(await toBob).toEqual({ message, sentAt: expect.any(String) });
+      expect(await toDave).toBeUndefined();
+      expect(await toErin).toBeUndefined();
+      expect(toCarol).toBe(1);
+    });
+
+    it('返信のメンションも解決して応答に載せ、メンションした参加者の部屋にも返信の message:new を届ける', async () => {
+      const { alice, bob, workspace, channelId } = await channelWithPeople();
+      const parent = await posted(alice, workspace.id, channelId, '親');
+      const bobSocket = await open(bob);
+      const toBob = nextEvent(bobSocket, 'message:new', 2_000);
+
+      const res = await send(
+        'POST',
+        alice,
+        `${messagePath(workspace.id, channelId, parent.id)}/replies`,
+        `@${bob.loginId} 返信`,
+      );
+
+      expect(res.status).toBe(201);
+      const reply = (await res.json()) as Message;
+      expect(reply.mentions).toEqual([mentionOf(bob)]);
+      expect(await toBob).toEqual({ message: reply, sentAt: expect.any(String) });
+    });
+
+    it('編集で本文のメンションが変わったら対象を置き換える。編集では、新しい対象の部屋へ配らない', async () => {
+      const { alice, bob, carol, workspace, channelId } = await channelWithPeople();
+      const message = await posted(alice, workspace.id, channelId, `@${bob.loginId} へ`);
+      const carolSocket = await open(carol);
+      const toCarol = nextEvent(carolSocket, 'message:updated', 1_000);
+
+      const res = await send(
+        'PATCH',
+        alice,
+        messagePath(workspace.id, channelId, message.id),
+        `@${carol.loginId} へ`,
+      );
+
+      expect(res.status).toBe(200);
+      const edited = (await res.json()) as Message;
+      expect(edited.mentions).toEqual([mentionOf(carol)]);
+      expect((await page(alice, workspace.id, channelId)).messages).toEqual([edited]);
+      expect(await toCarol).toBeUndefined();
     });
   });
 
