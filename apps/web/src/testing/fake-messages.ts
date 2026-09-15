@@ -33,6 +33,7 @@ export function message(n: number, overrides: Record<string, unknown> = {}) {
     parentId: null as string | null,
     replyCount: 0,
     replyParticipants: [] as (typeof BOB)[],
+    mentions: [] as { userId: string; user: typeof BOB | null }[],
     ...overrides,
   };
 }

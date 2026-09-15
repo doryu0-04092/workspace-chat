@@ -27,6 +27,96 @@ type PageQuery = { before?: string; limit?: string | number };
 /** 親に載せる返信の参加者の上限（機能一覧 6。実装時に決めた値）。 */
 const REPLY_PARTICIPANT_LIMIT = 3;
 
+/**
+ * 本文のメンション（機能一覧 9.1。実装時に決めた値）。`@` に続くユーザーID（英数字とアンダースコアの 3〜30 文字。1.1）で、
+ * **前が英数字・アンダースコアでなく、後ろに英数字・アンダースコアが続かない**もの（`mail@alice` や、31 文字以上の綴りの先頭は拾わない）。
+ * コードの中の `@` も拾う（api は Markdown を解析しない）。
+ */
+const MENTION_PATTERN = /(?<![A-Za-z0-9_])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])/g;
+
+/** 本文に現れたユーザーID を、小文字にして、最初に現れた順に重複なく返す（照合は大文字小文字によらない。機能一覧 1.1）。 */
+function mentionedLoginIds(body: string): string[] {
+  const found: string[] = [];
+  for (const [, loginId] of body.matchAll(MENTION_PATTERN)) {
+    if (loginId !== undefined) found.push(loginId.toLowerCase());
+  }
+  return [...new Set(found)];
+}
+
+/**
+ * 投稿時の宛先解決（機能一覧 9.1 の経路1。参照実装は prisma-schema.test.ts の `mentionTargetByLoginId`）。
+ * **対象も要求する側（`viewerId`。トークンから導いた書き手）も、そのチャンネルの参加者で、退会していないこと**。
+ * 照合は `lower()` で引く（`User_userId_lower_key` を使う。Prisma のクライアントの等値比較では大文字小文字を区別してしまう）。
+ * **踏むと壊れる: 生の SQL は schema.prisma の列名の写し（`@map`）を通らない**——`User.loginId` の列は `"userId"` である。
+ */
+async function mentionTargetsOf(
+  tx: Pick<PrismaService, '$queryRaw'>,
+  { viewerId, channelId, body }: { viewerId: string; channelId: string; body: string },
+): Promise<string[]> {
+  const loginIds = mentionedLoginIds(body);
+  if (loginIds.length === 0) return [];
+  const rows = await tx.$queryRaw<{ id: string }[]>`
+    SELECT u."id"
+    FROM "User" u
+    JOIN "ChannelMember" cm ON cm."userId" = u."id" AND cm."channelId" = ${channelId}::uuid
+    JOIN "ChannelMember" vcm ON vcm."channelId" = ${channelId}::uuid AND vcm."userId" = ${viewerId}::uuid
+    JOIN "User" viewer ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
+    WHERE lower(u."userId") = ANY(${loginIds}::text[]) AND u."deletedAt" IS NULL
+  `;
+  return rows.map(({ id }) => id);
+}
+
+/**
+ * 本文のメンションを経路1 で解決し、メッセージの対象として保存する。保存した対象の `User.id` を返す（配信の宛先に加える）。
+ * **保存するのは経路1 が返した値だけ**（表示時の参照先は、ここで確定させたものに限る。機能一覧 9.1）。
+ */
+async function saveMentions(
+  tx: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
+  {
+    messageId,
+    ...target
+  }: { messageId: string; viewerId: string; channelId: string; body: string },
+): Promise<string[]> {
+  const userIds = await mentionTargetsOf(tx, target);
+  if (userIds.length > 0) {
+    await tx.messageMention.createMany({ data: userIds.map((userId) => ({ messageId, userId })) });
+  }
+  return userIds;
+}
+
+/**
+ * 編集のときに、メッセージの対象を編集後の本文に合わせる（機能一覧 9.1）。
+ * **保存した対象のうち、編集後の本文にユーザーID が残っているものは消さない**——経路1 で引き直すと、チャンネルを抜けた・退会した対象は
+ * 解決できず、本文の `@` を変えていなくても消える（経路2 と、1.5 の「メンションの参照先も削除済みの利用者として表示する」が崩れる）。
+ * 本文から消えた対象だけを外し、まだ保存していない `@` は経路1 で解決して足す（足すのは経路1 が返した対象だけ）。
+ */
+async function replaceMentions(
+  tx: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
+  {
+    messageId,
+    ...target
+  }: { messageId: string; viewerId: string; channelId: string; body: string },
+): Promise<void> {
+  const loginIds = new Set(mentionedLoginIds(target.body));
+  const saved = await tx.messageMention.findMany({
+    where: { messageId },
+    select: { userId: true, user: { select: { loginId: true } } },
+  });
+  const removed = saved.filter(({ user }) => !loginIds.has(user.loginId.toLowerCase()));
+  if (removed.length > 0) {
+    await tx.messageMention.deleteMany({
+      where: { messageId, userId: { in: removed.map(({ userId }) => userId) } },
+    });
+  }
+  const kept = new Set(
+    saved.filter((mention) => !removed.includes(mention)).map(({ userId }) => userId),
+  );
+  const added = (await mentionTargetsOf(tx, target)).filter((userId) => !kept.has(userId));
+  if (added.length > 0) {
+    await tx.messageMention.createMany({ data: added.map((userId) => ({ messageId, userId })) });
+  }
+}
+
 const MESSAGE_SELECT = {
   id: true,
   channelId: true,
@@ -55,7 +145,11 @@ type MessageRow = {
  * 退会した投稿者は `author: null`（削除済みの利用者として表示する。機能一覧 1.5）。
  * **削除済みのメッセージは本文を返さない**（`body: null`・`deleted: true`。本文は DB に残る。機能一覧 4.2）。
  */
-function toMessage(row: MessageRow, replyParticipants: UserSummary[]): Message {
+function toMessage(
+  row: MessageRow,
+  replyParticipants: UserSummary[],
+  mentions: MentionTarget[],
+): Message {
   const deleted = row.deletedAt !== null;
   return {
     id: row.id,
@@ -68,6 +162,7 @@ function toMessage(row: MessageRow, replyParticipants: UserSummary[]): Message {
     parentId: row.parentId,
     replyCount: row.replyCount,
     replyParticipants,
+    mentions,
   };
 }
 
@@ -114,16 +209,63 @@ async function participantsOf(
   return participants;
 }
 
-/** 行を応答のメッセージにする。返信のある本体のメッセージにだけ、参加者を引いて載せる（返信と返信の無いメッセージは空）。 */
+type MentionTarget = Message['mentions'][number];
+
+/**
+ * 表示時の参照先解決（機能一覧 9.1 の経路2。参照実装は prisma-schema.test.ts の `mentionDisplayTarget`）。
+ * 渡したメッセージの保存した対象の `User` を、**まとめて1回で引く**（メッセージごとに引かない）。
+ * **`ChannelMember` を条件にしない**（対象がいま参加しているかを問わない）。退会した対象は `user: null`（削除済みの利用者。1.5）。並びは本文に最初に現れた順。
+ * **要求する側の条件を持たない**——呼ぶ側が読んでよいと決めたメッセージだけを渡す。**単独の API にしない**（UUID を試して利用者を引けてしまう）。
+ */
+async function mentionsOf(
+  db: Pick<PrismaService, 'messageMention'>,
+  rows: { id: string; body: string }[],
+): Promise<Map<string, MentionTarget[]>> {
+  const mentions = new Map<string, MentionTarget[]>();
+  if (rows.length === 0) return mentions;
+  const saved = await db.messageMention.findMany({
+    where: { messageId: { in: rows.map(({ id }) => id) } },
+    select: { messageId: true, user: { select: { ...USER_SUMMARY_SELECT, deletedAt: true } } },
+  });
+  for (const row of rows) {
+    const order = mentionedLoginIds(row.body);
+    const positionOf = (loginId: string) => order.indexOf(loginId.toLowerCase());
+    const users = saved
+      .filter(({ messageId }) => messageId === row.id)
+      .map(({ user }) => user)
+      .sort((a, b) => positionOf(a.loginId) - positionOf(b.loginId));
+    mentions.set(
+      row.id,
+      users.map((user) => {
+        // 列の loginId → 応答の userId の写像は toUserSummary だけに置く（users/user-summary.ts）
+        const summary = toUserSummary(user);
+        return { userId: summary.userId, user: user.deletedAt === null ? summary : null };
+      }),
+    );
+  }
+  return mentions;
+}
+
+/**
+ * 行を応答のメッセージにする。返信のある本体のメッセージにだけ参加者を、本文に `@` のある削除されていないメッセージにだけメンションの対象を、引いて載せる
+ * （**削除済みのメッセージは、本文を返さないのと同じく、誰を指したかも返さない**。機能一覧 9.1）。
+ * **トランザクションの中でも呼ぶため、2つの問い合わせは順に出す**（同じ接続で並べない）。
+ */
 async function toMessages(
-  db: Pick<PrismaService, '$queryRaw'>,
+  db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
   rows: MessageRow[],
 ): Promise<Message[]> {
   const participants = await participantsOf(
     db,
     rows.filter((row) => row.parentId === null && row.replyCount > 0),
   );
-  return rows.map((row) => toMessage(row, participants.get(row.id) ?? []));
+  const mentions = await mentionsOf(
+    db,
+    rows.filter((row) => row.deletedAt === null && mentionedLoginIds(row.body).length > 0),
+  );
+  return rows.map((row) =>
+    toMessage(row, participants.get(row.id) ?? [], mentions.get(row.id) ?? []),
+  );
 }
 
 /**
@@ -170,7 +312,7 @@ async function assertEditableMessage(
  * 既定値（50）と範囲（1〜100）は仕様の `limit` が持ち、openapi-validation.ts が要求に入れてから届く。
  */
 async function pageOf(
-  db: Pick<PrismaService, 'message' | '$queryRaw'>,
+  db: Pick<PrismaService, 'message' | '$queryRaw' | 'messageMention'>,
   where: { channelId: string; parentId: string | null },
   query: PageQuery,
 ): Promise<MessagePage> {
@@ -187,7 +329,10 @@ async function pageOf(
 }
 
 /** 1件の行を応答のメッセージにする（`toMessages` と同じく、返信のある本体のメッセージには参加者を載せる）。 */
-async function messageOf(db: Pick<PrismaService, '$queryRaw'>, row: MessageRow): Promise<Message> {
+async function messageOf(
+  db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
+  row: MessageRow,
+): Promise<Message> {
   const [message] = await toMessages(db, [row]);
   if (!message) throw new Error('1件の行から応答のメッセージを作れなかった');
   return message;
@@ -199,11 +344,14 @@ async function messageOf(db: Pick<PrismaService, '$queryRaw'>, row: MessageRow):
  * - **読めるのも書けるのも参加者だけ**。所属していなければ 404（`membershipOf`）、所属していれば 2段階（`assertChannelParticipant`）。
  *   **オーナーの例外は及ばない**
  * - **投稿・返信・編集・削除はチャンネルの行を掴んでからアーカイブ済みかを読む**（`lockedChannelFor`。機能一覧 3.2）。アーカイブ済みなら 409 `channel_archived`
- * - **`message:new` / `message:updated` / `message:deleted` は確定の後にチャンネルの部屋へ送る**（確定しなかった書き込みを配らない。機能一覧 5.2）
+ * - **`message:new` / `message:updated` / `message:deleted` は確定の後にチャンネルの部屋へ送る**（確定しなかった書き込みを配らない。機能一覧 5.2。メンションを含む `message:new` の宛先は下の箇条）
  * - 一覧は id の新しい順（`pageOf`）。**チャンネルの一覧は本体だけ**で、返信を混ぜない（機能一覧 6）
  * - **スレッドは1階層だけ**。親にできるのは、そのチャンネルの削除されていない本体のメッセージ（`parentId` が null）だけ
  * - **親の返信件数（`replyCount`）は、返信の投稿・削除と同じトランザクションで増減し**（一覧で `COUNT` を発行しない。要件定義書 4.1）、
  *   件数が変わった親を、参加者を付け直して `message:updated` で配る
+ * - **本文の `@ユーザーID` は、投稿・返信と同じトランザクションで経路1 で解決して保存する**（機能一覧 9.1。`saveMentions`）。
+ *   **編集では、本文にユーザーID が残っている対象を解決し直さずに残し**（抜けた・退会した対象も残る）、本文から消えた対象だけを外して新しい `@` を足す（`replaceMentions`）。
+ *   投稿と返信の `message:new` は、解決した対象の利用者の部屋をチャンネルの部屋に加えて1回で送る（5.2）——**対象はトランザクションの中で参加者と確かめた利用者だけ**
  */
 @Injectable()
 export class MessagesService {
@@ -220,7 +368,7 @@ export class MessagesService {
     input: PostMessageRequest,
   ): Promise<Message> {
     await this.workspaces.membershipOf(userId, workspaceId);
-    const message = await this.prisma.$transaction(async (tx) => {
+    const { message, mentioned } = await this.prisma.$transaction(async (tx) => {
       const channel = await lockedChannelFor(tx, userId, workspaceId, channelId);
       assertChannelParticipant(channel);
       if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
@@ -228,10 +376,16 @@ export class MessagesService {
         data: { channelId, workspaceId, authorId: userId, body: input.body },
         select: MESSAGE_SELECT,
       });
-      return messageOf(tx, row);
+      const mentioned = await saveMentions(tx, {
+        messageId: row.id,
+        viewerId: userId,
+        channelId,
+        body: input.body,
+      });
+      return { message: await messageOf(tx, row), mentioned };
     });
     const payload: MessageNewPayload = { message, sentAt: new Date().toISOString() };
-    this.emitter.toChannel(channelId, 'message:new', payload);
+    this.emitter.toChannelAndUsers(channelId, mentioned, 'message:new', payload);
     return message;
   }
 
@@ -259,7 +413,7 @@ export class MessagesService {
     input: PostMessageRequest,
   ): Promise<Message> {
     await this.workspaces.membershipOf(userId, workspaceId);
-    const { reply, parent } = await this.prisma.$transaction(async (tx) => {
+    const { reply, parent, mentioned } = await this.prisma.$transaction(async (tx) => {
       const channel = await lockedChannelFor(tx, userId, workspaceId, channelId);
       assertChannelParticipant(channel);
       const { count } = await tx.message.updateMany({
@@ -272,16 +426,26 @@ export class MessagesService {
         data: { channelId, workspaceId, authorId: userId, parentId, body: input.body },
         select: MESSAGE_SELECT,
       });
+      const mentioned = await saveMentions(tx, {
+        messageId: created.id,
+        viewerId: userId,
+        channelId,
+        body: input.body,
+      });
       const counted = await tx.message.findUniqueOrThrow({
         where: { id: parentId },
         select: MESSAGE_SELECT,
       });
-      return { reply: await messageOf(tx, created), parent: await messageOf(tx, counted) };
+      return {
+        reply: await messageOf(tx, created),
+        parent: await messageOf(tx, counted),
+        mentioned,
+      };
     });
     const sentAt = new Date().toISOString();
     const created: MessageNewPayload = { message: reply, sentAt };
     const counted: MessageUpdatedPayload = { message: parent, sentAt };
-    this.emitter.toChannel(channelId, 'message:new', created);
+    this.emitter.toChannelAndUsers(channelId, mentioned, 'message:new', created);
     this.emitter.toChannel(channelId, 'message:updated', counted);
     return reply;
   }
@@ -326,6 +490,8 @@ export class MessagesService {
         data: { body: input.body, editedAt: new Date() },
       });
       if (count !== 1) throw new NotFoundException();
+      // メンションの対象は、編集後の本文に合わせる（本文に残した対象は消さない）。**編集では対象の部屋へ配らない**（機能一覧 9.1 の実装時に決めた値）
+      await replaceMentions(tx, { messageId, viewerId: userId, channelId, body: input.body });
       const row = await tx.message.findUniqueOrThrow({
         where: { id: messageId },
         select: MESSAGE_SELECT,

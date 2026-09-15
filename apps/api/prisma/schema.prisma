@@ -1,7 +1,7 @@
 // Prisma のスキーマ。
 //
-// このファイルが定義するのは **認証・ワークスペース・チャンネルの土台と、チャンネルのメッセージとスレッド**である。
-// リアクション・メンション・添付・検索は別のイシューで扱う。
+// このファイルが定義するのは **認証・ワークスペース・チャンネルの土台と、チャンネルのメッセージとスレッドとメンションの対象**である。
+// リアクション・添付・検索は別のイシューで扱う。
 //
 // ============================================================================
 // このファイルを直す人へ: **Prisma の記法で書けない制約が6つある**
@@ -261,9 +261,10 @@ model User {
   recoveryCodes       RecoveryCode[]
   refreshTokens       RefreshToken[]
   /// 自分宛ての未承諾の招待（F-38）と、自分が出した招待（F-08）。
-  invitationsReceived Invitation[]   @relation("InvitationInvitee")
-  invitationsSent     Invitation[]   @relation("InvitationInviter")
+  invitationsReceived Invitation[]     @relation("InvitationInvitee")
+  invitationsSent     Invitation[]     @relation("InvitationInviter")
   messages            Message[]
+  mentionedIn         MessageMention[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -715,15 +716,38 @@ model Message {
   /// 削除されていない返信の件数（カウンタ列。一覧で `COUNT` を発行しない。返信の投稿・削除と同じトランザクションで増減する。要件定義書 4.1）。
   replyCount Int @default(0)
 
-  channel Channel   @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  author  User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  channel  Channel          @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  author   User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
   /// 親は論理削除だけで消える（返信は残す。機能一覧 4.2）。チャンネルごと消えるときは、同じ文の中で返信も消えるため NoAction にする。
-  parent  Message?  @relation("Thread", fields: [parentId, channelId], references: [id, channelId], onDelete: NoAction)
-  replies Message[] @relation("Thread")
+  parent   Message?         @relation("Thread", fields: [parentId, channelId], references: [id, channelId], onDelete: NoAction)
+  replies  Message[]        @relation("Thread")
+  mentions MessageMention[]
 
   /// 返信の親を、同じチャンネルのメッセージに限る複合外部キーの参照先。
   @@unique([id, channelId])
   /// **チャンネルの一覧（本体だけ。`parentId IS NULL`）と、スレッドの返信の一覧（`parentId` で絞る）は、どちらもこの向きで引く**
   /// （新しい順・`before` より古いもの）。**踏むと壊れる: 返信を引く問い合わせは必ず `channelId` を伴う**——`parentId` だけで引くと、この索引の前方を使えない。
   @@index([channelId, parentId, id(sort: Desc)])
+}
+
+/// メンションの対象（F-20。機能一覧 9.1）。投稿・返信のときに、本文の `@ユーザーID` を投稿時の宛先解決（経路1）で解決できた利用者を持つ。
+/// **編集では、本文にユーザーID が残っている対象を経路1 で解決し直さずに残す**（チャンネルを抜けた・退会した対象も残る）。本文から消えた対象だけを外し、
+/// まだ保存していない `@` だけを経路1 で解決して足す（`MessagesService` の `replaceMentions`）。**新しく足す行は、経路1 が返した利用者だけである**。
+/// **表示時の参照先解決（経路2）は、この表の `userId` から `User` を引く**——`ChannelMember` を条件にしないため、対象がチャンネルを抜けても退会しても引ける。
+model MessageMention {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @db.Uuid
+
+  /// 対象の利用者（`User.id`。ログイン識別子の `User.loginId` ではない）。
+  /// **`Membership` や `ChannelMember` を参照しない**——参照すると、キック・退出でメンションが消え、本文の `@` が誰を指したかを引けなくなる。
+  userId String @db.Uuid
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  /// 利用者は論理削除で行が残る（機能一覧 1.5）。
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 本文に同じ利用者を2回書いても1件。メッセージの対象を引く向きにも効く。
+  @@unique([messageId, userId])
 }

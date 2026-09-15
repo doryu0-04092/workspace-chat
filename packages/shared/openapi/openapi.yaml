@@ -932,7 +932,7 @@ paths:
         参加者だけが投稿できる。コードは一覧と同じ2段階（所属していなければ 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・
         プライベートは 404。オーナーでも参加していなければ同じ）。アーカイブ済みのチャンネルには投稿できない（409 channel_archived。機能一覧 3.2）。
         本文は 1〜4000 文字（コードポイント）で、空白だけは不可（機能一覧 4.1）。
-        作ったメッセージを message:new としてチャンネルの部屋へ配る（機能一覧 5.2）。
+        作ったメッセージを message:new としてチャンネルの部屋へ配る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で配る（機能一覧 5.2・9.1）。
         投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
       requestBody:
         required: true
@@ -1127,7 +1127,7 @@ paths:
         判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→
         そのチャンネルに無い・削除済みのメッセージと、返信（返信に返信はできない。1階層のみ）は 404 → アーカイブ済みのチャンネルは 409 channel_archived。
         本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。親の返信件数（replyCount）を同じトランザクションで1つ増やす（要件定義書 4.1）。
-        作った返信を message:new として、返信件数が増えた親を message:updated として、チャンネルの部屋へ配る（機能一覧 5.2・6）。
+        作った返信を message:new として、返信件数が増えた親を message:updated として、チャンネルの部屋へ配る（機能一覧 5.2・6）。返信の本文のメンションの対象がいれば、返信の message:new はその利用者の部屋も加えて1回で配る（機能一覧 9.1）。
         投稿・編集・削除と同じ枠で数える（利用者単位で1分に60回。機能一覧 4.1・4.2）
       requestBody:
         required: true
@@ -1755,6 +1755,7 @@ components:
         - parentId
         - replyCount
         - replyParticipants
+        - mentions
       properties:
         id:
           description: UUIDv7。一覧のカーソル（before）にそのまま使う
@@ -1803,6 +1804,31 @@ components:
         deleted:
           description: 削除済みか（「このメッセージは削除されました」に置き換えて表示する。機能一覧 4.2）
           type: boolean
+        mentions:
+          description: >-
+            本文のメンションの対象（機能一覧 9.1）。投稿・返信のときに、そのチャンネルの参加者で退会していない利用者へ解決できた
+            `@ユーザーID` を保存し、本文に最初に現れた順に1人1件で載せる。編集では、本文にユーザーID が残っている対象は解決し直さずに残す
+            （チャンネルを抜けた・退会した対象も残り、退会した対象は user が null）。本文から消えた対象は外し、新しく書いた `@` は投稿と同じく解決して足す。
+            削除済みのメッセージは空
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageMention'
+    MessageMention:
+      description: メンションの対象（表示時の参照先。機能一覧 9.1 の経路2。対象がいまそのチャンネルの参加者かは問わない）
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+        - user
+      properties:
+        userId:
+          description: 対象のユーザーID（登録したときの大文字小文字のまま）。本文の `@ユーザーID` とは大文字小文字によらず照合する（機能一覧 1.1）
+          type: string
+        user:
+          description: 対象の利用者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
+          oneOf:
+            - $ref: '#/components/schemas/UserSummary'
+            - type: 'null'
     MessagePage:
       type: object
       additionalProperties: false
