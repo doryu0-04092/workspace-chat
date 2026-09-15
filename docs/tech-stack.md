@@ -226,6 +226,8 @@ ESM で出すと `apps/api` から素直に `import` できない。
 - **`aws_db_instance` の `password_wo` の値が、実際に state に残らないこと**（Terraform の文書は write-only 引数を state に残さないとして `password_wo` を例に挙げるが、AWS プロバイダーの文書の `password_wo` の説明には `password` と同じ「it will be stored in the state file」が残っている。`apply` の後に state を開いて確かめる）
 - **`aws_ssm_parameter` の `value_wo` と `aws_elasticache_replication_group` の `auth_token_wo` の値が、実際に state に残らないこと**（上の `password_wo` と同じ形の write-only 引数。`apply` の後に state を開いて確かめる。`infra/production/cache.tf`）
 - **`aws_elasticache_replication_group` の `primary_endpoint_address` が `engine = "valkey"` で値を持つこと**（プロバイダーの文書は「(Redis only)」と書く。`REDIS_URL` の組み立てがこの属性に依る）
+- **PostgreSQL 17 の DB パラメータグループのファミリー名が `postgres17` であること**（AWS とプロバイダーの公式の文書に、この文字列そのものは見つからなかった。プロバイダーの文書の例は `postgres13`・`postgres12` の形。`apply` で確かめる。`infra/production/database.tf`）
+- **RDS の既定のパラメータグループの `shared_preload_libraries` が `pg_stat_statements` だけであること**（AWS の文書は「Typically, the default DB cluster parameter group loads only the `pg_stat_statements`」と書く。`pg_stat_statements,pg_bigm` で上書きするため、ほかにも既定で読み込むものがあれば外れる。`apply` の後に `SHOW shared_preload_libraries` で確かめる）
 - **VPC オリジンを経ても、api が受け取る X-Forwarded-For が「CloudFront → ALB」の2段の形になること**（`TRUST_PROXY_HOPS=2` の前提。上の ALB の行）
 
 #### WebSocket と複数インスタンスの問題
@@ -537,9 +539,9 @@ NestJS のコンストラクタインジェクションは、この指定が出�
      露見するのは検索を実装したあとであり、**本書が繰り返し避けてきた「最も遅い段階」**にあたる
 - **`CREATE EXTENSION` の前提として、`shared_preload_libraries` に `pg_bigm` が入っていること。**
   pg_bigm は共有ライブラリの事前読み込みを必須としている（公式ドキュメント）。
-  **ローカルは `compose.yaml` が `postgres -c shared_preload_libraries=pg_bigm` で渡しているが、
-  RDS には同じ指定が無い。** RDS では DB パラメータグループに書く必要があり、
-  **これは静的パラメータであるため、反映にインスタンスの再起動を伴う**（Terraform を書く段の作業）。
+  **ローカルは `compose.yaml` が `postgres -c shared_preload_libraries=pg_bigm` で渡し、
+  RDS は DB パラメータグループで `pg_stat_statements,pg_bigm` を渡す**（`infra/production/database.tf`。RDS の既定が読み込む `pg_stat_statements` を残す）。
+  **これは静的パラメータであるため、作った後に変えると、反映にインスタンスの再起動を伴う**。
   **上の `CREATE EXTENSION` の検証は、この設定が入っていることを前提とする。**
   設定が無い状態で試して落ちても、それは pg_bigm が使えない証拠にはならない
 - **テストの実行環境にも同じ前提が要る。** 本書は「テストは Testcontainers で
