@@ -17,11 +17,18 @@ locals {
   valkey_auth_token_version = 1
 }
 
+# 踏むと壊れる: AUTH トークンは英数字だけにする（special = false）。REDIS_URL の中に埋めるため、記号を許すと値によって
+# apply が落ちるか（ElastiCache が許す記号は一部だけ）、URL が壊れる（ElastiCache が許す # は URL では断片の始まりになる）。
+# どちらになるかは乱数しだいで、validate も plan も落ちない。技術スタックの秘密情報の行。
 ephemeral "random_password" "valkey_auth_token" {
   length  = 32
   special = false
 }
 
+# 踏むと壊れる: JWT_SECRET は長さ 64 で作る。HS256 の鍵は 256 ビット以上（RFC 7518 3.2）で、英数字 64 文字でおよそ 381 ビット。
+# api の下限（apps/api/src/config/api-config.ts の JWT_SECRET_MIN_BYTES）は 32 バイトで、32 に下げても起動も validate も plan も
+# CI も落ちず、署名の鍵の強さだけが下がる。変えるときは同じ apply で下の jwt_secret の value_wo_version を上げ、ECS のタスクを
+# 入れ替える（発行済みのアクセストークンはすべて無効になる。要件定義書 4.2 の「Parameter Store の値」の行）。
 ephemeral "random_password" "jwt_secret" {
   length  = 64
   special = false
