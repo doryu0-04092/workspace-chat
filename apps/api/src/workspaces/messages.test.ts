@@ -1427,6 +1427,29 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       expect(message.mentions).toEqual([]);
     });
 
+    it('`@` の後ろに英数字・アンダースコアが続く綴り（31 文字以上）は、先頭 30 文字と同じユーザーID の参加者がいても解決しない', async () => {
+      const { alice, workspace, channelId } = await channelWithPeople();
+      sequence += 1;
+      // ユーザーID の上限（30 文字。機能一覧 1.1）ちょうどの参加者を作る
+      const loginId = `Long_${Date.now().toString(36)}_${sequence}`.padEnd(30, '0').slice(0, 30);
+      const user = await prisma.user.create({
+        data: { loginId, displayName: '30文字の人', passwordHash: 'argon2id-placeholder' },
+      });
+      await prisma.membership.create({
+        data: { workspaceId: workspace.id, userId: user.id, role: 'MEMBER' },
+      });
+      await prisma.channelMember.create({
+        data: { channelId, workspaceId: workspace.id, userId: user.id },
+      });
+
+      // 30 文字ちょうどなら解決される（この利用者が参照先になりうることを先に見る）
+      const exact = await posted(alice, workspace.id, channelId, `@${loginId} へ`);
+      expect(exact.mentions.map((mention) => mention.userId)).toEqual([loginId]);
+
+      const longer = await posted(alice, workspace.id, channelId, `@${loginId}x へ`);
+      expect(longer.mentions).toEqual([]);
+    });
+
     it('保存したメンションは、対象がチャンネルを抜けても返し、退会したら user を null にする。削除済みのメッセージは空にする', async () => {
       const { alice, bob, carol, workspace, channelId } = await channelWithPeople();
       const kept = await posted(
