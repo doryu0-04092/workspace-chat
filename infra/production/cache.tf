@@ -2,6 +2,7 @@
 # 技術スタック「本番の HTTPS・秘密情報・state の置き場」の秘密情報の行と、「リソースのサイジング」の ElastiCache の行。
 #
 # 秘密の値は state とプランに残さない: 乱数は ephemeral の random_password で作り、write-only 引数でだけ渡す。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。秘密の値の渡し方の条件もそこにある。
 #
 # 踏むと壊れる: write-only 引数で渡した値は、*_wo_version を上げるまで入れ替わらない。
 # REDIS_URL の value_wo_version と ElastiCache の auth_token_wo_version は同じ乱数を渡すため、下の locals の
@@ -78,6 +79,8 @@ resource "aws_elasticache_replication_group" "valkey" {
   auth_token_wo_version      = local.valkey_auth_token_version
 }
 
+# 踏むと壊れる: secrets で渡すパラメータ（ここの2つと database.tf の database_url）の name は、渡す設定の名前（/REDIS_URL など）で終わらせ、
+# type は local.parameter_type（SecureString）にする。apps/api/src/config/api-config-infra.test.ts が確かめる。
 resource "aws_ssm_parameter" "redis_url" {
   name             = "/workspace-chat/REDIS_URL"
   type             = local.parameter_type

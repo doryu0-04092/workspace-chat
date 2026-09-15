@@ -90,6 +90,7 @@ export function resolveWebOrigin(raw: string | undefined): string {
  * `secret: true` の設定を足したら Terraform の側にもパラメータを足し、タスク定義の `environment` には書かない
  * （docs/tech-stack.md の「本番の HTTPS・秘密情報・state の置き場」）。マイグレーション用のタスク定義の `secrets` には `DATABASE_URL` 以外を足さない
  * （運用者が ECS Exec で入る先であり、足すと認証の外に出る。docs/requirements.md 4.2 手順 5 の代償）。
+ * `secret: true` の設定を3つより減らすと、api-config-infra.test.ts の「数え上げる対象がある」の下限で落ちる（減らすなら、その下限も直す）。
  */
 type Setting<T> = {
   readonly env: string;
