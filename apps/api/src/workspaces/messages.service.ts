@@ -4,11 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type {
-  MessageDeletedPayload,
-  MessageNewPayload,
-  MessageUpdatedPayload,
-  paths,
+import {
+  type MessageDeletedPayload,
+  type MessageNewPayload,
+  type MessageUpdatedPayload,
+  mentionedLoginIds,
+  type paths,
 } from '@workspace-chat/shared';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
@@ -26,22 +27,6 @@ type PageQuery = { before?: string; limit?: string | number };
 
 /** 親に載せる返信の参加者の上限（機能一覧 6。実装時に決めた値）。 */
 const REPLY_PARTICIPANT_LIMIT = 3;
-
-/**
- * 本文のメンション（機能一覧 9.1。実装時に決めた値）。`@` に続くユーザーID（英数字とアンダースコアの 3〜30 文字。1.1）で、
- * **前が英数字・アンダースコアでなく、後ろに英数字・アンダースコアが続かない**もの（`mail@alice` や、31 文字以上の綴りの先頭は拾わない）。
- * コードの中の `@` も拾う（api は Markdown を解析しない）。
- */
-const MENTION_PATTERN = /(?<![A-Za-z0-9_])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])/g;
-
-/** 本文に現れたユーザーID を、小文字にして、最初に現れた順に重複なく返す（照合は大文字小文字によらない。機能一覧 1.1）。 */
-function mentionedLoginIds(body: string): string[] {
-  const found: string[] = [];
-  for (const [, loginId] of body.matchAll(MENTION_PATTERN)) {
-    if (loginId !== undefined) found.push(loginId.toLowerCase());
-  }
-  return [...new Set(found)];
-}
 
 /**
  * 投稿時の宛先解決（機能一覧 9.1 の経路1。参照実装は prisma-schema.test.ts の `mentionTargetByLoginId`）。

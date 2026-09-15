@@ -51,6 +51,25 @@ describe('チャンネルのメッセージの表示', () => {
     expect(within(article).getByText('削除済みの利用者')).toBeDefined();
   });
 
+  it('本文のメンションは、応答の mentions の対象を「@表示名」で出す（F-20）', async () => {
+    const carol = {
+      id: '01920000-0000-7000-8000-000000000003',
+      userId: 'carol',
+      displayName: 'キャロル',
+    };
+    fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () =>
+          page([
+            message(1, { body: '@Carol に聞く', mentions: [{ userId: 'carol', user: carol }] }),
+          ]),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+
+    expect(await screen.findByText('@キャロル')).toBeDefined();
+  });
+
   it('編集したメッセージには「編集済み」を出し、編集していなければ出さない', async () => {
     fakeFetch(
       routes({
