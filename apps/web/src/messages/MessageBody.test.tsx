@@ -1,6 +1,7 @@
 import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { MessageBody } from './MessageBody';
+import type { Message } from './queries';
 
 function renderBody(body: string): HTMLElement {
   return render(<MessageBody body={body} />).container;
@@ -157,6 +158,70 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(container.querySelector('strong, b')).toBeNull();
       expect(container.querySelector('pre')?.textContent).toContain(
         '**太字ではない** <b>要素ではない</b>',
+      );
+    });
+  });
+
+  // 機能一覧 9.1（F-20）: 本文のメンションは、応答の mentions（投稿時に解決した対象）に載っているユーザーID だけを表示名で出す。#494。
+  describe('メンション（F-20）', () => {
+    type Mention = Message['mentions'][number];
+    /** テストで使う利用者（実在の人物ではない）。 */
+    const ALICE = {
+      id: '01920000-0000-7000-8000-000000000001',
+      userId: 'Alice_1',
+      displayName: 'アリス',
+    };
+
+    function renderWith(body: string, mentions: Mention[]): HTMLElement {
+      return render(<MessageBody body={body} mentions={mentions} />).container;
+    }
+
+    it('対象のユーザーID の `@` を、大文字小文字によらず `@表示名` に置き換える', () => {
+      const container = renderWith('こんにちは @alice_1 さん', [
+        { userId: 'Alice_1', user: ALICE },
+      ]);
+
+      const mentions = container.querySelectorAll('span.mention');
+      expect([...mentions].map((mention) => mention.textContent)).toEqual(['@アリス']);
+      expect(container.textContent).toBe('こんにちは @アリス さん');
+    });
+
+    it('退会した対象は「@削除済みの利用者」と出す', () => {
+      const container = renderWith('@Alice_1 へ', [{ userId: 'Alice_1', user: null }]);
+
+      expect(container.querySelector('span.mention')?.textContent).toBe('@削除済みの利用者');
+    });
+
+    it('対象に無い `@` と、英数字に続く `@` は書いた文字のまま残す', () => {
+      const body = '@nobody と mail@alice_1';
+      const container = renderWith(body, [{ userId: 'Alice_1', user: ALICE }]);
+
+      expect(container.querySelector('span.mention')).toBeNull();
+      expect(container.textContent).toBe(body);
+    });
+
+    it('インラインコード・コードブロック・リンクの文字の中の `@` は置き換えない', () => {
+      const mentions = [{ userId: 'Alice_1', user: ALICE }];
+      const inCode = renderWith('`@alice_1`', mentions);
+      expect(inCode.querySelector('span.mention')).toBeNull();
+      expect(inCode.querySelector('code')?.textContent).toBe('@alice_1');
+
+      const inBlock = renderWith('```\n@alice_1\n```', mentions);
+      expect(inBlock.querySelector('span.mention')).toBeNull();
+
+      const inLink = renderWith('[@alice_1](https://example.com/)', mentions);
+      expect(inLink.querySelector('span.mention')).toBeNull();
+      expect(inLink.querySelector('a')?.textContent).toBe('@alice_1');
+    });
+
+    it('表示名は文字として出し、HTML として解釈しない', () => {
+      const container = renderWith('@alice_1', [
+        { userId: 'Alice_1', user: { ...ALICE, displayName: '<img src=x onerror="alert(1)">' } },
+      ]);
+
+      expect(container.querySelector('img')).toBeNull();
+      expect(container.querySelector('span.mention')?.textContent).toBe(
+        '@<img src=x onerror="alert(1)">',
       );
     });
   });

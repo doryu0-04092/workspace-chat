@@ -1,3 +1,4 @@
+export { MENTION_PATTERN, mentionedLoginIds } from './mentions';
 export {
   REALTIME_EVENT_KINDS,
   REALTIME_EVENT_NAMES,
