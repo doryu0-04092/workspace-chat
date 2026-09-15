@@ -933,6 +933,22 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       // 利用者で数えるため、別の利用者は断らない。
       expect((await post(bob, workspace.id, channelId, '別の人')).status).toBe(201);
     });
+
+    // 機能一覧 4.1: 仕様の検証で 400 になる要求は、ガードより前に断るため枠を消費しない。枠は投稿・編集・削除で1つのため、
+    // 編集の 400 が枠を食えば投稿と削除の残りが減る（#393。投稿の側は「投稿のレート制限」のテスト）。
+    it('本文が仕様に合わない編集は、共有の枠の上限を超えて送っても 400 のままで、枠を消費しない', async () => {
+      // 最初の投稿（postedByAlice）が共有の枠を1回使う。
+      const { alice, workspace, channelId, message } = await postedByAlice();
+
+      for (let i = 0; i < POST_LIMIT; i += 1) {
+        expect((await edit(alice, workspace.id, channelId, message.id, '')).status).toBe(400);
+      }
+      // 枠を消費していなければ、続く正当な編集と投稿は上限に達していない。
+      expect((await edit(alice, workspace.id, channelId, message.id, '正しい本文')).status).toBe(
+        200,
+      );
+      expect((await post(alice, workspace.id, channelId, '続く投稿')).status).toBe(201);
+    });
   });
 
   describe('投稿のレート制限', () => {
