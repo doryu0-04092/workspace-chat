@@ -203,10 +203,11 @@ async function mentionsOf(
       .sort((a, b) => positionOf(a.loginId) - positionOf(b.loginId));
     mentions.set(
       row.id,
-      users.map((user) => ({
-        userId: user.loginId,
-        user: user.deletedAt === null ? toUserSummary(user) : null,
-      })),
+      users.map((user) => {
+        // 列の loginId → 応答の userId の写像は toUserSummary だけに置く（users/user-summary.ts）
+        const summary = toUserSummary(user);
+        return { userId: summary.userId, user: user.deletedAt === null ? summary : null };
+      }),
     );
   }
   return mentions;
