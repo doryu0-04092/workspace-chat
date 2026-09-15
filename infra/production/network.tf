@@ -161,8 +161,8 @@ resource "aws_vpc_security_group_ingress_rule" "db_from_task" {
   security_group_id            = aws_security_group.db.id
   referenced_security_group_id = aws_security_group.task.id
   ip_protocol                  = "tcp"
-  from_port                    = 5432
-  to_port                      = 5432
+  from_port                    = local.db_port
+  to_port                      = local.db_port
 }
 
 # 踏むと壊れる: この規則を壊しても api は止まらず、5xx も出ず、Valkey のアラートも鳴らない（要件定義書 4.2「アラート」の

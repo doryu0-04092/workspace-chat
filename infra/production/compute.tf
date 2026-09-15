@@ -78,6 +78,7 @@ data "aws_iam_policy_document" "task_execution_parameters" {
   statement {
     actions = ["ssm:GetParameters"]
     resources = [
+      aws_ssm_parameter.database_url.arn,
       aws_ssm_parameter.redis_url.arn,
       aws_ssm_parameter.jwt_secret.arn,
     ]
