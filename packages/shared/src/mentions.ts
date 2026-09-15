@@ -7,6 +7,12 @@
  */
 export const MENTION_PATTERN = /(?<![A-Za-z0-9_])@([A-Za-z0-9_]{3,30})(?![A-Za-z0-9_])/g;
 
+/**
+ * 入力欄のカーソルの直前で書きかけのメンション（補完候補を出す。機能一覧 9.1）。前の文字の境界は `MENTION_PATTERN` と同じで、
+ * 書きかけのため長さは 0〜30 文字（`@` だけでも当たる）。**カーソルの前の文字列の末尾に当てる**（`exec` で使う）。
+ */
+export const MENTION_BEING_TYPED = /(?<![A-Za-z0-9_])@([A-Za-z0-9_]{0,30})$/;
+
 /** 本文に現れたユーザーID を、小文字にして、最初に現れた順に重複なく返す（照合は大文字小文字によらない。機能一覧 1.1）。 */
 export function mentionedLoginIds(body: string): string[] {
   const found: string[] = [];
