@@ -88,7 +88,8 @@ export function resolveWebOrigin(raw: string | undefined): string {
  * `secret: true` と、不正なときに代わりに示す `hint` を書く。
  * **踏むと壊れる: `secret: true` は、本番で Systems Manager Parameter Store の暗号化パラメータと ECS の `secrets` で渡す対象を決める。**
  * `secret: true` の設定を足したら Terraform の側にもパラメータを足し、タスク定義の `environment` には書かない
- * （docs/tech-stack.md の「本番の HTTPS・秘密情報・state の置き場」）。
+ * （docs/tech-stack.md の「本番の HTTPS・秘密情報・state の置き場」）。マイグレーション用のタスク定義の `secrets` には `DATABASE_URL` 以外を足さない
+ * （運用者が ECS Exec で入る先であり、足すと認証の外に出る。docs/requirements.md 4.2 手順 5 の代償）。
  */
 type Setting<T> = {
   readonly env: string;
