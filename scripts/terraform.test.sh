@@ -3,6 +3,7 @@
 #
 #   1. 整形（terraform fmt -check）
 #   2. 構成ごとに、プロバイダーがロックのとおりに入り（init -backend=false -lockfile=readonly）、構文が通る（validate）
+#   3. CloudFront Functions のコード（infra/production/functions/）が期待どおりに書き換える（scripts/cloudfront-functions.test.mjs）
 #
 # -lockfile=readonly: .terraform.lock.hcl に無いプロバイダー・この OS のハッシュが無いときに、ロックを書き換えて通さず落とす。
 # **確認が空回りしたときにも落ちる形にする**: 追跡中の構成が1つも無い・ロックが追跡されていない構成があるときは落とす。
@@ -28,5 +29,8 @@ for dir in "${dirs[@]}"; do
   terraform -chdir="$dir" init -backend=false -lockfile=readonly -input=false -no-color >/dev/null || fail "$dir の init が通らない"
   terraform -chdir="$dir" validate -no-color || fail "$dir の validate が通らない"
 done
+
+echo "== 3. CloudFront Functions のコード"
+node scripts/cloudfront-functions.test.mjs || fail "CloudFront Functions の検査が通らない"
 
 echo "すべての構成が通った（${#dirs[@]} 件）"
