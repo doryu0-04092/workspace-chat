@@ -232,6 +232,10 @@ describe('Socket.IO の接続の入口（F-16）', () => {
         );
         expect(disconnected).toContain(id);
         expect(disconnected).not.toContain(token);
+        // 切断の理由も載せる（機能一覧 5.2。#353）。Socket.IO が与える理由の文字列は決め打ちせず、空でない文字列であることを見る。
+        const [line] = JSON.parse(disconnected ?? '[]') as [{ reason?: unknown }?];
+        expect(typeof line?.reason).toBe('string');
+        expect(line?.reason).not.toBe('');
       } finally {
         logged.mockRestore();
       }
