@@ -1,4 +1,5 @@
 # CloudFront の配信（#452）。技術スタックのフロント配信の行・「HTTPS とドメイン」と、「リソースのサイジング」の CloudFront の行。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 #
 # 最初のリリースのビヘイビアは、既定（web の静的配信のバケット）と /api/*（ALB。VPC オリジン）の2つである。
 # /files/*・/avatars/*（添付のバケット）は、添付とアバターの配信（F-29・F-04。署名付き Cookie の鍵は #427）を実装するときに足す。
@@ -51,6 +52,7 @@ resource "aws_cloudfront_origin_access_control" "web" {
 }
 
 # CloudFront（このディストリビューション）からの読み出しだけを許す。
+# 踏むと壊れる: この文書とバケットのポリシーは IAM の面に入る。変えるときは、main.tf の冒頭の条件に従い、検査の iamSurface の表も直す。
 data "aws_iam_policy_document" "web_bucket" {
   statement {
     actions   = ["s3:GetObject"]
