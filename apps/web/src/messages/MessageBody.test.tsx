@@ -32,6 +32,18 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(container.textContent).toContain(body);
     });
 
+    // 機能一覧 4.3: 文字のまま出した生の HTML の中の URL もリンクになる（href は書いた URL と一致しない場合がある）。
+    // 上の検査はリンクが 0 件でも通るため、リンクが1件できることを見る（#429）。
+    it('生の HTML の中の URL は、文字のまま出した上で https のリンクになる', () => {
+      const body = '<iframe src="https://example.com/x"></iframe>';
+      const container = renderBody(body);
+      expect(container.querySelector('iframe')).toBeNull();
+      const links = [...container.querySelectorAll('a')];
+      expect(links).toHaveLength(1);
+      expect(links[0]?.getAttribute('href') ?? '').toMatch(/^https:\/\/example\.com\/x/);
+      expect(container.textContent).toContain(body);
+    });
+
     it.each([
       'javascript:alert(1)',
       'JaVaScRiPt:alert(1)',
