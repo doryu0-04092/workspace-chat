@@ -4,7 +4,7 @@
 #
 # 段:
 #   runtime … api を動かす。`npm ci --omit=dev` で入る依存と、build 段のビルド済みの dist・openapi と、RDS の CA のバンドルだけを持つ
-#   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクと、運用者が ECS Exec で入るタスクで使う。下の migrate 段の注記）。`npm ci --omit=dev` で入る依存と、prisma.config.ts・スキーマ・マイグレーションと、RDS の CA のバンドルだけを持つ
+#   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクと、運用者が ECS Exec で入るタスクで使う。下の migrate 段の注記）。`npm ci --omit=dev` で入る依存と、prisma.config.ts・スキーマ・マイグレーションと、RDS の CA のバンドルと、psql だけを持つ
 #
 # 起動に要る環境変数は README「動かす」と apps/api/src/config/api-config.ts にある。**イメージに値を焼き込まない**
 # （.dockerignore が .env を文脈から外す）。scripts/api-image.test.sh が、実際に作って動かして確かめる。
@@ -43,6 +43,13 @@ RUN npm run generate \
 
 FROM ${NODE_IMAGE} AS prod-deps
 WORKDIR /app
+# Prisma の CLI のスキーマエンジンは、npm ci のときに、その場の OpenSSL の版を見て種類を選んで取る（@prisma/engines の postinstall）。
+# migrate 段は psql のために OpenSSL 3 を入れるため、ここにも openssl を入れて、同じ種類のエンジンを取らせる。
+# 踏むと壊れる: ここと migrate 段で OpenSSL の有無が食い違うと、prisma migrate deploy が実行時に別の種類のエンジンを取りに行き、
+# 「Can't write to /app/node_modules/@prisma/engines」で落ちる（scripts/api-image.test.sh の 1 が落ちて気づく）。
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl \
+  && rm -r /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
@@ -50,16 +57,34 @@ COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # マイグレーション用の段は build 段を継がない（#277）。build 段はソース・テストのコード・開発依存を全部持ち、それが本番の
-# タスクとして動くことになる。prod-deps の /app に、prisma.config.ts（接続先を DATABASE_URL から読む）とスキーマ・マイグレーションと、RDS の CA のバンドルだけを足す。
+# タスクとして動くことになる。prod-deps の /app に、prisma.config.ts（接続先を DATABASE_URL から読む）とスキーマ・マイグレーションと、RDS の CA のバンドルと、psql だけを足す。
 # prisma の CLI は prod-deps に入っている——@prisma/client が peerDependencies に持ち（任意）、package-lock.json で devOptional のため
 # --omit=dev でも lock の版で入る。ここで npm install しない（lock と違う版に解決される経路を作らない）。
 # 踏むと壊れる: @prisma/client が prisma を peer から外すと CLI が消える。scripts/api-image.test.sh の 1 が落ちて気づく。
 # 踏むと壊れる: 運用者が ECS Exec で RDS に入る先もこの段のイメージである（技術スタックのコンテナの行・要件定義書 4.2 手順 5 の代償）。
-# 入る手順はまだ書いていない（実際に入って確かめてから書く。#458）。問い合わせの手段（psql）もまだこの段に無い（#457）。
+# 入る手順はまだ書いていない（実際に入って確かめてから書く。#458）。問い合わせの手段は、下で入れる psql である。
 # CMD のまま起動すると、入る先が残らず、本番の DB に migrate deploy が走る。
 FROM ${NODE_IMAGE} AS migrate
 ENV NODE_ENV=production
 WORKDIR /app
+# psql を、PostgreSQL の公式の apt リポジトリ（PGDG）から入れる（#457。技術スタックのコンテナの行）。この段にだけ置き、
+# api のイメージには入れない（scripts/api-image.test.sh の 9）。手順は https://www.postgresql.org/download/linux/debian/ の
+# 「Manual Repository Configuration」で、Suites は土台の Debian の版（/etc/os-release の VERSION_CODENAME）から作る。
+# 署名鍵（apps/api/pgdg/apt.postgresql.org.asc）は https://www.postgresql.org/media/keys/ACCC4CF8.asc をそのまま置いたもの
+# （2026-09-15 に取得。指紋 B97B 0AFC AA1A 47F0 44F2 44A0 7FCC 7D46 ACCC 4CF8。sha256 0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76。
+# Debian bookworm の postgresql-common 248+deb12u1 が同じ置き場に同梱する鍵と、バイト列が一致した）。
+# openssl は prod-deps 段と揃えるために明示して入れる（prod-deps 段の注記）。
+# 踏むと壊れる: psql の版は RDS の版（技術スタックの DB の行。PostgreSQL 17）と揃える（psql の文書「psql works best with servers of the
+# same or an older major version.」）。RDS の版を上げるときは、ここの postgresql-client-17 と scripts/api-image.test.sh の 9 も上げる。
+COPY apps/api/pgdg/apt.postgresql.org.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && . /etc/os-release \
+  && printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' "$VERSION_CODENAME" \
+    > /etc/apt/sources.list.d/pgdg.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends postgresql-client-17 \
+  && rm -r /var/lib/apt/lists/*
 COPY --from=prod-deps /app ./
 COPY prisma.config.ts ./
 COPY apps/api/prisma apps/api/prisma
