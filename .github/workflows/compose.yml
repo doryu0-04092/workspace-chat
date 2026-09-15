@@ -1,0 +1,47 @@
+name: compose
+
+# 開発環境の compose（compose.yaml・docker/postgres/Dockerfile）の db を、実際に作って動かして確かめる（#28）。
+# 中身は scripts/compose-db.test.sh（手元でも同じものを回せる）。
+#
+# **ci.yml と違い、パスで絞る。このワークフローはブランチ保護の必須チェックに入れない。**
+# 入れると、compose に触れない PR ではジョブが走らず pending のまま残り、マージできなくなる（ci.yml の冒頭の注記）。
+# パスで絞るのは、イメージのビルド（pg_bigm のビルドを含む）が他の検査より明確に遅いため。
+# 代償: 必須チェックではないため、落ちてもマージは止まらない。結果は PR のチェックの一覧で見る。
+#
+# 土台（postgres:17-bookworm のタグ）の指す中身は動く（docker/postgres/Dockerfile の注記）。
+# compose に触れない変更だけが続いても壊れたことに気づけるよう、週に1回も回す。
+on:
+  pull_request:
+    paths:
+      - compose.yaml
+      - 'docker/**'
+      - scripts/compose-db.test.sh
+      - .github/workflows/compose.yml
+  push:
+    branches: [main]
+    paths:
+      - compose.yaml
+      - 'docker/**'
+      - scripts/compose-db.test.sh
+      - .github/workflows/compose.yml
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+# 打ち切るのは PR のときだけにする（ci.yml と同じ理由）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # ジョブ名は他のワークフローと重ねない（ブランチ保護の必須チェックはジョブ名で指す）。
+  compose-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: compose の db を作って動かし、pg_bigm を確かめる
+        run: bash scripts/compose-db.test.sh
