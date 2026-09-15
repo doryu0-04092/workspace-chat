@@ -63,8 +63,17 @@ docker run --rm --platform linux/arm64 --entrypoint psql "$migrate_repository:$I
 docker push "$api_repository:$IMAGE_TAG"
 docker push "$migrate_repository:$IMAGE_TAG"
 
-echo "== 3. マイグレーション用のタスク定義を新しいタグにする"
-tf apply -input=false -target=aws_ecs_task_definition.migrate
+echo "== 3. マイグレーション用のタスク定義を新しいタグにし、run-task に要るものを揃える"
+# -target はそのリソースと依存だけを作る。マイグレーション用のタスク定義の依存（ロール・ECR・ロググループ・DATABASE_URL →
+# RDS）に入らない、クラスター・パブリックサブネットとその経路（イメージの取得）・タスクのセキュリティグループと送信の規則・
+# RDS への受信の規則も並べる。初回のリリースでは、これが無いと手順 4 の run-task が成り立たない。
+# api のタスク定義とサービスは手順 5 に残す（マイグレーションの前に新しいタスク定義へ切り替えない）。
+tf apply -input=false \
+  -target=aws_ecs_task_definition.migrate \
+  -target=aws_ecs_cluster.main \
+  -target=aws_route_table_association.public \
+  -target=aws_vpc_security_group_egress_rule.task_all \
+  -target=aws_vpc_security_group_ingress_rule.db_from_task
 
 echo "== 4. マイグレーションを流す"
 cluster=$(tf output -raw ecs_cluster_name)
@@ -72,7 +81,9 @@ migrate_task_definition=$(tf output -raw migrate_task_definition_arn)
 network_configuration=$(tf output -raw migrate_network_configuration)
 task=$(aws ecs run-task --cluster "$cluster" --task-definition "$migrate_task_definition" --launch-type FARGATE \
   --network-configuration "$network_configuration" --query 'tasks[0].taskArn' --output text)
-[ -n "$task" ] && [ "$task" != "None" ] || fail "マイグレーションのタスクを起動できない"
+if [ -z "$task" ] || [ "$task" = "None" ]; then
+  fail "マイグレーションのタスクを起動できない"
+fi
 aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
 exit_code=$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
   --query 'tasks[0].containers[0].exitCode' --output text)

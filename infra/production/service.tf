@@ -35,6 +35,10 @@ locals {
   # 踏むと壊れる: api のサービスで ECS Exec を有効にしない。api のタスクは JWT_SECRET を持ち、入ると認証の外に出る
   # （要件定義書 4.2「RDS の障害から復旧するとき」手順 5 の「踏むと壊れる」）。
   api_enable_execute_command = false
+
+  # 新しいタスクが起動に失敗し続けたら、デプロイを止めて前のタスク定義に戻す（壊れたイメージのリリースを本番に居座らせない。
+  # 決定・2026-09-16・作業側。依頼側の委任による。PR #482 第0巡の設計の提案）。
+  api_deployment_circuit_breaker_rollback = true
 }
 
 data "aws_region" "current" {}
@@ -141,6 +145,11 @@ resource "aws_ecs_service" "api" {
     subnets          = aws_subnet.public[*].id
     security_groups  = [aws_security_group.task.id]
     assign_public_ip = local.task_assign_public_ip
+  }
+
+  deployment_circuit_breaker {
+    enable   = local.api_deployment_circuit_breaker_rollback
+    rollback = local.api_deployment_circuit_breaker_rollback
   }
 
   load_balancer {

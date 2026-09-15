@@ -3,6 +3,8 @@
 // 拡張子のあるパス（/assets/index-<hash>.js・/favicon.ico）はそのままバケットへ渡す。
 // 踏むと壊れる: web の画面の URL の区切りに「.」を含めない（含めると書き換えられず、バケットに無いキーとして 403 になる）。
 // 検査は scripts/cloudfront-functions.test.mjs。
+// handler は CloudFront Functions が名前で呼ぶ大域の入口であり、このファイルの中からは呼ばない。
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function handler(event) {
   var request = event.request;
   if (!request.uri.includes('.')) {

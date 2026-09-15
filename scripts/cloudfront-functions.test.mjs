@@ -2,9 +2,13 @@
 // CloudFront Functions の実行環境は Node ではなく、コードはモジュールではなく大域の handler を持つ1つのスクリプトである。
 // 使い方: node scripts/cloudfront-functions.test.mjs（scripts/terraform.test.sh から呼ぶ）
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 
-const source = readFileSync(new URL('../infra/production/functions/spa-rewrite.js', import.meta.url), 'utf8');
+const source = readFileSync(
+  join(import.meta.dirname, '../infra/production/functions/spa-rewrite.js'),
+  'utf8',
+);
 const context = {};
 runInNewContext(source, context);
 if (typeof context.handler !== 'function') {
@@ -15,7 +19,10 @@ if (typeof context.handler !== 'function') {
 const cases = [
   ['/', '/index.html'],
   ['/login', '/index.html'],
-  ['/workspaces/0190a1b2-0000-7000-8000-000000000001/channels/0190a1b2-0000-7000-8000-000000000002', '/index.html'],
+  [
+    '/workspaces/0190a1b2-0000-7000-8000-000000000001/channels/0190a1b2-0000-7000-8000-000000000002',
+    '/index.html',
+  ],
   ['/index.html', '/index.html'],
   ['/assets/index-3f9a1c.js', '/assets/index-3f9a1c.js'],
   ['/favicon.ico', '/favicon.ico'],
