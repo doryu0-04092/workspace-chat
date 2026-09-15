@@ -76,13 +76,16 @@ function toMessage(row: MessageRow, replyParticipants: UserSummary[]): Message {
  * **渡した親の分を1回の問い合わせで引く**（親ごとに引かない。技術スタックの「スレッドの返信件数・参加者」の CTE と window 関数）——
  * 利用者ごとの最後の返信に絞ってから、親ごとに新しい順の順位を付ける。
  * **踏むと壊れる: 生の SQL は schema.prisma の列名の写し（`@map`）を通らない**——`User.loginId` の列は `"userId"` である。
+ * **返信は親のチャンネルでも絞る**——`parentId` だけで引くと、索引 `(channelId, parentId, id DESC)` の前方を使えない（schema.prisma の注記）。
  */
 async function participantsOf(
   db: Pick<PrismaService, '$queryRaw'>,
-  parentIds: string[],
+  parents: { id: string; channelId: string }[],
 ): Promise<Map<string, UserSummary[]>> {
   const participants = new Map<string, UserSummary[]>();
-  if (parentIds.length === 0) return participants;
+  if (parents.length === 0) return participants;
+  const parentIds = parents.map(({ id }) => id);
+  const channelIds = [...new Set(parents.map(({ channelId }) => channelId))];
   const rows = await db.$queryRaw<
     { parentId: string; id: string; loginId: string; displayName: string }[]
   >`
@@ -91,7 +94,8 @@ async function participantsOf(
         ROW_NUMBER() OVER (PARTITION BY m."parentId", m."authorId" ORDER BY m."id" DESC) AS "perAuthor"
       FROM "Message" m
       JOIN "User" u ON u."id" = m."authorId"
-      WHERE m."parentId" = ANY(${parentIds}::uuid[]) AND m."deletedAt" IS NULL AND u."deletedAt" IS NULL
+      WHERE m."channelId" = ANY(${channelIds}::uuid[]) AND m."parentId" = ANY(${parentIds}::uuid[])
+        AND m."deletedAt" IS NULL AND u."deletedAt" IS NULL
     ), "ranked" AS (
       SELECT "parentId", "authorId",
         ROW_NUMBER() OVER (PARTITION BY "parentId" ORDER BY "id" DESC) AS "rank"
@@ -117,7 +121,7 @@ async function toMessages(
 ): Promise<Message[]> {
   const participants = await participantsOf(
     db,
-    rows.filter((row) => row.parentId === null && row.replyCount > 0).map((row) => row.id),
+    rows.filter((row) => row.parentId === null && row.replyCount > 0),
   );
   return rows.map((row) => toMessage(row, participants.get(row.id) ?? []));
 }
