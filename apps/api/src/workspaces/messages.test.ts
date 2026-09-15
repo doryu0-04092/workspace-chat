@@ -175,7 +175,9 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
   }
 
   /** トランザクションの中で行を掴んだまま確定しない（channel-archive.test.ts と同じ形）。 */
-  async function holdWith(lock: (tx: Pick<PrismaService, 'channel'>) => Promise<unknown>) {
+  async function holdWith(
+    lock: (tx: Pick<PrismaService, 'channel' | 'message'>) => Promise<unknown>,
+  ) {
     let release!: () => void;
     const released = new Promise<void>((resolve) => {
       release = resolve;
@@ -858,6 +860,64 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         await held.done;
 
         expect((await pending).status).toBe(409);
+      } finally {
+        held.release();
+        await held.done.catch(() => undefined);
+      }
+    });
+
+    // 機能一覧 4.2: 編集は削除済みでない行だけを条件付きで書き換える。判定（削除済みでないこと）を通った後に削除が確定しても、
+    // 編集は成立しない——支えているのは書き換えの条件（deletedAt: null）だけである（#389）。
+    it('削除の確定の前に届いた編集は、削除の確定を待ってから書き換えを試み、404 で断り、message:updated を配らない', async () => {
+      const { alice, bob, workspace, channelId, message } = await postedByAlice();
+      const bobSocket = await open(bob);
+      expect(await enter(bobSocket, channelId)).toMatchObject({ ok: true });
+      const held = await holdWith((tx) =>
+        tx.message.update({ where: { id: message.id }, data: { deletedAt: new Date() } }),
+      );
+      try {
+        const updated = nextEvent(bobSocket, 'message:updated', 3_000);
+        const pending = edit(alice, workspace.id, channelId, message.id, '同時に');
+        await vi.waitFor(async () => expect(await waitingOnLock()).toBeGreaterThan(0), {
+          timeout: 3_000,
+          interval: 50,
+        });
+        held.release();
+        await held.done;
+
+        expect((await pending).status).toBe(404);
+        expect(await updated).toBeUndefined();
+        const row = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+        expect(row.body).toBe('もとの本文');
+        expect(row.editedAt).toBeNull();
+      } finally {
+        held.release();
+        await held.done.catch(() => undefined);
+      }
+    });
+
+    // 機能一覧 3.2: 削除もアーカイブ済みかを読んで書くかを決めるため、チャンネルの行を掴んでから読む（#389）。
+    it('アーカイブの確定の前に届いた削除は、確定を待ってから読み、409 で断り、削除しない', async () => {
+      const { alice, workspace, channelId, message } = await postedByAlice();
+      const { baseName } = await prisma.channel.findUniqueOrThrow({ where: { id: channelId } });
+      const held = await holdWith((tx) =>
+        tx.channel.update({
+          where: { id: channelId },
+          data: { archivedAt: new Date(), archiveSequence: 1, name: `${baseName}-1` },
+        }),
+      );
+      try {
+        const pending = remove(alice, workspace.id, channelId, message.id);
+        await vi.waitFor(async () => expect(await waitingOnLock()).toBeGreaterThan(0), {
+          timeout: 3_000,
+          interval: 50,
+        });
+        held.release();
+        await held.done;
+
+        expect((await pending).status).toBe(409);
+        const row = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+        expect(row.deletedAt).toBeNull();
       } finally {
         held.release();
         await held.done.catch(() => undefined);
