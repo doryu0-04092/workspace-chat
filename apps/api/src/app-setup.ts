@@ -29,6 +29,10 @@ import { REALTIME_VALKEY_CLIENTS } from './realtime/realtime-valkey';
  * **ログは構造化 JSON を標準出力に出し、要求の中のログにはリクエスト ID を付ける**（要件定義書 4.6。logging/）。
  * テストは `logger` を渡して差し替える。**リクエスト ID のミドルウェアは、ほかのどのミドルウェアよりも先に置く。**
  *
+ * **踏むと壊れる: 前置き `api`（`setGlobalPrefix`）は、本番の ALB のヘルスチェックのパス `/api/health` にも写している**
+ * （infra/production/compute.tf の locals の api_health_check_path）。前置きを変えるならそちらも直す。
+ * 食い違うとターゲットが healthy にならず、CI は緑のまま、デプロイ後に初めて落ちる。
+ *
  * **終了のシグナル（ECS のタスク入れ替えの SIGTERM）を購読する**（#251）。購読しないと、Valkey と Prisma の
  * 片づけ（onApplicationShutdown / onModuleDestroy）は app.close() を呼ぶテストでだけ走り、本番では走らない。
  */

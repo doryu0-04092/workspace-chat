@@ -109,7 +109,7 @@ resource "aws_route_table_association" "private" {
 # 踏むと壊れる: タスクへの受信を止めるのは、タスクのセキュリティグループの1層だけである（技術スタックの代償）。
 # 送信元を ALB のセキュリティグループ以外に広げると、CloudFront を経ずに api へ直接届く。
 # 広げる誤りは validate でも plan でも落ちないため、apply の後に、タスクのセキュリティグループの受信が
-# ALB のセキュリティグループからの 3000 だけであることを実物で確かめる（技術スタックの同じ代償）。
+# ALB のセキュリティグループからの api のポート（compute.tf の local.api_port）だけであることを実物で確かめる（技術スタックの同じ代償）。
 
 resource "aws_security_group" "alb" {
   name   = "workspace-chat-alb"
@@ -133,22 +133,22 @@ resource "aws_security_group" "valkey" {
 
 # ALB への受信（CloudFront から）は、VPC オリジンを作るときに足す。
 
-# 踏むと壊れる: 3000 は api の既定の待ち受けポート（apps/api/src/port.ts）と同じでなければならない。
-# 食い違うと ALB からタスクへ届かず、CI は緑のまま、デプロイ後のヘルスチェックで初めて落ちる。
+# 踏むと壊れる: ポートは compute.tf の local.api_port（api の既定の待ち受けポート。apps/api/src/port.ts）だけを使う。
+# port.ts と食い違うと ALB からタスクへ届かず、CI は緑のまま、デプロイ後のヘルスチェックで初めて落ちる。
 resource "aws_vpc_security_group_egress_rule" "alb_to_task" {
   security_group_id            = aws_security_group.alb.id
   referenced_security_group_id = aws_security_group.task.id
   ip_protocol                  = "tcp"
-  from_port                    = 3000
-  to_port                      = 3000
+  from_port                    = local.api_port
+  to_port                      = local.api_port
 }
 
 resource "aws_vpc_security_group_ingress_rule" "task_from_alb" {
   security_group_id            = aws_security_group.task.id
   referenced_security_group_id = aws_security_group.alb.id
   ip_protocol                  = "tcp"
-  from_port                    = 3000
-  to_port                      = 3000
+  from_port                    = local.api_port
+  to_port                      = local.api_port
 }
 
 resource "aws_vpc_security_group_egress_rule" "task_all" {

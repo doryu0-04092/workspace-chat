@@ -387,11 +387,14 @@
 | `infra/bootstrap` の state（手元のファイル） | **対象外。写しを持たない**（state のバケットを作る前には置き場が無いため、手元のファイルに置く。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の state の行）。失ったら取り込み直す（下の「復旧手順」） |
 | Systems Manager Parameter Store（`secret: true` の設定の値） | **対象外。値の写しを持たない**（state にもプランにも残さない。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。失ったら作り直して入れ直す（下の「復旧手順」） |
 | ElastiCache Valkey | **対象外**（この節の「代償」） |
+| ECR のイメージ（api・マイグレーション用） | **対象外。写しを持たない**（ソースから作り直せるビルドの成果物である）。失ったら作り直して push し直す（下の「復旧手順」） |
 
 **S3 のバージョニングは、`terraform destroy` を止める。** バージョニングを有効にしたバケットは、
 オブジェクトを消しても**旧バージョンとデリートマーカーが残る**ため、`force_destroy` を指定しない限り
 バケットの削除が失敗する。ライフサイクルを置かないので旧バージョンが自動で消えることもない（`quarantine/` を除く）。
 **添付のバケットは `force_destroy` を指定する**（決定・2026-09-14・作業側。依頼側の「一般的なエンジニア目線で判断できることは判断してほしい」という委任による。#452。`infra/production/attachments.tf`）——デモの後に destroy する運用であり、旧バージョンに残る個人情報（6.2）も destroy で消す。**代償: 誤って destroy すると、添付ファイルは旧バージョンを含めて戻せない**（RDS も同じ destroy で消える）。
+
+**ECR のリポジトリも `force_delete` を指定する**（決定・2026-09-15・作業側。依頼側の「一般的なエンジニア目線で判断できることは判断してほしい」という委任による。#476。`infra/production/compute.tf`）——イメージが入ったままでは `terraform destroy` がリポジトリの削除を拒否するため。**代償: destroy の後にもう一度出すには、イメージを作り直して push し直す必要がある**（destroy で消えたイメージのタグは、ECS のタスク定義からも引けなくなる）。
 
 **旧バージョンが残り続けることの代償**（RDS の最終スナップショットと同じ形で書く）。
 
@@ -410,7 +413,7 @@
 
 #### 復旧手順
 
-**対象は6つあり、復旧の手順としてはそれぞれ閉じている。**
+**対象は7つあり、復旧の手順としてはそれぞれ閉じている。**
 
 | 対象 | 復旧の方式 |
 |---|---|
@@ -420,6 +423,7 @@
 | **`infra/bootstrap` の state** | **取り込み直す**——state のバケットは `prevent_destroy` で残るため、`terraform import` でバケット・バージョニング・パブリックアクセスの遮断（`infra/bootstrap/main.tf` の3つのリソース）を state に戻す |
 | **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
 | **ElastiCache Valkey** | **データを戻す手順は持たない**（持つのは配信の共有と期限つきの回数だけで、蓄積しない。この節の「代償」）。**作り直したら、接続先が変わらなくても AUTH トークンは作成時に新しい乱数になるため、版を上げてから ECS のタスクを入れ替える一手が要る**（手順は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の「踏むと壊れる」） |
+| **ECR のイメージ** | **作り直して push し直す**——ソースからイメージを作り（`scripts/api-image.test.sh` と同じ `apps/api/Dockerfile` の段）、ECR に push して、ECS のタスクを入れ替える（push の手順は、イメージを出す PR で書く） |
 
 **ただしデータとしては閉じていない。** RDS のメッセージレコードと S3 の添付ファイルは互いを
 参照する関係にあり、**RDS だけを過去の時点へ復元すると、復元時点より後に投稿された添付ファイルは
