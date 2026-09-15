@@ -509,7 +509,7 @@ export interface paths {
         };
         /**
          * チャンネルのメッセージの一覧（F-11・F-12）
-         * @description 新しい順。before（メッセージの id）を渡すと、それより古いものを返す（カーソルページネーション。OFFSET を使わない。機能一覧 4.1）。 before はそのチャンネルのメッセージでなくてもよく、存在を確かめない（id の順で比べる境目にすぎない）。 続きがあれば nextBefore に次の before を、無ければ null を返す。 参加者だけが取得できる。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、 パブリックは 403 not_a_channel_member・プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。 別のワークスペースのチャンネル・無いチャンネルは 404。アーカイブ済みでも参加者は読める（機能一覧 3.2）。 退会した投稿者のメッセージは残し、author を null にする（機能一覧 1.5）
+         * @description 新しい順。before（メッセージの id）を渡すと、それより古いものを返す（カーソルページネーション。OFFSET を使わない。機能一覧 4.1）。 スレッドの返信は含めない（返信の一覧は replies。機能一覧 6）。 before はそのチャンネルのメッセージでなくてもよく、存在を確かめない（id の順で比べる境目にすぎない）。 続きがあれば nextBefore に次の before を、無ければ null を返す。 参加者だけが取得できる。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、 パブリックは 403 not_a_channel_member・プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。 別のワークスペースのチャンネル・無いチャンネルは 404。アーカイブ済みでも参加者は読める（機能一覧 3.2）。 退会した投稿者のメッセージは残し、author を null にする（機能一覧 1.5）
          */
         get: operations["listMessages"];
         put?: never;
@@ -543,7 +543,7 @@ export interface paths {
         post?: never;
         /**
          * メッセージの削除（F-13）
-         * @description 論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、 以後の応答と配信では返さない（body: null・deleted: true。要件定義書 3.4）。message:deleted（本文を載せない）をチャンネルの部屋へ配る。 投稿・編集・削除を合わせて、利用者単位で1分に60回まで（3つのルートで1つの枠。機能一覧 4.1・4.2）
+         * @description 論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、 以後の応答と配信では返さない（body: null・deleted: true。要件定義書 3.4）。message:deleted（本文を載せない）をチャンネルの部屋へ配る。 返信を削除したら、親の返信件数（replyCount）を同じトランザクションで1つ減らし、親を message:updated として配る。 親を削除しても返信は残す（機能一覧 4.2・6）。 投稿・編集・削除を合わせて、利用者単位で1分に60回まで（3つのルートで1つの枠。機能一覧 4.1・4.2）
          */
         delete: operations["deleteMessage"];
         options?: never;
@@ -553,6 +553,37 @@ export interface paths {
          * @description 自分のメッセージだけを編集できる（作者でなければ 403 not_message_author。オーナーでも同じ。機能一覧 4.2）。 判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404 → そのチャンネルに無い・削除済みのメッセージは 404 → 作者でなければ 403 not_message_author → アーカイブ済みのチャンネルは 409 channel_archived。 本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。編集したメッセージを message:updated としてチャンネルの部屋へ配る（機能一覧 5.2）。 投稿・編集・削除を合わせて、利用者単位で1分に60回まで（3つのルートで1つの枠。機能一覧 4.1・4.2）
          */
         patch: operations["editMessage"];
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/messages/{messageId}/replies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * スレッドの返信の一覧（F-17）
+         * @description 親（messageId）の返信を新しい順に返す。before・limit・nextBefore の扱いはチャンネルの一覧と同じ（機能一覧 4.1・6）。 コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・ プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。 そのチャンネルに無いメッセージと、返信（返信はスレッドを持たない。1階層のみ）は 404。 削除済みの親の返信も読める（返信は保持する。機能一覧 4.2）。アーカイブ済みでも参加者は読める（機能一覧 3.2）
+         */
+        get: operations["listReplies"];
+        put?: never;
+        /**
+         * スレッドへの返信（F-17）
+         * @description 判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→ そのチャンネルに無い・削除済みのメッセージと、返信（返信に返信はできない。1階層のみ）は 404 → アーカイブ済みのチャンネルは 409 channel_archived。 本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。親の返信件数（replyCount）を同じトランザクションで1つ増やす（要件定義書 4.1）。 作った返信を message:new として、返信件数が増えた親を message:updated として、チャンネルの部屋へ配る（機能一覧 5.2・6）。 投稿・編集・削除と同じ枠で数える（利用者単位で1分に60回。機能一覧 4.1・4.2）
+         */
+        post: operations["postReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/invitations": {
@@ -767,6 +798,13 @@ export interface components {
             id: string;
             /** Format: uuid */
             channelId: string;
+            /**
+             * Format: uuid
+             * @description スレッドの親の id。チャンネルの本体のメッセージなら null（機能一覧 6）
+             */
+            parentId: string | null;
+            /** @description 削除されていない返信の件数。返信なら常に 0（返信はスレッドを持たない。機能一覧 6） */
+            replyCount: number;
             /** @description 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
             author: components["schemas"]["UserSummary"] | null;
             /** @description 本文。削除済みなら null（本文は DB に残るが返さない。機能一覧 4.2） */
@@ -2059,6 +2097,109 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             /** @description パブリックチャンネルに参加していない（not_a_channel_member）か、自分のメッセージではない（not_message_author） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listReplies: {
+        parameters: {
+            query?: {
+                /** @description これより古い返信を返す（メッセージの id）。形が uuid でなければ 400 */
+                before?: string;
+                /** @description 返す件数の上限。1〜100、既定は 50（チャンネルの一覧と同じ。機能一覧 4.1） */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 返信（新しい順）と、続きを取るための before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessagePage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    postReply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description 作った返信（parentId を持つ） */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
             403: {
                 headers: {
                     [name: string]: unknown;

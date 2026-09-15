@@ -25,6 +25,8 @@ function message(n: number, overrides: Record<string, unknown> = {}) {
     createdAt: `2026-09-14T00:0${n}:00.000Z`,
     editedAt: null,
     deleted: false,
+    parentId: null,
+    replyCount: 0,
     ...overrides,
   };
 }

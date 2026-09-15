@@ -34,6 +34,8 @@ function message(n: number, overrides: Record<string, unknown> = {}) {
     createdAt: SENT_AT,
     editedAt: null,
     deleted: false,
+    parentId: null,
+    replyCount: 0,
     ...overrides,
   };
 }

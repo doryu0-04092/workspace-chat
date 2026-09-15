@@ -878,6 +878,7 @@ paths:
       summary: チャンネルのメッセージの一覧（F-11・F-12）
       description: >-
         新しい順。before（メッセージの id）を渡すと、それより古いものを返す（カーソルページネーション。OFFSET を使わない。機能一覧 4.1）。
+        スレッドの返信は含めない（返信の一覧は replies。機能一覧 6）。
         before はそのチャンネルのメッセージでなくてもよく、存在を確かめない（id の順で比べる境目にすぎない）。
         続きがあれば nextBefore に次の before を、無ければ null を返す。
         参加者だけが取得できる。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、
@@ -1035,6 +1036,8 @@ paths:
       description: >-
         論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、
         以後の応答と配信では返さない（body: null・deleted: true。要件定義書 3.4）。message:deleted（本文を載せない）をチャンネルの部屋へ配る。
+        返信を削除したら、親の返信件数（replyCount）を同じトランザクションで1つ減らし、親を message:updated として配る。
+        親を削除しても返信は残す（機能一覧 4.2・6）。
         投稿・編集・削除を合わせて、利用者単位で1分に60回まで（3つのルートで1つの枠。機能一覧 4.1・4.2）
       responses:
         '204':
@@ -1059,6 +1062,110 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/messages/{messageId}/replies:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MessageId'
+    get:
+      operationId: listReplies
+      summary: スレッドの返信の一覧（F-17）
+      description: >-
+        親（messageId）の返信を新しい順に返す。before・limit・nextBefore の扱いはチャンネルの一覧と同じ（機能一覧 4.1・6）。
+        コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・
+        プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。
+        そのチャンネルに無いメッセージと、返信（返信はスレッドを持たない。1階層のみ）は 404。
+        削除済みの親の返信も読める（返信は保持する。機能一覧 4.2）。アーカイブ済みでも参加者は読める（機能一覧 3.2）
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: これより古い返信を返す（メッセージの id）。形が uuid でなければ 400
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: 返す件数の上限。1〜100、既定は 50（チャンネルの一覧と同じ。機能一覧 4.1）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: 返信（新しい順）と、続きを取るための before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: postReply
+      summary: スレッドへの返信（F-17）
+      description: >-
+        判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→
+        そのチャンネルに無い・削除済みのメッセージと、返信（返信に返信はできない。1階層のみ）は 404 → アーカイブ済みのチャンネルは 409 channel_archived。
+        本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。親の返信件数（replyCount）を同じトランザクションで1つ増やす（要件定義書 4.1）。
+        作った返信を message:new として、返信件数が増えた親を message:updated として、チャンネルの部屋へ配る（機能一覧 5.2・6）。
+        投稿・編集・削除と同じ枠で数える（利用者単位で1分に60回。機能一覧 4.1・4.2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostMessageRequest'
+      responses:
+        '201':
+          description: 作った返信（parentId を持つ）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1645,6 +1752,8 @@ components:
         - createdAt
         - editedAt
         - deleted
+        - parentId
+        - replyCount
       properties:
         id:
           description: UUIDv7。一覧のカーソル（before）にそのまま使う
@@ -1653,6 +1762,16 @@ components:
         channelId:
           type: string
           format: uuid
+        parentId:
+          description: スレッドの親の id。チャンネルの本体のメッセージなら null（機能一覧 6）
+          type:
+            - string
+            - 'null'
+          format: uuid
+        replyCount:
+          description: 削除されていない返信の件数。返信なら常に 0（返信はスレッドを持たない。機能一覧 6）
+          type: integer
+          minimum: 0
         author:
           description: 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
           oneOf:

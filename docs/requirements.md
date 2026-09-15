@@ -287,7 +287,7 @@
 | イベント | 内容 |
 |---|---|
 | `message:new` | メッセージの新規投稿（チャンネル・スレッド・DM） |
-| `message:updated` | メッセージの編集 |
+| `message:updated` | メッセージの編集（スレッドの返信件数が変わった親を含む） |
 | `message:deleted` | メッセージの削除 |
 | `reaction:changed` | リアクションの追加・取り消し |
 | `unread:updated` | 未読件数の変化 |

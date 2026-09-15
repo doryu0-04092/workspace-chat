@@ -707,9 +707,23 @@ model Message {
   /// 削除した時刻（論理削除）。**削除しても本文は残す**（要件定義書 3.4・機能一覧 4.2）。返さないのは応答と配信の側である。
   deletedAt DateTime? @db.Timestamptz(3)
 
-  channel Channel @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// スレッドの親（F-17。機能一覧 6）。チャンネルの本体のメッセージなら null。
+  /// **親は同じチャンネルのメッセージだけ**（複合外部キー）。**返信に返信はできない**（1階層のみ）——親が返信でないことは書く側が確かめる。
+  parentId String? @db.Uuid
 
-  /// **一覧（新しい順・`before` より古いもの）はこの向きで引く。**
-  @@index([channelId, id(sort: Desc)])
+  /// 削除されていない返信の件数（カウンタ列。一覧で `COUNT` を発行しない。返信の投稿・削除と同じトランザクションで増減する。要件定義書 4.1）。
+  replyCount Int @default(0)
+
+  channel Channel   @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  author  User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// 親は論理削除だけで消える（返信は残す。機能一覧 4.2）。チャンネルごと消えるときは、同じ文の中で返信も消えるため NoAction にする。
+  parent  Message?  @relation("Thread", fields: [parentId, channelId], references: [id, channelId], onDelete: NoAction)
+  replies Message[] @relation("Thread")
+
+  /// 返信の親を、同じチャンネルのメッセージに限る複合外部キーの参照先。
+  @@unique([id, channelId])
+  /// **チャンネルの一覧（本体だけ・新しい順・`before` より古いもの）はこの向きで引く**（`parentId IS NULL`）。
+  @@index([channelId, parentId, id(sort: Desc)])
+  /// **スレッドの返信の一覧（新しい順）はこの向きで引く。**
+  @@index([parentId, id(sort: Desc)])
 }
