@@ -69,6 +69,19 @@ describe('在席の一覧（PresenceRegistry）', () => {
     }
   });
 
+  // 取り直せているときに、5分ごと・入室し直しごとに warn を出し続けない（#399）。
+  it('取り直しに成功したら、一覧の取り直しでも入室し直しの取り直しでも warn を出さない', async () => {
+    const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const registry = new PresenceRegistry(fakeGateway(async () => [socketOf('s9', 'u2')]).gateway);
+    registry.add('c1', 'u1', 's1');
+
+    await registry.refresh();
+    await registry.refreshOne('c1');
+
+    expect(registry.usersIn('c1')).toEqual(['u2']);
+    expect(warned).not.toHaveBeenCalled();
+  });
+
   // #373: 失敗の原因（Valkey の停止・待ち時間の超過・置き換え側の不具合）を、運用ログの上で区別できるようにする。
   it('取り直しに失敗したチャンネルは今の一覧を残し、例外にせず、件数と最初の失敗の原因を warn に残す', async () => {
     const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
