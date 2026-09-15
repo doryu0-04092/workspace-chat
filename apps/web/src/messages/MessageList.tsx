@@ -13,27 +13,62 @@ import { type Message, useMessages } from './queries';
  */
 const FIRST_INDEX = 1_000_000_000;
 
+/** 一覧ごとに変わる文言。 */
+type Labels = { failed: string; empty: string; olderFailed: string; loadOlder: string };
+
+const CHANNEL_LABELS: Labels = {
+  failed: 'メッセージを読み込めませんでした。',
+  empty: 'まだメッセージはありません。',
+  olderFailed: '古いメッセージを読み込めませんでした。',
+  loadOlder: '古いメッセージを読み込む',
+};
+
+export const REPLY_LABELS: Labels = {
+  failed: '返信を読み込めませんでした。',
+  empty: 'まだ返信はありません。',
+  olderFailed: '古い返信を読み込めませんでした。',
+  loadOlder: '古い返信を読み込む',
+};
+
+type Pages = ReturnType<typeof useMessages>;
+
 type ListContext = {
+  labels: Labels;
   hasOlder: boolean;
   loadingOlder: boolean;
   olderFailed: unknown;
   loadOlder: () => void;
 };
 
-/** チャンネルのメッセージの一覧（F-11・F-12）。上が古く下が新しい。古いメッセージは先頭のボタンで遡って読む。 */
+/** チャンネルのメッセージの一覧（F-11・F-12）。返信のあるメッセージからスレッドを開く（F-17）。 */
 export function MessageList({
   workspaceId,
   channelId,
+  onOpenThread,
 }: {
   workspaceId: string;
   channelId: string;
+  onOpenThread: (message: Message) => void;
 }) {
   const messages = useMessages(workspaceId, channelId);
+  return <PagedMessages pages={messages} labels={CHANNEL_LABELS} onOpenThread={onOpenThread} />;
+}
 
-  if (!messages.data) {
-    return messages.isError ? (
+/** 新しい順のページを、上が古く下が新しい一覧にする。古いものは先頭のボタンで遡って読む。 */
+export function PagedMessages({
+  pages: query,
+  labels,
+  onOpenThread,
+}: {
+  pages: Pages;
+  labels: Labels;
+  onOpenThread?: (message: Message) => void;
+}) {
+  if (!query.data) {
+    return query.isError ? (
       <p role="alert" className="text-red-700">
-        メッセージを読み込めませんでした。{errorMessage(messages.error)}
+        {labels.failed}
+        {errorMessage(query.error)}
       </p>
     ) : (
       <p role="status" className="text-slate-600">
@@ -42,21 +77,23 @@ export function MessageList({
     );
   }
 
-  const { pages } = messages.data;
+  const { pages } = query.data;
   // api は新しい順に返す。画面は上を古くするため、ページの並びもページの中も逆にする
   const items = [...pages].reverse().flatMap((page) => [...page.messages].reverse());
-  if (items.length === 0) return <p className="text-slate-600">まだメッセージはありません。</p>;
+  if (items.length === 0) return <p className="text-slate-600">{labels.empty}</p>;
   const olderCount = pages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
 
   return (
     <LoadedList
       items={items}
       firstItemIndex={FIRST_INDEX - olderCount}
+      onOpenThread={onOpenThread}
       context={{
-        hasOlder: messages.hasNextPage,
-        loadingOlder: messages.isFetchingNextPage,
-        olderFailed: messages.isFetchNextPageError ? messages.error : null,
-        loadOlder: () => void messages.fetchNextPage(),
+        labels,
+        hasOlder: query.hasNextPage,
+        loadingOlder: query.isFetchingNextPage,
+        olderFailed: query.isFetchNextPageError ? query.error : null,
+        loadOlder: () => void query.fetchNextPage(),
       }}
     />
   );
@@ -66,10 +103,12 @@ export function MessageList({
 function LoadedList({
   items,
   firstItemIndex,
+  onOpenThread,
   context,
 }: {
   items: Message[];
   firstItemIndex: number;
+  onOpenThread?: (message: Message) => void;
   context: ListContext;
 }) {
   const list = useRef<VirtuosoHandle>(null);
@@ -88,7 +127,7 @@ function LoadedList({
       followOutput="auto"
       context={context}
       components={{ Header: OlderMessages }}
-      itemContent={(_, message) => <MessageItem message={message} />}
+      itemContent={(_, message) => <MessageItem message={message} onOpenThread={onOpenThread} />}
     />
   );
 }
@@ -98,7 +137,8 @@ function OlderMessages({ context }: { context: ListContext }) {
     <div className="flex flex-col items-center gap-1 py-2">
       {context.olderFailed !== null && (
         <p role="alert" className="text-red-700">
-          古いメッセージを読み込めませんでした。{errorMessage(context.olderFailed)}
+          {context.labels.olderFailed}
+          {errorMessage(context.olderFailed)}
         </p>
       )}
       {context.hasOlder && (
@@ -108,7 +148,7 @@ function OlderMessages({ context }: { context: ListContext }) {
           disabled={context.loadingOlder}
           onClick={context.loadOlder}
         >
-          古いメッセージを読み込む
+          {context.labels.loadOlder}
         </button>
       )}
     </div>
@@ -116,7 +156,13 @@ function OlderMessages({ context }: { context: ListContext }) {
 }
 
 /** 1件のメッセージ。退会した投稿者は「削除済みの利用者」（機能一覧 1.5）、削除済みは本文を置き換える（4.2）。 */
-function MessageItem({ message }: { message: Message }) {
+export function MessageItem({
+  message,
+  onOpenThread,
+}: {
+  message: Message;
+  onOpenThread?: (message: Message) => void;
+}) {
   return (
     <article className="px-2 py-2">
       <header className="flex items-baseline gap-2 text-sm">
@@ -133,6 +179,34 @@ function MessageItem({ message }: { message: Message }) {
       ) : (
         <MessageBody body={message.body} />
       )}
+      {onOpenThread && <ThreadSummary message={message} onOpen={() => onOpenThread(message)} />}
     </article>
+  );
+}
+
+/**
+ * スレッドの入口（機能一覧 6）。返信があれば件数と返信した人の表示名、無ければ「返信する」を出す。
+ * 削除済みで返信の無いメッセージには出さない（削除済みの親には返信できない）。
+ */
+function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
+  if (message.replyCount > 0) {
+    return (
+      <div className="mt-1 flex items-baseline gap-2 text-sm">
+        <button type="button" className="text-sky-700 underline" onClick={onOpen}>
+          {`${message.replyCount}件の返信`}
+        </button>
+        {message.replyParticipants.length > 0 && (
+          <span className="text-slate-500">
+            {message.replyParticipants.map((user) => user.displayName).join('、')}
+          </span>
+        )}
+      </div>
+    );
+  }
+  if (message.body === null) return null;
+  return (
+    <button type="button" className="mt-1 text-sm text-slate-600 underline" onClick={onOpen}>
+      返信する
+    </button>
   );
 }

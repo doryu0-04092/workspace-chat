@@ -13,8 +13,10 @@ import type { Failure } from '../auth/failure';
 import {
   addMessage,
   markDeleted,
+  type Message,
   type MessagePages,
   messagesKey,
+  repliesKey,
   replaceMessage,
 } from '../messages/queries';
 import { useRealtime } from './realtime-context';
@@ -33,8 +35,8 @@ export const ENTER_RETRY_DELAY_MS = 60_000;
  *   （5.2「再接続後、切断中に発生したメッセージが補完される」。`connect` は「upon connection and reconnection」に届く）
  * - **上限（429）で断られたら、1分おいて、繋がっていれば入室要求を送り直す**（9.2「画面は時間をおいてやり直す」）。ほかの断りは送り直さない
  * - チャンネルを離れたら、繋がっていれば退室要求を送る（9.2）
- * - `message:new` / `message:updated` / `message:deleted` を、このチャンネルの一覧のキャッシュに反映する（技術スタックの「データ取得」）。
- *   `message:new` は同じ id を2行にしない（自分の投稿は、投稿の応答と配信の両方で届く）
+ * - `message:new` / `message:updated` / `message:deleted` を、このチャンネルの一覧と、読み込んであるスレッドの返信のキャッシュに反映する
+ *   （技術スタックの「データ取得」。機能一覧 6）。`message:new` は同じ id を2行にしない（自分の投稿は、投稿の応答と配信の両方で届く）
  */
 export function useChannelRealtime(workspaceId: string, channelId: string): Failure | null {
   const { socket } = useRealtime();
@@ -44,8 +46,13 @@ export function useChannelRealtime(workspaceId: string, channelId: string): Fail
   useEffect(() => {
     const key = messagesKey(workspaceId, channelId);
     const room: ChannelRoomRequest = { channelId };
-    const update = (change: (data: MessagePages | undefined) => MessagePages | undefined) =>
-      queryClient.setQueryData<MessagePages>(key, change);
+    /** 本体のメッセージはチャンネルの一覧に、返信はその親の返信に。読み込んでいないキャッシュは作らない（更新が undefined を返す）。 */
+    const listOf = (message: Message) =>
+      message.parentId === null ? key : repliesKey(workspaceId, channelId, message.parentId);
+    const update = (
+      target: readonly unknown[],
+      change: (data: MessagePages | undefined) => MessagePages | undefined,
+    ) => queryClient.setQueryData<MessagePages>(target, change);
 
     let active = true;
     let retry: ReturnType<typeof setTimeout> | undefined;
@@ -68,15 +75,22 @@ export function useChannelRealtime(workspaceId: string, channelId: string): Fail
     };
     const onNew = ({ message }: MessageNewPayload) => {
       // スレッドの返信は、チャンネル本体の一覧に混ぜない（機能一覧 6）。件数が変わった親は message:updated で置き換わる
-      if (message.channelId === channelId && message.parentId === null) {
-        update((data) => addMessage(data, message));
+      if (message.channelId === channelId) {
+        update(listOf(message), (data) => addMessage(data, message));
       }
     };
     const onUpdated = ({ message }: MessageUpdatedPayload) => {
-      if (message.channelId === channelId) update((data) => replaceMessage(data, message));
+      if (message.channelId === channelId) {
+        update(listOf(message), (data) => replaceMessage(data, message));
+      }
     };
     const onDeleted = (payload: MessageDeletedPayload) => {
-      if (payload.channelId === channelId) update((data) => markDeleted(data, payload.messageId));
+      // 削除の配信は親を持たないため、チャンネルの一覧と、その下に置いた返信のキャッシュのすべてに当てる（鍵の前方で一致する）
+      if (payload.channelId === channelId) {
+        queryClient.setQueriesData<MessagePages>({ queryKey: key }, (data) =>
+          markDeleted(data, payload.messageId),
+        );
+      }
     };
 
     socket.on('connect', enter);

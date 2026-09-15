@@ -1,50 +1,8 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { error, fakeFetch, headerOf, json, PROFILE, token, USER } from '../testing/fake-api';
+import { error, fakeFetch, headerOf, json, USER } from '../testing/fake-api';
+import { CHANNEL_PATH, GENERAL, MESSAGES, message, page, routes } from '../testing/fake-messages';
 import { renderApp } from '../testing/render-app';
-
-const WORKSPACE_ID = '01920000-0000-7000-8000-0000000000a1';
-const GENERAL = {
-  id: '01920000-0000-7000-8000-0000000000c1',
-  name: 'general',
-  visibility: 'PUBLIC',
-  joined: true,
-};
-/** テストで使うもう1人の利用者（実在の人物ではない）。 */
-const BOB = { id: '01920000-0000-7000-8000-000000000002', userId: 'bob', displayName: 'ボブ' };
-
-const CHANNEL_PATH = `/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}`;
-const MESSAGES = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/messages`;
-
-function message(n: number, overrides: Record<string, unknown> = {}) {
-  return {
-    id: `01920000-0000-7000-8000-${String(n).padStart(12, '0')}`,
-    channelId: GENERAL.id,
-    author: BOB,
-    body: `メッセージ ${n}`,
-    createdAt: `2026-09-14T00:0${n}:00.000Z`,
-    editedAt: null,
-    deleted: false,
-    parentId: null,
-    replyCount: 0,
-    replyParticipants: [],
-    mentions: [],
-    ...overrides,
-  };
-}
-
-function page(messages: ReturnType<typeof message>[], nextBefore: string | null = null) {
-  return json(200, { messages, nextBefore });
-}
-
-function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
-  return {
-    'POST /api/auth/refresh': () => token('t1'),
-    'GET /api/users/me': () => json(200, PROFILE),
-    [`GET /api/workspaces/${WORKSPACE_ID}/channels`]: () => json(200, [GENERAL]),
-    ...extra,
-  };
-}
 
 function articles(): HTMLElement[] {
   return screen.getAllByRole('article');
