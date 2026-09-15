@@ -27,6 +27,7 @@ function message(n: number, overrides: Record<string, unknown> = {}) {
     deleted: false,
     parentId: null,
     replyCount: 0,
+    replyParticipants: [],
     ...overrides,
   };
 }

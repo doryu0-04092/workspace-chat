@@ -805,6 +805,8 @@ export interface components {
             parentId: string | null;
             /** @description 削除されていない返信の件数。返信なら常に 0（返信はスレッドを持たない。機能一覧 6） */
             replyCount: number;
+            /** @description 返信した参加者。削除されていない返信を書いた、退会していない利用者を、最後に返信した順に最大3人（機能一覧 6）。 返信と、返信の無いメッセージは空 */
+            replyParticipants: components["schemas"]["UserSummary"][];
             /** @description 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
             author: components["schemas"]["UserSummary"] | null;
             /** @description 本文。削除済みなら null（本文は DB に残るが返さない。機能一覧 4.2） */
