@@ -25,9 +25,8 @@ locals {
   alb_listener_port     = 80
   alb_listener_protocol = "HTTP"
 
-  # destroy のときに、イメージが入ったままのリポジトリも消す（要件定義書 4.2 の「デモ後は terraform destroy する運用」。
-  # 添付のバケットの force_destroy と同じ。プロバイダーの文書「If `true`, will delete the repository even if it contains images.」）。
-  # イメージはソースから作り直せる。
+  # destroy のときに、イメージが入ったままのリポジトリも消す（決定と代償は要件定義書 4.2「バックアップ」の ECR の段落。
+  # プロバイダーの文書「If `true`, will delete the repository even if it contains images.」）。
   ecr_force_delete = true
 }
 
@@ -94,7 +93,9 @@ resource "aws_iam_role_policy" "task_execution_parameters" {
 
 # マイグレーションのタスクのタスクロール: 運用者が ECS Exec で入るための権限（#274 の決定。入る先は api のタスクではなく、
 # マイグレーションのイメージを run-task で動かしたタスク——要件定義書 4.2「RDS の障害から復旧するとき」手順 5 の代償。#452・#458）。
-# 踏むと壊れる: この権限を api のタスクのタスクロールに付けない。api のタスクに入ると JWT_SECRET に届き、認証の外に出る。
+# 踏むと壊れる: このロールに ssmmessages の4つの操作のほかの権限を足さない。タスクロールの資格情報はコンテナに渡り、ECS Exec で入った
+# 運用者がその権限を得る（要件定義書 4.2 手順 5 の「踏むと壊れる」）。この権限を api のタスクのタスクロールに付けない。api のタスクに入ると
+# JWT_SECRET に届き、認証の外に出る。
 resource "aws_iam_role" "migrate_task" {
   name               = "workspace-chat-migrate-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json

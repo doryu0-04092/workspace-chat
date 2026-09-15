@@ -5,6 +5,10 @@ import { Public } from './auth/access-token.guard';
 /**
  * 死活確認（F-39）。ALB のヘルスチェックが叩く。
  *
+ * **踏むと壊れる: 本番の ALB のヘルスチェックは、このパス（前置きを含めて `/api/health`）と状態コード 200 を、
+ * infra/production/compute.tf の locals（api_health_check_path・api_health_check_matcher）に写している。**
+ * パスや状態コードを変えるならそちらも直す。食い違うとターゲットが healthy にならず、CI は緑のまま、デプロイ後に初めて落ちる。
+ *
  * **認証を要さない**——応答は稼働していることだけであり、アプリケーションの内容を返さないため、
  * 「非ログインでの閲覧」には当たらない（要件定義書 2）。
  * **DB・Redis 等に問い合わせない**（浅い死活確認。代償は機能一覧 14.1）——依存を注入しない。
