@@ -171,10 +171,11 @@ describe('Valkey の保存先', () => {
 });
 
 describe('Valkey が止まっているとき（ResilientLoginBackoffStore）', () => {
-  function failing(): LoginBackoffStore {
-    const error = Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:6379'), {
+  function failing(
+    error: Error = Object.assign(new Error('connect ECONNREFUSED 10.0.0.1:6379'), {
       code: 'ECONNREFUSED',
-    });
+    }),
+  ): LoginBackoffStore {
     return {
       begin: vi.fn().mockRejectedValue(error),
       recordFailure: vi.fn().mockRejectedValue(error),
@@ -208,6 +209,21 @@ describe('Valkey が止まっているとき（ResilientLoginBackoffStore）', (
     const message = String(logger.warn.mock.calls[0]?.[0]);
     expect(message).not.toContain('secret_user');
     expect(message).not.toContain('10.0.0.1');
+  });
+
+  // code を持たない失敗（ioredis の「Reached the max retries per request limit」など）では、種類の名前だけを残す（#401）。
+  it('code を持たない失敗では、warn に種類の名前だけを載せ、メッセージを載せない', async () => {
+    const logger = { warn: vi.fn(), log: vi.fn() };
+    const store = new ResilientLoginBackoffStore(
+      failing(new Error('valkey.internal.example:6379 Reached the max retries per request limit')),
+      new MemoryLoginBackoffStore(),
+      { retryIntervalMs: 30_000, logger },
+    );
+    await store.begin('k', 1_800_000_000_000);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const message = String(logger.warn.mock.calls[0]?.[0]);
+    expect(message).toMatch(/: Error$/);
+    expect(message).not.toContain('valkey.internal.example');
   });
 
   it('試し直す間隔が過ぎたら Valkey を試し、戻ったらログを出す', async () => {

@@ -6,8 +6,8 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
     "build:watch": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
-    "start": "node dist/main.js",
-    "dev": "node --watch dist/main.js"
+    "start": "node --no-warnings dist/main.js",
+    "dev": "node --watch --no-warnings dist/main.js"
   },
   "dependencies": {
     "@nest-lab/throttler-storage-redis": "^1.2.0",
