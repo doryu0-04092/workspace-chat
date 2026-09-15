@@ -119,6 +119,17 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       },
     );
 
+    // 機能一覧 4.3: リンクに残す URL は http / https に限らず、mailto などのスキームと相対 URL も残す（#387）。
+    it.each([
+      ['mailto', '[連絡する](mailto:alice@example.com)', 'mailto:alice@example.com'],
+      ['相対 URL', '[チャンネル](/channels/abc)', '/channels/abc'],
+    ])('記法のリンクは、%s の URL も href に残す', (_name, body, href) => {
+      const links = [...renderBody(body).querySelectorAll('a')].map((link) =>
+        link.getAttribute('href'),
+      );
+      expect(links).toEqual([href]);
+    });
+
     it('素のメールアドレスはリンクにせず、文字のまま残す（承認の範囲は URL）', () => {
       const container = renderBody('alice@example.com に連絡する');
       expect(container.querySelector('a')).toBeNull();
