@@ -218,10 +218,33 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     ).toEqual([]);
   });
 
-  it('実行ロールが読めるパラメータは、タスク定義の secrets が指すパラメータとちょうど同じである', () => {
+  it('task_execution_parameters のポリシーが読めるパラメータは、タスク定義の secrets が指すパラメータとちょうど同じである', () => {
     expect(executionResources.map(({ parameter }) => parameter).sort()).toEqual(
       [...new Set(secrets.map(({ parameter }) => parameter))].sort(),
     );
+  });
+
+  // 実行ロールが読める秘密の範囲は、ポリシーの中身だけでなく、実行ロールに結び付くものすべてで決まる（付け替え・2つ目の結び付きも含む）。
+  it('実行ロールに結び付くのは ECS の管理ポリシーと task_execution_parameters のポリシーの2つだけで、パラメータを読む操作を与えるのはそのポリシーの ssm:GetParameters だけである', () => {
+    // 実行ロールへの参照は、この2つの結び付きと、タスク定義の execution_role_arn だけである（足した・付け替えた結び付きは数が合わない）。
+    expect(countOf(terraform, /\baws_iam_role\.task_execution\b/g)).toBe(
+      2 + countOf(terraform, /\bexecution_role_arn\s*=\s*aws_iam_role\.task_execution\.arn\b/g),
+    );
+    const managed = block('resource', 'aws_iam_role_policy_attachment', 'task_execution_managed');
+    expect(managed).toMatch(/\brole\s*=\s*aws_iam_role\.task_execution\.name\b/);
+    expect(/\bpolicy_arn\s*=\s*"([^"]+)"/.exec(managed)?.[1]).toBe(
+      'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy',
+    );
+    const parameters = block('resource', 'aws_iam_role_policy', 'task_execution_parameters');
+    expect(parameters).toMatch(/\brole\s*=\s*aws_iam_role\.task_execution\.id\b/);
+    expect(parameters).toMatch(
+      /\bpolicy\s*=\s*data\.aws_iam_policy_document\.task_execution_parameters\.json\b/,
+    );
+    const policy = block('data', 'aws_iam_policy_document', 'task_execution_parameters');
+    expect(countOf(policy, /\bstatement\s*\{/g)).toBe(1);
+    expect(itemsOf(policy, 'actions')).toEqual(['"ssm:GetParameters"']);
+    // パラメータを読む操作は、ほかのどのポリシーにも書かない（コメントは除いてから数える）。
+    expect(countOf(terraform, /ssm:GetParameter/g)).toBe(1);
   });
 
   it.each(secretEnvs)(
