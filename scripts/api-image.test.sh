@@ -7,8 +7,11 @@
 # 4. どちらのイメージにも、秘密を置くファイル（.env と .env.*。.env.example を除く）・テストのコード・`src/` 配下のソース・--omit=dev を落とすと入る開発依存（代表として vitest と @nestjs/testing）が入っていない
 # 5. どちらのイメージも root で動かない
 # 6. 実行用のイメージの中で api の依存が解決される版が、package-lock.json の版と同じである
+# 7. 本番の DATABASE_URL の形（sslmode=verify-full&sslrootcert=<CA>）で、TLS だけを受け付ける PostgreSQL に対し、
+#    マイグレーション用のイメージ（Prisma の CLI）も実行用のイメージの pg も、サーバー証明書を CA で検証する（別の CA では繋がらない）
+# 8. どちらのイメージにも RDS の CA のバンドルがあり、本番のリージョンのルート CA を含む
 #
-# Docker が動いていることが前提。作ったコンテナとネットワークは終わりに消す（イメージは残す）。
+# Docker と openssl が動いていることが前提。作ったコンテナとネットワークと証明書は終わりに消す（イメージは残す）。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -16,13 +19,18 @@ cd "$(dirname "$0")/.."
 suffix="api-image-test-$$"
 network="$suffix"
 postgres="$suffix-postgres"
+tls_postgres="$suffix-postgres-tls"
+tls_client="$suffix-tls-client"
 api="$suffix-api"
 runtime_image="workspace-chat-api:test"
 migrate_image="workspace-chat-api-migrate:test"
+tls_dir=$(mktemp -d)
 
 cleanup() {
-  docker rm -f "$api" "$postgres" >/dev/null 2>&1 || true
+  docker rm -f "$api" "$postgres" "$tls_postgres" "$tls_client" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
+  rm -f "$tls_dir"/*
+  rmdir "$tls_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -145,5 +153,111 @@ actual=$(docker run --rm --entrypoint node "$runtime_image" -e '
 ')
 [ "$expected" = "$actual" ] ||
   fail "イメージの中の依存の版が package-lock.json と違う: $(diff <(echo "$expected") <(echo "$actual") | grep '^[<>]' | tr '\n' ' ')"
+
+echo "== 7. 本番の DATABASE_URL の形で、マイグレーション用のイメージも実行用のイメージの pg も、サーバー証明書を CA で検証する"
+# 本番の RDS は SSL でない接続を断る。ここでは TLS の接続（hostssl）だけを受け付ける PostgreSQL を立て、使い捨ての CA（ca）と、
+# それとは別の CA（other-ca）を作る。サーバー証明書は ca が署名し、名前はコンテナの名前にする。
+# **別の CA で繋がらないことまで見る**——Prisma の CLI は sslmode=verify-full を prefer に読み替えて sslrootcert を捨て、
+# 証明書を検証せずに TLS だけを張る（#424）。正しい CA で繋がることだけを見ると、その形でも通る。
+# MSYS_NO_PATHCONV は、Git Bash が -subj の /CN=… をパスに書き換えないようにする（Linux では何もしない）。
+(
+  cd "$tls_dir" &&
+    MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=image-test-ca" \
+      -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign" \
+      -keyout ca.key -out ca.pem 2>/dev/null &&
+    MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=image-test-other-ca" \
+      -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign" \
+      -keyout other-ca.key -out other-ca.pem 2>/dev/null &&
+    MSYS_NO_PATHCONV=1 openssl req -newkey rsa:2048 -nodes -subj "/CN=$tls_postgres" \
+      -keyout server.key -out server.csr 2>/dev/null &&
+    printf 'subjectAltName=DNS:%s\n' "$tls_postgres" >server.ext &&
+    openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 1 \
+      -extfile server.ext -out server.pem 2>/dev/null
+) || fail "検査用の証明書を作れない（openssl）"
+# PostgreSQL は他人が読める鍵を拒むため、起動の前に postgres の持ち物・0600 で置き直す。
+docker create --name "$tls_postgres" --network "$network" \
+  --env POSTGRES_PASSWORD=image-test --env POSTGRES_DB=chat --entrypoint bash "$postgres_image" -c '
+    install -d -o postgres -m 700 /tmp/ssl &&
+    install -o postgres -m 600 /tls/server.pem /tls/server.key /tmp/ssl/ &&
+    printf "local all all trust\nhostssl all all all scram-sha-256\n" >/tmp/ssl/pg_hba.conf &&
+    exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/ssl/server.pem \
+      -c ssl_key_file=/tmp/ssl/server.key -c hba_file=/tmp/ssl/pg_hba.conf' >/dev/null
+docker cp "$tls_dir/." "$tls_postgres:/tls" >/dev/null
+docker start "$tls_postgres" >/dev/null
+for _ in $(seq 1 60); do
+  if docker exec "$tls_postgres" pg_isready --host 127.0.0.1 --username postgres --dbname chat >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+docker exec "$tls_postgres" pg_isready --host 127.0.0.1 --username postgres --dbname chat >/dev/null ||
+  { docker logs "$tls_postgres" >&2 || true; fail "TLS の PostgreSQL が起動しない"; }
+tls_url="postgresql://postgres:image-test@$tls_postgres:5432/chat?sslmode=verify-full&sslrootcert=/tmp/ca.pem"
+
+# イメージを、指定の CA を /tmp/ca.pem に置いて1回動かす。引数: CA のファイル名・DATABASE_URL・docker create に続ける引数。
+run_with_ca() {
+  local ca_file=$1 url=$2
+  shift 2
+  docker rm -f "$tls_client" >/dev/null 2>&1 || true
+  docker create --name "$tls_client" --network "$network" --env DATABASE_URL="$url" "$@" >/dev/null &&
+    docker cp "$tls_dir/$ca_file" "$tls_client:/tmp/ca.pem" >/dev/null &&
+    docker start --attach "$tls_client"
+}
+
+out=$(run_with_ca ca.pem "$tls_url" "$migrate_image" 2>&1) ||
+  { echo "$out" >&2; fail "正しい CA で、マイグレーションを適用できない"; }
+if out=$(run_with_ca other-ca.pem "$tls_url" "$migrate_image" 2>&1); then
+  echo "$out" >&2
+  fail "別の CA でも、マイグレーションを適用できた（Prisma の CLI が証明書を検証していない）"
+fi
+grep -q 'certificate verify failed' <<<"$out" ||
+  { echo "$out" >&2; fail "別の CA で、マイグレーションが証明書の検証以外の理由で落ちた"; }
+if out=$(run_with_ca ca.pem "${tls_url%&sslrootcert=*}" "$migrate_image" 2>&1); then
+  echo "$out" >&2
+  fail "sslrootcert の無い verify-full でも、マイグレーションを適用できた（検証する CA が無いまま繋がった）"
+fi
+grep -q 'sslrootcert' <<<"$out" ||
+  { echo "$out" >&2; fail "sslrootcert の無い verify-full で、sslrootcert が要ると知らせずに落ちた"; }
+# TLS を受け付けない PostgreSQL（1 で使った $postgres）には、平文に落ちて繋がってはならない。Prisma の CLI の prefer は
+# 平文に落ちるため、読み替えで sslmode=require にしないと、TLS を断る接続先（成りすまし）にパスワードの交換を始める。
+if out=$(run_with_ca ca.pem "${tls_url/@$tls_postgres:/@$postgres:}" "$migrate_image" 2>&1); then
+  echo "$out" >&2
+  fail "TLS を受け付けない PostgreSQL に、マイグレーションが平文で繋がった"
+fi
+
+# api は PrismaPg に DATABASE_URL をそのまま渡す（apps/api/src/prisma.service.ts）。同じ pg で繋ぐ。
+# 出力が true の1行だけであることまで見る——pg は sslmode=require などに SECURITY WARNING を標準エラーに出す（3 の検査に掛かる）。
+# shellcheck disable=SC2016
+pg_probe='
+  const pg = require(require("node:module").createRequire("/app/apps/api/dist/main.js").resolve("pg"));
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  client.connect()
+    .then(() => client.query("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()"))
+    .then((result) => { console.log(result.rows[0].ssl); return client.end(); })
+    .catch((error) => { console.error(error.code ?? error.message); process.exit(1); });'
+out=$(run_with_ca ca.pem "$tls_url" --entrypoint node "$runtime_image" -e "$pg_probe" 2>&1) ||
+  { echo "$out" >&2; fail "正しい CA で、実行用のイメージの pg が繋がらない"; }
+[ "$out" = "true" ] || fail "実行用のイメージの pg の出力が TLS の接続の true の1行ではない: $out"
+if out=$(run_with_ca other-ca.pem "$tls_url" --entrypoint node "$runtime_image" -e "$pg_probe" 2>&1); then
+  fail "別の CA でも、実行用のイメージの pg が繋がった（証明書を検証していない）"
+fi
+grep -q 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' <<<"$out" ||
+  fail "別の CA で、実行用のイメージの pg が証明書の検証以外の理由で落ちた: $out"
+
+echo "== 8. どちらのイメージにも RDS の CA のバンドルがあり、本番のリージョンのルート CA を含む"
+# リージョンは infra/production/main.tf の provider "aws" の1箇所から読む。RDS の既定の CA は rds-ca-rsa2048-g1 である。
+region=$(sed -n 's/^  region = "\([^"]*\)"$/\1/p' infra/production/main.tf)
+[ -n "$region" ] || fail "infra/production/main.tf から provider のリージョンを読めない"
+for image in "$runtime_image" "$migrate_image"; do
+  # shellcheck disable=SC2016
+  docker run --rm --entrypoint node --env REGION="$region" "$image" -e '
+    const { X509Certificate } = require("node:crypto");
+    const pem = require("node:fs").readFileSync("/app/certs/rds-global-bundle.pem", "utf8");
+    const subjects = pem.split(/(?=-----BEGIN CERTIFICATE-----)/).filter((block) => block.includes("BEGIN"))
+      .map((block) => new X509Certificate(block).subject.split("\n"));
+    const want = `CN=Amazon RDS ${process.env.REGION} Root CA RSA2048 G1`;
+    if (!subjects.some((lines) => lines.includes(want))) { console.error(`${want} が無い（${subjects.length} 件）`); process.exit(1); }' ||
+    fail "$image の RDS の CA のバンドルに、$region のルート CA が無い"
+done
 
 echo "すべての確認を通過しました"

@@ -3,11 +3,18 @@
 # ビルドの文脈はリポジトリの根である（npm workspaces のため）。作る手順は scripts/api-image.test.sh が持つ。
 #
 # 段:
-#   runtime … api を動かす。`npm ci --omit=dev` で入る依存と、build 段のビルド済みの dist・openapi だけを持つ
-#   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクと、運用者が ECS Exec で入るタスクで使う。下の migrate 段の注記）。`npm ci --omit=dev` で入る依存と、prisma.config.ts・スキーマ・マイグレーションだけを持つ
+#   runtime … api を動かす。`npm ci --omit=dev` で入る依存と、build 段のビルド済みの dist・openapi と、RDS の CA のバンドルだけを持つ
+#   migrate … `prisma migrate deploy` を1回流して終わる（ECS の一回きりのタスクと、運用者が ECS Exec で入るタスクで使う。下の migrate 段の注記）。`npm ci --omit=dev` で入る依存と、prisma.config.ts・スキーマ・マイグレーションと、RDS の CA のバンドルだけを持つ
 #
 # 起動に要る環境変数は README「動かす」と apps/api/src/config/api-config.ts にある。**イメージに値を焼き込まない**
 # （.dockerignore が .env を文脈から外す）。scripts/api-image.test.sh が、実際に作って動かして確かめる。
+#
+# RDS の CA のバンドル（apps/api/certs/rds-global-bundle.pem → /app/certs/rds-global-bundle.pem。技術スタックの「DB への接続の暗号化」。#424）は、
+# AWS が配る https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem をそのまま置いたもの
+# （2026-09-15 に取得。Last-Modified: Thu, 24 Jul 2025 21:38:09 GMT。sha256 e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3）。
+# 公開の証明書であり秘密ではない。ビルドのたびに取りに行かないのは、AWS が中身を足すたびに同じ Dockerfile から違うイメージができるためである。
+# 入れ替えるときは同じ URL から取り直して置き換え、scripts/api-image.test.sh の 8 を通す。
+# 踏むと壊れる: 本番の DATABASE_URL の sslrootcert がこのパスを指す。パスを変えると、api もマイグレーションも RDS に繋がらない。
 
 # glibc の土台にする。argon2 はビルド済みのネイティブモジュールを使い、Alpine（musl）では入れ方が変わる。
 #
@@ -43,7 +50,7 @@ COPY apps/web/package.json apps/web/
 RUN npm ci --omit=dev --no-audit --no-fund
 
 # マイグレーション用の段は build 段を継がない（#277）。build 段はソース・テストのコード・開発依存を全部持ち、それが本番の
-# タスクとして動くことになる。prod-deps の /app に、prisma.config.ts（接続先を DATABASE_URL から読む）とスキーマ・マイグレーションだけを足す。
+# タスクとして動くことになる。prod-deps の /app に、prisma.config.ts（接続先を DATABASE_URL から読む）とスキーマ・マイグレーションと、RDS の CA のバンドルだけを足す。
 # prisma の CLI は prod-deps に入っている——@prisma/client が peerDependencies に持ち（任意）、package-lock.json で devOptional のため
 # --omit=dev でも lock の版で入る。ここで npm install しない（lock と違う版に解決される経路を作らない）。
 # 踏むと壊れる: @prisma/client が prisma を peer から外すと CLI が消える。scripts/api-image.test.sh の 1 が落ちて気づく。
@@ -56,6 +63,7 @@ WORKDIR /app
 COPY --from=prod-deps /app ./
 COPY prisma.config.ts ./
 COPY apps/api/prisma apps/api/prisma
+COPY apps/api/certs/rds-global-bundle.pem certs/
 USER node
 CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
 
@@ -69,6 +77,7 @@ COPY --from=build /app/packages/shared/dist packages/shared/dist
 # api は起動時に REST の仕様を読む（apps/api/src/openapi-validation.ts）。
 COPY --from=build /app/packages/shared/openapi packages/shared/openapi
 COPY --from=build /app/apps/api/dist apps/api/dist
+COPY apps/api/certs/rds-global-bundle.pem certs/
 USER node
 EXPOSE 3000
 CMD ["node", "apps/api/dist/main.js"]
