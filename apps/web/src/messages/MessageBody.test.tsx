@@ -214,6 +214,18 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(inLink.querySelector('a')?.textContent).toBe('@alice_1');
     });
 
+    it('本文に書いた `<span class="mention">` は要素にならず、書いた文字のまま残す', () => {
+      // 描画してよい要素に span を、sanitize のスキーマに class `mention` を足したため、
+      // 守っているのは「生の HTML を構文解析で読ませない」ことだけになった（DISABLED_CONSTRUCTS の htmlText / htmlFlow）。
+      // 壊れると、届いていない相手へのメンションを本物と同じ見た目で書けてしまう（機能一覧 4.3・9.1）。
+      const body = '<span class="mention">@alice_1</span> と書く';
+
+      const container = renderWith(body, []);
+
+      expect(container.querySelector('span')).toBeNull();
+      expect(container.textContent).toBe(body);
+    });
+
     it('表示名は文字として出し、HTML として解釈しない', () => {
       const container = renderWith('@alice_1', [
         { userId: 'Alice_1', user: { ...ALICE, displayName: '<img src=x onerror="alert(1)">' } },
