@@ -12,6 +12,11 @@ terraform {
       source  = "hashicorp/aws"
       version = ">= 6.62"
     }
+    # 3.7.1 以上: ephemeral の random_password（技術スタック「インフラ（AWS）」の IaC の行）。
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.7.1"
+    }
   }
 
   backend "s3" {
