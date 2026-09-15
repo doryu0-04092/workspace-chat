@@ -22,7 +22,7 @@
 # 代償: タグの指す先が変わると、同じ Dockerfile から違うイメージができる。
 # それでもタグにするのは、依存の自動更新（dependabot.yml）が Dockerfile を見ておらず（#38）、
 # ダイジェストで固定すると誰かが手で上げるまで古いままになるためである。
-# 取り直しは scripts/api-image.test.sh の `docker build --pull` が行う（手元のイメージがあってもレジストリを見る）。
+# 取り直しは scripts/api-image.test.sh の `docker build --pull` と、scripts/release.sh の `docker buildx build --pull` が行う（手元のイメージがあってもレジストリを見る）。
 ARG NODE_IMAGE=node:24-bookworm-slim
 
 FROM ${NODE_IMAGE} AS deps
