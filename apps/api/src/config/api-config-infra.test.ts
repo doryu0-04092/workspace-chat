@@ -59,12 +59,22 @@ const terraform = withoutComments(
     .join('\n'),
 );
 
-/** `<kind> "<type>" "<name>" {` から、行頭の `}` までの本文を、その種類のブロックすべてについて返す。 */
-function blocksOf(kind: 'resource' | 'data', type: string): { name: string; body: string }[] {
-  return [...terraform.matchAll(new RegExp(`^${kind} "${type}" "(\\w+)" \\{$`, 'gm'))].map(
+/**
+ * `<kind> "<type>" "<name>" {` から、行頭の `}` までの本文を、その種類のブロックすべてについて返す（`type` は正規表現の断片）。
+ * 中身の無いブロック（`{}` の1行）は、見出しの行の `{` までを本文にする。
+ */
+function blocksOf(
+  kind: 'resource' | 'data',
+  type: string,
+): { type: string; name: string; body: string }[] {
+  return [...terraform.matchAll(new RegExp(`^${kind} "(${type})" "(\\w+)" \\{(\\})?$`, 'gm'))].map(
     (match) => ({
-      name: match[1] ?? '',
-      body: terraform.slice(match.index, terraform.indexOf('\n}\n', match.index)),
+      type: match[1] ?? '',
+      name: match[2] ?? '',
+      body:
+        match[3] === undefined
+          ? terraform.slice(match.index, terraform.indexOf('\n}\n', match.index))
+          : match[0].slice(0, -1),
     }),
   );
 }
@@ -122,11 +132,8 @@ function splitItems(inner: string): string[] {
   return items.map((item) => item.trim()).filter((item) => item !== '');
 }
 
-/**
- * オブジェクト（`{ … }`）の最も外側の属性のキー。最も外側の `,` と改行で属性に分け、キーとして読めない属性は `undefined` にする
- * （黙って外さない）。
- */
-function topLevelKeys(object: string): (string | undefined)[] {
+/** オブジェクト・ブロック（`{ … }`）の最も外側の属性と入れ子のブロックを、最も外側の `,` と改行で分けて返す。 */
+function entriesOf(object: string): string[] {
   const inner = object.trim().slice(1, -1);
   const entries: string[] = [];
   let depth = 0;
@@ -149,10 +156,74 @@ function topLevelKeys(object: string): (string | undefined)[] {
     }
   }
   entries.push(inner.slice(start));
-  return entries
-    .map((entry) => entry.trim())
-    .filter((entry) => entry !== '')
-    .map((entry) => /^"?([A-Za-z_][\w-]*)"?\s*[=:]/.exec(entry)?.[1]);
+  return entries.map((entry) => entry.trim()).filter((entry) => entry !== '');
+}
+
+/** オブジェクト（`{ … }`）の最も外側の属性のキー。キーとして読めない属性は `undefined` にする（黙って外さない）。 */
+function topLevelKeys(object: string): (string | undefined)[] {
+  return entriesOf(object).map((entry) => /^"?([A-Za-z_][\w-]*)"?\s*[=:]/.exec(entry)?.[1]);
+}
+
+type Hcl = { [key: string]: string | string[] | Hcl[] };
+
+/**
+ * ブロック（`{ … }`）を、キーごとの値に読む。属性の値は、リスト（`[ … ]`）なら要素の配列、それ以外は式の文字列のまま。
+ * 入れ子のブロック（`key { … }`）は、同じキーのブロックすべてを配列にする。キーとして読めない行（`dynamic "…" {`・ヒアドキュメントの中身など）と、
+ * 同じキーの2つ目は `?` に集める（黙って外さず、照合で落とす）。
+ */
+function hclOf(object: string): Hcl {
+  const hcl: Hcl = {};
+  const unreadable: string[] = [];
+  for (const entry of entriesOf(object)) {
+    const nested = /^([A-Za-z_]\w*)\s*\{/.exec(entry);
+    const assignment = /^"?([A-Za-z_][\w-]*)"?\s*[=:]\s*/.exec(entry);
+    if (
+      nested?.[1] !== undefined &&
+      enclosed(entry, nested[0].length - 1).length === entry.length - nested[0].length - 1
+    ) {
+      const child = hclOf(entry.slice(nested[0].length - 1));
+      const existing: string | (string | Hcl)[] | undefined = hcl[nested[1]];
+      if (existing === undefined) {
+        hcl[nested[1]] = [child];
+      } else if (
+        Array.isArray(existing) &&
+        existing.length > 0 &&
+        existing.every((item) => typeof item !== 'string')
+      ) {
+        existing.push(child);
+      } else {
+        unreadable.push(entry);
+      }
+    } else if (assignment?.[1] !== undefined && !Object.hasOwn(hcl, assignment[1])) {
+      const value = entry.slice(assignment[0].length);
+      hcl[assignment[1]] =
+        value.startsWith('[') && enclosed(value, 0).length === value.length - 2
+          ? splitItems(enclosed(value, 0))
+          : value;
+    } else {
+      unreadable.push(entry);
+    }
+  }
+  if (unreadable.length > 0) hcl['?'] = unreadable;
+  return hcl;
+}
+
+/** `blocksOf` の本文（見出しの行から、閉じ括弧の手前まで）を読む。 */
+const hclOfBlock = (body: string): Hcl => hclOf(`${body.slice(body.indexOf('{'))}\n}`);
+
+/** 入れ子のブロックの中も含めた、すべての属性の `[キー, 値]`（リストは要素を `, ` でつなぐ。`?` は読めない行ごと）。 */
+function flatEntries(hcl: Hcl): [string, string][] {
+  return Object.entries(hcl).flatMap(([key, value]): [string, string][] => {
+    if (typeof value === 'string') return [[key, value]];
+    const items: (string | Hcl)[] = value;
+    const strings = items.filter((item): item is string => typeof item === 'string');
+    if (strings.length === items.length) {
+      return key === '?'
+        ? strings.map((raw): [string, string] => [key, raw])
+        : [[key, strings.join(', ')]];
+    }
+    return items.flatMap((item) => (typeof item === 'string' ? [] : flatEntries(item)));
+  });
 }
 
 /** 属性の書き方（`key = …`・`"key" = …`・`key: …`）を問わずに、キーの出現に当たる正規表現の断片。 */
@@ -317,38 +388,163 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     );
   });
 
-  // 実行ロールが読める秘密の範囲は、ポリシーの中身だけでなく、実行ロールに結び付くものすべてで決まる（付け替え・2つ目の結び付きも含む）。
-  it('実行ロールに結び付くのは ECS の管理ポリシーと task_execution_parameters のポリシーの2つだけで、パラメータを読む操作を与えるのはそのポリシーの ssm:GetParameters だけである', () => {
+  // 秘密のパラメータを誰がどの操作で読めるかは、付いているポリシーの操作と、そのロールを引き受けられる相手の両方で決まる。
+  // 操作やキーを1つずつ数える・禁じる形では、ワイルドカード（ssm:*）・信頼する相手・次のキーで同じことが起きるため、
+  // IAM の面（aws_iam_ で始まるブロックと、policy・assume_role_policy を持つブロック）の全体を、この表とちょうど同じかで照合する。
+  it('IAM の面（ロール・ポリシーの文書・ポリシーを受けるブロック・結び付き）は、表とちょうど同じである', () => {
+    const iamSurface: Record<string, Hcl> = {
+      'data.aws_iam_policy_document.ecs_tasks_assume': {
+        statement: [
+          {
+            actions: ['"sts:AssumeRole"'],
+            principals: [{ type: '"Service"', identifiers: ['"ecs-tasks.amazonaws.com"'] }],
+          },
+        ],
+      },
+      'resource.aws_iam_role.task_execution': {
+        name: '"workspace-chat-task-execution"',
+        assume_role_policy: 'data.aws_iam_policy_document.ecs_tasks_assume.json',
+      },
+      'resource.aws_iam_role_policy_attachment.task_execution_managed': {
+        role: 'aws_iam_role.task_execution.name',
+        policy_arn: '"arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"',
+      },
+      'data.aws_iam_policy_document.task_execution_parameters': {
+        // resources は、上の「ちょうど同じ」の検査が secrets の指すパラメータと照合する。
+        statement: [
+          {
+            actions: ['"ssm:GetParameters"'],
+            resources: executionResources.map(({ item }) => item),
+          },
+        ],
+      },
+      'resource.aws_iam_role_policy.task_execution_parameters': {
+        name: '"parameters"',
+        role: 'aws_iam_role.task_execution.id',
+        policy: 'data.aws_iam_policy_document.task_execution_parameters.json',
+      },
+      'resource.aws_iam_role.migrate_task': {
+        name: '"workspace-chat-migrate-task"',
+        assume_role_policy: 'data.aws_iam_policy_document.ecs_tasks_assume.json',
+      },
+      'data.aws_iam_policy_document.task_exec_command': {
+        statement: [
+          {
+            actions: [
+              '"ssmmessages:CreateControlChannel"',
+              '"ssmmessages:CreateDataChannel"',
+              '"ssmmessages:OpenControlChannel"',
+              '"ssmmessages:OpenDataChannel"',
+            ],
+            resources: ['"*"'],
+          },
+        ],
+      },
+      'resource.aws_iam_role_policy.task_exec_command': {
+        name: '"exec-command"',
+        role: 'aws_iam_role.migrate_task.id',
+        policy: 'data.aws_iam_policy_document.task_exec_command.json',
+      },
+      'data.aws_iam_policy_document.web_bucket': {
+        statement: [
+          {
+            actions: ['"s3:GetObject"'],
+            resources: ['"${aws_s3_bucket.web.arn}/*"'],
+            principals: [{ type: '"Service"', identifiers: ['"cloudfront.amazonaws.com"'] }],
+            condition: [
+              {
+                test: '"StringEquals"',
+                variable: '"AWS:SourceArn"',
+                values: ['aws_cloudfront_distribution.main.arn'],
+              },
+            ],
+          },
+        ],
+      },
+      'resource.aws_s3_bucket_policy.web': {
+        bucket: 'aws_s3_bucket.web.id',
+        policy: 'data.aws_iam_policy_document.web_bucket.json',
+      },
+    };
+    const blocks = (['resource', 'data'] as const).flatMap((kind) =>
+      blocksOf(kind, '\\w+').map(({ type, name, body }) => ({
+        key: `${kind}.${type}.${name}`,
+        type,
+        hcl: hclOfBlock(body),
+      })),
+    );
+    // 書き方を問わずに数えたブロックと、読めたブロックが一致する（読めないブロックの中の IAM を黙って外さない）。
+    expect(countOf(terraform, /\b(?:resource|data)\s+"/g)).toBe(blocks.length);
+    const policyKey = /^(?:assume_role_)?policy$/;
+    const surface = blocks.filter(
+      ({ type, hcl }) =>
+        type.startsWith('aws_iam_') || Object.keys(hcl).some((key) => policyKey.test(key)),
+    );
+    expect(Object.fromEntries(surface.map(({ key, hcl }) => [key, hcl]))).toEqual(iamSurface);
+    // ポリシーを受ける属性は、面のブロックの最も外側にしか無い（入れ子のブロックの中に書いたものを黙って外さない）。
+    expect(countOf(terraform, new RegExp(attribute('(?:assume_role_)?policy'), 'g'))).toBe(
+      surface.flatMap(({ hcl }) => Object.keys(hcl)).filter((key) => policyKey.test(key)).length,
+    );
+  });
+
+  // 実行ロールを execution_role_arn のほか（task_role_arn など）から指すと、その先のコンテナが実行ロールの権限でパラメータを読める。
+  it('実行ロールを指すのは、表の結び付き2つとタスク定義の execution_role_arn だけで、ロール名を文字列で書かない', () => {
     // 実行ロールへの参照は、この2つの結び付きと、タスク定義の execution_role_arn だけである（足した・付け替えた結び付きは数が合わない）。
     expect(countOf(terraform, /\baws_iam_role\.task_execution\b/g)).toBe(
       2 + countOf(terraform, /\bexecution_role_arn\s*=\s*aws_iam_role\.task_execution\.arn\b/g),
     );
     // ロール名の文字列で結び付けると、参照の数に現れない。ロール名は自分のブロックの1箇所だけに書き、role を文字列で書かない。
-    // ロールのブロックの中で結び付ける引数（managed_policy_arns・inline_policy）も使わない。
     const executionRole = block('resource', 'aws_iam_role', 'task_execution');
     const executionRoleName = stringAttribute(executionRole, 'name') ?? '';
     expect(executionRoleName).not.toBe('');
     expect(terraform.split(`"${executionRoleName}"`).length - 1).toBe(1);
     expect(countOf(terraform, new RegExp(`${attribute('roles?')}\\s*\\[?\\s*"`, 'g'))).toBe(0);
+  });
+
+  // 秘密の値は state とプランに残さない（cache.tf・database.tf の冒頭）。パラメータの name と type だけを見ると、value_wo を value に替えても緑になる。
+  it('秘密の値は、ephemeral の random_password から write-only 引数（*_wo）でだけ渡す', () => {
+    const resources = blocksOf('resource', '\\w+').map(({ type, name, body }) => ({
+      at: `${type}.${name}`,
+      type,
+      hcl: hclOfBlock(body),
+    }));
+    expect(countOf(terraform, /\bresource\s+"/g)).toBe(resources.length);
+    // 乱数の元は ephemeral の random_password だけ（resource・data で作ると、値が state に残る）。値を読むデータソース aws_ssm_parameter も使わない。
+    expect(countOf(terraform, /"random_(?:password|string)"/g)).toBe(
+      countOf(terraform, /^ephemeral "random_password" "\w+" \{$/gm),
+    );
+    const parameters = resources.filter(({ type }) => type === 'aws_ssm_parameter');
+    expect(countOf(terraform, /"aws_ssm_parameter"/g)).toBe(parameters.length);
+    // パラメータのキーは許可したものだけ（value・insecure_value で平文を渡させない。読めない行も `?` として外に出る）。
+    expect(parameters.length).toBeGreaterThanOrEqual(secretEnvs.length);
     expect(
-      countOf(executionRole, new RegExp(attribute('(?:managed_policy_arns|inline_policy)'), 'g')) +
-        countOf(executionRole, /\binline_policy\s*\{/g),
-    ).toBe(0);
-    const managed = block('resource', 'aws_iam_role_policy_attachment', 'task_execution_managed');
-    expect(managed).toMatch(/\brole\s*=\s*aws_iam_role\.task_execution\.name\b/);
-    expect(/\bpolicy_arn\s*=\s*"([^"]+)"/.exec(managed)?.[1]).toBe(
-      'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy',
+      parameters
+        .map(({ at, hcl }) => `${at}: ${Object.keys(hcl).sort().join(', ')}`)
+        .filter((keys) => !keys.endsWith(': name, tier, type, value_wo, value_wo_version')),
+    ).toEqual([]);
+    // どのリソースでも、password・secret・token を含むキーは write-only 引数とその版だけ（読めない行に含まれていても落とす）。
+    const secretWord = /password|secret|token/i;
+    const entries = resources.flatMap(({ at, hcl }) =>
+      flatEntries(hcl).map(([key, value]) => ({ at, key, value })),
     );
-    const parameters = block('resource', 'aws_iam_role_policy', 'task_execution_parameters');
-    expect(parameters).toMatch(/\brole\s*=\s*aws_iam_role\.task_execution\.id\b/);
-    expect(parameters).toMatch(
-      /\bpolicy\s*=\s*data\.aws_iam_policy_document\.task_execution_parameters\.json\b/,
-    );
-    const policy = block('data', 'aws_iam_policy_document', 'task_execution_parameters');
-    expect(countOf(policy, /\bstatement\s*\{/g)).toBe(1);
-    expect(itemsOf(policy, 'actions')).toEqual(['"ssm:GetParameters"']);
-    // パラメータを読む操作は、ほかのどのポリシーにも書かない（コメントは除いてから数える）。
-    expect(countOf(terraform, /ssm:GetParameter/g)).toBe(1);
+    expect(
+      entries
+        .filter(({ key, value }) =>
+          key === '?'
+            ? secretWord.test(value)
+            : secretWord.test(key) && !/_wo(?:_version)?$/.test(key),
+        )
+        .map(({ at, key }) => `${at}: ${key}`),
+    ).toEqual([]);
+    // write-only 引数の値は ephemeral の random_password から作る（リテラルの秘密をファイルに書かない）。書き方を問わずに数えた *_wo と数が合う。
+    const writeOnly = entries.filter(({ key }) => key.endsWith('_wo'));
+    expect(writeOnly.length).toBe(countOf(terraform, new RegExp(attribute('\\w+_wo'), 'g')));
+    expect(writeOnly.length).toBeGreaterThanOrEqual(secretEnvs.length);
+    expect(
+      writeOnly
+        .filter(({ value }) => !value.includes('ephemeral.random_password.'))
+        .map(({ at, key }) => `${at}: ${key}`),
+    ).toEqual([]);
   });
 
   // 名前ごとに最初の1件だけを見ると、2つ目のタスク定義の同じ名前の要素が照合されない。secrets の要素すべてを照合する。

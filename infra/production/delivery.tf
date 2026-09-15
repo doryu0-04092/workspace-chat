@@ -51,6 +51,8 @@ resource "aws_cloudfront_origin_access_control" "web" {
 }
 
 # CloudFront（このディストリビューション）からの読み出しだけを許す。
+# 踏むと壊れる: この文書とバケットのポリシーは IAM の面として、apps/api/src/config/api-config-infra.test.ts の iamSurface の表とちょうど同じかで照合する
+# （変えたら表も直す。条件は compute.tf の「IAM のロール」の注記）。
 data "aws_iam_policy_document" "web_bucket" {
   statement {
     actions   = ["s3:GetObject"]
