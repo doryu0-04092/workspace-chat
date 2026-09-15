@@ -2,7 +2,7 @@ import { Logger, Module } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { AuthModule } from '../auth/auth.module';
 import { MetricsWriter } from '../logging/metrics';
-import { VALKEY_CLIENT, ValkeyModule } from '../rate-limit/rate-limit.module';
+import { RateLimitModule, VALKEY_CLIENT, ValkeyModule } from '../rate-limit/rate-limit.module';
 import { PresenceRegistry } from './presence-registry';
 import { RealtimeEmitter } from './realtime.emitter';
 import { RealtimeGateway } from './realtime.gateway';
@@ -13,7 +13,7 @@ import { RoomMembershipReconciler } from './room-membership-reconciler';
 
 /** リアルタイム配信（F-16）と在席（F-22）。Socket.IO のサーバーの設定は createApp が RealtimeIoAdapter で当てる。 */
 @Module({
-  imports: [AuthModule, ValkeyModule],
+  imports: [AuthModule, ValkeyModule, RateLimitModule],
   providers: [
     RealtimeGateway,
     RealtimeEmitter,
