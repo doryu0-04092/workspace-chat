@@ -8,11 +8,11 @@ type Call = { key: string; ttl: number; limit: number; blockDuration: number; na
 class FakeStorage implements ThrottlerStorage {
   readonly calls: Call[] = [];
   failing = false;
+  failure: Error = Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
   constructor(private readonly result: Record) {}
   async increment(key: string, ttl: number, limit: number, blockDuration: number, name: string) {
     this.calls.push({ key, ttl, limit, blockDuration, name });
-    if (this.failing)
-      throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+    if (this.failing) throw this.failure;
     return this.result;
   }
 }
@@ -123,5 +123,18 @@ describe('Valkey が止まったときにメモリへ迂回するレート制限
     await storage.increment('secret-tracker-key', 60_000, 10, 60_000, 'default');
     expect(lines.warn.join('\n')).not.toContain('secret-tracker-key');
     expect(lines.warn.join('\n')).toContain('ECONNREFUSED');
+  });
+
+  // code を持たない失敗（ioredis の「Reached the max retries per request limit」など）では、種類の名前だけを残す（#401）。
+  it('code を持たない失敗では、ログに種類の名前だけを出し、メッセージを出さない', async () => {
+    const { storage, primary, lines } = setup();
+    primary.failing = true;
+    primary.failure = new Error(
+      'valkey.internal.example:6379 Reached the max retries per request limit',
+    );
+    await storage.increment('k', 60_000, 10, 60_000, 'default');
+    expect(lines.warn).toHaveLength(1);
+    expect(lines.warn[0]).toMatch(/: Error$/);
+    expect(lines.warn[0]).not.toContain('valkey.internal.example');
   });
 });
