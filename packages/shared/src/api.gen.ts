@@ -339,6 +339,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/channels/{channelId}/mention-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * メンションの補完候補（F-20）
+         * @description 入力欄の `@` に続く文字列（prefix）で前方一致する、そのチャンネルの参加者で退会していない利用者を、ユーザーID の小文字の昇順に最大10人返す （機能一覧 9.1。候補は投稿時の宛先解決で解決できる利用者と一致させ、照合は大文字小文字によらない）。 コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加者でなければ、パブリックは 403 not_a_channel_member・プライベートは 404。 オーナーの例外は及ばない（参加していないオーナーも同じ）。別のワークスペースのチャンネル・無いチャンネルは 404
+         */
+        get: operations["listMentionCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{id}/channels/{channelId}/members": {
         parameters: {
             query?: never;
@@ -1615,6 +1640,48 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             /** @description オーナーでない（owner_only） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listMentionCandidates: {
+        parameters: {
+            query?: {
+                /** @description `@` に続けて入力した文字列。英数字とアンダースコアの 0〜30 文字で、それ以外の形なら 400。省略・空なら参加者の全員が照合に当たる */
+                prefix?: string;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 候補（ユーザーID の小文字の昇順。最大10人。実装時に決めた値。機能一覧 9.1） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
             403: {
                 headers: {
                     [name: string]: unknown;

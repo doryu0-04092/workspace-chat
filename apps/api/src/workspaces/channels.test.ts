@@ -431,4 +431,154 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
       }
     });
   });
+
+  // 機能一覧 9.1（F-20）: メンションの補完候補。候補は投稿時の宛先解決（経路1）で解決できる利用者と一致させ、違うのは前方一致であることだけ。#494。
+  // CLAUDE.md「必ずテストを書く箇所」: 検索がプライベートチャンネルを漏らさないこと（補完候補も、非参加者にプライベートチャンネルの参加者を出さない）。
+  describe('メンションの補完候補（F-20。コードは2段階・オーナーの例外なし）', () => {
+    function candidates(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      query = '',
+    ): Promise<Response> {
+      return request(
+        'GET',
+        `/workspaces/${workspaceId}/channels/${channelId}/mention-candidates${query}`,
+        by.authorization,
+      );
+    }
+
+    /** ユーザーID を決めて利用者を作り、ワークスペースに参加させる（ログインはしない。候補の対象にするだけ）。 */
+    async function userNamed(workspaceId: string, loginId: string): Promise<LoggedIn> {
+      const user = await prisma.user.create({
+        data: { loginId, displayName: `候補の人 ${loginId}`, passwordHash: 'argon2id-placeholder' },
+      });
+      await prisma.membership.create({ data: { workspaceId, userId: user.id, role: 'MEMBER' } });
+      return { authorization: '', id: user.id, loginId };
+    }
+
+    function summaryOf(user: LoggedIn) {
+      return { id: user.id, userId: user.loginId, displayName: expect.any(String) as string };
+    }
+
+    /** この it だけのユーザーID の頭（ほかの it の利用者と前方一致しない）。 */
+    function uniqueTag(): string {
+      sequence += 1;
+      return `m${Date.now().toString(36)}${sequence}`;
+    }
+
+    it('参加者は、ユーザーID の前方一致（大文字小文字によらない）で、退会者と非参加者を除いた候補を、ユーザーID の小文字の昇順で取得できる', async () => {
+      const owner = await login();
+      const member = await login();
+      const workspace = await workspaceWith(owner, member);
+      const tag = uniqueTag();
+      // 登録した綴りに大文字を含む側（列の lower() が要る）と、小文字だけの側（引数の lower() が要る）を並べる
+      const bravo = await userNamed(workspace.id, `${tag.toUpperCase()}_Bravo`);
+      const alpha = await userNamed(workspace.id, `${tag}_alpha`);
+      const gone = await userNamed(workspace.id, `${tag}_charlie`);
+      // 同じワークスペースにいて、このチャンネルに参加していない
+      await userNamed(workspace.id, `${tag}_delta`);
+      const channel = await channelRow(workspace.id, 'mention', 'PRIVATE', [
+        member,
+        bravo,
+        alpha,
+        gone,
+      ]);
+      await prisma.user.update({ where: { id: gone.id }, data: { deletedAt: new Date() } });
+
+      const res = await candidates(member, workspace.id, channel, `?prefix=${tag.toUpperCase()}`);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([summaryOf(alpha), summaryOf(bravo)]);
+    });
+
+    it('候補は10人までで、ユーザーID の小文字の昇順の先頭から返す。prefix を省くと参加者の全員が照合に当たる', async () => {
+      const owner = await login();
+      const member = await login();
+      const workspace = await workspaceWith(owner, member);
+      const tag = uniqueTag();
+      const people: LoggedIn[] = [];
+      for (let i = 0; i < 11; i += 1) {
+        people.push(await userNamed(workspace.id, `${tag}_p${String(i).padStart(2, '0')}`));
+      }
+      const channel = await channelRow(workspace.id, 'many', 'PUBLIC', [member, ...people]);
+
+      const byPrefix = await candidates(member, workspace.id, channel, `?prefix=${tag}`);
+      expect(byPrefix.status).toBe(200);
+      expect(await byPrefix.json()).toEqual(people.slice(0, 10).map(summaryOf));
+
+      // member のユーザーID（Ch_…）は小文字にすると tag（m…）より前に並ぶ
+      const all = await candidates(member, workspace.id, channel);
+      expect(all.status).toBe(200);
+      expect(await all.json()).toEqual([summaryOf(member), ...people.slice(0, 9).map(summaryOf)]);
+    });
+
+    it('前方一致は `_` を文字として比べる（ワイルドカードにしない）', async () => {
+      const owner = await login();
+      const member = await login();
+      const workspace = await workspaceWith(owner, member);
+      const tag = uniqueTag();
+      const underscore = await userNamed(workspace.id, `${tag}_a`);
+      const letter = await userNamed(workspace.id, `${tag}xa`);
+      const channel = await channelRow(workspace.id, 'wild', 'PUBLIC', [
+        member,
+        underscore,
+        letter,
+      ]);
+
+      const res = await candidates(member, workspace.id, channel, `?prefix=${tag}_`);
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([summaryOf(underscore)]);
+    });
+
+    it('所属していなければ種別によらず 404、所属していればパブリックは 403・プライベートは 404。参加していないオーナーも同じ（例外は及ばない）', async () => {
+      const owner = await login();
+      const participant = await login();
+      const bystander = await login();
+      const outsider = await login();
+      const workspace = await workspaceWith(owner, participant, bystander);
+      const open = await channelRow(workspace.id, 'open', 'PUBLIC', [participant]);
+      const secret = await channelRow(workspace.id, 'secret', 'PRIVATE', [participant]);
+
+      for (const channel of [open, secret]) {
+        const res = await candidates(outsider, workspace.id, channel);
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual(NOT_FOUND);
+      }
+      for (const by of [bystander, owner]) {
+        const publicRes = await candidates(by, workspace.id, open);
+        expect(publicRes.status).toBe(403);
+        expect(((await publicRes.json()) as ErrorResponse).code).toBe('not_a_channel_member');
+        const privateRes = await candidates(by, workspace.id, secret);
+        expect(privateRes.status).toBe(404);
+        expect(await privateRes.json()).toEqual(NOT_FOUND);
+      }
+    });
+
+    it('別のワークスペースのチャンネル・存在しないチャンネルは 404', async () => {
+      const owner = await login();
+      const workspace = await workspaceWith(owner);
+      const other = await workspaceWith(owner);
+      const elsewhere = await channelRow(other.id, 'elsewhere', 'PUBLIC', [owner]);
+
+      for (const channel of [elsewhere, MISSING_ID]) {
+        const res = await candidates(owner, workspace.id, channel);
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual(NOT_FOUND);
+      }
+    });
+
+    it('prefix がユーザーID に使えない文字を含む・31 文字以上なら 400', async () => {
+      const owner = await login();
+      const member = await login();
+      const workspace = await workspaceWith(owner, member);
+      const channel = await channelRow(workspace.id, 'form', 'PUBLIC', [member]);
+
+      for (const query of ['?prefix=a-b', `?prefix=${'a'.repeat(31)}`]) {
+        const res = await candidates(member, workspace.id, channel, query);
+        expect(res.status).toBe(400);
+      }
+    });
+  });
 });

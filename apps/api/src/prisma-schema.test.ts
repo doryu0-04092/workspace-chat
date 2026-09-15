@@ -1843,6 +1843,117 @@ describe('Prisma のスキーマとマイグレーション', () => {
     });
 
     /**
+     * メンションの**補完候補**（機能一覧 9.1。#90）を返す問い合わせ。
+     *
+     * **条件は経路1（`mentionTargetByLoginId`）と同じ**——対象も要求する側も、そのチャンネルの参加者で、退会していない。
+     * **違うのは照合が前方一致であることだけである。** 候補に出たのに投稿で解決されない利用者を作らない。
+     * 候補の提示は解決ではないため、「メンションの解決には2つの経路があり」の2つには数えない。
+     *
+     * **`LIKE` を使わない。** `_` はユーザーID に使える文字であり、`LIKE` のワイルドカードでもある——
+     * エスケープを書き漏らすと `a_` が `ab` に当たる。`starts_with` は文字をそのまま比べる。
+     *
+     * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す（REVIEW.md 3 / CWE-89）。
+     * `prefix` は入力欄の自由入力であり、`viewerId` はトークンから導く値である（`mentionTargetByLoginId` と同じ）。
+     */
+    function mentionCandidatesByPrefix({
+      viewerId,
+      channelId,
+      prefix,
+    }: {
+      viewerId: string;
+      channelId: string;
+      prefix: string;
+    }): string {
+      return `
+        SELECT u."id"
+        FROM "User" u
+        JOIN "ChannelMember" cm
+          ON cm."userId" = u."id" AND cm."channelId" = '${channelId}'
+        JOIN "ChannelMember" vcm
+          ON vcm."channelId" = '${channelId}' AND vcm."userId" = '${viewerId}'
+        JOIN "User" viewer
+          ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
+        WHERE starts_with(lower(u."userId"), lower('${prefix}'))
+          AND u."deletedAt" IS NULL
+        ORDER BY lower(u."userId");
+      `;
+    }
+
+    it('補完候補は、経路1 で解決される利用者をユーザーID の前方で返し、消し込みを取りこぼした退会者は返さない', async () => {
+      const viewerId = '00000000-0000-7000-8000-000000000002';
+      const channelId = '00000000-0000-7000-8000-0000000000c2';
+      const { userId, loginId } = await createDeletedUserKeepingMembership();
+      // 大文字にして、照合の両側の lower() を要る形にする
+      const query = mentionCandidatesByPrefix({
+        viewerId,
+        channelId,
+        prefix: loginId.toUpperCase(),
+      });
+
+      // **同じ利用者で、退会前は候補に出ることを先に見る**（否定側だけだと、常に空を返す問い合わせでも緑になる）
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = NULL WHERE "id" = '${userId}';`);
+      expect(await expectSqlToSucceed(query)).toBe(userId);
+
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';`);
+      expect(await expectSqlToSucceed(query)).toBe('');
+    });
+
+    it('補完候補の前方一致は `_` を文字として比べ、ワイルドカードにしない', async () => {
+      const tag = randomUUID().slice(0, 8);
+      const underscoreId = randomUUID();
+      const letterId = randomUUID();
+      const channelId = '00000000-0000-7000-8000-0000000000c2';
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${underscoreId}', 'c${tag}_a', '下線の人', 'argon2id-placeholder'),
+                 ('${letterId}', 'c${tag}xa', '文字の人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${underscoreId}', 'MEMBER'),
+                 ('${randomUUID()}', '${ws}', '${letterId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '${channelId}', '${ws}', '${underscoreId}'),
+                 ('${randomUUID()}', '${channelId}', '${ws}', '${letterId}');
+      `);
+
+      const output = await expectSqlToSucceed(
+        mentionCandidatesByPrefix({
+          viewerId: '00000000-0000-7000-8000-000000000002',
+          channelId,
+          prefix: `c${tag}_`,
+        }),
+      );
+
+      expect(output).toBe(underscoreId);
+    });
+
+    it('参加していない要求する側・退会した要求する側には、補完候補を返さない', async () => {
+      // 経路1 と同じく、非参加者が前方一致を1文字ずつ試してプライベートチャンネルの参加者を探れないようにする
+      const viewerId = randomUUID();
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${viewerId}', 'cand_elsewhere_${randomUUID().slice(0, 8)}', '要求側・別チャンネルの人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${viewerId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000c1', '${ws}', '${viewerId}');
+      `);
+      const { userId: ghostViewerId } = await createDeletedUserKeepingMembership();
+
+      for (const requester of [viewerId, ghostViewerId]) {
+        const output = await expectSqlToSucceed(
+          mentionCandidatesByPrefix({
+            viewerId: requester,
+            channelId: '00000000-0000-7000-8000-0000000000c2',
+            prefix: 'insider',
+          }),
+        );
+        expect(output).toBe('');
+      }
+    });
+
+    /**
      * 表示時の参照先解決 — 既に投稿され、対象が確定しているメッセージ本文中の
      * メンションを描画するための問い合わせ（機能一覧 9.1 の経路2）。
      *
