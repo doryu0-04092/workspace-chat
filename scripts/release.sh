@@ -45,11 +45,23 @@ migrate_repository=$(tf output -raw ecr_migrate_repository_url)
 registry=${api_repository%%/*}
 aws ecr get-login-password | docker login --username AWS --password-stdin "$registry" >/dev/null
 
-echo "== 2. イメージ（linux/arm64）を作って push する"
+echo "== 2. イメージ（linux/arm64）を作り、ARM64 で動くことを確かめてから push する"
+# ARM64 で動くことは CI では確かめていない（CI の code は amd64 のイメージで scripts/api-image.test.sh を回す）。
+# push の前にここで、ネイティブモジュール（argon2）・Prisma の CLI・psql が ARM64 のイメージの中で動くことを見る。
 docker buildx build --platform linux/arm64 --file apps/api/Dockerfile --target runtime \
-  --tag "$api_repository:$IMAGE_TAG" --push .
+  --tag "$api_repository:$IMAGE_TAG" --load .
 docker buildx build --platform linux/arm64 --file apps/api/Dockerfile --target migrate \
-  --tag "$migrate_repository:$IMAGE_TAG" --push .
+  --tag "$migrate_repository:$IMAGE_TAG" --load .
+docker run --rm --platform linux/arm64 --entrypoint node "$api_repository:$IMAGE_TAG" \
+  -e 'require(require("node:module").createRequire("/app/apps/api/dist/main.js").resolve("argon2"))' ||
+  fail "ARM64 の api のイメージで argon2 を読めない"
+docker run --rm --platform linux/arm64 --entrypoint node "$migrate_repository:$IMAGE_TAG" \
+  node_modules/prisma/build/index.js --version >/dev/null ||
+  fail "ARM64 のマイグレーション用のイメージで Prisma の CLI が動かない"
+docker run --rm --platform linux/arm64 --entrypoint psql "$migrate_repository:$IMAGE_TAG" --version ||
+  fail "ARM64 のマイグレーション用のイメージで psql が動かない"
+docker push "$api_repository:$IMAGE_TAG"
+docker push "$migrate_repository:$IMAGE_TAG"
 
 echo "== 3. マイグレーション用のタスク定義を新しいタグにする"
 tf apply -input=false -target=aws_ecs_task_definition.migrate
