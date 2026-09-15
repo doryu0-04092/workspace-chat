@@ -171,6 +171,6 @@ resource "aws_vpc_security_group_ingress_rule" "valkey_from_task" {
   security_group_id            = aws_security_group.valkey.id
   referenced_security_group_id = aws_security_group.task.id
   ip_protocol                  = "tcp"
-  from_port                    = 6379
-  to_port                      = 6379
+  from_port                    = local.valkey_port
+  to_port                      = local.valkey_port
 }
