@@ -43,9 +43,10 @@ locals {
   db_storage_encrypted   = true
   db_publicly_accessible = false
 
-  # pg_bigm は共有ライブラリの事前読み込みを要する（pg_bigm の文書「must be set to 'pg_bigm'」）。RDS が既定で読み込む pg_stat_statements も並べて残す。
+  # pg_bigm は共有ライブラリの事前読み込みを要する（pg_bigm の文書「must be set to 'pg_bigm'」）。RDS の postgres17 の既定（pg_stat_statements,pg_tle。
+  # aws rds describe-engine-default-parameters で確かめた・2026-09-16）を残したまま足す。
   # 静的パラメータのため、作った後に変えたら再起動が要る。
-  db_shared_preload_libraries = "pg_stat_statements,pg_bigm"
+  db_shared_preload_libraries = "pg_stat_statements,pg_tle,pg_bigm"
   db_static_parameter_apply   = "pending-reboot"
 
   # サーバー側でも SSL でない接続を断る（技術スタックの「DB への接続の暗号化」）。RDS for PostgreSQL 15 以降の既定は 1 だが、
