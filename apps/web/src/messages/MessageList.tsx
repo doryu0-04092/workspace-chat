@@ -177,7 +177,7 @@ export function MessageItem({
       {message.body === null ? (
         <p className="text-slate-500">このメッセージは削除されました</p>
       ) : (
-        <MessageBody body={message.body} />
+        <MessageBody body={message.body} mentions={message.mentions} />
       )}
       {onOpenThread && <ThreadSummary message={message} onOpen={() => onOpenThread(message)} />}
     </article>
