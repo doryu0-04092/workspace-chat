@@ -31,7 +31,13 @@ export function ThreadPanel({
       </div>
       {parent && <MessageItem message={parent} />}
       <PagedMessages pages={replies} labels={REPLY_LABELS} />
-      <MessageForm post={post} label="返信" submitLabel="返信を送信する" />
+      <MessageForm
+        post={post}
+        workspaceId={workspaceId}
+        channelId={channelId}
+        label="返信"
+        submitLabel="返信を送信する"
+      />
     </section>
   );
 }
