@@ -1,4 +1,5 @@
 # リリースの手順（scripts/release.sh）が読む値（#452）。web_url と web_bucket は delivery.tf にある。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 
 output "ecr_api_repository_url" {
   description = "api のイメージ（apps/api/Dockerfile の runtime 段）を push する先"

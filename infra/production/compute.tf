@@ -2,6 +2,7 @@
 # 技術スタック「インフラ（AWS）」のコンテナ・ロードバランサの行と、「リソースのサイジング」の ALB の行。
 #
 # タスク定義・サービス・ロググループは service.tf にある。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 
 # 踏むと壊れる: 技術スタックと要件定義書が決めた値は、この locals にだけ書く（下のブロックには、名前・識別子・説明のほかに
 # リテラルの値を書かない）。どの値も、変えても validate も plan も CI も落ちない。変えるときは、文書の行を先に直す。
@@ -49,6 +50,8 @@ resource "aws_ecs_cluster" "main" {
 }
 
 # --- IAM のロール ---------------------------------------------------------------
+#
+# 踏むと壊れる: この下のロール・ポリシー・結び付きは IAM の面に入る。足す・変えるときは、main.tf の冒頭の条件に従い、検査の iamSurface の表も直す。
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
   statement {
@@ -62,6 +65,9 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
 }
 
 # タスク実行ロール: イメージの取得・ログの送信と、secrets に渡すパラメータの読み出し。
+# 踏むと壊れる: このロールに結び付けるのは、下の管理ポリシー（AmazonECSTaskExecutionRolePolicy）の付与と task_execution_parameters の2つだけにする。
+# role はロールの参照（aws_iam_role.task_execution）で書き、ロール名の文字列で書かない。ロールのブロックに managed_policy_arns・inline_policy を書かない。
+# パラメータを読む操作（ssm:GetParameters）は task_execution_parameters の1箇所だけに書く。apps/api/src/config/api-config-infra.test.ts が確かめる。
 resource "aws_iam_role" "task_execution" {
   name               = "workspace-chat-task-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
@@ -74,6 +80,8 @@ resource "aws_iam_role_policy_attachment" "task_execution_managed" {
 
 # 踏むと壊れる: secret: true の設定のパラメータを足したら、ここの resources にも足す（足さないとタスクが起動しない）。
 # 既定の鍵（aws/ssm）で暗号化するため kms:Decrypt は要らない（ECS の文書「Required only if your secret uses a custom KMS key」）。
+# 踏むと壊れる: statement は1つだけ、actions は ["ssm:GetParameters"] だけ、resources はその場に書いたリストで、要素は aws_ssm_parameter.<名前>.arn だけにする
+# （apps/api/src/config/api-config-infra.test.ts が確かめる。"*" やリストでない式を書くと検査が落ちる）。
 data "aws_iam_policy_document" "task_execution_parameters" {
   statement {
     actions = ["ssm:GetParameters"]
