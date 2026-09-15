@@ -8,7 +8,8 @@ import { API_SETTINGS } from './api-config';
 // 落ちずに秘密が平文でタスク定義に残る（#483）。API_SETTINGS と infra/production の3箇所——タスク定義の secrets・
 // 実行ロールの ssm:GetParameters の resources・aws_ssm_parameter——が揃っていることを、Terraform のファイルを読んで確かめる。
 // **読めない書き方を、黙って数え上げから外さずに落とす**——environment の側は「含まない」の否定形のため、取りこぼすと緑のまま通る。
-// そのため、コメントを除いてから読み、**すべてのタスク定義の、同じキーのすべてのリストの、すべての要素**を数え上げる。
+// そのため、コメントを除いてから読み、**すべてのタスク定義の、同じキーのすべてのリストの、すべての要素**を数え上げ、
+// **読む箇所（ブロック・リスト・要素）ごとに、書き方を問わずにゆるく数えた出現と読めた出現が一致しなければ落とす**。
 
 const infraDir = join(__dirname, '..', '..', '..', '..', 'infra', 'production');
 
@@ -158,12 +159,34 @@ const envsOf = (task: string) =>
     .map(({ env }) => env)
     .sort();
 
+function countOf(text: string, pattern: RegExp): number {
+  return [...text.matchAll(pattern)].length;
+}
+
 describe('secret: true の設定と、Terraform での秘密の渡し方', () => {
   // 数え上げが空で通らないように。
   it('数え上げる対象がある', () => {
     expect(secretEnvs.length).toBeGreaterThanOrEqual(3);
     expect(taskDefinitions.map(({ name }) => name).sort()).toEqual(['api', 'migrate']);
     expect(environment.filter(({ task }) => task === 'api').length).toBeGreaterThanOrEqual(1);
+  });
+
+  // 読む箇所（ブロック・リスト）ごとに、書き方を問わずにゆるく数えた出現と、読めた出現を突き合わせる。
+  // 一致しなければ、読めない書き方（名前が \w の外・リストでない式など）があり、その中身は数え上げに入っていない。
+  it('タスク定義のブロックと、environment・secrets・実行ロールの resources は、どれも読める書き方である（ゆるく数えた出現と読めた出現が一致する）', () => {
+    expect(countOf(terraform, /\bresource\s+"aws_ecs_task_definition"/g)).toBe(
+      taskDefinitions.length,
+    );
+    for (const { name, body } of taskDefinitions) {
+      expect(countOf(body, /\b(?:environment|secrets)\s*=/g), name).toBe(
+        countOf(body, /\b(?:environment|secrets)\s*=\s*\[/g),
+      );
+    }
+    expect(
+      countOf(terraform, /\bdata\s+"aws_iam_policy_document"\s+"task_execution_parameters"/g),
+    ).toBe(1);
+    const policy = block('data', 'aws_iam_policy_document', 'task_execution_parameters');
+    expect(countOf(policy, /\bresources\s*=/g)).toBe(countOf(policy, /\bresources\s*=\s*\[/g));
   });
 
   it('タスク定義の environment・secrets と実行ロールの resources の要素は、どれも読める（読めない要素を黙って外さない）', () => {
