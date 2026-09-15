@@ -2,6 +2,7 @@
 # 技術スタック「インフラ（AWS）」のコンテナ・ロードバランサの行と、「リソースのサイジング」の ALB の行。
 #
 # タスク定義・サービス・ロググループは service.tf にある。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 
 # 踏むと壊れる: 技術スタックと要件定義書が決めた値は、この locals にだけ書く（下のブロックには、名前・識別子・説明のほかに
 # リテラルの値を書かない）。どの値も、変えても validate も plan も CI も落ちない。変えるときは、文書の行を先に直す。
@@ -50,11 +51,7 @@ resource "aws_ecs_cluster" "main" {
 
 # --- IAM のロール ---------------------------------------------------------------
 #
-# 踏むと壊れる: IAM の面（aws_iam_ で始まるブロックと、policy・assume_role_policy を持つブロック。delivery.tf の web_bucket も含む）は、
-# apps/api/src/config/api-config-infra.test.ts の iamSurface の表とちょうど同じかで照合する。ロール・ポリシー・操作・信頼する相手・結び付きを
-# 足す・変えるときは、秘密のパラメータを読める操作（ワイルドカードを含む）と、それを持つロールを引き受けられる相手が増えないことを確かめてから、表も直す。
-# ポリシーは aws_iam_policy_document のブロックで書き、policy・assume_role_policy には data.aws_iam_policy_document.<名前>.json だけを渡す
-# （jsonencode・ヒアドキュメント・dynamic で書くと、中身を読めずに検査が落ちる）。
+# 踏むと壊れる: この下のロール・ポリシー・結び付きは IAM の面に入る。足す・変えるときは、main.tf の冒頭の条件に従い、検査の iamSurface の表も直す。
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
   statement {

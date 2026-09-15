@@ -283,6 +283,24 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     expect(environment.filter(({ task }) => task === 'api').length).toBeGreaterThanOrEqual(1);
   });
 
+  // この検査が infra/production 全体に課す条件は main.tf の冒頭の1箇所に置く。条件を破る変更をする人がどの .tf を開いても辿れるように、
+  // main.tf のほかのどの .tf にも、そこを指す1行を置かせる（新しい .tf にも）。
+  it('main.tf の冒頭に検査の条件があり、main.tf のほかのどの .tf にも、それを指す1行がある', () => {
+    const others = infraFiles.filter((file) => file.endsWith('.tf') && file !== 'main.tf');
+    expect(others.length).toBeGreaterThanOrEqual(1);
+    expect(
+      others.filter(
+        (file) =>
+          !readFileSync(join(infraDir, file), 'utf8').includes(
+            'このファイルにも main.tf の冒頭の検査の条件が掛かる',
+          ),
+      ),
+    ).toEqual([]);
+    expect(readFileSync(join(infraDir, 'main.tf'), 'utf8')).toContain(
+      '踏むと壊れる（検査の条件）: apps/api/src/config/api-config-infra.test.ts',
+    );
+  });
+
   // 読む箇所（ファイル・ブロック・コンテナ・リスト）ごとに、書き方を問わずにゆるく数えた出現と、読めた出現を突き合わせる。
   // 一致しなければ、読めない書き方（名前が \w の外・リストでない式・locals に置いたコンテナなど）があり、その中身は数え上げに入っていない。
   it('ファイル・タスク定義のブロック・コンテナ・environment / secrets・実行ロールの resources は、どれも読める書き方である（ゆるく数えた出現と読めた出現が一致する）', () => {

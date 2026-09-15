@@ -3,8 +3,7 @@
 # 要件定義書 4.2 の「バックアップ」と「RDS の障害から復旧するとき」。
 #
 # 秘密の値は state とプランに残さない: マスターパスワードは ephemeral の random_password で作り、write-only 引数でだけ渡す。
-# 踏むと壊れる: apps/api/src/config/api-config-infra.test.ts が確かめる——aws_db_instance の password を含むキーは password_wo・password_wo_version だけ、
-# database_url のキーは name・type・tier・value_wo・value_wo_version だけにし、*_wo の値は ephemeral.random_password から作る（条件の全体は cache.tf の冒頭）。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。秘密の値の渡し方の条件もそこにある。
 #
 # 踏むと壊れる: write-only 引数で渡した値は、*_wo_version を上げるまで入れ替わらない。
 # DATABASE_URL の value_wo_version と RDS の password_wo_version は同じ乱数を渡すため、下の locals の db_password_version だけで上げる

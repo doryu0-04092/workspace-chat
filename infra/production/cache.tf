@@ -2,10 +2,7 @@
 # 技術スタック「本番の HTTPS・秘密情報・state の置き場」の秘密情報の行と、「リソースのサイジング」の ElastiCache の行。
 #
 # 秘密の値は state とプランに残さない: 乱数は ephemeral の random_password で作り、write-only 引数でだけ渡す。
-# 踏むと壊れる: apps/api/src/config/api-config-infra.test.ts がこの条件を、どの .tf についても確かめる——乱数は ephemeral の random_password だけで作る
-# （resource・data の random_password・random_string と、値を読むデータソース aws_ssm_parameter を使わない）。どのリソースでも password・secret・token を
-# 含むキーは write-only 引数（*_wo）とその版（*_wo_version）だけにし、*_wo の値は ephemeral.random_password から作る。
-# aws_ssm_parameter のキーは name・type・tier・value_wo・value_wo_version だけにする。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。秘密の値の渡し方の条件もそこにある。
 #
 # 踏むと壊れる: write-only 引数で渡した値は、*_wo_version を上げるまで入れ替わらない。
 # REDIS_URL の value_wo_version と ElastiCache の auth_token_wo_version は同じ乱数を渡すため、下の locals の
