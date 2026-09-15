@@ -251,6 +251,7 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         deleted: false,
         parentId: null,
         replyCount: 0,
+        replyParticipants: [],
       });
       expect(Number.isNaN(Date.parse(message.createdAt))).toBe(false);
       expect(await prisma.message.count({ where: { channelId } })).toBe(1);
@@ -1036,6 +1037,48 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       return { owner, alice, bob, carol, workspace, channelId, parent };
     }
 
+    /** 応答の `UserSummary` の形（表示名は login が連番で作る）。 */
+    function summaryOf(user: LoggedIn) {
+      return { id: user.id, userId: user.loginId, displayName: expect.any(String) };
+    }
+
+    it('親の replyParticipants は、削除されていない返信を書いた退会していない利用者を、最後に返信した順に最大3人返す。返信は空', async () => {
+      const { owner, alice, bob, carol, workspace, channelId, parent } = await thread();
+      const dave = await login();
+      await prisma.membership.create({
+        data: { workspaceId: workspace.id, userId: dave.id, role: 'MEMBER' },
+      });
+      for (const member of [carol, owner, dave]) {
+        await prisma.channelMember.create({
+          data: { channelId, workspaceId: workspace.id, userId: member.id },
+        });
+      }
+      await replied(alice, workspace.id, channelId, parent.id, 'alice の最初の返信');
+      await replied(bob, workspace.id, channelId, parent.id, 'bob の最初の返信');
+      await replied(carol, workspace.id, channelId, parent.id, 'carol の返信');
+      const removed = await replied(alice, workspace.id, channelId, parent.id, '消す返信');
+      await replied(owner, workspace.id, channelId, parent.id, 'owner の返信');
+      await replied(bob, workspace.id, channelId, parent.id, 'bob の2つ目の返信');
+      await replied(dave, workspace.id, channelId, parent.id, '退会する人の返信');
+      expect((await removeMessage(alice, workspace.id, channelId, removed.id)).status).toBe(204);
+      await prisma.user.update({ where: { id: dave.id }, data: { deletedAt: new Date() } });
+
+      const { messages } = await page(bob, workspace.id, channelId);
+
+      // 削除されていない最後の返信の新しい順は dave（退会）・bob・owner・carol・alice（削除した返信を除くと、最初の返信が最後）。
+      // 退会した dave を除くと alice は4人目になり、上限で外れる。
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.replyParticipants).toEqual([
+        summaryOf(bob),
+        summaryOf(owner),
+        summaryOf(carol),
+      ]);
+      const { messages: threadReplies } = await replyPage(bob, workspace.id, channelId, parent.id);
+      expect(threadReplies.map(({ replyParticipants }) => replyParticipants)).toEqual(
+        threadReplies.map(() => []),
+      );
+    });
+
     it('参加者は返信でき、201 と返信（parentId を持ち replyCount は 0）を返し、親の replyCount を1つ増やす。チャンネルの一覧には返信を混ぜない', async () => {
       const { alice, bob, workspace, channelId, parent } = await thread();
       expect(parent).toMatchObject({ parentId: null, replyCount: 0 });
@@ -1053,9 +1096,10 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         deleted: false,
         parentId: parent.id,
         replyCount: 0,
+        replyParticipants: [],
       });
       const { messages } = await page(alice, workspace.id, channelId);
-      expect(messages).toEqual([{ ...parent, replyCount: 1 }]);
+      expect(messages).toEqual([{ ...parent, replyCount: 1, replyParticipants: [summaryOf(bob)] }]);
     });
 
     it('返信の一覧は、そのスレッドの返信だけを新しい順に返し、limit で件数を絞り、nextBefore で続きを取る', async () => {
@@ -1117,7 +1161,15 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         nextBefore: null,
       });
       const { messages } = await page(bob, workspace.id, channelId);
-      expect(messages).toEqual([{ ...parent, body: null, deleted: true, replyCount: 1 }]);
+      expect(messages).toEqual([
+        {
+          ...parent,
+          body: null,
+          deleted: true,
+          replyCount: 1,
+          replyParticipants: [summaryOf(bob)],
+        },
+      ]);
     });
 
     it('所属していなければ種別によらず 404、所属していて参加していなければパブリックは 403・プライベートは 404 で、返信も返信の一覧も断る。オーナーでも同じ', async () => {
@@ -1246,7 +1298,7 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
 
       expect(await newToAlice).toEqual({ message: child, sentAt: expect.any(String) });
       expect(await updatedToAlice).toEqual({
-        message: { ...parent, replyCount: 1 },
+        message: { ...parent, replyCount: 1, replyParticipants: [summaryOf(bob)] },
         sentAt: expect.any(String),
       });
       expect(await newToCarol).toBeUndefined();
