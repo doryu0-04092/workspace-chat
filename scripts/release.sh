@@ -11,9 +11,15 @@
 #
 # apply は -auto-approve を付けない。**毎回プランを見て yes と打ってから進む。**
 #
+# 前段（初回だけ）: state のバケットを作る。この構成の state は手元のファイル（infra/bootstrap/terraform.tfstate。追跡しない）に置くため、
+# 流した端末の外に消さずに残す（失うとバケットを Terraform から操作できなくなり、取り込み直しが要る。要件定義書 4.2「復旧手順」）。
+#   terraform -chdir=infra/bootstrap init
+#   terraform -chdir=infra/bootstrap apply
+#
 # 使い方:
-#   TF_STATE_BUCKET=<state のバケット名> IMAGE_TAG=<タグ> ALARM_EMAIL=<通知先> bash scripts/release.sh
-#   state のバケット名は terraform -chdir=infra/bootstrap output -raw state_bucket で引ける（README の Terraform の節）。
+#   TF_STATE_BUCKET=$(terraform -chdir=infra/bootstrap output -raw state_bucket) \
+#     IMAGE_TAG=$(git rev-parse --short HEAD) ALARM_EMAIL=<通知先> bash scripts/release.sh
+#   アラートのメールの購読は、届く確認のメールのリンクを開くまで有効にならない。
 #
 # 前提: aws（資格情報と ap-northeast-1）・terraform・docker（buildx で linux/arm64 を作れること——x86 の端末では QEMU の登録が要る）・node と npm。
 set -euo pipefail
