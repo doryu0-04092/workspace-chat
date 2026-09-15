@@ -246,16 +246,19 @@ grep -q 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' <<<"$out" ||
   fail "別の CA で、実行用のイメージの pg が証明書の検証以外の理由で落ちた: $out"
 
 echo "== 8. どちらのイメージにも RDS の CA のバンドルがあり、本番のリージョンのルート CA を含む"
-# リージョンは infra/production/main.tf の provider "aws" の1箇所から、RDS の CA は infra/production/database.tf の db_ca_cert_identifier から読む。
+# リージョンは infra/production/main.tf の provider "aws" の1箇所から、RDS の CA は infra/production/database.tf の db_ca_cert_identifier から、
+# バンドルのパスは同じファイルの db_url_tls_parameters の sslrootcert（本番の DATABASE_URL が指すパス）から読む。
 region=$(sed -n 's/^  region = "\([^"]*\)"$/\1/p' infra/production/main.tf)
 [ -n "$region" ] || fail "infra/production/main.tf から provider のリージョンを読めない"
 ca_identifier=$(sed -n 's/^  db_ca_cert_identifier = "\([^"]*\)"$/\1/p' infra/production/database.tf)
 [ -n "$ca_identifier" ] || fail "infra/production/database.tf から db_ca_cert_identifier を読めない"
+bundle_path=$(sed -n 's/^  db_url_tls_parameters = ".*sslrootcert=\([^"&]*\).*"$/\1/p' infra/production/database.tf)
+[ -n "$bundle_path" ] || fail "infra/production/database.tf の db_url_tls_parameters から sslrootcert のパスを読めない"
 for image in "$runtime_image" "$migrate_image"; do
   # shellcheck disable=SC2016
-  docker run --rm --entrypoint node --env REGION="$region" --env CA_IDENTIFIER="$ca_identifier" "$image" -e '
+  docker run --rm --entrypoint node --env REGION="$region" --env CA_IDENTIFIER="$ca_identifier" --env BUNDLE_PATH="$bundle_path" "$image" -e '
     const { X509Certificate } = require("node:crypto");
-    const pem = require("node:fs").readFileSync("/app/certs/rds-global-bundle.pem", "utf8");
+    const pem = require("node:fs").readFileSync(process.env.BUNDLE_PATH, "utf8");
     const subjects = pem.split(/(?=-----BEGIN CERTIFICATE-----)/).filter((block) => block.includes("BEGIN"))
       .map((block) => new X509Certificate(block).subject.split("\n"));
     const kind = /^rds-ca-(rsa2048|rsa4096|ecc384)-g1$/.exec(process.env.CA_IDENTIFIER);
