@@ -258,6 +258,15 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       },
     );
 
+    // asWrittenText が後から作る文字の中の改行も、改行の要素にする（MessageBody.tsx の「remarkPlugins の並びを変えない」。#383）。
+    // 構文を読ませない記法はふつうの段落の文字のまま残るため、並びによらず改行になる——並びが効くのは、文字に替える画像だけである。
+    it('行をまたぐ画像を書いた文字に替えたときも、書いた改行を改行の要素にする', () => {
+      const container = renderBody('![画像の\n説明](https://example.com/x.png)');
+      expect(container.querySelectorAll('br')).toHaveLength(1);
+      expect(container.textContent).toContain('![画像の');
+      expect(container.textContent).toContain('説明](https://example.com/x.png)');
+    });
+
     it('書いていない文字を足さない（脚注の見出しなど）', () => {
       const container = renderBody('本文[^1]\n\n[^1]: 注');
       expect(container.textContent).not.toContain('Footnotes');
