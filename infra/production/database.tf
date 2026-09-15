@@ -19,9 +19,8 @@ locals {
   # DATABASE_URL の value_wo_version と RDS の password_wo_version が一緒に使う版。
   db_password_version = 1
 
-  # マスターパスワードは英数字 32 文字。DATABASE_URL の中に埋めるため、URL の区切りになる記号を含めない（技術スタックの秘密情報の行）。
-  db_password_length  = 32
-  db_password_special = false
+  # マスターパスワードは 32 文字。英数字だけにするのは cache.tf の random_password_special（DATABASE_URL の中に埋めるため、URL の区切りになる記号を含めない）。
+  db_password_length = 32
 
   # 接続の形（技術スタックの「DB への接続の暗号化」）。sslrootcert は api のイメージの中の RDS の CA のバンドルのパス
   # （apps/api/Dockerfile）。パスが食い違うと、api もマイグレーションも RDS に繋がらない。
@@ -44,11 +43,14 @@ locals {
   db_storage_encrypted   = true
   db_publicly_accessible = false
 
-  # pg_bigm は共有ライブラリの事前読み込みを要する（pg_bigm の文書「must be set to 'pg_bigm'」）。RDS の既定は pg_stat_statements だけを
-  # 読み込む（AWS の文書「Typically, the default DB cluster parameter group loads only the `pg_stat_statements`」）ため、両方を並べる。
+  # pg_bigm は共有ライブラリの事前読み込みを要する（pg_bigm の文書「must be set to 'pg_bigm'」）。RDS が既定で読み込む pg_stat_statements も並べて残す。
   # 静的パラメータのため、作った後に変えたら再起動が要る。
   db_shared_preload_libraries = "pg_stat_statements,pg_bigm"
   db_static_parameter_apply   = "pending-reboot"
+
+  # サーバー側でも SSL でない接続を断る（技術スタックの「DB への接続の暗号化」）。RDS for PostgreSQL 15 以降の既定は 1 だが、
+  # カスタムのパラメータグループに付け替えても外れないよう明示する。動的パラメータで、再起動なしで効く。
+  db_force_ssl = "1"
 
   # 自動バックアップ（要件定義書 4.2「バックアップ」の、保持期間と取得時間帯）。時刻は UTC。
   # 保持期間は 7 日（その間の任意の時点へ復元できる）。取得は日本時間の 03:00〜03:30、メンテナンスは月曜の日本時間 04:00〜04:30
@@ -69,7 +71,7 @@ locals {
 
 ephemeral "random_password" "db_password" {
   length  = local.db_password_length
-  special = local.db_password_special
+  special = local.random_password_special
 }
 
 resource "aws_db_subnet_group" "main" {
@@ -85,6 +87,11 @@ resource "aws_db_parameter_group" "main" {
     name         = "shared_preload_libraries"
     value        = local.db_shared_preload_libraries
     apply_method = local.db_static_parameter_apply
+  }
+
+  parameter {
+    name  = "rds.force_ssl"
+    value = local.db_force_ssl
   }
 }
 
