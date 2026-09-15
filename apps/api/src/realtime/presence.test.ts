@@ -130,11 +130,15 @@ describe('在席（F-22）', () => {
     // 画面の側の取り直しは入室要求の送り直しで行う（9.2「クライアントの要求で行う場合…入室要求として扱う」）。
     it('同じ接続が入室し直すと、一覧を取り直してから返す（ずれた一覧をそのまま返さない）', async () => {
       const { alice, bob, channelId } = await channelOfThree();
-      await enter(await t.open(t.secondBase, alice), channelId);
+      const aliceSocket = await t.open(t.secondBase, alice);
+      await enter(aliceSocket, channelId);
       const bobSocket = await t.open(t.firstBase, bob);
       await enter(bobSocket, channelId);
       await untilBothSee(channelId, alice.id, true);
-      const received = collect(await t.open(t.secondBase, alice));
+      await untilBothSee(channelId, bob.id, true);
+      // 配らないことは、届く資格のある側（部屋に入っている接続）で見る（#375）。
+      const received = await collectAfterEntries(bobSocket);
+      const aliceReceived = collect(aliceSocket);
       t.first
         .get(PresenceRegistry)
         .replace(channelId, [{ id: 'stale-socket', userId: 'stale-user' }]);
@@ -144,6 +148,7 @@ describe('在席（F-22）', () => {
       expect(ack.ok && sorted(ack.present)).toEqual(sorted([alice.id, bob.id]));
       await quiet();
       expect(received).toEqual([]);
+      expect(aliceReceived).toEqual([]);
     });
   });
 
