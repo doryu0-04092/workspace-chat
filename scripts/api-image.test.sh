@@ -10,6 +10,7 @@
 # 7. 本番の DATABASE_URL の形（sslmode=verify-full&sslrootcert=<CA>）で、TLS だけを受け付ける PostgreSQL に対し、
 #    マイグレーション用のイメージ（Prisma の CLI）も実行用のイメージの pg も、サーバー証明書を CA で検証する（別の CA では繋がらない）
 # 8. どちらのイメージにも RDS の CA のバンドルがあり、本番のリージョンのルート CA を含む
+# 9. マイグレーション用のイメージには psql 17 があり、7 と同じ形の URL で CA を検証して繋がる（別の CA では繋がらない）。実行用のイメージには psql が無い
 #
 # Docker と openssl が動いていることが前提。作ったコンテナとネットワークと証明書は終わりに消す（イメージは残す）。
 set -euo pipefail
@@ -259,5 +260,25 @@ for image in "$runtime_image" "$migrate_image"; do
     if (!subjects.some((lines) => lines.includes(want))) { console.error(`${want} が無い（${subjects.length} 件）`); process.exit(1); }' ||
     fail "$image の RDS の CA のバンドルに、$region のルート CA が無い"
 done
+
+echo "== 9. マイグレーション用のイメージには psql 17 があり、本番の DATABASE_URL の形で CA を検証して繋がる。実行用のイメージには psql が無い"
+# 運用者が ECS Exec で入る先は、マイグレーション用のイメージのタスクであり api のタスクではない（技術スタックのコンテナの行。#457）。
+# psql の文書「psql works best with servers of the same or an older major version.」——RDS は 17 のため、17 の psql を入れる。
+version=$(docker run --rm --entrypoint psql "$migrate_image" --version) ||
+  fail "マイグレーション用のイメージで psql を起動できない"
+[[ "$version" == "psql (PostgreSQL) 17."* ]] || fail "マイグレーション用のイメージの psql が 17 ではない: $version"
+out=$(run_with_ca ca.pem "$tls_url" --entrypoint psql "$migrate_image" "$tls_url" \
+  --tuples-only --no-align --command "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()" 2>&1) ||
+  { echo "$out" >&2; fail "正しい CA で、マイグレーション用のイメージの psql が繋がらない"; }
+[ "$out" = "t" ] || fail "マイグレーション用のイメージの psql の出力が TLS の接続の t の1行ではない: $out"
+if out=$(run_with_ca other-ca.pem "$tls_url" --entrypoint psql "$migrate_image" "$tls_url" --command "SELECT 1" 2>&1); then
+  fail "別の CA でも、マイグレーション用のイメージの psql が繋がった（証明書を検証していない）"
+fi
+grep -q 'certificate verify failed' <<<"$out" ||
+  fail "別の CA で、マイグレーション用のイメージの psql が証明書の検証以外の理由で落ちた: $out"
+# 運用の道具を api のタスクに持たせない。調べる側（docker run）の失敗を「無い」として通さないよう、無いときの印を返させる。
+found=$(docker run --rm --entrypoint sh "$runtime_image" -c 'command -v psql || echo absent') ||
+  fail "実行用のイメージの中を調べられない"
+[ "$found" = "absent" ] || fail "実行用のイメージに psql がある: $found"
 
 echo "すべての確認を通過しました"
