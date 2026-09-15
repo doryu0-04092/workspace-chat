@@ -16,14 +16,21 @@ export type ChannelMember =
   paths['/workspaces/{id}/channels/{channelId}/members']['get']['responses'][200]['content']['application/json'][number];
 
 /**
- * チャンネルの作成・一覧・オーナーの管理用の一覧・参加者一覧（F-10。機能一覧 3.1）。
+ * メンションの補完候補の上限（機能一覧 9.1。実装時に決めた値）。
+ * **踏むと壊れる: 変えるなら `packages/shared/openapi/openapi.yaml` の `listMentionCandidates` の `maxItems` と description、機能一覧 9.1 も同じ値にする**
+ * ——応答は仕様で検証しない（openapi-validation.ts の `validateResponses: false`）ため、片方だけ変えても何も落ちない。
+ */
+const MENTION_CANDIDATE_LIMIT = 10;
+
+/**
+ * チャンネルの作成・一覧・オーナーの管理用の一覧・参加者一覧（F-10。機能一覧 3.1）と、メンションの補完候補（F-20。9.1）。
  *
  * - **要求する側の所属（`Membership`・退会していない）を最初に確かめ、無ければ存在の有無を区別せず 404**
  *   （`WorkspacesService.membershipOf`。機能一覧 1.4 の2段構えの1段目もここで満たす）
  * - **プライベートチャンネルの可視性の根拠は `ChannelMember` の有無である**（CLAUDE.md 2。`schema.prisma` の `ChannelMember`）。
  *   **オーナーでも、参加していなければ一般の一覧には出さない**——オーナーの例外は管理用の一覧と参加者一覧（人の出入りの管理）と、アーカイブ・復元の応答（管理用の一覧と同じ項目）だけ
  * - 条件の形は `apps/api/src/prisma-schema.test.ts` の参照実装（`visibleChannels` / `manageableChannels` / `channelMemberViewers` /
- *   `channelMemberList`）に揃える。値はクライアントの問い合わせ API で渡す（文字列に埋め込まない）
+ *   `channelMemberList` / `mentionCandidatesByPrefix`）に揃える。値はクライアントの問い合わせ API か、`$queryRaw` のタグ付きテンプレートのプレースホルダで渡す（文字列に埋め込まない）
  */
 @Injectable()
 export class ChannelsService {
@@ -114,5 +121,35 @@ export class ChannelsService {
       orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
     });
     return rows.map(({ membership: { user } }) => toUserSummary(user));
+  }
+
+  /**
+   * メンションの補完候補（F-20。機能一覧 9.1。参照実装は prisma-schema.test.ts の `mentionCandidatesByPrefix`）。
+   * **候補は投稿時の宛先解決（経路1）で解決できる利用者と一致させる**——対象も要求する側も、そのチャンネルの参加者で退会していない。違うのは前方一致であることだけ。
+   * **オーナーの例外は及ばない**（`members` と違い、役割によらず参加の2段階を当てる。候補に出た利用者は、参加者でなければ投稿で解決されない）。
+   * - 照合は `lower()` の前方一致で、**`LIKE` を使わない**（`_` はユーザーID の文字であり、`LIKE` のワイルドカードでもある）
+   * - **踏むと壊れる: 生の SQL は schema.prisma の列名の写し（`@map`）を通らない**——`User.loginId` の列は `"userId"` である
+   */
+  async mentionCandidates(
+    userId: string,
+    workspaceId: string,
+    channelId: string,
+    prefix: string,
+  ): Promise<ChannelMember[]> {
+    await this.workspaces.membershipOf(userId, workspaceId);
+    assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
+    const rows = await this.prisma.$queryRaw<
+      { id: string; loginId: string; displayName: string }[]
+    >`
+      SELECT u."id", u."userId" AS "loginId", u."displayName"
+      FROM "User" u
+      JOIN "ChannelMember" cm ON cm."userId" = u."id" AND cm."channelId" = ${channelId}::uuid
+      JOIN "ChannelMember" vcm ON vcm."channelId" = ${channelId}::uuid AND vcm."userId" = ${userId}::uuid
+      JOIN "User" viewer ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
+      WHERE starts_with(lower(u."userId"), lower(${prefix})) AND u."deletedAt" IS NULL
+      ORDER BY lower(u."userId")
+      LIMIT ${MENTION_CANDIDATE_LIMIT}
+    `;
+    return rows.map(toUserSummary);
   }
 }

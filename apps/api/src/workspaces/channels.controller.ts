@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard';
 import {
   type Channel,
@@ -49,5 +49,16 @@ export class ChannelsController {
     @Param('channelId') channelId: string,
   ): Promise<ChannelMember[]> {
     return this.channels.members(user.id, workspaceId, channelId);
+  }
+
+  /** メンションの補完候補（F-20。機能一覧 9.1）。`prefix` の形と既定値（空）は仕様が持ち、openapi-validation.ts が要求に入れてから届く。 */
+  @Get('channels/:channelId/mention-candidates')
+  mentionCandidates(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+    @Param('channelId') channelId: string,
+    @Query('prefix') prefix: string,
+  ): Promise<ChannelMember[]> {
+    return this.channels.mentionCandidates(user.id, workspaceId, channelId, prefix);
   }
 }
