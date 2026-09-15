@@ -67,7 +67,10 @@ export function useChannelRealtime(workspaceId: string, channelId: string): Fail
       });
     };
     const onNew = ({ message }: MessageNewPayload) => {
-      if (message.channelId === channelId) update((data) => addMessage(data, message));
+      // スレッドの返信は、チャンネル本体の一覧に混ぜない（機能一覧 6）。件数が変わった親は message:updated で置き換わる
+      if (message.channelId === channelId && message.parentId === null) {
+        update((data) => addMessage(data, message));
+      }
     };
     const onUpdated = ({ message }: MessageUpdatedPayload) => {
       if (message.channelId === channelId) update((data) => replaceMessage(data, message));
