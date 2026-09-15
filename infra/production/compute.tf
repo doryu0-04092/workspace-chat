@@ -77,6 +77,8 @@ resource "aws_iam_role_policy_attachment" "task_execution_managed" {
 
 # 踏むと壊れる: secret: true の設定のパラメータを足したら、ここの resources にも足す（足さないとタスクが起動しない）。
 # 既定の鍵（aws/ssm）で暗号化するため kms:Decrypt は要らない（ECS の文書「Required only if your secret uses a custom KMS key」）。
+# 踏むと壊れる: statement は1つだけ、actions は ["ssm:GetParameters"] だけ、resources はその場に書いたリストで、要素は aws_ssm_parameter.<名前>.arn だけにする
+# （apps/api/src/config/api-config-infra.test.ts が確かめる。"*" やリストでない式を書くと検査が落ちる）。
 data "aws_iam_policy_document" "task_execution_parameters" {
   statement {
     actions = ["ssm:GetParameters"]

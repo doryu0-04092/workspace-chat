@@ -10,6 +10,7 @@ import { API_SETTINGS } from './api-config';
 // **読めない書き方を、黙って数え上げから外さずに落とす**——environment の側は「含まない」の否定形のため、取りこぼすと緑のまま通る。
 // そのため、コメントを除いてから読み、**すべてのタスク定義の、すべてのコンテナの、同じキーのすべてのリストの、すべての要素**を数え上げ、
 // **読む箇所（ファイル・ブロック・コンテナ・リスト・要素）ごとに、書き方を問わずにゆるく数えた出現と読めた出現が一致しなければ落とす**。
+// コンテナの属性のキーは許可したものだけにする（秘密を渡す別の経路を、キーを1つずつ禁じる形では塞ぎ切れないため）。
 
 const infraDir = join(__dirname, '..', '..', '..', '..', 'infra', 'production');
 
@@ -121,6 +122,39 @@ function splitItems(inner: string): string[] {
   return items.map((item) => item.trim()).filter((item) => item !== '');
 }
 
+/**
+ * オブジェクト（`{ … }`）の最も外側の属性のキー。最も外側の `,` と改行で属性に分け、キーとして読めない属性は `undefined` にする
+ * （黙って外さない）。
+ */
+function topLevelKeys(object: string): (string | undefined)[] {
+  const inner = object.trim().slice(1, -1);
+  const entries: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let start = 0;
+  for (let i = 0; i < inner.length; i += 1) {
+    const char = inner[i];
+    if (inString) {
+      if (char === '\\') i += 1;
+      else if (char === '"') inString = false;
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === '[' || char === '{' || char === '(') {
+      depth += 1;
+    } else if (char === ']' || char === '}' || char === ')') {
+      depth -= 1;
+    } else if ((char === ',' || char === '\n') && depth === 0) {
+      entries.push(inner.slice(start, i));
+      start = i + 1;
+    }
+  }
+  entries.push(inner.slice(start));
+  return entries
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+    .map((entry) => /^"?([A-Za-z_][\w-]*)"?\s*[=:]/.exec(entry)?.[1]);
+}
+
 /** 属性の書き方（`key = …`・`"key" = …`・`key: …`）を問わずに、キーの出現に当たる正規表現の断片。 */
 const attribute = (key: string) => `\\b${key}"?\\s*[=:]`;
 
@@ -198,6 +232,40 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
       );
       expect(
         containers.filter((container) => !(container.startsWith('{') && container.endsWith('}'))),
+        name,
+      ).toEqual([]);
+
+      // コンテナの属性のキーの層: 許可したキーだけを使う。environmentFiles・secretOptions など、秘密を渡す別の経路を黙って足させない
+      // （キーを1つずつ禁じると、次のキーで同じことが起きる）。キーとして読めない属性も落とす。
+      const containerKeys = [
+        'name',
+        'image',
+        'essential',
+        'portMappings',
+        'environment',
+        'secrets',
+      ];
+      expect(
+        containers
+          .flatMap((container) => topLevelKeys(container))
+          .filter(
+            (key) => key === undefined || ![...containerKeys, 'logConfiguration'].includes(key),
+          ),
+        name,
+      ).toEqual([]);
+      const logConfigurations = containers.flatMap((container) =>
+        [...container.matchAll(new RegExp(`${attribute('logConfiguration')}\\s*\\{`, 'g'))].map(
+          (match) => `{${enclosed(container, match.index + match[0].length - 1)}}`,
+        ),
+      );
+      expect(
+        countOf(containers.join('\n'), new RegExp(attribute('logConfiguration'), 'g')),
+        name,
+      ).toBe(logConfigurations.length);
+      expect(
+        logConfigurations
+          .flatMap((configuration) => topLevelKeys(configuration))
+          .filter((key) => key === undefined || !['logDriver', 'options'].includes(key)),
         name,
       ).toEqual([]);
 

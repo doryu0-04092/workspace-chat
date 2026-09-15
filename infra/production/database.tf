@@ -127,6 +127,8 @@ resource "aws_db_instance" "main" {
   deletion_protection     = local.db_deletion_protection
 }
 
+# 踏むと壊れる: name は渡す設定の名前（/DATABASE_URL）で終わらせ、type は local.parameter_type（SecureString）にする
+# （apps/api/src/config/api-config-infra.test.ts が確かめる。cache.tf の redis_url・jwt_secret と同じ）。
 resource "aws_ssm_parameter" "database_url" {
   name             = "/workspace-chat/DATABASE_URL"
   type             = local.parameter_type
