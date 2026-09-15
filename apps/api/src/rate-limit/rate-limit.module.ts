@@ -116,7 +116,7 @@ export class RateLimitGuard extends ThrottlerGuard {
  * `@Throttle({ default: … })` で、ルートごとに上限を決める（登録・ログイン・照合で数値が違うため）。
  * 発信元は `req.ip`（Express の `trust proxy`。app-setup.ts が TRUST_PROXY_HOPS から設定する）。
  * **利用者で数えるルートは `UserRateLimitGuard` を使う**（user-rate-limit.guard.ts。枠はルートごと）。
- * **メッセージの投稿・編集・削除は、3つで1つの枠を分け合う `MessageWriteRateLimitGuard` を使う**（message-write-rate-limit.guard.ts）。
+ * **メッセージの投稿・返信・編集・削除は、4つで1つの枠を分け合う `MessageWriteRateLimitGuard` を使う**（message-write-rate-limit.guard.ts）。
  * **ガードを通らない WebSocket の入室要求は、ThrottlerModule が出す保存先（`ThrottlerStorage`）で直接数える**（ChannelRoomsGateway）。
  */
 @Module({

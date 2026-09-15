@@ -5,7 +5,7 @@ import { UserRateLimitException } from '../error-response';
 
 /**
  * 利用者単位のレート制限（機能一覧 4.1・4.2）。数える単位は発信元（`req.ip`）ではなく、AccessTokenGuard が解決した利用者である。
- * 枠はルートごとに分かれる（`@nestjs/throttler` の既定のキー）。メッセージの書き込みは `MessageWriteRateLimitGuard` が3つのルートで1つの枠にする。
+ * 枠はルートごとに分かれる（`@nestjs/throttler` の既定のキー）。メッセージの書き込みは `MessageWriteRateLimitGuard` が4つのルート（投稿・返信・編集・削除）で1つの枠にする。
  *
  * - **AccessTokenGuard（APP_GUARD）の後に走る**——全体のガードはルートのガードより先に走るため、ここでは利用者が必ず載っている
  * - 使う側は `@UseGuards(UserRateLimitGuard)` と `@Throttle({ default: … })` で上限を決める。保存先は RateLimitGuard と同じ
