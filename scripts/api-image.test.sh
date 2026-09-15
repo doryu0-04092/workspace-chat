@@ -246,17 +246,21 @@ grep -q 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' <<<"$out" ||
   fail "別の CA で、実行用のイメージの pg が証明書の検証以外の理由で落ちた: $out"
 
 echo "== 8. どちらのイメージにも RDS の CA のバンドルがあり、本番のリージョンのルート CA を含む"
-# リージョンは infra/production/main.tf の provider "aws" の1箇所から読む。RDS の既定の CA は rds-ca-rsa2048-g1 である。
+# リージョンは infra/production/main.tf の provider "aws" の1箇所から、RDS の CA は infra/production/database.tf の db_ca_cert_identifier から読む。
 region=$(sed -n 's/^  region = "\([^"]*\)"$/\1/p' infra/production/main.tf)
 [ -n "$region" ] || fail "infra/production/main.tf から provider のリージョンを読めない"
+ca_identifier=$(sed -n 's/^  db_ca_cert_identifier = "\([^"]*\)"$/\1/p' infra/production/database.tf)
+[ -n "$ca_identifier" ] || fail "infra/production/database.tf から db_ca_cert_identifier を読めない"
 for image in "$runtime_image" "$migrate_image"; do
   # shellcheck disable=SC2016
-  docker run --rm --entrypoint node --env REGION="$region" "$image" -e '
+  docker run --rm --entrypoint node --env REGION="$region" --env CA_IDENTIFIER="$ca_identifier" "$image" -e '
     const { X509Certificate } = require("node:crypto");
     const pem = require("node:fs").readFileSync("/app/certs/rds-global-bundle.pem", "utf8");
     const subjects = pem.split(/(?=-----BEGIN CERTIFICATE-----)/).filter((block) => block.includes("BEGIN"))
       .map((block) => new X509Certificate(block).subject.split("\n"));
-    const want = `CN=Amazon RDS ${process.env.REGION} Root CA RSA2048 G1`;
+    const kind = /^rds-ca-(rsa2048|rsa4096|ecc384)-g1$/.exec(process.env.CA_IDENTIFIER);
+    if (kind === null) { console.error(`CA の識別子の形が想定と違う: ${process.env.CA_IDENTIFIER}`); process.exit(1); }
+    const want = `CN=Amazon RDS ${process.env.REGION} Root CA ${kind[1].toUpperCase()} G1`;
     if (!subjects.some((lines) => lines.includes(want))) { console.error(`${want} が無い（${subjects.length} 件）`); process.exit(1); }' ||
     fail "$image の RDS の CA のバンドルに、$region のルート CA が無い"
 done
