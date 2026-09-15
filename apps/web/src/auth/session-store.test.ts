@@ -98,6 +98,35 @@ describe('起動時の復元', () => {
     expect(order).toEqual(['lock:workspace-chat:refresh', 'refresh', 'unlock']);
   });
 
+  // 製品の経路（main.tsx の引数なしの createSessionStore()）は、ブラウザの navigator.locks を読む（#425）。
+  // jsdom には navigator.locks が無いため、グローバルを差し替えて確かめる。
+  it('引数なしで作ると、ブラウザの navigator.locks の同じ名前のロックの中でリフレッシュを送る', async () => {
+    const order: string[] = [];
+    fakeFetch({
+      'POST /api/auth/refresh': () => {
+        order.push('refresh');
+        return token('t1');
+      },
+      'GET /api/users/me': () => json(200, PROFILE),
+    });
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (name: string, callback: () => Promise<unknown>) => {
+          order.push(`lock:${name}`);
+          const result = await callback();
+          order.push('unlock');
+          return result;
+        },
+      },
+    });
+    const store = createSessionStore();
+
+    await store.restore();
+
+    expect(order).toEqual(['lock:workspace-chat:refresh', 'refresh', 'unlock']);
+    expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't1', user: USER });
+  });
+
   it('ロックが取れず断られても（InvalidStateError など）、ロックの外でリフレッシュし、確かめる途中のまま止まらない', async () => {
     const { count } = fakeFetch({
       'POST /api/auth/refresh': () => token('t1'),
