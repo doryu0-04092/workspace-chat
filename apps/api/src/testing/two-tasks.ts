@@ -23,6 +23,15 @@ export type Workspace =
 
 export type LoggedIn = { authorization: string; token: string; id: string };
 
+/**
+ * 他のタスクへの通知（Valkey の Pub/Sub を通るサーバー間の通知・部屋から外す処理）が届くのを `vi.waitFor` で待つ上限。
+ * 手元では 1 秒かからずに届くが、CI の負荷で 3 秒を超えて揺れた（#388・#450）。届けばその時点で抜けるため、通るテストは遅くならない。
+ */
+export const CROSS_TASK_WAIT_MS = 10_000;
+
+/** 他のタスクへの通知を待つテストの期限（1件のテストで何度も待つため、Vitest の既定の 5 秒では待ちの上限より先に切れる）。 */
+export const CROSS_TASK_TEST_TIMEOUT_MS = 30_000;
+
 export type TwoTasks = {
   readonly first: INestApplication;
   readonly second: INestApplication;
