@@ -8,8 +8,8 @@ import { API_SETTINGS } from './api-config';
 // 落ちずに秘密が平文でタスク定義に残る（#483）。API_SETTINGS と infra/production の3箇所——タスク定義の secrets・
 // 実行ロールの ssm:GetParameters の resources・aws_ssm_parameter——が揃っていることを、Terraform のファイルを読んで確かめる。
 // **読めない書き方を、黙って数え上げから外さずに落とす**——environment の側は「含まない」の否定形のため、取りこぼすと緑のまま通る。
-// そのため、コメントを除いてから読み、**すべてのタスク定義の、同じキーのすべてのリストの、すべての要素**を数え上げ、
-// **読む箇所（ブロック・リスト・要素）ごとに、書き方を問わずにゆるく数えた出現と読めた出現が一致しなければ落とす**。
+// そのため、コメントを除いてから読み、**すべてのタスク定義の、すべてのコンテナの、同じキーのすべてのリストの、すべての要素**を数え上げ、
+// **読む箇所（ファイル・ブロック・コンテナ・リスト・要素）ごとに、書き方を問わずにゆるく数えた出現と読めた出現が一致しなければ落とす**。
 
 const infraDir = join(__dirname, '..', '..', '..', '..', 'infra', 'production');
 
@@ -49,8 +49,10 @@ function withoutComments(text: string): string {
   return out;
 }
 
+// Terraform が読むのは、ディレクトリの直下の .tf と .tf.json だけである（サブディレクトリは module で呼んだときだけ読まれる）。
+const infraFiles = readdirSync(infraDir);
 const terraform = withoutComments(
-  readdirSync(infraDir)
+  infraFiles
     .filter((file) => file.endsWith('.tf'))
     .map((file) => readFileSync(join(infraDir, file), 'utf8'))
     .join('\n'),
@@ -119,16 +121,23 @@ function splitItems(inner: string): string[] {
   return items.map((item) => item.trim()).filter((item) => item !== '');
 }
 
+/** 属性の書き方（`key = …`・`"key" = …`・`key: …`）を問わずに、キーの出現に当たる正規表現の断片。 */
+const attribute = (key: string) => `\\b${key}"?\\s*[=:]`;
+
 /** 本文の中の `<key> = [ … ]` のリスト**すべて**の要素（最初の1つだけを読まない）。 */
 function itemsOf(body: string, key: string): string[] {
-  return [...body.matchAll(new RegExp(`\\b${key}\\s*=\\s*\\[`, 'g'))].flatMap((match) =>
+  return [...body.matchAll(new RegExp(`${attribute(key)}\\s*\\[`, 'g'))].flatMap((match) =>
     splitItems(enclosed(body, match.index + match[0].length - 1)),
   );
 }
 
-/** `{ name = "…", … }` の要素の name（読めなければ undefined）。 */
-function nameOf(item: string): string | undefined {
-  return /\bname\s*=\s*"([^"]+)"/.exec(item)?.[1];
+function countOf(text: string, pattern: RegExp): number {
+  return [...text.matchAll(pattern)].length;
+}
+
+/** 要素の中の、値が文字列の属性（読めなければ undefined）。 */
+function stringAttribute(item: string, key: string): string | undefined {
+  return new RegExp(`${attribute(key)}\\s*"([^"]+)"`).exec(item)?.[1];
 }
 
 const secretEnvs = Object.values(API_SETTINGS)
@@ -141,12 +150,14 @@ const secrets = taskDefinitions.flatMap(({ name: task, body }) =>
   itemsOf(body, 'secrets').map((item) => ({
     task,
     item,
-    env: nameOf(item),
-    parameter: /\bvalueFrom\s*=\s*aws_ssm_parameter\.(\w+)\.arn\b/.exec(item)?.[1],
+    env: stringAttribute(item, 'name'),
+    parameter: new RegExp(`${attribute('valueFrom')}\\s*aws_ssm_parameter\\.(\\w+)\\.arn\\b`).exec(
+      item,
+    )?.[1],
   })),
 );
 const environment = taskDefinitions.flatMap(({ name: task, body }) =>
-  itemsOf(body, 'environment').map((item) => ({ task, item, env: nameOf(item) })),
+  itemsOf(body, 'environment').map((item) => ({ task, item, env: stringAttribute(item, 'name') })),
 );
 const executionResources = itemsOf(
   block('data', 'aws_iam_policy_document', 'task_execution_parameters'),
@@ -159,10 +170,6 @@ const envsOf = (task: string) =>
     .map(({ env }) => env)
     .sort();
 
-function countOf(text: string, pattern: RegExp): number {
-  return [...text.matchAll(pattern)].length;
-}
-
 describe('secret: true の設定と、Terraform での秘密の渡し方', () => {
   // 数え上げが空で通らないように。
   it('数え上げる対象がある', () => {
@@ -171,22 +178,40 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     expect(environment.filter(({ task }) => task === 'api').length).toBeGreaterThanOrEqual(1);
   });
 
-  // 読む箇所（ブロック・リスト）ごとに、書き方を問わずにゆるく数えた出現と、読めた出現を突き合わせる。
-  // 一致しなければ、読めない書き方（名前が \w の外・リストでない式など）があり、その中身は数え上げに入っていない。
-  it('タスク定義のブロックと、environment・secrets・実行ロールの resources は、どれも読める書き方である（ゆるく数えた出現と読めた出現が一致する）', () => {
+  // 読む箇所（ファイル・ブロック・コンテナ・リスト）ごとに、書き方を問わずにゆるく数えた出現と、読めた出現を突き合わせる。
+  // 一致しなければ、読めない書き方（名前が \w の外・リストでない式・locals に置いたコンテナなど）があり、その中身は数え上げに入っていない。
+  it('ファイル・タスク定義のブロック・コンテナ・environment / secrets・実行ロールの resources は、どれも読める書き方である（ゆるく数えた出現と読めた出現が一致する）', () => {
+    // .tf.json と module は、ここで読む .tf の本文の外に構成を足す。
+    expect(infraFiles.filter((file) => file.endsWith('.tf.json'))).toEqual([]);
+    expect(countOf(terraform, /\bmodule\s+"/g)).toBe(0);
+
     expect(countOf(terraform, /\bresource\s+"aws_ecs_task_definition"/g)).toBe(
       taskDefinitions.length,
     );
     for (const { name, body } of taskDefinitions) {
-      expect(countOf(body, /\b(?:environment|secrets)\s*=/g), name).toBe(
-        countOf(body, /\b(?:environment|secrets)\s*=\s*\[/g),
+      // コンテナの一覧は jsonencode([ … ]) の1つだけで、その要素はどれもオブジェクトをその場に書いたもの（local.x・関数・for で作らない）。
+      const lists = [...body.matchAll(/\bcontainer_definitions\s*=\s*jsonencode\(\s*\[/g)];
+      expect(countOf(body, /\bcontainer_definitions\s*=/g), name).toBe(lists.length);
+      expect(lists, name).toHaveLength(1);
+      const containers = lists.flatMap((match) =>
+        splitItems(enclosed(body, match.index + match[0].length - 1)),
+      );
+      expect(
+        containers.filter((container) => !(container.startsWith('{') && container.endsWith('}'))),
+        name,
+      ).toEqual([]);
+
+      expect(countOf(body, new RegExp(attribute('(?:environment|secrets)'), 'g')), name).toBe(
+        countOf(body, new RegExp(`${attribute('(?:environment|secrets)')}\\s*\\[`, 'g')),
       );
     }
     expect(
       countOf(terraform, /\bdata\s+"aws_iam_policy_document"\s+"task_execution_parameters"/g),
     ).toBe(1);
     const policy = block('data', 'aws_iam_policy_document', 'task_execution_parameters');
-    expect(countOf(policy, /\bresources\s*=/g)).toBe(countOf(policy, /\bresources\s*=\s*\[/g));
+    expect(countOf(policy, new RegExp(attribute('resources'), 'g'))).toBe(
+      countOf(policy, new RegExp(`${attribute('resources')}\\s*\\[`, 'g')),
+    );
   });
 
   it('タスク定義の environment・secrets と実行ロールの resources の要素は、どれも読める（読めない要素を黙って外さない）', () => {
@@ -247,17 +272,17 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     expect(countOf(terraform, /ssm:GetParameter/g)).toBe(1);
   });
 
-  it.each(secretEnvs)(
-    '%s を渡すパラメータは、その名前で終わる暗号化パラメータ（SecureString）である',
-    (env) => {
-      const parameter = secrets.find((secret) => secret.env === env)?.parameter;
-      expect(parameter).toBeDefined();
-      const body = block('resource', 'aws_ssm_parameter', parameter ?? '');
-      expect(/\bname\s*=\s*"([^"]+)"/.exec(body)?.[1]).toMatch(new RegExp(`/${env}$`));
-      const type = /\btype\s*=\s*(\S+)/.exec(body)?.[1];
+  // 名前ごとに最初の1件だけを見ると、2つ目のタスク定義の同じ名前の要素が照合されない。secrets の要素すべてを照合する。
+  it.each(secrets.map(({ task, env, parameter }) => [task, env ?? '', parameter ?? ''] as const))(
+    '%s の %s を渡すパラメータ（%s）は、その名前で終わる暗号化パラメータ（SecureString）である',
+    (_task, env, parameter) => {
+      expect(parameter).not.toBe('');
+      const body = block('resource', 'aws_ssm_parameter', parameter);
+      expect(stringAttribute(body, 'name')).toMatch(new RegExp(`/${env}$`));
+      const type = new RegExp(`${attribute('type')}\\s*(\\S+)`).exec(body)?.[1];
       const resolved =
         type === 'local.parameter_type'
-          ? /\bparameter_type\s*=\s*"([^"]+)"/.exec(terraform)?.[1]
+          ? new RegExp(`${attribute('parameter_type')}\\s*"([^"]+)"`).exec(terraform)?.[1]
           : type?.replaceAll('"', '');
       expect(resolved).toBe('SecureString');
     },
