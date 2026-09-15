@@ -84,6 +84,39 @@ async function saveMentions(
   return userIds;
 }
 
+/**
+ * 編集のときに、メッセージの対象を編集後の本文に合わせる（機能一覧 9.1）。
+ * **保存した対象のうち、編集後の本文にユーザーID が残っているものは消さない**——経路1 で引き直すと、チャンネルを抜けた・退会した対象は
+ * 解決できず、本文の `@` を変えていなくても消える（経路2 と、1.5 の「メンションの参照先も削除済みの利用者として表示する」が崩れる）。
+ * 本文から消えた対象だけを外し、まだ保存していない `@` は経路1 で解決して足す（足すのは経路1 が返した対象だけ）。
+ */
+async function replaceMentions(
+  tx: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
+  {
+    messageId,
+    ...target
+  }: { messageId: string; viewerId: string; channelId: string; body: string },
+): Promise<void> {
+  const loginIds = new Set(mentionedLoginIds(target.body));
+  const saved = await tx.messageMention.findMany({
+    where: { messageId },
+    select: { userId: true, user: { select: { loginId: true } } },
+  });
+  const removed = saved.filter(({ user }) => !loginIds.has(user.loginId.toLowerCase()));
+  if (removed.length > 0) {
+    await tx.messageMention.deleteMany({
+      where: { messageId, userId: { in: removed.map(({ userId }) => userId) } },
+    });
+  }
+  const kept = new Set(
+    saved.filter((mention) => !removed.includes(mention)).map(({ userId }) => userId),
+  );
+  const added = (await mentionTargetsOf(tx, target)).filter((userId) => !kept.has(userId));
+  if (added.length > 0) {
+    await tx.messageMention.createMany({ data: added.map((userId) => ({ messageId, userId })) });
+  }
+}
+
 const MESSAGE_SELECT = {
   id: true,
   channelId: true,
@@ -456,9 +489,8 @@ export class MessagesService {
         data: { body: input.body, editedAt: new Date() },
       });
       if (count !== 1) throw new NotFoundException();
-      // メンションの対象は、編集後の本文で解決し直して置き換える。**編集では対象の部屋へ配らない**（機能一覧 9.1 の実装時に決めた値）
-      await tx.messageMention.deleteMany({ where: { messageId } });
-      await saveMentions(tx, { messageId, viewerId: userId, channelId, body: input.body });
+      // メンションの対象は、編集後の本文に合わせる（本文に残した対象は消さない）。**編集では対象の部屋へ配らない**（機能一覧 9.1 の実装時に決めた値）
+      await replaceMentions(tx, { messageId, viewerId: userId, channelId, body: input.body });
       const row = await tx.message.findUniqueOrThrow({
         where: { id: messageId },
         select: MESSAGE_SELECT,

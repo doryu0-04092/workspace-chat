@@ -1516,6 +1516,43 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       expect((await page(alice, workspace.id, channelId)).messages).toEqual([edited]);
       expect(await toCarol).toBeUndefined();
     });
+
+    it('編集では、本文に残した対象は、チャンネルを抜けても退会しても消さない。本文から消した対象だけを外し、新しく書いた `@` を足す', async () => {
+      const { alice, bob, carol, erin, workspace, channelId } = await channelWithPeople();
+      const message = await posted(
+        alice,
+        workspace.id,
+        channelId,
+        `@${bob.loginId} と @${carol.loginId} へ`,
+      );
+      // bob はチャンネルを抜け、carol は退会する（どちらも、いまは経路1 で解決できない）
+      await prisma.channelMember.deleteMany({ where: { channelId, userId: bob.id } });
+      await prisma.user.update({ where: { id: carol.id }, data: { deletedAt: new Date() } });
+
+      const kept = await send(
+        'PATCH',
+        alice,
+        messagePath(workspace.id, channelId, message.id),
+        `@${bob.loginId} と @${carol.loginId} へ（誤字を直した）`,
+      );
+      expect(kept.status).toBe(200);
+      expect(((await kept.json()) as Message).mentions).toEqual([
+        mentionOf(bob),
+        { userId: carol.loginId, user: null },
+      ]);
+
+      const changed = await send(
+        'PATCH',
+        alice,
+        messagePath(workspace.id, channelId, message.id),
+        `@${carol.loginId} と @${erin.loginId} へ`,
+      );
+      expect(changed.status).toBe(200);
+      expect(((await changed.json()) as Message).mentions).toEqual([
+        { userId: carol.loginId, user: null },
+        mentionOf(erin),
+      ]);
+    });
   });
 
   describe('投稿のレート制限', () => {
