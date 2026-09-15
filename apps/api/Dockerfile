@@ -105,4 +105,6 @@ COPY --from=build /app/apps/api/dist apps/api/dist
 COPY apps/api/certs/rds-global-bundle.pem certs/
 USER node
 EXPOSE 3000
-CMD ["node", "apps/api/dist/main.js"]
+# --no-warnings: Node の警告の既定の出力（素のテキストで標準エラー）を止める。警告は api が 'warning' を受けて構造化ログに残す
+# （apps/api/src/bootstrap.ts の installWarningLog。要件定義書 4.6）。マイグレーション用の段には付けない——Prisma の CLI は警告を残す先を持たない。
+CMD ["node", "--no-warnings", "apps/api/dist/main.js"]
