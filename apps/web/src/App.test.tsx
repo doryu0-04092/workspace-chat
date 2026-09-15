@@ -87,6 +87,31 @@ describe('ログインの画面', () => {
     expect(sessionStorage.length).toBe(0);
   });
 
+  // 機能一覧 1.2 の web の節: ログインしていない利用者がワークスペースの画面を開くとログインの画面へ移し、ログインしたら元の行き先へ戻す（#414）。
+  // 元の行き先に戻らないと、一覧の画面（/workspaces）の要求が想定外になり、ワークスペースの見出しが出ない。
+  it('ログインしていないときに開いたワークスペースの画面へ、ログインした後に戻る', async () => {
+    const workspace = {
+      id: '01920000-0000-7000-8000-0000000000a1',
+      name: '開発チーム',
+      createdAt: '2026-09-13T00:00:00.000Z',
+      role: 'OWNER',
+    };
+    fakeFetch({
+      ...signedOut,
+      'POST /api/auth/login': () => loggedIn('t1'),
+      [`GET /api/workspaces/${workspace.id}`]: () => json(200, workspace),
+      [`GET /api/workspaces/${workspace.id}/channels`]: () => json(200, []),
+    });
+    renderAt(`/workspaces/${workspace.id}`);
+
+    await screen.findByRole('heading', { name: 'ログイン' });
+    type('ユーザーID', 'alice');
+    type('パスワード', 'password-1');
+    fireEvent.click(screen.getByRole('button', { name: 'ログイン' }));
+
+    expect(await screen.findByRole('heading', { name: '開発チーム' })).toBeDefined();
+  });
+
   it('ユーザーID かパスワードが違えば理由を出し、ログインの画面に留まる', async () => {
     await openLogin({ 'POST /api/auth/login': () => error(401, 'invalid_credentials') });
 
