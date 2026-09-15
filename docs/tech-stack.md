@@ -224,6 +224,8 @@ ESM で出すと `apps/api` から素直に `import` できない。
 
 - **暗号化パラメータに使う KMS の鍵の費用**
 - **`aws_db_instance` の `password_wo` の値が、実際に state に残らないこと**（Terraform の文書は write-only 引数を state に残さないとして `password_wo` を例に挙げるが、AWS プロバイダーの文書の `password_wo` の説明には `password` と同じ「it will be stored in the state file」が残っている。`apply` の後に state を開いて確かめる）
+- **`aws_ssm_parameter` の `value_wo` と `aws_elasticache_replication_group` の `auth_token_wo` の値が、実際に state に残らないこと**（上の `password_wo` と同じ形の write-only 引数。`apply` の後に state を開いて確かめる。`infra/production/cache.tf`）
+- **`aws_elasticache_replication_group` の `primary_endpoint_address` が `engine = "valkey"` で値を持つこと**（プロバイダーの文書は「(Redis only)」と書く。`REDIS_URL` の組み立てがこの属性に依る）
 - **VPC オリジンを経ても、api が受け取る X-Forwarded-For が「CloudFront → ALB」の2段の形になること**（`TRUST_PROXY_HOPS=2` の前提。上の ALB の行）
 
 #### WebSocket と複数インスタンスの問題
