@@ -74,6 +74,7 @@ resource "aws_ecs_task_definition" "api" {
   # コンテナの属性は name・image・essential・portMappings・environment・secrets・logConfiguration だけ（logConfiguration の中は logDriver・options だけ）。
   # 属性を足すときは、秘密を渡す別の経路（environmentFiles・secretOptions など）でないことを確かめてから、検査の許可リストにも足す。
   # environment・secrets はその場に書いたリスト（[ … ]）にし、要素の name は文字列、secrets の valueFrom は aws_ssm_parameter.<名前>.arn の形で書く。
+  # api のコンテナの environment を空にしない（検査の「数え上げる対象がある」の下限で落ちる。空にするなら、その下限も直す）。
   container_definitions = jsonencode([
     {
       name         = "api"

@@ -308,6 +308,20 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     expect(infraFiles.filter((file) => file.endsWith('.tf.json'))).toEqual([]);
     expect(countOf(terraform, /\bmodule\s+"/g)).toBe(0);
 
+    // ブロックの本文の終わりを、行頭の `}` と、文字列の外で数えた括弧の深さの2通りで求める。ヒアドキュメントの中の行頭の `}` で
+    // 本文が途中で切れると、後ろの属性（平文の password など）が黙って数え上げから外れる。
+    expect(
+      [...terraform.matchAll(/^(?:resource|data) "\w+" "\w+" \{$/gm)]
+        .filter((match) => {
+          const open = match.index + match[0].length - 1;
+          return (
+            open + enclosed(terraform, open).length + 1 !==
+            terraform.indexOf('\n}\n', match.index) + 1
+          );
+        })
+        .map((match) => match[0]),
+    ).toEqual([]);
+
     expect(countOf(terraform, /\bresource\s+"aws_ecs_task_definition"/g)).toBe(
       taskDefinitions.length,
     );

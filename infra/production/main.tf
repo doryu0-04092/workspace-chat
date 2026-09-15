@@ -7,11 +7,13 @@
 # どの .tf にも次の条件が掛かり、破ると apps/api のテストが落ちる（ファイルごとの条件は、そのファイルの注記にある）。
 # - この構成を module に分けず、.tf.json を置かない（そこに置いた構成は読めない）
 # - resource・data のブロックは terraform fmt の形（行頭の `resource "型" "名前" {` から行頭の `}` まで。中身の無いブロックは `{}` の1行）で書き、
-#   ephemeral のブロックは行頭の `ephemeral "random_password" "名前" {` の形だけにする（書き方を問わずに数えた数と、この形で読めた数を突き合わせる）
+#   ephemeral のブロックは行頭の `ephemeral "random_password" "名前" {` の形だけにする（書き方を問わずに数えた数と、この形で読めた数を突き合わせる）。
+#   ヒアドキュメントの中に、行頭の `}` と閉じない括弧を書かない（ブロックの本文の終わりを、行頭の `}` と括弧の深さの2通りで求め、食い違えば落ちる）
 # - IAM の面（aws_iam_ で始まるブロックと、policy・assume_role_policy を持つブロック。S3 のバケットポリシーや SNS のトピックのポリシーも入る）は、
 #   検査の iamSurface の表とちょうど同じかで照合する。足す・変えるときは、秘密のパラメータを読める操作（ワイルドカードを含む）と、それを持つロールを
 #   引き受けられる相手が増えないことを確かめてから、表も直す。ポリシーは aws_iam_policy_document のブロックで書き、policy・assume_role_policy には
-#   data.aws_iam_policy_document.<名前>.json だけを渡す（jsonencode・ヒアドキュメント・dynamic は読めない）。入れ子のブロックの中に policy を書かない
+#   data.aws_iam_policy_document.<名前>.json だけを渡す（jsonencode・ヒアドキュメントで書いたポリシーと dynamic の statement は、表と食い違って落ちる）。
+#   入れ子のブロックの中に policy を書かない
 # - 秘密の値は state とプランに残さない: 乱数は ephemeral の random_password だけで作る（resource・data の random_password・random_string と、
 #   値を読むデータソース aws_ssm_parameter を使わない）。どのリソースでも password・secret・token を含むキーは write-only 引数（*_wo）と
 #   その版（*_wo_version）だけにし、*_wo の値は ephemeral.random_password から作る。*_wo はリソースのブロックの中にだけ書く（locals・output に書かない）。
