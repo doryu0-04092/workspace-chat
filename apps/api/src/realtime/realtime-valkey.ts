@@ -34,6 +34,22 @@ export function createRealtimeValkeyClients(base: Redis, logger: Logger): Realti
     maxRetriesPerRequest: null,
   });
   subscriber.on('error', () => undefined);
+  // 購読の接続の遷移も残す（publish が戻っても、購読が戻ったとは限らない。#288）。
+  // 切れたことは reconnecting で見る——手動で閉じたとき（終了時）は reconnecting にならず、warn を出さない。
+  // ioredis は ready の処理で購読をやり直す（autoResubscribe の既定）。
+  let subscriberLost = false;
+  subscriber.on('reconnecting', () => {
+    if (subscriberLost) return;
+    subscriberLost = true;
+    logger.warn(
+      'Valkey の購読の接続が切れたため、他のタスクからの配信を受け取れない（繋がり直したら購読をやり直す）',
+    );
+  });
+  subscriber.on('ready', () => {
+    if (!subscriberLost) return;
+    subscriberLost = false;
+    logger.log('Valkey の購読の接続が戻ったため、購読をやり直して他のタスクからの配信を受け取る');
+  });
 
   const recoveredListeners: (() => void)[] = [];
   const notifyPublishRecovered = () => {
@@ -44,7 +60,7 @@ export function createRealtimeValkeyClients(base: Redis, logger: Logger): Realti
   const publisher = withHandledRejections(base, (command, succeeded) => {
     if (command !== 'publish') return;
     if (succeeded && failing) {
-      logger.log('Valkey に戻ったため、タスクをまたいで配信する');
+      logger.log('Valkey に publish できるようになったため、タスクをまたぐ配信を再開する');
       notifyPublishRecovered();
     }
     if (!succeeded && !failing) {
