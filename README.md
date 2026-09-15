@@ -109,7 +109,7 @@ bash scripts/check-docs.test.sh
 ```
 
 （`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
-この1行だけ飛ばす。`npm test` と `scripts/api-image.test.sh` は Docker が動いていることが前提。**どちらも、タグで指す土台を毎回レジストリから取り直すため、レジストリに届くことも前提である**（`npm test` はテストの `POSTGRES_IMAGE`・`VALKEY_IMAGE`、`scripts/api-image.test.sh` は api の `NODE_IMAGE` とテストの `POSTGRES_IMAGE`）——手元に土台が残っていても、届かなければ通らない）
+この1行だけ飛ばす。`npm test` と `scripts/api-image.test.sh` は Docker が動いていることが前提。`scripts/api-image.test.sh` は `openssl` も要る（DB への TLS の検査に使う、使い捨ての証明書を作る）。**どちらも、タグで指す土台を毎回レジストリから取り直すため、レジストリに届くことも前提である**（`npm test` はテストの `POSTGRES_IMAGE`・`VALKEY_IMAGE`、`scripts/api-image.test.sh` は api の `NODE_IMAGE` とテストの `POSTGRES_IMAGE`）——手元に土台が残っていても、届かなければ通らない）
 
 `scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる
 （**番号は付けない**——下記の出力の見出し `1.`〜`3.` と桁が揃わず、別のものを指してしまう）。

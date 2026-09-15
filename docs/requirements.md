@@ -475,7 +475,7 @@ S3 に残ったまま、どのメッセージからも参照されなくなる**
    4.3 の署名付き Cookie による参加者限定の配信も、3.5.1 の「オーナーの例外も添付ファイルには及ばない」も、
    **この経路には掛からない**（#160）。
    **ECS Exec で入る先は、api のタスクではなく、マイグレーション用のイメージを run-task で動かしたタスクにする**（[技術スタック](tech-stack.md) のコンテナの行。#274・#452）——
-   **入る手順（起動の形・問い合わせの接続先・止め方）は、まだ書かない**——マイグレーション用のタスク定義と psql（#457）が無く、実際に入って確かめられないためである。手順が満たす条件は #458 に置く。
+   **入る手順（起動の形・問い合わせの接続先・止め方）は、まだ書かない**——マイグレーション用のタスク定義が無く、実際に入って確かめられないためである（psql はマイグレーション用のイメージに入れた。#457）。手順が満たす条件は #458 に置く。
    ECS Exec のコマンドは root で動き（AWS 公式「these commands are run as the root user.」）、**入ったタスクのコンテナが環境変数として持つ値と、タスクロールの権限にも届くものとして扱う**（環境変数は Fargate の上で届かないことを確かめていない。タスクロールは AWS 公式「The permissions granted in the IAM role are vended to containers running in the task.」「Containers are not a security boundary and the use of task IAM roles does not change this.」）。
    api のタスクは `secret: true` の設定（`JWT_SECRET` を含む）を持ち（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）、
    **`JWT_SECRET` に届けば、任意の利用者のアクセストークンを署名して作れる**（署名と検証は HS256 の共有鍵。`apps/api/src/auth/auth.module.ts`）——**アプリの認証そのものの外に出る。**

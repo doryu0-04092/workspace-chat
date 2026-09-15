@@ -65,6 +65,41 @@ try {
   if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
 }
 
+// **Prisma の CLI に渡す接続先は、証明書を検証する形に読み替える。**
+// 本番の `DATABASE_URL` は libpq の形（`sslmode=verify-full&sslrootcert=<CA のファイル>`）で、
+// api の pg と psql はこの形でサーバー証明書を検証する。**Prisma の CLI（7.10.0）はこの形では検証しない**——
+// `verify-full` を `prefer` に読み替えて `sslrootcert` を捨て、別の CA でも繋がる（#424 で確かめた）。
+// CLI が検証する形（`sslmode=require&sslcert=<CA のファイル>&sslaccept=strict`）はここでだけ作る。
+// その形は psql が読めず pg では警告になるため、`DATABASE_URL` の値そのものにはしない
+// （docs/tech-stack.md の「DB への接続の暗号化」）。
+//
+// **踏むと壊れる: この読み替えを外すと、マイグレーションは暗号化されるが、接続先を検証しないまま流れる。**
+// scripts/api-image.test.sh が、別の CA ではマイグレーションを適用できないことを見る。
+// `sslmode=verify-full` の無い接続先（手元の開発用 DB とテスト）は、そのまま渡す。
+function toPrismaCliUrl(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    // URL として読めない値は Prisma の検査に任せる。例外の `input` には値（資格情報を含む）が載るため、ここで投げない。
+    return url;
+  }
+  if (parsed.searchParams.get('sslmode') !== 'verify-full') return url;
+  const rootCertificate = parsed.searchParams.get('sslrootcert');
+  if (rootCertificate === null || rootCertificate === '') {
+    // Prisma に渡すと prefer に読み替えられ、検証する CA が無いまま繋がる。
+    throw new Error(
+      'DATABASE_URL の sslmode=verify-full には sslrootcert（サーバー証明書を検証する CA のファイル）を付ける',
+    );
+  }
+  parsed.searchParams.set('sslmode', 'require');
+  parsed.searchParams.delete('sslrootcert');
+  parsed.searchParams.set('sslcert', rootCertificate);
+  parsed.searchParams.set('sslaccept', 'strict');
+  return parsed.toString();
+}
+
 // **パスも .env と同じ基準（このファイルの位置）で解決する。**
 // Prisma 7 がこの2つを cwd 起点で解くのか設定ファイルの位置起点で解くのかは
 // **確かめていない。** どちらであっても正しくなる形にして、その曖昧さを消す。
@@ -76,7 +111,7 @@ export default defineConfig({
     path: join(import.meta.dirname, 'apps/api/prisma/migrations'),
   },
   datasource: {
-    // **環境に入っていた値が常に勝つ。** 上の説明を参照。
-    url: databaseUrlFromEnvironment ?? process.env.DATABASE_URL,
+    // **環境に入っていた値が常に勝つ。** 上の説明を参照。CLI が証明書を検証する形への読み替えも上にある。
+    url: toPrismaCliUrl(databaseUrlFromEnvironment ?? process.env.DATABASE_URL),
   },
 });
