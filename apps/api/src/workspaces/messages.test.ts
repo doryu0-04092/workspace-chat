@@ -28,7 +28,7 @@ const TOO_MANY_REQUESTS = {
 const MISSING_ID = '00000000-0000-7000-8000-000000000000';
 const LAST_ID = 'ffffffff-ffff-7fff-bfff-ffffffffffff';
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-/** 投稿・編集・削除の上限（利用者単位で1分に60回。3つのルートで1つの枠。機能一覧 4.1・4.2）。 */
+/** 投稿・返信・編集・削除の上限（利用者単位で1分に60回。4つのルートで1つの枠。機能一覧 4.1・4.2・6）。 */
 const POST_LIMIT = 60;
 
 let sequence = 0;
@@ -249,6 +249,8 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         createdAt: expect.any(String),
         editedAt: null,
         deleted: false,
+        parentId: null,
+        replyCount: 0,
       });
       expect(Number.isNaN(Date.parse(message.createdAt))).toBe(false);
       expect(await prisma.message.count({ where: { channelId } })).toBe(1);
@@ -908,7 +910,8 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       expect(await deleted).toBeUndefined();
     });
 
-    // #384: 投稿・編集・削除は3つのルートで1つの枠を分け合う（提案・承認済・2026-09-13・依頼側）。
+    // #384: 投稿・編集・削除は1つの枠を分け合う（提案・承認済・2026-09-13・依頼側）。返信も同じ枠に入れ、4つのルートで1つの枠にする（機能一覧 6 の実装時に決めた値）。
+    // 返信のルートが同じ枠に入ることは、スレッドの節の「返信も、投稿・編集・削除と同じ枠で数え…」が確かめる。
     it('投稿・編集・削除は、同じ利用者で合わせて1分に60回を超えたら、どれも 429 で断る。別の利用者は断らない', async () => {
       // 最初の投稿（postedByAlice）も同じ枠を1回使う。
       const { alice, bob, workspace, channelId, message } = await postedByAlice();
@@ -932,6 +935,374 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
 
       // 利用者で数えるため、別の利用者は断らない。
       expect((await post(bob, workspace.id, channelId, '別の人')).status).toBe(201);
+    });
+  });
+
+  // 機能一覧 6（F-17）: スレッド。CLAUDE.md「必ずテストを書く箇所」（返信も同じ）: WebSocket が非参加者にイベントを配信しないこと／
+  // オーナーが、参加していないプライベートチャンネルのメッセージを取得できないこと／自分以外のメッセージを編集・削除できないこと。
+  describe('スレッド（F-17）', () => {
+    function messagePath(workspaceId: string, channelId: string, messageId: string): string {
+      return `${base}/api/workspaces/${workspaceId}/channels/${channelId}/messages/${messageId}`;
+    }
+
+    function reply(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      messageId: string,
+      body: unknown,
+    ): Promise<Response> {
+      return fetch(`${messagePath(workspaceId, channelId, messageId)}/replies`, {
+        method: 'POST',
+        headers: { authorization: by.authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+    }
+
+    function replies(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      messageId: string,
+      query = '',
+    ): Promise<Response> {
+      return fetch(`${messagePath(workspaceId, channelId, messageId)}/replies${query}`, {
+        headers: { authorization: by.authorization },
+      });
+    }
+
+    async function replied(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      messageId: string,
+      body: string,
+    ): Promise<Message> {
+      const res = await reply(by, workspaceId, channelId, messageId, body);
+      expect(res.status).toBe(201);
+      return (await res.json()) as Message;
+    }
+
+    async function replyPage(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      messageId: string,
+      query = '',
+    ): Promise<MessagePage> {
+      const res = await replies(by, workspaceId, channelId, messageId, query);
+      expect(res.status).toBe(200);
+      return (await res.json()) as MessagePage;
+    }
+
+    function editMessage(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      messageId: string,
+      body: unknown,
+    ): Promise<Response> {
+      return fetch(messagePath(workspaceId, channelId, messageId), {
+        method: 'PATCH',
+        headers: { authorization: by.authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+    }
+
+    function removeMessage(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+      messageId: string,
+    ): Promise<Response> {
+      return fetch(messagePath(workspaceId, channelId, messageId), {
+        method: 'DELETE',
+        headers: { authorization: by.authorization },
+      });
+    }
+
+    async function replyCountOf(messageId: string): Promise<number> {
+      return (await prisma.message.findUniqueOrThrow({ where: { id: messageId } })).replyCount;
+    }
+
+    /** オーナーのワークスペースに alice と bob が参加するチャンネルを作り、alice が親を1件投稿する（carol は所属だけ）。 */
+    async function thread(visibility: 'PUBLIC' | 'PRIVATE' = 'PUBLIC') {
+      const owner = await login();
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const workspace = await workspaceWith(owner, alice, bob, carol);
+      const channelId = await channelRow(workspace.id, visibility, [alice, bob]);
+      const parent = await posted(alice, workspace.id, channelId, '親のメッセージ');
+      return { owner, alice, bob, carol, workspace, channelId, parent };
+    }
+
+    it('参加者は返信でき、201 と返信（parentId を持ち replyCount は 0）を返し、親の replyCount を1つ増やす。チャンネルの一覧には返信を混ぜない', async () => {
+      const { alice, bob, workspace, channelId, parent } = await thread();
+      expect(parent).toMatchObject({ parentId: null, replyCount: 0 });
+
+      const res = await reply(bob, workspace.id, channelId, parent.id, '返信');
+
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual({
+        id: expect.stringMatching(UUID_V7),
+        channelId,
+        author: { id: bob.id, userId: bob.loginId, displayName: expect.any(String) },
+        body: '返信',
+        createdAt: expect.any(String),
+        editedAt: null,
+        deleted: false,
+        parentId: parent.id,
+        replyCount: 0,
+      });
+      const { messages } = await page(alice, workspace.id, channelId);
+      expect(messages).toEqual([{ ...parent, replyCount: 1 }]);
+    });
+
+    it('返信の一覧は、そのスレッドの返信だけを新しい順に返し、limit で件数を絞り、nextBefore で続きを取る', async () => {
+      const { alice, bob, workspace, channelId, parent } = await thread();
+      const other = await posted(alice, workspace.id, channelId, '別の親');
+      await replied(alice, workspace.id, channelId, other.id, '別のスレッドの返信');
+      const first = await replied(bob, workspace.id, channelId, parent.id, '1');
+      const second = await replied(alice, workspace.id, channelId, parent.id, '2');
+      const third = await replied(bob, workspace.id, channelId, parent.id, '3');
+
+      const head = await replyPage(alice, workspace.id, channelId, parent.id, '?limit=2');
+      expect(head).toEqual({ messages: [third, second], nextBefore: second.id });
+      const rest = await replyPage(
+        alice,
+        workspace.id,
+        channelId,
+        parent.id,
+        `?limit=2&before=${second.id}`,
+      );
+      expect(rest).toEqual({ messages: [first], nextBefore: null });
+    });
+
+    it('返信に返信はできず 404 で断り、書き込まない。返信のスレッドの一覧も 404', async () => {
+      const { alice, bob, workspace, channelId, parent } = await thread();
+      const child = await replied(bob, workspace.id, channelId, parent.id, '返信');
+
+      const res = await reply(alice, workspace.id, channelId, child.id, '返信への返信');
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual(NOT_FOUND);
+      expect((await replies(alice, workspace.id, channelId, child.id)).status).toBe(404);
+      expect(await prisma.message.count({ where: { parentId: child.id } })).toBe(0);
+      expect(await replyCountOf(parent.id)).toBe(1);
+      expect(await replyCountOf(child.id)).toBe(0);
+    });
+
+    it('無いメッセージ・別のチャンネルのメッセージ・削除済みのメッセージへの返信は 404。削除済みの親の返信は残り、一覧で読める', async () => {
+      const { alice, bob, workspace, channelId, parent } = await thread();
+      const otherChannelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const elsewhere = await posted(alice, workspace.id, otherChannelId, '別のチャンネル');
+      const kept = await replied(bob, workspace.id, channelId, parent.id, '残る返信');
+      expect((await removeMessage(alice, workspace.id, channelId, parent.id)).status).toBe(204);
+
+      for (const messageId of [MISSING_ID, elsewhere.id, parent.id]) {
+        const res = await reply(bob, workspace.id, channelId, messageId, '届かない返信');
+        expect(res.status, messageId).toBe(404);
+        expect(await res.json()).toEqual(NOT_FOUND);
+      }
+      for (const messageId of [MISSING_ID, elsewhere.id]) {
+        expect((await replies(bob, workspace.id, channelId, messageId)).status, messageId).toBe(
+          404,
+        );
+      }
+      expect(await prisma.message.count({ where: { channelId, parentId: { not: null } } })).toBe(1);
+
+      // 親を削除しても、返信は残り読める（機能一覧 4.2）。親は削除済みとして一覧に残り、返信件数も残る。
+      expect(await replyPage(bob, workspace.id, channelId, parent.id)).toEqual({
+        messages: [kept],
+        nextBefore: null,
+      });
+      const { messages } = await page(bob, workspace.id, channelId);
+      expect(messages).toEqual([{ ...parent, body: null, deleted: true, replyCount: 1 }]);
+    });
+
+    it('所属していなければ種別によらず 404、所属していて参加していなければパブリックは 403・プライベートは 404 で、返信も返信の一覧も断る。オーナーでも同じ', async () => {
+      const outsider = await login();
+      for (const visibility of ['PUBLIC', 'PRIVATE'] as const) {
+        const { owner, carol, workspace, channelId, parent } = await thread(visibility);
+        for (const who of [outsider, carol, owner]) {
+          const label = `${visibility} ${who === outsider ? 'outsider' : who === owner ? 'owner' : 'member'}`;
+          const expected = who === outsider || visibility === 'PRIVATE' ? 404 : 403;
+
+          const posting = await reply(who, workspace.id, channelId, parent.id, '参加していない');
+          expect(posting.status, label).toBe(expected);
+          const listing = await replies(who, workspace.id, channelId, parent.id);
+          expect(listing.status, label).toBe(expected);
+          if (expected === 404) expect(await listing.json(), label).toEqual(NOT_FOUND);
+          else expect(await listing.json(), label).toMatchObject({ code: 'not_a_channel_member' });
+        }
+        expect(await replyCountOf(parent.id)).toBe(0);
+      }
+    });
+
+    it('アーカイブ済みのチャンネルでは、返信を 409 channel_archived で断り、返信の一覧は参加者が読める（機能一覧 3.2）', async () => {
+      const { alice, bob, workspace, channelId, parent } = await thread();
+      const kept = await replied(bob, workspace.id, channelId, parent.id, 'アーカイブの前');
+      const { baseName } = await prisma.channel.findUniqueOrThrow({ where: { id: channelId } });
+      await prisma.channel.update({
+        where: { id: channelId },
+        data: { archivedAt: new Date(), archiveSequence: 1, name: `${baseName}-1` },
+      });
+
+      const res = await reply(alice, workspace.id, channelId, parent.id, 'アーカイブの後');
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ code: 'channel_archived' });
+      expect(await replyPage(alice, workspace.id, channelId, parent.id)).toEqual({
+        messages: [kept],
+        nextBefore: null,
+      });
+      expect(await replyCountOf(parent.id)).toBe(1);
+    });
+
+    it('本文の形は投稿と同じで、空白だけ・4001 文字は 400 validation_failed で断り、件数を変えない', async () => {
+      const { bob, workspace, channelId, parent } = await thread();
+
+      for (const body of ['   ', 'あ'.repeat(4001)]) {
+        const res = await reply(bob, workspace.id, channelId, parent.id, body);
+        expect(res.status).toBe(400);
+        expect(await res.json()).toMatchObject({ code: 'validation_failed' });
+      }
+      expect(await replyCountOf(parent.id)).toBe(0);
+    });
+
+    it('返信を削除すると親の replyCount を1つ減らし、同じ返信の2回目の削除は 404 で減らさない。返信の編集は件数を変えない', async () => {
+      const { alice, bob, workspace, channelId, parent } = await thread();
+      const one = await replied(bob, workspace.id, channelId, parent.id, '1');
+      const two = await replied(alice, workspace.id, channelId, parent.id, '2');
+      expect(await replyCountOf(parent.id)).toBe(2);
+
+      expect((await editMessage(bob, workspace.id, channelId, one.id, '直した')).status).toBe(200);
+      expect(await replyCountOf(parent.id)).toBe(2);
+      expect((await removeMessage(bob, workspace.id, channelId, one.id)).status).toBe(204);
+      expect(await replyCountOf(parent.id)).toBe(1);
+      expect((await removeMessage(bob, workspace.id, channelId, one.id)).status).toBe(404);
+      expect(await replyCountOf(parent.id)).toBe(1);
+
+      // 削除した返信は、返信の一覧に削除済みとして残る（チャンネルの一覧と同じ。機能一覧 4.2）。
+      const { messages } = await replyPage(alice, workspace.id, channelId, parent.id);
+      expect(messages.map(({ id, deleted }) => [id, deleted])).toEqual([
+        [two.id, false],
+        [one.id, true],
+      ]);
+    });
+
+    it('作者でなければ、親の作者でもオーナーでも、返信の編集・削除を 403 not_message_author で断り、件数を変えない', async () => {
+      const { owner, alice, bob, workspace, channelId, parent } = await thread();
+      await prisma.channelMember.create({
+        data: { channelId, workspaceId: workspace.id, userId: owner.id },
+      });
+      const child = await replied(bob, workspace.id, channelId, parent.id, '返信');
+
+      for (const who of [alice, owner]) {
+        const edited = await editMessage(who, workspace.id, channelId, child.id, '他人が直す');
+        expect(edited.status).toBe(403);
+        expect(await edited.json()).toMatchObject({ code: 'not_message_author' });
+        const removed = await removeMessage(who, workspace.id, channelId, child.id);
+        expect(removed.status).toBe(403);
+        expect(await removed.json()).toMatchObject({ code: 'not_message_author' });
+      }
+      expect(await prisma.message.findUniqueOrThrow({ where: { id: child.id } })).toMatchObject({
+        body: '返信',
+        editedAt: null,
+        deletedAt: null,
+      });
+      expect(await replyCountOf(parent.id)).toBe(1);
+    });
+
+    it('同時に届いた返信を取りこぼさずに数える（replyCount は削除されていない返信の件数と一致する）', async () => {
+      const { alice, bob, workspace, channelId, parent } = await thread();
+
+      const results = await Promise.all(
+        Array.from({ length: 10 }, (_, index) =>
+          reply(index % 2 === 0 ? alice : bob, workspace.id, channelId, parent.id, `同時${index}`),
+        ),
+      );
+
+      expect(results.map(({ status }) => status)).toEqual(Array.from({ length: 10 }, () => 201));
+      expect(await replyCountOf(parent.id)).toBe(10);
+      expect(await prisma.message.count({ where: { parentId: parent.id, deletedAt: null } })).toBe(
+        10,
+      );
+    });
+
+    it('返信は message:new（parentId を持つ）、件数が変わった親は message:updated として、チャンネルの部屋に入っている接続にだけ届く。削除は message:deleted と親の message:updated', async () => {
+      const { alice, bob, carol, workspace, channelId, parent } = await thread();
+      const aliceSocket = await open(alice);
+      const carolSocket = await open(carol);
+      expect(await enter(aliceSocket, channelId)).toMatchObject({ ok: true });
+      // 非参加者は入室を断られ、部屋に入らない。
+      expect(await enter(carolSocket, channelId)).toMatchObject({ ok: false, status: 403 });
+
+      const newToAlice = nextEvent(aliceSocket, 'message:new', 2_000);
+      const updatedToAlice = nextEvent(aliceSocket, 'message:updated', 2_000);
+      const newToCarol = nextEvent(carolSocket, 'message:new', 1_000);
+      const updatedToCarol = nextEvent(carolSocket, 'message:updated', 1_000);
+      const child = await replied(bob, workspace.id, channelId, parent.id, '配る返信');
+
+      expect(await newToAlice).toEqual({ message: child, sentAt: expect.any(String) });
+      expect(await updatedToAlice).toEqual({
+        message: { ...parent, replyCount: 1 },
+        sentAt: expect.any(String),
+      });
+      expect(await newToCarol).toBeUndefined();
+      expect(await updatedToCarol).toBeUndefined();
+
+      const deletedToAlice = nextEvent(aliceSocket, 'message:deleted', 2_000);
+      const decrementedToAlice = nextEvent(aliceSocket, 'message:updated', 2_000);
+      const deletedToCarol = nextEvent(carolSocket, 'message:deleted', 1_000);
+      expect((await removeMessage(bob, workspace.id, channelId, child.id)).status).toBe(204);
+
+      expect(await deletedToAlice).toEqual({
+        channelId,
+        messageId: child.id,
+        sentAt: expect.any(String),
+      });
+      expect(await decrementedToAlice).toEqual({
+        message: { ...parent, replyCount: 0 },
+        sentAt: expect.any(String),
+      });
+      expect(await deletedToCarol).toBeUndefined();
+    });
+
+    it('断った返信（返信への返信・アーカイブ済み・非参加者）は配らない', async () => {
+      const { alice, bob, carol, workspace, channelId, parent } = await thread();
+      const child = await replied(bob, workspace.id, channelId, parent.id, '返信');
+      const aliceSocket = await open(alice);
+      expect(await enter(aliceSocket, channelId)).toMatchObject({ ok: true });
+
+      const received = nextEvent(aliceSocket, 'message:new', 1_000);
+      const updated = nextEvent(aliceSocket, 'message:updated', 1_000);
+      expect((await reply(alice, workspace.id, channelId, child.id, '返信への返信')).status).toBe(
+        404,
+      );
+      expect((await reply(carol, workspace.id, channelId, parent.id, '非参加者')).status).toBe(403);
+
+      expect(await received).toBeUndefined();
+      expect(await updated).toBeUndefined();
+    });
+
+    it('返信も、投稿・編集・削除と同じ枠で数え、同じ利用者で合わせて1分に60回を超えたら 429 で断り、件数を変えない', async () => {
+      const { alice, workspace, channelId, parent } = await thread();
+
+      // 親の投稿で1回使っている。残りの 59 回を返信と投稿で交互に使う。
+      for (let index = 0; index < POST_LIMIT - 1; index += 1) {
+        const res =
+          index % 2 === 0
+            ? await reply(alice, workspace.id, channelId, parent.id, `返信${index}`)
+            : await post(alice, workspace.id, channelId, `本体${index}`);
+        expect(res.status, String(index)).toBe(201);
+      }
+      const limited = await reply(alice, workspace.id, channelId, parent.id, '上限を超えた返信');
+
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toEqual(TOO_MANY_REQUESTS);
+      expect(await replyCountOf(parent.id)).toBe(30);
     });
   });
 

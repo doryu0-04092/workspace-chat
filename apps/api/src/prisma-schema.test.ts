@@ -236,7 +236,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **この検査は検査制約・部分一意索引・式に対する索引（`lower(...)`）を見ない。**
       // Prisma がそれらをスキーマとして扱わないためである
       // （検査制約を消して確かめた。`User_userId_lower_key` を足しても差分は出ない）。
-      // **手書きした制約は5つあり、その5つは下の各テストが個別に見ている。**
+      // **手書きした制約は6つあり、その6つは下の各テストが個別に見ている。**
       // ここが通ったからといって、マイグレーションの手書き部分まで
       // 守られているわけではない。列挙は `schema.prisma` の冒頭と揃えてある。
       expect(() =>
@@ -642,6 +642,30 @@ describe('Prisma のスキーマとマイグレーション', () => {
         const { exitCode, output } = await insertMessage(body);
         expect(exitCode, output).toBe(0);
       }
+    });
+  });
+
+  // 機能一覧 6: 返信件数はカウンタ列で、負にならない。アプリの増減を誤っても DB が止める。
+  describe('メッセージの返信件数', () => {
+    async function insertMessage(
+      replyCount: number,
+    ): Promise<{ exitCode: number; output: string }> {
+      const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
+      return psql(
+        `INSERT INTO "Message" ("id", "channelId", "workspaceId", "authorId", "body", "replyCount")
+         VALUES ('${randomUUID()}', '${channelId}', '${workspaceId}', '${userId}', 'あ', ${replyCount});`,
+      );
+    }
+
+    it('返信件数を負にできない', async () => {
+      const { exitCode, output } = await insertMessage(-1);
+      expect(exitCode).not.toBe(0);
+      expect(output).toContain('Message_replyCount_check');
+    });
+
+    it('返信件数 0 は入れられる', async () => {
+      const { exitCode, output } = await insertMessage(0);
+      expect(exitCode, output).toBe(0);
     });
   });
 

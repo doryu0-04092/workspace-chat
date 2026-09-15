@@ -1,27 +1,28 @@
 // Prisma のスキーマ。
 //
-// このファイルが定義するのは **認証・ワークスペース・チャンネルの土台と、チャンネルのメッセージ**である。
-// スレッド・リアクション・メンション・添付・検索は別のイシューで扱う。
+// このファイルが定義するのは **認証・ワークスペース・チャンネルの土台と、チャンネルのメッセージとスレッド**である。
+// リアクション・メンション・添付・検索は別のイシューで扱う。
 //
 // ============================================================================
-// このファイルを直す人へ: **Prisma の記法で書けない制約が5つある**
+// このファイルを直す人へ: **Prisma の記法で書けない制約が6つある**
 // ============================================================================
 //
 // 部分一意索引（`WHERE` 付き）・式に対する索引（`lower(...)`）・検査制約（CHECK）は
 // Prisma のスキーマ言語に無い。
-// **マイグレーションの SQL に直接書いてある。** 具体的には次の5つ。
+// **マイグレーションの SQL に直接書いてある。** 具体的には次の6つ。
 //
 //   1. `User_userId_lower_key`                 … ユーザーID の一意性は大文字小文字を区別しない
 //   2. `Membership_single_owner_per_workspace` … 1ワークスペースにオーナーは1人
 //   3. `RecoveryCode_single_unused_per_user`   … 未使用のリカバリーコードは1人1つ
 //   4. `Channel_archive_naming_check`          … アーカイブと採番と改名が不可分
 //   5. `Message_body_check`                    … 本文は 1〜4000 文字で、空白だけではない
+//   6. `Message_replyCount_check`              … 返信件数は負にならない
 //
-// **このファイルだけを見ても、この5つは見えない。** モデルを増減させるときは
-// `prisma/migrations/` の SQL も併せて読むこと。5つとも
+// **このファイルだけを見ても、この6つは見えない。** モデルを増減させるときは
+// `prisma/migrations/` の SQL も併せて読むこと。6つとも
 // `apps/api/src/prisma-schema.test.ts` が実際の PostgreSQL に対して検証している。
 //
-// 代償: 上の5つは `prisma migrate dev` の自動生成では復元されない。
+// 代償: 上の6つは `prisma migrate dev` の自動生成では復元されない。
 // スキーマを作り直すときは手で書き足す必要がある。
 // 採らなかった側（制約をアプリ側の実装だけで守る）の代償は、
 // **片方だけ実行された状態を DB が受け入れてしまう**ことである。
@@ -539,8 +540,8 @@ model Channel {
 
   /// アーカイブした時刻（F-35）。null なら現役。
   ///
-  /// **この列を読んで、人を増やす・メッセージを書くかを決める経路（参加・招待・投稿・編集・削除）は、読む前にその行を掴むこと。**
-  /// 掴まずに読むと、アーカイブの確定の直前に読んだ古い値に基づいて、アーカイブの後に参加・招待・投稿・編集・削除が成立する。
+  /// **この列を読んで、人を増やす・メッセージを書くかを決める経路（参加・招待・投稿・返信・編集・削除）は、読む前にその行を掴むこと。**
+  /// 掴まずに読むと、アーカイブの確定の直前に読んだ古い値に基づいて、アーカイブの後に参加・招待・投稿・返信・編集・削除が成立する。
   /// DB の制約はこれを止めない。実装は apps/api/src/workspaces/channel-access.ts の `lockedChannelFor`（行を強さ `share` で掴んでから読む）を使う。
   archivedAt DateTime? @db.Timestamptz(3)
 
@@ -683,7 +684,7 @@ model ChannelMember {
   @@index([userId])
 }
 
-/// チャンネルのメッセージ（F-11・F-13。機能一覧 4.1・4.2）。
+/// チャンネルのメッセージとスレッドの返信（F-11・F-13・F-17。機能一覧 4.1・4.2・6）。
 model Message {
   /// UUIDv7。一覧のカーソル（`before`）にそのまま使う。
   id String @id @default(uuid(7)) @db.Uuid
@@ -707,9 +708,22 @@ model Message {
   /// 削除した時刻（論理削除）。**削除しても本文は残す**（要件定義書 3.4・機能一覧 4.2）。返さないのは応答と配信の側である。
   deletedAt DateTime? @db.Timestamptz(3)
 
-  channel Channel @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// スレッドの親（F-17。機能一覧 6）。チャンネルの本体のメッセージなら null。
+  /// **親は同じチャンネルのメッセージだけ**（複合外部キー）。**返信に返信はできない**（1階層のみ）——親が返信でないことは書く側が確かめる。
+  parentId String? @db.Uuid
 
-  /// **一覧（新しい順・`before` より古いもの）はこの向きで引く。**
-  @@index([channelId, id(sort: Desc)])
+  /// 削除されていない返信の件数（カウンタ列。一覧で `COUNT` を発行しない。返信の投稿・削除と同じトランザクションで増減する。要件定義書 4.1）。
+  replyCount Int @default(0)
+
+  channel Channel   @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  author  User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// 親は論理削除だけで消える（返信は残す。機能一覧 4.2）。チャンネルごと消えるときは、同じ文の中で返信も消えるため NoAction にする。
+  parent  Message?  @relation("Thread", fields: [parentId, channelId], references: [id, channelId], onDelete: NoAction)
+  replies Message[] @relation("Thread")
+
+  /// 返信の親を、同じチャンネルのメッセージに限る複合外部キーの参照先。
+  @@unique([id, channelId])
+  /// **チャンネルの一覧（本体だけ。`parentId IS NULL`）と、スレッドの返信の一覧（`parentId` で絞る）は、どちらもこの向きで引く**
+  /// （新しい順・`before` より古いもの）。**踏むと壊れる: 返信を引く問い合わせは必ず `channelId` を伴う**——`parentId` だけで引くと、この索引の前方を使えない。
+  @@index([channelId, parentId, id(sort: Desc)])
 }

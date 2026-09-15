@@ -34,6 +34,8 @@ function message(n: number, overrides: Record<string, unknown> = {}) {
     createdAt: SENT_AT,
     editedAt: null,
     deleted: false,
+    parentId: null,
+    replyCount: 0,
     ...overrides,
   };
 }
@@ -380,6 +382,22 @@ describe('配信の反映（機能一覧 5.2）', () => {
     act(() =>
       socket.deliver('message:new', {
         message: message(3, { channelId: OTHER_CHANNEL_ID }),
+        sentAt: SENT_AT,
+      }),
+    );
+    await pause();
+
+    expect(screen.queryByText('メッセージ 3')).toBeNull();
+  });
+
+  // 機能一覧 6「スレッドの返信は、チャンネル本体の一覧に混ざって表示されない」。返信もチャンネルの部屋へ message:new で届く。
+  it('スレッドの返信（parentId を持つ）の message:new は、開いているチャンネルの一覧に足さない', async () => {
+    const { socket, count } = await openChannel();
+    await accept(socket, count, 2);
+
+    act(() =>
+      socket.deliver('message:new', {
+        message: message(3, { parentId: message(1).id }),
         sentAt: SENT_AT,
       }),
     );
