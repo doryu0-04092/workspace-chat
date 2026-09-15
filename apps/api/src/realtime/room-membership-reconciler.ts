@@ -5,6 +5,7 @@ import {
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from '@nestjs/common';
+import { errorKind } from '../logging/error-kind';
 import { PrismaService } from '../prisma.service';
 import { RealtimePresence } from './realtime-presence';
 import { REALTIME_VALKEY_CLIENTS, type RealtimeValkeyClients } from './realtime-valkey';
@@ -22,7 +23,8 @@ export const ROOM_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
  * - **外した（利用者, チャンネル）は、キック・退出と同じく利用者単位で在席から外す**（`RealtimePresence.userRemoved`）——
  *   参加者でなくなった利用者は、他のタスクに接続が残っていても（そちらの照合がまだ走っていなくても）在席ではない
  * - **契機は5分ごとと、Valkey への publish が戻ったとき**。見るのは自タスクの接続だけ（`local`）——Valkey が止まっていても照合できる
- * - 照合に失敗しても例外にせず、warn を残す（次の契機でやり直す）
+ * - 照合に失敗しても例外にせず、warn を残す（次の契機でやり直す）。**warn には code か、code が無ければ種類の名前だけを残す**——
+ *   照合は DB と Valkey に問い合わせ、接続の失敗のメッセージには接続先が入りうる（logging/error-kind.ts）
  */
 @Injectable()
 export class RoomMembershipReconciler implements OnApplicationBootstrap, OnModuleDestroy {
@@ -79,9 +81,8 @@ export class RoomMembershipReconciler implements OnApplicationBootstrap, OnModul
         this.presence.userRemoved([...channelIds], userId);
       }
     } catch (error) {
-      const failure = error instanceof Error ? error : new Error(String(error));
       this.logger.warn(
-        `チャンネルの部屋の参加を照合できなかった（次の契機でやり直す）: ${failure.message}`,
+        `チャンネルの部屋の参加を照合できなかった（次の契機でやり直す）: ${errorKind(error, 'name')}`,
       );
     }
   }

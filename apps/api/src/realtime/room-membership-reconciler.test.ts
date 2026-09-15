@@ -1,12 +1,15 @@
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
+import { Logger } from '@nestjs/common';
 import { REALTIME_REQUESTS } from '@workspace-chat/shared';
 import type { Socket } from 'socket.io-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { PrismaService } from '../prisma.service';
 import { POSTGRES_STARTUP_TIMEOUT_MS } from '../testing/postgres';
 import { nextEvent } from '../testing/realtime-client';
 import { type TwoTasks, startTwoTasks } from '../testing/two-tasks';
 import { PresenceRegistry } from './presence-registry';
+import { RealtimePresence } from './realtime-presence';
 import { REALTIME_VALKEY_CLIENTS, type RealtimeValkeyClients } from './realtime-valkey';
 import { RealtimeGateway, channelRoom } from './realtime.gateway';
 import { ROOM_RECONCILE_INTERVAL_MS, RoomMembershipReconciler } from './room-membership-reconciler';
@@ -101,6 +104,58 @@ describe('チャンネルの部屋の参加の照合', () => {
       await t.first.get(RoomMembershipReconciler).reconcile();
 
       expect(await reached([aliceSocket, bobSocket], channelId)).toEqual([false, true]);
+    });
+  });
+
+  // 照合は DB と Valkey に問い合わせ、接続の失敗のメッセージには接続先が入る（#382）。warn には code を残し、code が無ければ
+  // 種類の名前だけを残す（apps/api/src/logging/error-kind.ts。在席の一覧の取り直し〔presence-registry.ts〕と同じ残し方）。
+  // DB の呼び出しだけを失敗させるため、照合をこのタスクの本物の部品と、失敗を返す Prisma で組み立てる。
+  describe('照合の失敗', () => {
+    async function warnOfFailedReconcile(failure: Error): Promise<string[]> {
+      await roomOfTwo();
+      const failingPrisma = {
+        channelMember: {
+          findMany: () => Promise.reject(failure),
+        },
+      } as unknown as PrismaService;
+      const reconciler = new RoomMembershipReconciler(
+        t.first.get(RealtimeGateway),
+        failingPrisma,
+        t.first.get(RealtimePresence),
+        t.first.get<RealtimeValkeyClients>(REALTIME_VALKEY_CLIENTS),
+      );
+      const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        await reconciler.reconcile();
+        return warned.mock.calls
+          .map(([message]) => String(message))
+          .filter((message) => message.includes('照合できなかった'));
+      } finally {
+        warned.mockRestore();
+      }
+    }
+
+    it('code を持つ失敗は code だけを warn に残し、メッセージに入りうる接続先は残さない', async () => {
+      const unreachable = Object.assign(
+        new Error("Can't reach database server at db.internal.example:5432"),
+        { code: 'P1001' },
+      );
+
+      const messages = await warnOfFailedReconcile(unreachable);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('P1001');
+      expect(messages[0]).not.toContain('db.internal.example');
+    });
+
+    it('code を持たない失敗は種類の名前だけを warn に残し、メッセージは残さない', async () => {
+      const refused = new TypeError('fetch failed: db.internal.example:5432');
+
+      const messages = await warnOfFailedReconcile(refused);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toContain('TypeError');
+      expect(messages[0]).not.toContain('db.internal.example');
     });
   });
 
