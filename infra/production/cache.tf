@@ -8,30 +8,51 @@
 # valkey_auth_token_version だけで上げる（片方だけ上げると、api が Valkey に繋がらない。技術スタックの秘密情報の行）。
 # 版を上げた apply の後も、ECS のタスクを入れ替えるまで動いているコンテナは古い値を持つ。
 
+# 踏むと壊れる: 技術スタックが決めた値は、この locals にだけ書く（下のブロックには、名前と説明のほかにリテラルの値を書かない）。
+# どの値も、変えても validate も plan も CI も落ちない（apply が落ちるのは AWS の制約の外に出たときだけ）。
+# 変えるときは、技術スタックの行を先に直す。
 locals {
   # Valkey の待ち受けポート。ElastiCache・REDIS_URL・network.tf の受信の規則はこの値だけを使う
-  # （食い違うと api が Valkey に繋がらず、validate も plan も落ちず、5xx もアラートも出ない。要件定義書 4.2「アラート」）。
+  # （食い違うと api が Valkey に繋がらず、5xx もアラートも出ない。要件定義書 4.2「アラート」）。
   valkey_port = 6379
 
   # REDIS_URL の value_wo_version と ElastiCache の auth_token_wo_version が一緒に使う版。
   valkey_auth_token_version = 1
+
+  # JWT_SECRET の value_wo_version。上げると、発行済みのアクセストークンがすべて無効になる（要件定義書 4.2 の「Parameter Store の値」の行）。
+  jwt_secret_version = 1
+
+  # 乱数の長さ。下げても AWS の制約（AUTH トークンは 16–128 文字）の内側なら、トークンと鍵の強さだけが下がる。
+  # JWT_SECRET の 64 は、HS256 の鍵は 256 ビット以上（RFC 7518 3.2）による（英数字 64 文字でおよそ 381 ビット）。
+  # api の下限（apps/api/src/config/api-config.ts の JWT_SECRET_MIN_BYTES）は 32 バイトで、32 に下げても api の起動は落ちない。
+  valkey_auth_token_length = 32
+  jwt_secret_length        = 64
+
+  # 乱数は英数字だけにする。AUTH トークンは REDIS_URL の中に埋めるため、記号を許すと乱数しだいで apply が落ちるか
+  # （ElastiCache が許す記号は一部だけ）、URL が壊れる（ElastiCache が許す # は URL では断片の始まりになる）。
+  random_password_special = false
+
+  valkey_engine             = "valkey"
+  valkey_engine_version     = "8.2"
+  valkey_node_type          = "cache.t4g.micro"
+  valkey_num_cache_clusters = 1
+
+  # 転送時暗号化。REDIS_URL の rediss:// と auth_token_wo は、これを前提にする。
+  valkey_transit_encryption_enabled = true
+
+  # Parameter Store の暗号化パラメータ（標準の区分）。String にすると、値が暗号化されずに置かれる。
+  parameter_type = "SecureString"
+  parameter_tier = "Standard"
 }
 
-# 踏むと壊れる: AUTH トークンは英数字だけにする（special = false）。REDIS_URL の中に埋めるため、記号を許すと値によって
-# apply が落ちるか（ElastiCache が許す記号は一部だけ）、URL が壊れる（ElastiCache が許す # は URL では断片の始まりになる）。
-# どちらになるかは乱数しだいで、validate も plan も落ちない。技術スタックの秘密情報の行。
 ephemeral "random_password" "valkey_auth_token" {
-  length  = 32
-  special = false
+  length  = local.valkey_auth_token_length
+  special = local.random_password_special
 }
 
-# 踏むと壊れる: JWT_SECRET は長さ 64 で作る。HS256 の鍵は 256 ビット以上（RFC 7518 3.2）で、英数字 64 文字でおよそ 381 ビット。
-# api の下限（apps/api/src/config/api-config.ts の JWT_SECRET_MIN_BYTES）は 32 バイトで、32 に下げても起動も validate も plan も
-# CI も落ちず、署名の鍵の強さだけが下がる。変えるときは同じ apply で下の jwt_secret の value_wo_version を上げ、ECS のタスクを
-# 入れ替える（発行済みのアクセストークンはすべて無効になる。要件定義書 4.2 の「Parameter Store の値」の行）。
 ephemeral "random_password" "jwt_secret" {
-  length  = 64
-  special = false
+  length  = local.jwt_secret_length
+  special = local.random_password_special
 }
 
 resource "aws_elasticache_subnet_group" "valkey" {
@@ -43,32 +64,32 @@ resource "aws_elasticache_replication_group" "valkey" {
   replication_group_id = "workspace-chat"
   description          = "workspace-chat realtime adapter and rate limit counters"
 
-  engine             = "valkey"
-  engine_version     = "8.2"
-  node_type          = "cache.t4g.micro"
-  num_cache_clusters = 1
+  engine             = local.valkey_engine
+  engine_version     = local.valkey_engine_version
+  node_type          = local.valkey_node_type
+  num_cache_clusters = local.valkey_num_cache_clusters
   port               = local.valkey_port
 
   subnet_group_name  = aws_elasticache_subnet_group.valkey.name
   security_group_ids = [aws_security_group.valkey.id]
 
-  transit_encryption_enabled = true
+  transit_encryption_enabled = local.valkey_transit_encryption_enabled
   auth_token_wo              = ephemeral.random_password.valkey_auth_token.result
   auth_token_wo_version      = local.valkey_auth_token_version
 }
 
 resource "aws_ssm_parameter" "redis_url" {
   name             = "/workspace-chat/REDIS_URL"
-  type             = "SecureString"
-  tier             = "Standard"
+  type             = local.parameter_type
+  tier             = local.parameter_tier
   value_wo         = "rediss://:${ephemeral.random_password.valkey_auth_token.result}@${aws_elasticache_replication_group.valkey.primary_endpoint_address}:${local.valkey_port}"
   value_wo_version = local.valkey_auth_token_version
 }
 
 resource "aws_ssm_parameter" "jwt_secret" {
   name             = "/workspace-chat/JWT_SECRET"
-  type             = "SecureString"
-  tier             = "Standard"
+  type             = local.parameter_type
+  tier             = local.parameter_tier
   value_wo         = ephemeral.random_password.jwt_secret.result
-  value_wo_version = 1
+  value_wo_version = local.jwt_secret_version
 }

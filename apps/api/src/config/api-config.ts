@@ -31,8 +31,8 @@ export const API_CONFIG = Symbol('API_CONFIG');
  * JWT_SECRET の下限（バイト）。RFC 7518 3.2: HS256 の鍵はハッシュの出力（256 ビット）以上でなければならない（MUST）。
  *
  * **踏むと壊れる: 本番の JWT_SECRET は英数字・長さ 64 で作る**（技術スタックの「本番の HTTPS・秘密情報・state の置き場」。
- * `infra/production/cache.tf` の `random_password`）。この定数を 64 より上げると、本番の api は起動時に落ちる。
- * 上げるときは、同じ `apply` で `random_password` の `length` とパラメータの `value_wo_version` を上げ、ECS のタスクを入れ替える。
+ * `infra/production/cache.tf` の `locals` の `jwt_secret_length`）。この定数を 64 より上げると、本番の api は起動時に落ちる。
+ * 上げるときは、同じ `apply` で `jwt_secret_length` と `jwt_secret_version` を上げ、ECS のタスクを入れ替える。
  */
 const JWT_SECRET_MIN_BYTES = 32;
 
