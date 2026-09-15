@@ -62,6 +62,9 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
 }
 
 # タスク実行ロール: イメージの取得・ログの送信と、secrets に渡すパラメータの読み出し。
+# 踏むと壊れる: このロールに結び付けるのは、下の管理ポリシー（AmazonECSTaskExecutionRolePolicy）の付与と task_execution_parameters の2つだけにする。
+# role はロールの参照（aws_iam_role.task_execution）で書き、ロール名の文字列で書かない。ロールのブロックに managed_policy_arns・inline_policy を書かない。
+# パラメータを読む操作（ssm:GetParameters）は task_execution_parameters の1箇所だけに書く。apps/api/src/config/api-config-infra.test.ts が確かめる。
 resource "aws_iam_role" "task_execution" {
   name               = "workspace-chat-task-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json

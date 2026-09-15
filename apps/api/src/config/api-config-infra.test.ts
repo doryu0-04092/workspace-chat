@@ -255,6 +255,17 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     expect(countOf(terraform, /\baws_iam_role\.task_execution\b/g)).toBe(
       2 + countOf(terraform, /\bexecution_role_arn\s*=\s*aws_iam_role\.task_execution\.arn\b/g),
     );
+    // ロール名の文字列で結び付けると、参照の数に現れない。ロール名は自分のブロックの1箇所だけに書き、role を文字列で書かない。
+    // ロールのブロックの中で結び付ける引数（managed_policy_arns・inline_policy）も使わない。
+    const executionRole = block('resource', 'aws_iam_role', 'task_execution');
+    const executionRoleName = stringAttribute(executionRole, 'name') ?? '';
+    expect(executionRoleName).not.toBe('');
+    expect(terraform.split(`"${executionRoleName}"`).length - 1).toBe(1);
+    expect(countOf(terraform, new RegExp(`${attribute('roles?')}\\s*\\[?\\s*"`, 'g'))).toBe(0);
+    expect(
+      countOf(executionRole, new RegExp(attribute('(?:managed_policy_arns|inline_policy)'), 'g')) +
+        countOf(executionRole, /\binline_policy\s*\{/g),
+    ).toBe(0);
     const managed = block('resource', 'aws_iam_role_policy_attachment', 'task_execution_managed');
     expect(managed).toMatch(/\brole\s*=\s*aws_iam_role\.task_execution\.name\b/);
     expect(/\bpolicy_arn\s*=\s*"([^"]+)"/.exec(managed)?.[1]).toBe(

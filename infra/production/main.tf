@@ -2,6 +2,9 @@
 #
 # バケット名はアカウント ID を含むため構成に書かず、init のときに渡す:
 #   terraform -chdir=infra/production init -backend-config="bucket=$(terraform -chdir=infra/bootstrap output -raw state_bucket)"
+#
+# 踏むと壊れる: この構成を module に分けず、.tf.json を置かない。apps/api/src/config/api-config-infra.test.ts はこのディレクトリの直下の .tf を読んで
+# 秘密の渡し方を確かめるため、module や .tf.json に置いた構成は読めずに検査が落ちる。
 
 terraform {
   # 1.11 以上: S3 バックエンドの use_lockfile と write-only 引数（技術スタック「インフラ（AWS）」の IaC の行）。

@@ -68,6 +68,8 @@ resource "aws_ecs_task_definition" "api" {
 
   # secret: true の設定（apps/api/src/config/api-config.ts の API_SETTINGS）は secrets で渡し、environment に書かない
   # （技術スタックの秘密情報の行）。踏むと壊れる: secret: true の設定を足したら、ここと compute.tf の ssm:GetParameters の両方に足す。
+  # 踏むと壊れる: apps/api/src/config/api-config-infra.test.ts がこのファイルを読んで秘密の渡し方を確かめる。タスク定義は api と migrate の2つだけにし、
+  # container_definitions は jsonencode([ … ]) の1つだけで、その要素はその場に書いたオブジェクトにする（local・merge・for で作ると、中身を読めずに検査が落ちる）。
   container_definitions = jsonencode([
     {
       name         = "api"
