@@ -88,7 +88,7 @@ export type InvitationNewPayload = {
 };
 
 /**
- * `message:new` の payload（F-11・F-17。機能一覧 4.1・5.2・6）。チャンネルの部屋へ送る。
+ * `message:new` の payload（F-11・F-17・F-20。機能一覧 4.1・5.2・6・9.1）。チャンネルの部屋へ送る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で送る。
  * `message` は投稿・返信の応答（REST の Message）と同じ形（返信は `parentId` を持つ）。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
  */
 export type MessageNewPayload = {

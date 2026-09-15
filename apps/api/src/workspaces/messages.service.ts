@@ -310,7 +310,7 @@ async function messageOf(
  * - **読めるのも書けるのも参加者だけ**。所属していなければ 404（`membershipOf`）、所属していれば 2段階（`assertChannelParticipant`）。
  *   **オーナーの例外は及ばない**
  * - **投稿・返信・編集・削除はチャンネルの行を掴んでからアーカイブ済みかを読む**（`lockedChannelFor`。機能一覧 3.2）。アーカイブ済みなら 409 `channel_archived`
- * - **`message:new` / `message:updated` / `message:deleted` は確定の後にチャンネルの部屋へ送る**（確定しなかった書き込みを配らない。機能一覧 5.2）
+ * - **`message:new` / `message:updated` / `message:deleted` は確定の後にチャンネルの部屋へ送る**（確定しなかった書き込みを配らない。機能一覧 5.2。メンションを含む `message:new` の宛先は下の箇条）
  * - 一覧は id の新しい順（`pageOf`）。**チャンネルの一覧は本体だけ**で、返信を混ぜない（機能一覧 6）
  * - **スレッドは1階層だけ**。親にできるのは、そのチャンネルの削除されていない本体のメッセージ（`parentId` が null）だけ
  * - **親の返信件数（`replyCount`）は、返信の投稿・削除と同じトランザクションで増減し**（一覧で `COUNT` を発行しない。要件定義書 4.1）、
