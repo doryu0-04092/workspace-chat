@@ -1,59 +1,35 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { REALTIME_REQUESTS } from '@workspace-chat/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fakeFetch, json, PROFILE, token, USER } from '../testing/fake-api';
+import { fakeFetch, json, token, USER } from '../testing/fake-api';
+import {
+  CHANNEL_PATH,
+  GENERAL,
+  MESSAGES,
+  message,
+  page,
+  routes as signedInRoutes,
+  SENT_AT,
+  WORKSPACE_ID,
+} from '../testing/fake-messages';
 import type { FakeSocket } from '../testing/fake-socket';
 import { renderApp } from '../testing/render-app';
 
 const WORKSPACE = {
-  id: '01920000-0000-7000-8000-0000000000a1',
+  id: WORKSPACE_ID,
   name: '開発チーム',
   createdAt: '2026-09-13T00:00:00.000Z',
   role: 'MEMBER',
 };
-const GENERAL = {
-  id: '01920000-0000-7000-8000-0000000000c1',
-  name: 'general',
-  visibility: 'PUBLIC',
-  joined: true,
-};
 const OTHER_CHANNEL_ID = '01920000-0000-7000-8000-0000000000c9';
-/** テストで使うもう1人の利用者（実在の人物ではない）。 */
-const BOB = { id: '01920000-0000-7000-8000-000000000002', userId: 'bob', displayName: 'ボブ' };
-const SENT_AT = '2026-09-14T00:00:00.000Z';
 
-const CHANNEL_PATH = `/workspaces/${WORKSPACE.id}/channels/${GENERAL.id}`;
-const MESSAGES = `/api/workspaces/${WORKSPACE.id}/channels/${GENERAL.id}/messages`;
-
-function message(n: number, overrides: Record<string, unknown> = {}) {
-  return {
-    id: `01920000-0000-7000-8000-${String(n).padStart(12, '0')}`,
-    channelId: GENERAL.id,
-    author: BOB,
-    body: `メッセージ ${n}`,
-    createdAt: SENT_AT,
-    editedAt: null,
-    deleted: false,
-    parentId: null,
-    replyCount: 0,
-    replyParticipants: [],
-    ...overrides,
-  };
-}
-
-function page(messages: ReturnType<typeof message>[]) {
-  return json(200, { messages, nextBefore: null });
-}
-
+/** 共有の応答に、ワークスペースの取得と1件のメッセージの一覧を足す。 */
 function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
-  return {
-    'POST /api/auth/refresh': () => token('t1'),
-    'GET /api/users/me': () => json(200, PROFILE),
+  return signedInRoutes({
     [`GET /api/workspaces/${WORKSPACE.id}`]: () => json(200, WORKSPACE),
-    [`GET /api/workspaces/${WORKSPACE.id}/channels`]: () => json(200, [GENERAL]),
     [`GET ${MESSAGES}`]: () => page([message(1)]),
     ...extra,
-  };
+  });
 }
 
 async function openChannel(extra: Parameters<typeof fakeFetch>[0] = {}) {

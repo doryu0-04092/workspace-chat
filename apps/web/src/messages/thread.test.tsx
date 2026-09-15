@@ -1,46 +1,27 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { error, fakeFetch, headerOf, json, PROFILE, token, USER } from '../testing/fake-api';
+import { error, fakeFetch, headerOf, json, USER } from '../testing/fake-api';
+import {
+  BOB,
+  CHANNEL_PATH,
+  GENERAL,
+  MESSAGES,
+  message,
+  page,
+  routes,
+  SENT_AT,
+  type TestMessage,
+} from '../testing/fake-messages';
 import { renderApp } from '../testing/render-app';
 
 // 機能一覧 6（F-17）: スレッドの画面。親に「N件の返信」と返信した人を出し、スレッドを開いて返信を読み書きする。
 
-const WORKSPACE_ID = '01920000-0000-7000-8000-0000000000a1';
-const GENERAL = {
-  id: '01920000-0000-7000-8000-0000000000c1',
-  name: 'general',
-  visibility: 'PUBLIC',
-  joined: true,
-};
-/** テストで使うほかの利用者（実在の人物ではない）。 */
-const BOB = { id: '01920000-0000-7000-8000-000000000002', userId: 'bob', displayName: 'ボブ' };
+/** テストで使う3人目の利用者（実在の人物ではない）。 */
 const CAROL = {
   id: '01920000-0000-7000-8000-000000000003',
   userId: 'carol',
   displayName: 'キャロル',
 };
-const SENT_AT = '2026-09-14T00:00:00.000Z';
-
-const CHANNEL_PATH = `/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}`;
-const MESSAGES = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/messages`;
-
-type TestMessage = ReturnType<typeof message>;
-
-function message(n: number, overrides: Record<string, unknown> = {}) {
-  return {
-    id: `01920000-0000-7000-8000-${String(n).padStart(12, '0')}`,
-    channelId: GENERAL.id,
-    author: BOB,
-    body: `メッセージ ${n}`,
-    createdAt: `2026-09-14T00:0${n % 10}:00.000Z`,
-    editedAt: null as string | null,
-    deleted: false,
-    parentId: null as string | null,
-    replyCount: 0,
-    replyParticipants: [] as (typeof BOB)[],
-    ...overrides,
-  };
-}
 
 function reply(n: number, parent: TestMessage, overrides: Record<string, unknown> = {}) {
   return message(n, { parentId: parent.id, body: `返信 ${n}`, ...overrides });
@@ -48,19 +29,6 @@ function reply(n: number, parent: TestMessage, overrides: Record<string, unknown
 
 function repliesPath(parent: { id: string }): string {
   return `${MESSAGES}/${parent.id}/replies`;
-}
-
-function page(messages: TestMessage[], nextBefore: string | null = null) {
-  return json(200, { messages, nextBefore });
-}
-
-function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
-  return {
-    'POST /api/auth/refresh': () => token('t1'),
-    'GET /api/users/me': () => json(200, PROFILE),
-    [`GET /api/workspaces/${WORKSPACE_ID}/channels`]: () => json(200, [GENERAL]),
-    ...extra,
-  };
 }
 
 async function openThread() {
