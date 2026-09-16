@@ -2,6 +2,8 @@
 #
 # 配信は CloudFront 経由だけ、アップロードはブラウザから署名付き URL で `quarantine/` へ直接 PUT する。
 # バケットポリシー（書く主体の分け方）と CORS は、添付とアバターのアップロードと確定を実装するときに足す（F-29・F-04。#427）。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
+# バケットポリシーは IAM の面に入る——足すときは、その条件に従い、検査の iamSurface の表も直す。
 
 data "aws_caller_identity" "current" {}
 

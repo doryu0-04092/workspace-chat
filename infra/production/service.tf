@@ -1,5 +1,6 @@
 # ECS のタスク定義・サービス・ロググループ（#452）。技術スタックのコンテナの行・「ECS のタスクの置き場」と、
 # 「リソースのサイジング」の ECS Fargate の行。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 #
 # マイグレーションはサービスの外で、マイグレーション用のタスク定義を aws ecs run-task で1回動かし、新しいタスク定義に
 # 切り替える前に流す（技術スタックのコンテナの行。#274）。運用者が ECS Exec で入る先も、そのタスク定義を run-task で動かしたタスクである。
@@ -68,6 +69,12 @@ resource "aws_ecs_task_definition" "api" {
 
   # secret: true の設定（apps/api/src/config/api-config.ts の API_SETTINGS）は secrets で渡し、environment に書かない
   # （技術スタックの秘密情報の行）。踏むと壊れる: secret: true の設定を足したら、ここと compute.tf の ssm:GetParameters の両方に足す。
+  # 踏むと壊れる: apps/api/src/config/api-config-infra.test.ts がこのファイルを読んで秘密の渡し方を確かめる。タスク定義は api と migrate の2つだけにし、
+  # container_definitions は jsonencode([ … ]) の1つだけで、その要素はその場に書いたオブジェクトにする（local・merge・for で作ると、中身を読めずに検査が落ちる）。
+  # コンテナの属性は name・image・essential・portMappings・environment・secrets・logConfiguration だけ（logConfiguration の中は logDriver・options だけ）。
+  # 属性を足すときは、秘密を渡す別の経路（environmentFiles・secretOptions など）でないことを確かめてから、検査の許可リストにも足す。
+  # environment・secrets はその場に書いたリスト（[ … ]）にし、要素の name は文字列、secrets の valueFrom は aws_ssm_parameter.<名前>.arn の形で書く。
+  # api のコンテナの environment を空にしない（検査の「数え上げる対象がある」の下限で落ちる。空にするなら、その下限も直す）。
   container_definitions = jsonencode([
     {
       name         = "api"

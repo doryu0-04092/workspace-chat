@@ -1,1 +1,6 @@
 @import 'tailwindcss';
+
+/* 本文のメンション（F-20。機能一覧 9.1）。class は MessageBody の sanitize のスキーマが `mention` だけを通す */
+.mention {
+  @apply rounded bg-sky-100 px-0.5 font-semibold text-sky-800;
+}
