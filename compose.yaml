@@ -97,6 +97,8 @@ services:
     #
     # このイメージは build: を持たないため、`build --pull` の対象にならない。
     # パッチ修正を受け取るには `docker compose pull redis` が要る（README.md の操作表）。
+    # **このイメージも Dependabot で追わないと決めている**（理由は .github/dependabot.yml の末尾）。
+    # 追う経路が無い以上、**この `docker compose pull` が唯一の取り込みの経路である。**
     #
     # **requirepass を設けない（認証を掛けない）。** 127.0.0.1 にだけ束縛しており、
     # ローカルでは守るものが無い。代償は docs/tech-stack.md に書いた

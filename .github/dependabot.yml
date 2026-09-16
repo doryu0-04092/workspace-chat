@@ -77,10 +77,16 @@ updates:
 # **タグの版を上げる提案**である。版を上げる提案は、上の npm と同じ方針で受け取らない
 # （README の「依存の版を上げない方針」）。
 #
-# **代わりの経路: 同じタグの中の更新（Node 24 系・PostgreSQL 17 系の中の更新と OS の修正）は、
-# イメージを作るたびに --pull で取り込む。** 付いている場所は
-# scripts/api-image.test.sh・scripts/release.sh（api の土台）と、
-# README の操作表の docker compose build --pull（db の土台）である。
+# **代わりの経路: 同じタグの中の更新（Node 24 系・PostgreSQL 17 系の中の更新と OS の修正）は、--pull で取り込む。**
+# **ただし api と db で強さが違う。**
+#   - api の土台（NODE_IMAGE）: **イメージを作るたびに取り込む。**
+#     作る経路は scripts/api-image.test.sh と scripts/release.sh の2つだけで、どちらも --pull を付けている
+#   - db の土台（POSTGRES_IMAGE）: **人が docker compose build --pull db を叩いたときだけ取り込む。**
+#     docker compose up -d --build --wait では土台は取り直されない（README の操作表と、その下の実測）。
+#     **api 側より弱い。** 忘れれば古い土台のまま動き続ける
+#   - redis（Valkey）のイメージ: **build: を持たないため --pull の対象にならない。**
+#     取り込むには docker compose pull redis が要る（compose.yaml の redis の注記と README の操作表）。
+#     db 側と同じく、人が叩いたときだけである
 #
 # **pg_bigm の更新を追う経路は無い**（docker/postgres/Dockerfile が git clone で取り、
 # SHA-1 で固定するため、docker のエコシステムでも --pull でも追えない）。無いことをここに記録する。

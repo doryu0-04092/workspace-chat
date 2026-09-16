@@ -46,6 +46,9 @@ postgres_image=$(sed -n "s/^export const POSTGRES_IMAGE = '\([^']*\)';$/\1/p" ap
 
 echo "== イメージを作る"
 # --pull: 土台（タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で作り、手元の緑が CI の緑と同じ意味を持たない（#281）。
+# **踏むと壊れる: この --pull は、土台の更新を受け取る唯一の経路の一方である。**
+# 土台は Dependabot で追わないと決めており（理由は .github/dependabot.yml の末尾）、
+# 外すと、同じタグの中の更新（Node 24 系の中の更新と OS の修正）が届かなくなる。
 # 代償: レジストリに届かない環境では、手元に土台があってもこの検査は通らない（下の docker pull も同じ）。
 docker build --pull --file apps/api/Dockerfile --target migrate --tag "$migrate_image" . >/dev/null
 docker build --pull --file apps/api/Dockerfile --target runtime --tag "$runtime_image" . >/dev/null
