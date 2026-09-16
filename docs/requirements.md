@@ -570,7 +570,9 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
      **`--with-decryption` を付けない**（値は取り出さない。版だけを見る）
   2. **動いているタスクがすべて、入れ替えの後に起動したものであること**——
      `aws ecs list-tasks --cluster "$cluster" --service-name "$service" --query 'taskArns' --output text` で列挙し直し、
-     **`before_arns` と重なりが無いこと**を見る。**版が上がっても、古いタスクが残っていれば古い値を持ったままである**
+     **列挙が空でないこと**と、**`before_arns` と重なりが無いこと**を見る。
+     **空集合は「重なりが無い」を満たしてしまう**ため、空でないことを先に見る（止めた直後は 0 件である）。
+     **版が上がっても、古いタスクが残っていれば古い値を持ったままである**
 
 - **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
   1. **Terraform の外で** api のサービスの desired count を 0 にし、タスクが無くなるのを待つ——
@@ -585,7 +587,9 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
      `aws rds describe-db-instances --db-instance-identifier workspace-chat --query 'DBInstances[0].PendingModifiedValues'`
      を繰り返して見る（`aws ecs wait` はここには当たらない）。
      **この待ちだけでは入れ替わりを確かめられない**——版が上がっていなければ、その要素は最初から現れない（RDS の API リファレンス「Between the time of the request and the completion of the request, the `MasterUserPassword` element exists in the `PendingModifiedValues` element of the operation response.」）
-  4. 対象を絞らない `apply` でサービスを戻す（起動するタスクは新しいパラメータを読む）。
+  4. 対象を絞らない `apply` でサービスを戻し、**`aws ecs wait services-stable --cluster "$cluster" --services "$service"` で安定を待つ**
+     （起動するタスクは新しいパラメータを読む）。**`apply` は待たない**——`aws_ecs_service.api` は `wait_for_steady_state` を置いておらず、
+     UpdateService を呼んだ時点で戻る。**待たずに次の段へ進むと、動いているタスクが 0 件のまま確かめる段を通る。**
      **手順 1 で作った drift が、ここで戻る**——`desired_count` は `local.api_task_count` のままで `ignore_changes` を置いていないため、
      Terraform が 0 を構成の値に戻す
   5. **上の共通の前置きの「確かめる段」を当てる**（`DATABASE_URL` の版が上がったこと・全タスクが入れ替わったこと）。
@@ -613,7 +617,8 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 - **`JWT_SECRET` も、api を止めてから入れ替える。** 署名と検証は HS256 の共有鍵であり、**漏れた鍵があれば任意の利用者のアクセストークンを作れる**（上記 3.5 の脅威）。版を上げた `apply` の後も、**ECS のタスクを入れ替えるまで動いているコンテナは古い鍵を持つ**ため、止めずに入れ替えると、**偽造したトークンを古いタスクが受理し続ける窓**が残る。止めれば窓は消える。
   1. 手順は上の RDS と同じ（Terraform の外で desired count を 0 にし、タスクが無くなるのを待つ）
   2. `jwt_secret_version` を上げ、`JWT_SECRET` のパラメータだけを対象に `apply` する（`-target=aws_ssm_parameter.jwt_secret`）
-  3. 対象を絞らない `apply` でサービスを戻す
+  3. 対象を絞らない `apply` でサービスを戻し、**`aws ecs wait services-stable --cluster "$cluster" --services "$service"` で安定を待つ**
+     （上の RDS の手順 4 と同じ理由——`apply` はタスクの起動を待たない）
   4. **上の共通の前置きの「確かめる段」を当てる**（`JWT_SECRET` の版が上がったこと・全タスクが入れ替わったこと）。
      そのうえで、ログインしたまま画面を開き直し、ログインし直さずに使えることを確かめる（下の代償のとおり、リフレッシュで取り直せる）。
      **こちらは動作の確認だけでは特に弱い**——**鍵が替わらなかったときのほうが容易に通る**（発行済みのトークンがそのまま通る）ため、

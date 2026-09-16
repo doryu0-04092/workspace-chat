@@ -145,9 +145,13 @@ resource "aws_ecs_task_definition" "migrate" {
 }
 
 resource "aws_ecs_service" "api" {
-  name                              = "workspace-chat-api"
-  cluster                           = aws_ecs_cluster.main.id
-  task_definition                   = aws_ecs_task_definition.api.arn
+  name            = "workspace-chat-api"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.api.arn
+  # 踏むと壊れる: **この desired_count に lifecycle { ignore_changes } を置かない。**
+  # 要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順 4 は、**手順 1 で Terraform の外から 0 にした drift を、
+  # 対象を絞らない apply が構成の値に戻すこと**に依存している。置くと Terraform がその drift を無視し、
+  # **api を止めたまま全断が続く。** validate も plan も CI も落ちない。
   desired_count                     = local.api_task_count
   launch_type                       = "FARGATE"
   health_check_grace_period_seconds = local.api_health_check_grace_seconds
