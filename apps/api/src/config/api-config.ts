@@ -33,6 +33,11 @@ export const API_CONFIG = Symbol('API_CONFIG');
  * **踏むと壊れる: 本番の JWT_SECRET は英数字・長さ 64 で作る**（技術スタックの「本番の HTTPS・秘密情報・state の置き場」。
  * `infra/production/cache.tf` の `locals` の `jwt_secret_length`）。この定数を 64 より上げると、本番の api は起動時に落ちる。
  * 上げるときは、同じ `apply` で `jwt_secret_length` と `jwt_secret_version` を上げ、ECS のタスクを入れ替える。
+ * **代償: 止めずにローリングで入れ替えると、新旧の鍵を持つタスクが同時に動く区間ができる。**
+ * ALB にスティッキーセッションを置いていないため、**発行済みのアクセストークンを持つ利用者の要求が、
+ * 当たったタスクによって通ったり 401 になったりする**（リフレッシュで取り直せるが、その間は失敗が見える）。
+ * **漏えいの疑いで入れ替えるときは、この区間を作らない**——api を止めてから入れ替える
+ * （docs/requirements.md 4.2「秘密の値が漏れた疑いがあるとき」の JWT_SECRET の箇条）。
  */
 const JWT_SECRET_MIN_BYTES = 32;
 

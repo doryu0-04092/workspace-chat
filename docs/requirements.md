@@ -513,8 +513,21 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 
 **どの箇条にも共通する前置き**（書き写さず、ここを見る）。
 
+- **まず、以降の段が使う値を束縛する**（`release.sh` と同じ代入の形。以降の段はこれを参照する）。
+
+  ```sh
+  TF_STATE_BUCKET=$(terraform -chdir=infra/bootstrap output -raw state_bucket)
+  terraform -chdir=infra/production init -backend-config="bucket=$TF_STATE_BUCKET"
+  cluster=$(terraform -chdir=infra/production output -raw ecs_cluster_name)
+  service=$(terraform -chdir=infra/production output -raw ecs_service_name)
+  before_arns=$(aws ecs list-tasks --cluster "$cluster" --service-name "$service" --query 'taskArns' --output text)
+  ```
+
+  **`before_arns` は、確かめる段 2 の基準である**——入れ替えの後に列挙し直し、**この集合と重なりが無いこと**を見る。
+  `--force-new-deployment` で入れ替える箇条（Valkey）は**タスク定義のリビジョンが変わらない**ため、
+  `taskDefinition` では区別できない。
 - **`terraform` を流す前に、[release.sh](../scripts/release.sh) と同じ前置きを済ませる**——
-  `terraform -chdir=infra/production init -backend-config="bucket=$TF_STATE_BUCKET"` を先に流し、
+  上の `init` を先に流し、
   `TF_VAR_image_tag` と `TF_VAR_alarm_email` を渡す（`infra/production/variables.tf` の2つには既定値が無く、
   渡さないと `apply` が対話で聞いてくる）。**`image_tag` は現に動いているタグを渡す**——別のタグを渡すと、
   対象を絞らない `apply` が api のタスク定義を差し替え、**入れ替えの手順が同時にデプロイになる**。
@@ -525,11 +538,8 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **これが最後の確かめる段の基準値である**（控えずに進むと、上がったかどうかを判定できない）。
   **`locals` の `*_version`（1→2）では代用できない**——Parameter Store の版とは別の番号で、
   RDS の作り直しなど別の `apply` でも SSM 側の版は上がる
-- **タスクを指す段は、先にサービスのタスクを列挙する**——
-  `aws ecs list-tasks --cluster "$cluster" --service-name "$service" --query 'taskArns' --output text`。
-  `aws ecs wait tasks-stopped` と `aws ecs describe-tasks` は、どちらも `--cluster` と `--tasks` を要る
 - **待つ段は `aws ecs wait` で待つ**（`release.sh` と同じ形）。タスクが無くなるのは
-  `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $arns`（上で列挙した ARN）、
+  `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $before_arns`、
   サービスが安定するのは `aws ecs wait services-stable --cluster "$cluster" --services "$service"`。
   **RDS の待ちにはこれが当たらない**（下の RDS の手順 3）
 - **確かめる段は、入れ替わったことを確かめる。** 動くことを確かめるだけでは足りない——
@@ -538,13 +548,13 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
      `aws ssm get-parameter --name /workspace-chat/<名前> --query 'Parameter.Version' --output text`。
      **`--with-decryption` を付けない**（値は取り出さない。版だけを見る）
   2. **動いているタスクがすべて、入れ替えの後に起動したものであること**——
-     上の列挙で ARN を採り、`aws ecs describe-tasks --cluster "$cluster" --tasks $arns --query 'tasks[].[startedAt,taskDefinition]'` を見る。
-     **版が上がっても、古いタスクが残っていれば古い値を持ったままである**
+     `aws ecs list-tasks --cluster "$cluster" --service-name "$service" --query 'taskArns' --output text` で列挙し直し、
+     **`before_arns` と重なりが無いこと**を見る。**版が上がっても、古いタスクが残っていれば古い値を持ったままである**
 
 - **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
-  1. **Terraform の外で** api のサービスの desired count を 0 にし、タスクが無くなるのを待つ。
-     クラスターとサービスの名前は `terraform output` から採る（`ecs_cluster_name` / `ecs_service_name`。`infra/production/outputs.tf`）——
-     `aws ecs update-service --cluster "$(terraform -chdir=infra/production output -raw ecs_cluster_name)" --service "$(terraform -chdir=infra/production output -raw ecs_service_name)" --desired-count 0`。
+  1. **Terraform の外で** api のサービスの desired count を 0 にし、タスクが無くなるのを待つ——
+     `aws ecs update-service --cluster "$cluster" --service "$service" --desired-count 0` の後、
+     `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $before_arns`（変数は上の共通の前置きで束縛する）。
      **`--cluster` を省くと `default` クラスターが仮定される**（このリポジトリのクラスターは `default` ではない）。
      **`local.api_task_count`（`infra/production/service.tf`）は直さない**——直すと手順 2 の `-target` の理由が消え、
      手順 4 の対象を絞らない `apply` でも構成が 0 のままでサービスが戻らない。
@@ -565,7 +575,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **代償: 入れ替えの間（数分。測っていない）、サービス全体が止まる。** 一部の要求だけが失敗する状態は作らない。
   **この間、下記「アラート」の 5xx 率が鳴る**——ALB は健全なターゲットが無いとき 503 を返すため、
   全断はそのアラートで捕まる。**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**
-- **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`-replace=aws_elasticache_replication_group.valkey` と `valkey_auth_token_version` の引き上げを同じ `apply` で行い、**その後に `aws ecs update-service --cluster … --service … --force-new-deployment` でタスクを入れ替える**——名前の採り方は上の手順 1 と同じ。**desired count を 0 にして戻す形は採らない**（この箇条が「api は止めない」と決めているため）。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）。
+- **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`-replace=aws_elasticache_replication_group.valkey` と `valkey_auth_token_version` の引き上げを同じ `apply` で行い、**その後に `aws ecs update-service --cluster "$cluster" --service "$service" --force-new-deployment` でタスクを入れ替え、`aws ecs wait services-stable --cluster "$cluster" --services "$service"` で安定を待つ**（変数は上の共通の前置きで束縛する）。**desired count を 0 にして戻す形は採らない**（この箇条が「api は止めない」と決めているため）。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）。
   **鳴るのは作り直しの区間だけである**——古いクラスタが消える間は下記「アラート」のメトリクス欠損が鳴るが、
   **新しいクラスタができてからタスクを入れ替えるまでは鳴らない**（同じ節が「AUTH トークンが食い違った場合」を鳴らない側に名指ししている）。
   **アラートが収まったことを「入れ替えが終わった合図」と読まないこと**——古いトークンを持ったままでも収まる。
