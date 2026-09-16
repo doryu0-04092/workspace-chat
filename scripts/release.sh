@@ -22,6 +22,9 @@
 #   アラートのメールの購読は、届く確認のメールのリンクを開くまで有効にならない。
 #
 # 前提: aws（資格情報と ap-northeast-1）・terraform・docker（buildx で linux/arm64 を作れること——x86 の端末では QEMU の登録が要る）・node と npm。
+#   **レジストリ（Docker Hub）へ届くこと。** 手順 2 は土台を --pull で取り直すため、手元にイメージがあっても届かなければ落ちる
+#   （同じ代償は scripts/api-image.test.sh と apps/api/src/testing/postgres.ts にもある）。
+#   **落ちるのは手順 1 の apply が済んだ後である**（ECR のリポジトリは作られた状態で止まる）。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

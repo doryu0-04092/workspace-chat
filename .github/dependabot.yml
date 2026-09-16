@@ -94,7 +94,8 @@ updates:
 #   valkey/valkey:8-alpine（compose.yaml の redis と、apps/api/src/testing/valkey.ts の VALKEY_IMAGE。**同じタグ**）
 #     経路: docker compose pull redis（README の操作表）
 #           valkey.ts の PullPolicy.alwaysPull()
-#     強さ: **npm test を流せば届く。** 手元でテストを回さない人には、compose pull だけが経路になる
+#     強さ: **npm test を流せば届く。** 手元でテストを回さない人には、compose pull だけが経路になる。
+#     **どちらも取り直すのは手元のイメージまでで、動いているコンテナに入るのは次に up -d で作り直したとき**
 #
 #   postgres:17（テストの土台。apps/api/src/testing/postgres.ts の POSTGRES_IMAGE。**db の土台とは別のタグ**）
 #     経路: scripts/api-image.test.sh の docker pull
