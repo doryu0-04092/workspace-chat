@@ -102,6 +102,8 @@ resource "aws_db_parameter_group" "main" {
   }
 }
 
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の RDS の箇条が、
+# このアドレス（aws_db_instance.main）を -target でリテラルで打っている。** 名前を変えるとその段が対象を絞れない。
 resource "aws_db_instance" "main" {
   # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順 3 が、この識別子をリテラルで打っている**
   # （aws rds describe-db-instances --db-instance-identifier workspace-chat）。変えるとその段が対象を見つけられない。
@@ -140,6 +142,7 @@ resource "aws_db_instance" "main" {
 # 踏むと壊れる: **接頭辞（/workspace-chat/）も、要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の前置きと
 # 確かめる段がリテラルで打っている。** 上の検査は**末尾しか見ない**ため、接頭辞を変えても CI は緑のまま、
 # **4.2 の段だけが対象を見つけられなくなる**（落ちる位置は前置きの弾く段で、api を止める前ではある）。
+# 踏むと壊れる: **4.2 の RDS の箇条が、このアドレス（aws_ssm_parameter.database_url）を -target で打っている。**
 resource "aws_ssm_parameter" "database_url" {
   name             = "/workspace-chat/DATABASE_URL"
   type             = local.parameter_type

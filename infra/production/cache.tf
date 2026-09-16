@@ -73,6 +73,9 @@ resource "aws_elasticache_subnet_group" "valkey" {
   subnet_ids = aws_subnet.private[*].id
 }
 
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の REDIS_URL の箇条が、
+# このアドレス（aws_elasticache_replication_group.valkey）を -replace でリテラルで打っている。**
+# 名前を変えると、**作り直しが起きないまま版だけが上がる**（漏れたトークンが古いクラスタに残る）。
 resource "aws_elasticache_replication_group" "valkey" {
   replication_group_id = "workspace-chat"
   description          = "workspace-chat realtime adapter and rate limit counters"
@@ -104,6 +107,8 @@ resource "aws_ssm_parameter" "redis_url" {
   value_wo_version = local.valkey_auth_token_version
 }
 
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の JWT_SECRET の箇条が、
+# このアドレス（aws_ssm_parameter.jwt_secret）を -target でリテラルで打っている。** 名前を変えるとその段が対象を絞れない。
 resource "aws_ssm_parameter" "jwt_secret" {
   name             = "/workspace-chat/JWT_SECRET"
   type             = local.parameter_type
