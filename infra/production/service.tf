@@ -83,6 +83,11 @@ resource "aws_ecs_task_definition" "api" {
   # api のコンテナの environment を空にしない（検査の「数え上げる対象がある」の下限で落ちる。空にするなら、その下限も直す）。
   container_definitions = jsonencode([
     {
+      # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の前置きが、
+      # このコンテナを containerDefinitions[0] という位置で、image を <URL>:<タグ> という形で読み、
+      # 末尾のタグを TF_VAR_image_tag に採る。** 並びを変える・image の形を変えると、
+      # **採るタグが別のものになるか採れなくなり、対象を絞らない apply が別のイメージを本番へ出す。**
+      # validate も plan も CI も落ちない。
       name         = "api"
       image        = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
       essential    = true

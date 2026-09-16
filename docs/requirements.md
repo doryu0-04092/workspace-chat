@@ -531,16 +531,11 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   export TF_VAR_alarm_email=$(aws sns list-subscriptions-by-topic --topic-arn "$topic_arn" \
     --query "Subscriptions[?Protocol=='email'].Endpoint | [0]" --output text)
 
-  # 入れ替える設定の名前と、**入れ替えの前の版**（確かめる段 1 の基準。段 2 の基準 before_arns と同じ形にする）
-  name=DATABASE_URL   # その箇条のもの（REDIS_URL / JWT_SECRET）に替える
-  before_version=$(aws ssm get-parameter --name "/workspace-chat/$name" \
-    --query 'Parameter.Version' --output text)
-
   # **採れなかったまま進まない。** 空でも変数は「設定済み」になるため apply は聞き返さず、
   # endpoint = "" で落ちる——**落ちる位置は api を止めた後**である（全断のまま手が止まる）。
   # **`None` も弾く**——`aws ... --output text` は、該当が無いとき空文字ではなく文字列 `None` を出す
   missing=
-  for v in cluster service before_arns before_version TF_VAR_image_tag TF_VAR_alarm_email; do
+  for v in cluster service before_arns TF_VAR_image_tag TF_VAR_alarm_email; do
     value=$(eval printf %s \"\$$v\")
     case "$value" in '' | None) missing="$missing $v" ;; esac
   done
@@ -550,6 +545,20 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **`exit` は使わない**——この前置きは**貼った同じシェルに値を残すこと**が存在理由であり、
   `exit` を踏むと**シェルごと終わって、既に採れていた束縛まで全部消える**。
   採れなかったものを列挙して、**そろうまで以降の段へ進まない**。
+- **入れ替える設定の名前と、その版は、箇条の中で採る**（**上の共通の欄には置かない**）。
+
+  ```sh
+  # その箇条の先頭で、毎回これを打ち直す
+  name=DATABASE_URL   # その箇条のもの（REDIS_URL / JWT_SECRET）に替える
+  before_version=$(aws ssm get-parameter --name "/workspace-chat/$name" \
+    --query 'Parameter.Version' --output text)
+  case "$before_version" in '' | None) echo "$name の版を採れていない。先へ進まない" ;; esac
+  ```
+
+  **踏むと壊れる: 3つの箇条を続けて流すとき、この2つを採り直さないと、前の箇条の値が生き残る。**
+  すると確かめる段 1 が**別の設定の版と比べて通る**——**入れ替えていない設定でも「上がった」と判定できてしまう**。
+  `JWT_SECRET` は**版の確認だけが唯一の検出経路**である（下の箇条のとおり、動作の確認では区別できない）ため、
+  **漏れた鍵が生きたまま緑になる。**
 
   **`before_arns` は、確かめる段 2 の基準である**——入れ替えの後に列挙し直し、**この集合と重なりが無いこと**を見る。
   `--force-new-deployment` で入れ替える箇条（Valkey）は**タスク定義のリビジョンが変わらない**ため、
