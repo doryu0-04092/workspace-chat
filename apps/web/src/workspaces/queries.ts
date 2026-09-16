@@ -74,7 +74,7 @@ export function useJoinChannel(workspaceId: string) {
 /**
  * 既読位置を進める（F-23。REST の仕様の updateChannelRead）。
  * **戻さないのは api が持つ不変条件である**（渡した位置が今より古ければ何もしない。機能一覧 10.1）。
- * 一覧は読み直さない——進めた後の未読数は `unread:updated` で届く。
+ * 一覧は読み直さない——進めた後の未読数とメンションの件数は `unread:updated` で届く。
  */
 export function useUpdateChannelRead(workspaceId: string, channelId: string) {
   const store = useSessionStore();

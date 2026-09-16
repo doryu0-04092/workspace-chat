@@ -24,7 +24,7 @@ export async function announceUnreadTo(
 }
 
 /**
- * **そのチャンネルの参加者それぞれに、その人の未読数を配る**（F-23。機能一覧 5.2・10.1）。
+ * **そのチャンネルの参加者それぞれに、その人の未読数とメンションの件数を配る**（F-23・F-24。機能一覧 5.2・10.1・10.2）。
  * 投稿・返信・削除のように、**全員の未読が変わりうる**ときに使う。
  *
  * **書いた本人には送らない**（`writerId`）——自分の投稿・自分の削除では自分の未読は変わらないため、送っても同じ値が届くだけである。
@@ -272,7 +272,8 @@ export type UnreadCounts = { unread: number; mentions: number };
 export type ChannelUnread = UnreadCounts & { lastReadMessageId: string | null };
 
 /**
- * 1人ぶんの未読数と既読位置を、参加しているチャンネルごとに返す（一覧。`Channel.unread` と `Channel.lastReadMessageId`）。
+ * 1人ぶんの未読数・メンションの件数・既読位置を、参加しているチャンネルごとに返す
+ * （一覧。`Channel.unread`・`Channel.mentions`・`Channel.lastReadMessageId`）。
  *
  * **既読位置も一緒に返す**——「ここから未読」の区切り線は、この位置の次のメッセージの上に出す（10.1）。
  * **未読数から位置を数えてはならない**: 自分の投稿と削除済みは未読に数えないが、一覧には並ぶため必ずずれる。
@@ -305,7 +306,7 @@ export async function unreadOfChannels(
 }
 
 /**
- * 1チャンネルぶんの未読数を、そのチャンネルの参加者ごとに返す（配信。`unread:updated`）。
+ * 1チャンネルぶんの未読数とメンションの件数を、そのチャンネルの参加者ごとに返す（配信。`unread:updated`）。
  * **返すのは参加者だけである**——`unread:updated` の宛先を、この結果からそのまま作ってよい（5.2 の資格の確認がここで済む）。
  */
 export async function unreadOfMembers(
