@@ -280,6 +280,12 @@ export function useKickWorkspaceMember(workspaceId: string) {
         { predicate: ({ queryKey }) => isChannelMembersKeyOf(workspaceId, queryKey) },
         (members) => members?.filter((member) => member.id !== memberId),
       );
+      // 管理用の一覧の人数（F-35）は、外した相手がどのチャンネルに居たかを画面が知らないため、その場では直せない。
+      // **取り直す**——開いていれば即座に返り、閉じていれば次に開いたとき読む。鍵の前方には一般の一覧が入らないが、`exact` で揃える
+      return queryClient.invalidateQueries({
+        queryKey: managedChannelsKey(workspaceId),
+        exact: true,
+      });
     },
   });
 }
@@ -311,11 +317,20 @@ export function useKickChannelMember(workspaceId: string, channelId: string) {
         `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/members/${segment(memberId)}`,
         { method: 'DELETE' },
       ),
-    onSuccess: (_, memberId) =>
+    onSuccess: (_, memberId) => {
       queryClient.setQueryData<UserSummary[]>(
         channelMembersKey(workspaceId, channelId),
         (members) => members?.filter((member) => member.id !== memberId),
-      ),
+      );
+      // **管理用の一覧のそのチャンネルの人数も、その場で1つ減らす**（F-35。同じ行に参加者の一覧と並べて出しており、食い違ったまま残さない）
+      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+        channels?.map((channel) =>
+          channel.id === channelId
+            ? { ...channel, memberCount: Math.max(0, channel.memberCount - 1) }
+            : channel,
+        ),
+      );
+    },
   });
 }
 
@@ -331,7 +346,12 @@ export function useJoinChannel(workspaceId: string) {
           method: 'POST',
         },
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+    // 管理用の一覧（F-35）の人数も変わる。どのように増えるかは取り直さないと決まらない（退会済みを数えない等は api が持つ）
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: managedChannelsKey(workspaceId), exact: true }),
+      ]),
   });
 }
 
@@ -375,6 +395,11 @@ export function useCreateChannel(workspaceId: string) {
         method: 'POST',
         body,
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+    // 管理用の一覧（F-35）にも行が増える。並び（名前の順）と人数は api が持つので、足すのではなく取り直す
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: managedChannelsKey(workspaceId), exact: true }),
+      ]),
   });
 }

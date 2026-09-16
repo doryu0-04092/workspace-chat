@@ -221,6 +221,73 @@ describe('復元（F-35・3.2）', () => {
   });
 });
 
+// **管理用の一覧の人数・行を変える操作は、通ったら管理用の一覧を直すか取り直す**（#545 第0巡の 🔴1 の適用先）。
+// 参加（人数が増える）と作成（行が増える）は、どのように増えるかを画面が決めきれないので取り直す。
+describe('管理用の一覧を変える、ほかの操作', () => {
+  it('開いている間にチャンネルへ参加したら、管理用の一覧を取り直す', async () => {
+    const random = {
+      ...GENERAL,
+      id: '01920000-0000-7000-8000-0000000000c2',
+      name: 'random',
+      joined: false,
+    };
+    const { count } = fakeFetch(
+      routes({
+        ...AS_OWNER,
+        [`GET ${CHANNELS}`]: () => json(200, [random]),
+        [`GET ${MANAGED}`]: [
+          () => json(200, [{ ...MANAGED_GENERAL, id: random.id, name: 'random', memberCount: 1 }]),
+          () => json(200, [{ ...MANAGED_GENERAL, id: random.id, name: 'random', memberCount: 2 }]),
+        ],
+        [`POST ${CHANNELS}/${random.id}/join`]: () => new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+    const list = await openManaged();
+    expect(rowOf(list, /random/).textContent).toContain('参加者 1 人');
+
+    fireEvent.click(screen.getByRole('button', { name: 'random に参加する' }));
+
+    await waitFor(() => expect(rowOf(list, /random/).textContent).toContain('参加者 2 人'));
+    expect(count(`GET ${MANAGED}`)).toBe(2);
+  });
+
+  it('開いている間にチャンネルを作ったら、管理用の一覧を取り直す', async () => {
+    const created = {
+      ...MANAGED_GENERAL,
+      id: '01920000-0000-7000-8000-0000000000c3',
+      name: 'design',
+      memberCount: 1,
+    };
+    const { count } = fakeFetch(
+      routes({
+        ...AS_OWNER,
+        [`GET ${MANAGED}`]: [
+          () => json(200, [MANAGED_GENERAL]),
+          () => json(200, [MANAGED_GENERAL, created]),
+        ],
+        [`POST ${CHANNELS}`]: () =>
+          json(201, {
+            ...GENERAL,
+            id: created.id,
+            name: 'design',
+            unread: 0,
+            mentions: 0,
+            lastReadMessageId: null,
+          }),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+    const list = await openManaged();
+
+    fireEvent.change(screen.getByLabelText('チャンネル名'), { target: { value: 'design' } });
+    fireEvent.click(screen.getByRole('button', { name: 'チャンネルを作成する' }));
+
+    await waitFor(() => expect(rowOf(list, /design/)).toBeDefined());
+    expect(count(`GET ${MANAGED}`)).toBe(2);
+  });
+});
+
 // #539 から回した分: **参加していないプライベートチャンネルからも、管理用の一覧で相手を選んで外せる**（機能一覧 3.1・2.2）。
 // **出す理由は直前の操作のものだけ**（#534 と同じ型を先に塞ぐ）。
 describe('断られた理由の出し方', () => {
@@ -272,7 +339,41 @@ describe('管理用の一覧からのキック（F-09）', () => {
 
     await waitFor(() => expect(members.queryByText(/ボブ/)).toBeNull());
     expect(count(`DELETE ${secretMembers}/${BOB.id}`)).toBe(1);
+    // **同じ行の見出しの人数も、その場で直る**（参加者の一覧と食い違ったまま残さない。#545 第0巡の 🔴1）。管理用の一覧は取り直さない
+    expect(rowOf(list, /secret/).textContent).toContain('参加者 0 人');
+    expect(count(`GET ${MANAGED}`)).toBe(1);
     // ログインしている利用者（アリス）は、この一覧に居ない
     expect(USER.id).not.toBe(BOB.id);
+  });
+
+  // ワークスペースからのキックは、外した相手がどのチャンネルに居たかを画面が知らないため、管理用の一覧を取り直す（#545 第0巡の 🔴1）。
+  it('ワークスペースからキックしたら、開いている管理用の一覧を取り直し、人数を直す', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { count } = fakeFetch(
+      routes({
+        ...AS_OWNER,
+        [`GET ${MANAGED}`]: [
+          () => json(200, [MANAGED_GENERAL]),
+          () => json(200, [{ ...MANAGED_GENERAL, memberCount: 1 }]),
+        ],
+        [`GET /api/workspaces/${WORKSPACE_ID}/members`]: () =>
+          json(200, [
+            { ...USER, role: 'OWNER' },
+            { ...BOB, role: 'MEMBER' },
+          ]),
+        [`DELETE /api/workspaces/${WORKSPACE_ID}/members/${BOB.id}`]: () =>
+          new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+    const list = await openManaged();
+    expect(rowOf(list, /general/).textContent).toContain('参加者 2 人');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'メンバーを見る' }));
+    const members = within(await screen.findByRole('list', { name: 'メンバー' }));
+    fireEvent.click(members.getByRole('button', { name: 'ボブ をキックする' }));
+
+    await waitFor(() => expect(rowOf(list, /general/).textContent).toContain('参加者 1 人'));
+    expect(count(`GET ${MANAGED}`)).toBe(2);
   });
 });
