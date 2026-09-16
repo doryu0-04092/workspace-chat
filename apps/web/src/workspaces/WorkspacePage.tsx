@@ -60,6 +60,12 @@ export function WorkspacePage() {
                   {channel.unread > 0 && (
                     <span className="text-sm text-slate-600">{`未読 ${channel.unread} 件`}</span>
                   )}
+                  {/* 自分宛のメンションの件数（機能一覧 10.2）。**ブラウザ通知の許可によらず、画面内で分かるようにする** */}
+                  {channel.mentions > 0 && (
+                    <span className="rounded-full bg-red-600 px-2 text-xs font-bold text-white">
+                      {`メンション ${channel.mentions} 件`}
+                    </span>
+                  )}
                 </>
               ) : (
                 <>

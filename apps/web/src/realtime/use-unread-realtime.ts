@@ -16,9 +16,9 @@ export function useUnreadRealtime(workspaceId: string) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const onUnread = ({ channelId, unread }: UnreadUpdatedPayload) => {
+    const onUnread = ({ channelId, unread, mentions }: UnreadUpdatedPayload) => {
       queryClient.setQueryData<Channel[]>(channelsKey(workspaceId), (channels) =>
-        setChannelUnread(channels, channelId, unread),
+        setChannelUnread(channels, channelId, { unread, mentions }),
       );
     };
     socket.on(UNREAD_UPDATED, onUnread);

@@ -66,6 +66,71 @@ describe('未読の画面（F-23）', () => {
     });
   });
 
+  // 機能一覧 10.2（F-24）: 自分宛のメンションの件数を、画面内のバッジで出す。**ブラウザ通知の許可によらず出す。** #516。
+  describe('メンションのバッジ（F-24）', () => {
+    it('メンションのあるチャンネルに、件数のバッジを文字で出す', async () => {
+      fakeFetch(
+        routes({ [CHANNELS]: () => json(200, [channelWithUnread(3, null, undefined, 2)]) }),
+      );
+
+      renderApp(WORKSPACE_PATH);
+
+      const item = await screen.findByRole('listitem');
+      expect(within(item).getByText(/メンション 2 件/)).toBeDefined();
+    });
+
+    it('メンションが 0 なら、未読があってもバッジを出さない', async () => {
+      fakeFetch(
+        routes({ [CHANNELS]: () => json(200, [channelWithUnread(3, null, undefined, 0)]) }),
+      );
+
+      renderApp(WORKSPACE_PATH);
+
+      const item = await screen.findByRole('listitem');
+      expect(within(item).getByText(/未読 3 件/)).toBeDefined();
+      expect(within(item).queryByText(/メンション/)).toBeNull();
+    });
+
+    it('参加していないチャンネルにはバッジを出さない', async () => {
+      const notJoined = { ...channelWithUnread(3, null, undefined, 2), joined: false };
+      fakeFetch(routes({ [CHANNELS]: () => json(200, [notJoined]) }));
+
+      renderApp(WORKSPACE_PATH);
+
+      const item = await screen.findByRole('listitem');
+      expect(within(item).queryByText(/メンション/)).toBeNull();
+    });
+
+    it('unread:updated を受けて、一覧を読み直さずにメンションの件数を差し替える', async () => {
+      const channels = vi.fn<Handler>(() => json(200, [channelWithUnread(1, null, undefined, 0)]));
+      fakeFetch(routes({ [CHANNELS]: channels }));
+
+      const { sockets } = renderApp(WORKSPACE_PATH);
+      const item = await screen.findByRole('listitem');
+      expect(within(item).queryByText(/メンション/)).toBeNull();
+      const calls = channels.mock.calls.length;
+
+      sockets[0]?.deliver('unread:updated', {
+        channelId: GENERAL.id,
+        unread: 2,
+        mentions: 1,
+        sentAt: '2026-09-16T00:00:00.000Z',
+      });
+
+      expect(await screen.findByText(/メンション 1 件/)).toBeDefined();
+      expect(channels.mock.calls.length).toBe(calls);
+
+      // 既読を進めて 0 が届けば、バッジは消える
+      sockets[0]?.deliver('unread:updated', {
+        channelId: GENERAL.id,
+        unread: 0,
+        mentions: 0,
+        sentAt: '2026-09-16T00:00:01.000Z',
+      });
+      await waitFor(() => expect(screen.queryByText(/メンション/)).toBeNull());
+    });
+  });
+
   describe('「ここから未読」の区切り線', () => {
     it('開いた時点の既読位置の次に出し、読み進めても動かさない', async () => {
       const older = message(1);
@@ -301,6 +366,7 @@ describe('未読の画面（F-23）', () => {
       sockets[0]?.deliver('unread:updated', {
         channelId: GENERAL.id,
         unread: 2,
+        mentions: 0,
         sentAt: '2026-09-16T00:00:00.000Z',
       });
 

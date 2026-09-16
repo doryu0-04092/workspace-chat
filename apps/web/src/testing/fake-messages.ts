@@ -12,6 +12,7 @@ export const GENERAL = {
   // メッセージの雛形（`message(n)` は n 分目）より前に置き、既定ではすべてが参加より後になるようにする
   joinedAt: '2026-09-14T00:00:00.000Z',
   unread: 0,
+  mentions: 0,
   lastReadMessageId: null,
 };
 /** テストで使うワークスペース。参加している側にする（オーナー専用の作成のフォームを出さない）。 */
@@ -82,6 +83,7 @@ export function channelWithUnread(
   unread: number,
   lastReadMessageId: string | null = null,
   joinedAt: string | null = GENERAL.joinedAt,
+  mentions = 0,
 ) {
-  return { ...GENERAL, unread, lastReadMessageId, joinedAt };
+  return { ...GENERAL, unread, mentions, lastReadMessageId, joinedAt };
 }
