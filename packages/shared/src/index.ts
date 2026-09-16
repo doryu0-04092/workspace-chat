@@ -1,4 +1,4 @@
-export { MENTION_PATTERN, mentionedLoginIds } from './mentions';
+export { MENTION_BEING_TYPED, MENTION_PATTERN, mentionedLoginIds } from './mentions';
 export {
   REALTIME_EVENT_KINDS,
   REALTIME_EVENT_NAMES,
