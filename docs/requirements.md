@@ -521,6 +521,15 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   cluster=$(terraform -chdir=infra/production output -raw ecs_cluster_name)
   service=$(terraform -chdir=infra/production output -raw ecs_service_name)
   before_arns=$(aws ecs list-tasks --cluster "$cluster" --service-name "$service" --query 'taskArns' --output text)
+
+  # apply に渡す2つは、**いま動いているものから採る**（新しく決めない）
+  task_def=$(aws ecs describe-services --cluster "$cluster" --services "$service" \
+    --query 'services[0].taskDefinition' --output text)
+  export TF_VAR_image_tag=$(aws ecs describe-task-definition --task-definition "$task_def" \
+    --query 'taskDefinition.containerDefinitions[0].image' --output text | sed 's/.*://')
+  topic_arn=$(aws sns list-topics --query "Topics[?ends_with(TopicArn, ':workspace-chat-alerts')].TopicArn" --output text)
+  export TF_VAR_alarm_email=$(aws sns list-subscriptions-by-topic --topic-arn "$topic_arn" \
+    --query "Subscriptions[?Protocol=='email'].Endpoint | [0]" --output text)
   ```
 
   **`before_arns` は、確かめる段 2 の基準である**——入れ替えの後に列挙し直し、**この集合と重なりが無いこと**を見る。
@@ -573,8 +582,11 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
      `-target` を打ち間違えた）にも通る**。手順 3 の待ちも捕まえない（版が上がっていなければ、その要素は最初から現れない）
 
   **代償: 入れ替えの間（数分。測っていない）、サービス全体が止まる。** 一部の要求だけが失敗する状態は作らない。
-  **この間、下記「アラート」の 5xx 率が鳴る**——ALB は健全なターゲットが無いとき 503 を返すため、
-  全断はそのアラートで捕まる。**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**
+  **この間、下記「アラート」の 5xx 率が鳴りうる**——ALB は健全なターゲットが無いとき 503 を返すためである。
+  **ただし必ず鳴るわけではない**——このアラームは割合で、`treat_missing_data = "notBreaching"` である
+  （`infra/production/alarms.tf`。要求が無い時間帯は割合が求まらず、鳴らさない）。
+  **要求の来ない時間帯に入れ替えれば、全断でも鳴らない。**
+  鳴ったときは、**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**
 - **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`-replace=aws_elasticache_replication_group.valkey` と `valkey_auth_token_version` の引き上げを同じ `apply` で行い、**その後に `aws ecs update-service --cluster "$cluster" --service "$service" --force-new-deployment` でタスクを入れ替え、`aws ecs wait services-stable --cluster "$cluster" --services "$service"` で安定を待つ**（変数は上の共通の前置きで束縛する）。**desired count を 0 にして戻す形は採らない**（この箇条が「api は止めない」と決めているため）。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）。
   **鳴るのは作り直しの区間だけである**——古いクラスタが消える間は下記「アラート」のメトリクス欠損が鳴るが、
   **新しいクラスタができてからタスクを入れ替えるまでは鳴らない**（同じ節が「AUTH トークンが食い違った場合」を鳴らない側に名指ししている）。
@@ -595,7 +607,8 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
      **こちらは動作の確認だけでは特に弱い**——**鍵が替わらなかったときのほうが容易に通る**（発行済みのトークンがそのまま通る）ため、
      どちらでも通ってしまい、漏れた鍵が生きているかを区別できない
 
-  **代償: 入れ替えの間、サービス全体が止まる**（上の RDS と同じく、この間は 5xx 率のアラートが鳴る）。
+  **代償: 入れ替えの間、サービス全体が止まる**（上の RDS と同じく、この間は 5xx 率のアラートが鳴りうる。
+  **要求の来ない時間帯なら鳴らない**——同じ理由）。
   **発行済みのアクセストークンはすべて無効になるが、利用者はログインし直さずに済む**——リフレッシュトークンは DB に置く乱数で、署名の鍵に依らないためである
 - **2つの DB 利用者を交互に使い、止めずに入れ替える形は採らない**（Secrets Manager の文書が可用性の要る場合に勧める形。「After rotation, both `user` and `user_clone` credentials are valid.」）。DB は外から繋げないため、利用者の作成・権限の付与・パスワードの設定を、psql を持つマイグレーション用のタスクで流す仕組みが要る。**代償は、上の RDS の計画停止である**
 
@@ -624,6 +637,9 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 **鳴り続けるアラートも同じである。**
 
 **タスクの全断は 5xx 率で捕まえる**——ALB は健全なターゲットが無いとき 503 を返す。
+**ただし要求が来ていなければ捕まえられない**——このアラームは割合であり、`treat_missing_data = "notBreaching"` である
+（[alarms.tf](../infra/production/alarms.tf)。要求が無い時間帯は割合が求まらず、鳴らさない）。
+**全断そのものを常時検知する経路は持たない**（上の「秘密の値が漏れた疑いがあるとき」の代償も、この前提の上に立つ）。
 **5xx 率は ALB のメトリクスから取る（決定）。** アプリのログで数える形は採らない——
 **全断のときメトリクスの発行そのものが止まり、値は 0 ではなく欠損になるため**
 （接続数のメトリクスを発行するのもアプリ自身である。4.6）。**アプリ側を選ぶと全断の検知が
