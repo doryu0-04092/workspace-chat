@@ -79,11 +79,16 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
  * 未読のあるチャンネル（F-23。機能一覧 10.1）。
  * 既読位置は `lastReadMessageId`、**既読位置をまだ持たないときの線の境目**は `joinedAt` で渡す。
  */
-export function channelWithUnread(
-  unread: number,
-  lastReadMessageId: string | null = null,
-  joinedAt: string | null = GENERAL.joinedAt,
+export function channelWithUnread({
+  unread,
   mentions = 0,
-) {
+  lastReadMessageId = null,
+  joinedAt = GENERAL.joinedAt,
+}: {
+  unread: number;
+  mentions?: number;
+  lastReadMessageId?: string | null;
+  joinedAt?: string | null;
+}) {
   return { ...GENERAL, unread, mentions, lastReadMessageId, joinedAt };
 }

@@ -32,7 +32,7 @@ describe('未読の画面（F-23）', () => {
 
   describe('サイドバーの未読', () => {
     it('未読のあるチャンネルは太字で、件数を文字でも出す', async () => {
-      fakeFetch(routes({ [CHANNELS]: () => json(200, [channelWithUnread(3)]) }));
+      fakeFetch(routes({ [CHANNELS]: () => json(200, [channelWithUnread({ unread: 3 })]) }));
 
       renderApp(WORKSPACE_PATH);
 
@@ -44,7 +44,7 @@ describe('未読の画面（F-23）', () => {
     });
 
     it('未読が 0 のチャンネルは太字にせず、件数も出さない', async () => {
-      fakeFetch(routes({ [CHANNELS]: () => json(200, [channelWithUnread(0)]) }));
+      fakeFetch(routes({ [CHANNELS]: () => json(200, [channelWithUnread({ unread: 0 })]) }));
 
       renderApp(WORKSPACE_PATH);
 
@@ -56,7 +56,7 @@ describe('未読の画面（F-23）', () => {
     it('参加していないチャンネルには未読を出さない', async () => {
       // **未読の値が入っていても出さない。** api は参加していないチャンネルの未読を常に 0 で返すが、
       // 画面はその値に頼らず、参加しているかどうかで決める（機能一覧 10.1）
-      const notJoined = { ...channelWithUnread(3), joined: false };
+      const notJoined = { ...channelWithUnread({ unread: 3 }), joined: false };
       fakeFetch(routes({ [CHANNELS]: () => json(200, [notJoined]) }));
 
       renderApp(WORKSPACE_PATH);
@@ -70,7 +70,9 @@ describe('未読の画面（F-23）', () => {
   describe('メンションのバッジ（F-24）', () => {
     it('メンションのあるチャンネルに、件数のバッジを文字で出す', async () => {
       fakeFetch(
-        routes({ [CHANNELS]: () => json(200, [channelWithUnread(3, null, undefined, 2)]) }),
+        routes({
+          [CHANNELS]: () => json(200, [channelWithUnread({ unread: 3, mentions: 2 })]),
+        }),
       );
 
       renderApp(WORKSPACE_PATH);
@@ -81,7 +83,9 @@ describe('未読の画面（F-23）', () => {
 
     it('メンションが 0 なら、未読があってもバッジを出さない', async () => {
       fakeFetch(
-        routes({ [CHANNELS]: () => json(200, [channelWithUnread(3, null, undefined, 0)]) }),
+        routes({
+          [CHANNELS]: () => json(200, [channelWithUnread({ unread: 3, mentions: 0 })]),
+        }),
       );
 
       renderApp(WORKSPACE_PATH);
@@ -92,7 +96,10 @@ describe('未読の画面（F-23）', () => {
     });
 
     it('参加していないチャンネルにはバッジを出さない', async () => {
-      const notJoined = { ...channelWithUnread(3, null, undefined, 2), joined: false };
+      const notJoined = {
+        ...channelWithUnread({ unread: 3, mentions: 2 }),
+        joined: false,
+      };
       fakeFetch(routes({ [CHANNELS]: () => json(200, [notJoined]) }));
 
       renderApp(WORKSPACE_PATH);
@@ -102,7 +109,9 @@ describe('未読の画面（F-23）', () => {
     });
 
     it('unread:updated を受けて、一覧を読み直さずにメンションの件数を差し替える', async () => {
-      const channels = vi.fn<Handler>(() => json(200, [channelWithUnread(1, null, undefined, 0)]));
+      const channels = vi.fn<Handler>(() =>
+        json(200, [channelWithUnread({ unread: 1, mentions: 0 })]),
+      );
       fakeFetch(routes({ [CHANNELS]: channels }));
 
       const { sockets } = renderApp(WORKSPACE_PATH);
@@ -137,7 +146,8 @@ describe('未読の画面（F-23）', () => {
       const newer = message(2);
       fakeFetch(
         routes({
-          [CHANNELS]: () => json(200, [channelWithUnread(1, older.id)]),
+          [CHANNELS]: () =>
+            json(200, [channelWithUnread({ unread: 1, lastReadMessageId: older.id })]),
           [`GET ${MESSAGES}`]: () => page([newer, older]),
         }),
       );
@@ -162,8 +172,8 @@ describe('未読の画面（F-23）', () => {
       const { count } = fakeFetch(
         routes({
           [CHANNELS]: [
-            () => json(200, [channelWithUnread(1, older.id)]),
-            () => json(200, [channelWithUnread(0, newer.id)]),
+            () => json(200, [channelWithUnread({ unread: 1, lastReadMessageId: older.id })]),
+            () => json(200, [channelWithUnread({ unread: 0, lastReadMessageId: newer.id })]),
           ],
           [`GET ${MESSAGES}`]: () => page([newer, older]),
         }),
@@ -192,7 +202,10 @@ describe('未読の画面（F-23）', () => {
       fakeFetch(
         routes({
           // 参加したのは 1 件目と 2 件目の間
-          [CHANNELS]: () => json(200, [channelWithUnread(1, null, after.createdAt)]),
+          [CHANNELS]: () =>
+            json(200, [
+              channelWithUnread({ unread: 1, lastReadMessageId: null, joinedAt: after.createdAt }),
+            ]),
           [`GET ${MESSAGES}`]: () => page([after, before]),
         }),
       );
@@ -212,7 +225,13 @@ describe('未読の画面（F-23）', () => {
     it('既読位置も参加した時刻も無ければ線を出さない', async () => {
       fakeFetch(
         routes({
-          [CHANNELS]: () => json(200, [{ ...channelWithUnread(0, null, null), joined: true }]),
+          [CHANNELS]: () =>
+            json(200, [
+              {
+                ...channelWithUnread({ unread: 0, lastReadMessageId: null, joinedAt: null }),
+                joined: true,
+              },
+            ]),
           [`GET ${MESSAGES}`]: () => page([message(1)]),
         }),
       );
@@ -231,7 +250,7 @@ describe('未読の画面（F-23）', () => {
       const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
       fakeFetch(
         routes({
-          [CHANNELS]: () => json(200, [channelWithUnread(2, null)]),
+          [CHANNELS]: () => json(200, [channelWithUnread({ unread: 2, lastReadMessageId: null })]),
           [`GET ${MESSAGES}`]: () => page([newer, older]),
           [`PUT ${READ}`]: read,
         }),
@@ -253,7 +272,7 @@ describe('未読の画面（F-23）', () => {
       const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
       fakeFetch(
         routes({
-          [CHANNELS]: () => json(200, [channelWithUnread(2, null)]),
+          [CHANNELS]: () => json(200, [channelWithUnread({ unread: 2, lastReadMessageId: null })]),
           [`GET ${MESSAGES}`]: () => page([reply, body]),
           [`PUT ${READ}`]: read,
         }),
@@ -276,7 +295,7 @@ describe('未読の画面（F-23）', () => {
       const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
       fakeFetch(
         routes({
-          [CHANNELS]: () => json(200, [channelWithUnread(2, null)]),
+          [CHANNELS]: () => json(200, [channelWithUnread({ unread: 2, lastReadMessageId: null })]),
           [`GET ${MESSAGES}`]: () => page([removed, kept]),
           [`PUT ${READ}`]: read,
         }),
@@ -296,7 +315,7 @@ describe('未読の画面（F-23）', () => {
       const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
       fakeFetch(
         routes({
-          [CHANNELS]: () => json(200, [channelWithUnread(1, null)]),
+          [CHANNELS]: () => json(200, [channelWithUnread({ unread: 1, lastReadMessageId: null })]),
           [`GET ${MESSAGES}`]: () => page([removed]),
           [`PUT ${READ}`]: read,
         }),
@@ -314,7 +333,7 @@ describe('未読の画面（F-23）', () => {
       const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
       fakeFetch(
         routes({
-          [CHANNELS]: () => json(200, [channelWithUnread(1, null)]),
+          [CHANNELS]: () => json(200, [channelWithUnread({ unread: 1, lastReadMessageId: null })]),
           [`GET ${MESSAGES}`]: () => page([only]),
           [`PUT ${READ}`]: read,
         }),
@@ -355,7 +374,7 @@ describe('未読の画面（F-23）', () => {
     it('unread:updated を受けて、一覧を読み直さずに未読数を差し替える', async () => {
       // **配信は宛先のチャンネルにだけ当てる**ので、もう1つ置いて巻き添えを見る
       const other = { ...GENERAL, id: '01920000-0000-7000-8000-0000000000c2', name: 'random' };
-      const channels = vi.fn<Handler>(() => json(200, [channelWithUnread(0), other]));
+      const channels = vi.fn<Handler>(() => json(200, [channelWithUnread({ unread: 0 }), other]));
       fakeFetch(routes({ [CHANNELS]: channels }));
 
       const { sockets } = renderApp(WORKSPACE_PATH);
