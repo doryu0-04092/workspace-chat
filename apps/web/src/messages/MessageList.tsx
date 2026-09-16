@@ -45,13 +45,25 @@ export function MessageList({
   workspaceId,
   channelId,
   onOpenThread,
+  lastReadMessageId = null,
+  joinedAt = null,
 }: {
   workspaceId: string;
   channelId: string;
   onOpenThread: (message: Message) => void;
+  lastReadMessageId?: string | null;
+  joinedAt?: string | null;
 }) {
   const messages = useMessages(workspaceId, channelId);
-  return <PagedMessages pages={messages} labels={CHANNEL_LABELS} onOpenThread={onOpenThread} />;
+  return (
+    <PagedMessages
+      pages={messages}
+      labels={CHANNEL_LABELS}
+      onOpenThread={onOpenThread}
+      lastReadMessageId={lastReadMessageId}
+      joinedAt={joinedAt}
+    />
+  );
 }
 
 /** 新しい順のページを、上が古く下が新しい一覧にする。古いものは先頭のボタンで遡って読む。 */
@@ -59,10 +71,14 @@ export function PagedMessages({
   pages: query,
   labels,
   onOpenThread,
+  lastReadMessageId = null,
+  joinedAt = null,
 }: {
   pages: Pages;
   labels: Labels;
   onOpenThread?: (message: Message) => void;
+  lastReadMessageId?: string | null;
+  joinedAt?: string | null;
 }) {
   if (!query.data) {
     return query.isError ? (
@@ -82,12 +98,19 @@ export function PagedMessages({
   const items = [...pages].reverse().flatMap((page) => [...page.messages].reverse());
   if (items.length === 0) return <p className="text-slate-600">{labels.empty}</p>;
   const olderCount = pages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
+  // **線は既読位置より後の最初の1件の上にだけ出す。**
+  // id は UUIDv7 で、文字の並びが時刻の順になる（機能一覧 10.1。同じミリ秒の前後が決まらない時刻では比べない）。
+  // **既読位置をまだ持たないチャンネルでは、参加した時点より後の最初の1件の上に出す**（10.1・openapi の Channel.lastReadMessageId）。
+  // **未読数から位置を数えてはならない**——自分の投稿と削除済みは未読に数えないが、一覧には並ぶため必ずずれる。
+  // 参加していないチャンネルはどちらも null になり、線は出ない（そもそも開けない）
+  const unreadFromId = firstUnreadId(items, lastReadMessageId, joinedAt);
 
   return (
     <LoadedList
       items={items}
       firstItemIndex={FIRST_INDEX - olderCount}
       onOpenThread={onOpenThread}
+      unreadFromId={unreadFromId}
       context={{
         labels,
         hasOlder: query.hasNextPage,
@@ -104,11 +127,13 @@ function LoadedList({
   items,
   firstItemIndex,
   onOpenThread,
+  unreadFromId,
   context,
 }: {
   items: Message[];
   firstItemIndex: number;
   onOpenThread?: (message: Message) => void;
+  unreadFromId: string | null;
   context: ListContext;
 }) {
   const list = useRef<VirtuosoHandle>(null);
@@ -127,8 +152,50 @@ function LoadedList({
       followOutput="auto"
       context={context}
       components={{ Header: OlderMessages }}
-      itemContent={(_, message) => <MessageItem message={message} onOpenThread={onOpenThread} />}
+      itemContent={(_, message) => (
+        <>
+          {message.id === unreadFromId && <UnreadDivider />}
+          <MessageItem message={message} onOpenThread={onOpenThread} />
+        </>
+      )}
     />
+  );
+}
+
+/**
+ * 「ここから未読」の線を出す1件（古い順に並んだ `items` から選ぶ）。無ければ null。
+ *
+ * - 既読位置があれば、**その id より後**の最初の1件（id は UUIDv7 で、文字の並びが時刻の順になる）
+ * - 既読位置がまだ無ければ、**参加した時刻より後**の最初の1件（参加する前の履歴は未読にしない。機能一覧 10.1）
+ * - どちらも無ければ出さない（参加していないチャンネル）
+ */
+function firstUnreadId(
+  items: Message[],
+  lastReadMessageId: string | null,
+  joinedAt: string | null,
+): string | null {
+  if (lastReadMessageId !== null) {
+    return items.find((message) => message.id > lastReadMessageId)?.id ?? null;
+  }
+  if (joinedAt === null) return null;
+  return items.find((message) => message.createdAt >= joinedAt)?.id ?? null;
+}
+
+/**
+ * 「ここから未読」の区切り線（F-23。機能一覧 10.1）。
+ * **線は装飾ではなく境目である**ため、`separator` として支援技術にも渡す（`separator` は中の文から名前を取らないので `aria-label` を付ける）。
+ */
+function UnreadDivider() {
+  return (
+    <div
+      role="separator"
+      aria-label="ここから未読"
+      className="my-2 flex items-center gap-2 text-sm text-red-700"
+    >
+      <span className="h-px flex-1 bg-red-300" />
+      ここから未読
+      <span className="h-px flex-1 bg-red-300" />
+    </div>
   );
 }
 

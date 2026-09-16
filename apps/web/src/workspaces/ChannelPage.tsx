@@ -1,10 +1,12 @@
+import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { failureMessage } from '../auth/failure-message';
 import { MessageList } from '../messages/MessageList';
 import { PostMessageForm } from '../messages/PostMessageForm';
+import { useMessages } from '../messages/queries';
 import { ThreadPanel } from '../messages/ThreadPanel';
 import { useChannelRealtime } from '../realtime/use-channel-realtime';
-import { useChannels } from './queries';
+import { useChannels, useUpdateChannelRead } from './queries';
 
 /** 開いているスレッドの親の id を持つ URL のパラメータ（機能一覧 6。開き直しても同じスレッドを開く）。 */
 const THREAD_PARAM = 'thread';
@@ -38,14 +40,37 @@ export function ChannelPage() {
       <Link to={`/workspaces/${workspaceId}`} className="text-sm underline">
         チャンネルの一覧へ
       </Link>
-      <ChannelMessages key={channelId} workspaceId={workspaceId} channelId={channelId} />
+      <ChannelMessages
+        key={channelId}
+        workspaceId={workspaceId}
+        channelId={channelId}
+        lastReadMessageId={channel.lastReadMessageId ?? null}
+        joinedAt={channel.joinedAt ?? null}
+      />
     </main>
   );
 }
 
-/** 参加しているチャンネルの本体。入室要求は、参加していると分かったチャンネルにだけ送る。 */
-function ChannelMessages({ workspaceId, channelId }: { workspaceId: string; channelId: string }) {
+/**
+ * 参加しているチャンネルの本体。入室要求は、参加していると分かったチャンネルにだけ送る。
+ *
+ * **区切り線の位置は、開いた時点の既読位置で固定する**（読み進めても動かない。機能一覧 10.1）。
+ * チャンネルを変えると `key` で作り直され、そのチャンネルの位置で取り直す。
+ */
+function ChannelMessages({
+  workspaceId,
+  channelId,
+  lastReadMessageId,
+  joinedAt,
+}: {
+  workspaceId: string;
+  channelId: string;
+  lastReadMessageId: string | null;
+  joinedAt: string | null;
+}) {
   const rejected = useChannelRealtime(workspaceId, channelId);
+  const [unreadFrom] = useState(lastReadMessageId);
+  useAdvanceRead(workspaceId, channelId);
   const [searchParams, setSearchParams] = useSearchParams();
   const threadId = searchParams.get(THREAD_PARAM);
   const setThread = (id: string | null) =>
@@ -70,6 +95,8 @@ function ChannelMessages({ workspaceId, channelId }: { workspaceId: string; chan
               workspaceId={workspaceId}
               channelId={channelId}
               onOpenThread={(message) => setThread(message.id)}
+              lastReadMessageId={unreadFrom}
+              joinedAt={joinedAt}
             />
           </section>
           <PostMessageForm workspaceId={workspaceId} channelId={channelId} />
@@ -86,4 +113,24 @@ function ChannelMessages({ workspaceId, channelId }: { workspaceId: string; chan
       </div>
     </>
   );
+}
+
+/**
+ * 読み込んである最新の**本体**まで既読位置を進める（F-23。機能一覧 10.1）。
+ * 返信はスレッドごとに別の位置を持つため、ここでは数えない。
+ * **同じ位置は送り直さない**——描き直しのたびに送ると、上限（429）に当たる。
+ */
+function useAdvanceRead(workspaceId: string, channelId: string) {
+  const messages = useMessages(workspaceId, channelId);
+  const { mutate: advance } = useUpdateChannelRead(workspaceId, channelId);
+  // 最新のページは新しい順で、その先頭の**削除されていない本体**が、既読位置に送れる中でいちばん新しい。
+  // **一覧は削除済みも返すが、api の既読の更新は削除済みの id を 404 で断る**（channels.service.ts の updateRead）——
+  // 条件を揃えないと、最後の投稿が消されただけで既読が進まなくなり、読んでもそのチャンネルは未読のまま残る
+  const newestId =
+    messages.data?.pages[0]?.messages.find((m) => m.parentId === null && !m.deleted)?.id ?? null;
+
+  // **同じ位置は送り直さない**——効果の依存が位置そのものであり、変わらないうちは走らない
+  useEffect(() => {
+    if (newestId !== null) advance(newestId);
+  }, [newestId, advance]);
 }

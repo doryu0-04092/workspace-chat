@@ -30,6 +30,9 @@ export function SignedInLayout() {
         </Link>
         <div className="flex items-center gap-3">
           {session.status === 'signedIn' && <span>{session.user.displayName}</span>}
+          <Link to="/settings" className="underline">
+            設定
+          </Link>
           <button
             type="button"
             className="rounded border px-3 py-1 disabled:opacity-50"

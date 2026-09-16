@@ -64,9 +64,18 @@ export class ChannelsService {
           },
           select: { id: true, name: true, visibility: true },
         });
-        await tx.channelMember.create({ data: { channelId: channel.id, workspaceId, userId } });
+        const member = await tx.channelMember.create({
+          data: { channelId: channel.id, workspaceId, userId },
+          select: { joinedAt: true },
+        });
         // 作った直後は、そのチャンネルにメッセージが1件も無い（F-23。機能一覧 10.1）。
-        return { ...channel, joined: true, unread: 0, lastReadMessageId: null };
+        return {
+          ...channel,
+          joined: true,
+          joinedAt: member.joinedAt.toISOString(),
+          unread: 0,
+          lastReadMessageId: null,
+        };
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new ConflictException(CHANNEL_NAME_TAKEN);
@@ -90,7 +99,8 @@ export class ChannelsService {
         id: true,
         name: true,
         visibility: true,
-        members: { where: { userId }, select: { id: true } },
+        // **参加した時刻は「ここから未読」の線に要る**（既読位置をまだ持たない利用者。機能一覧 10.1）。
+        members: { where: { userId }, select: { id: true, joinedAt: true } },
       },
       orderBy: { name: 'asc' },
     });
@@ -102,7 +112,8 @@ export class ChannelsService {
     return rows.map(({ members, ...channel }) => ({
       ...channel,
       joined: members.length > 0,
-      // **参加していないチャンネルは、未読 0・既読位置なし**（既読位置も参加も持たない。機能一覧 10.1）。
+      // **参加していないチャンネルは、参加時刻なし・未読 0・既読位置なし**（既読位置も参加も持たない。機能一覧 10.1）。
+      joinedAt: members[0]?.joinedAt.toISOString() ?? null,
       unread: unread.get(channel.id)?.unread ?? 0,
       lastReadMessageId: unread.get(channel.id)?.lastReadMessageId ?? null,
     }));

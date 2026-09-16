@@ -289,6 +289,57 @@ paths:
           $ref: '#/components/responses/UnsupportedMediaType'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /users/me/settings:
+    get:
+      operationId: getMySettings
+      summary: 自分の設定の取得（F-23）
+      description: >-
+        利用者ごとの設定を返す（機能一覧 10.1）。**プロフィールとは別の経路である**——
+        プロフィールが持つのは他人に見える情報であり、設定は本人にしか返さない
+      responses:
+        '200':
+          description: 自分の設定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateMySettings
+      summary: 自分の設定の編集（F-23）
+      description: >-
+        送った項目だけを変える（機能一覧 10.1）。**既読位置は動かさない**——
+        「含めない」→「含める」に戻すと、過去の未読の返信が未読として現れる（一括で既読扱いにしない）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserSettingsRequest'
+      responses:
+        '200':
+          description: 変えた後の設定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces:
     post:
       operationId: createWorkspace
@@ -1714,6 +1765,29 @@ components:
           type: string
         displayName:
           type: string
+    UserSettings:
+      description: >-
+        利用者ごとの設定（F-23。機能一覧 10.1）。**プロフィール（Profile）とは分ける**——
+        プロフィールが持つのは他人に見える情報であり、設定は本人にしか返さない。
+        通知の設定（F-24・F-25）が増えたら、ここに足す
+      type: object
+      additionalProperties: false
+      required:
+        - threadUnreadIncluded
+      properties:
+        threadUnreadIncluded:
+          description: >-
+            スレッド内の未読を、チャンネルの未読に含めるか（既定は含める）。
+            切り替えても既読位置は動かさないため、「含めない」→「含める」で過去の未読の返信が未読として現れる（機能一覧 10.1）
+          type: boolean
+    UpdateUserSettingsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        threadUnreadIncluded:
+          description: 送った項目だけを変える（機能一覧 10.1）
+          type: boolean
     Profile:
       type: object
       additionalProperties: false
@@ -2007,6 +2081,7 @@ components:
         - name
         - visibility
         - joined
+        - joinedAt
         - unread
         - lastReadMessageId
       properties:
@@ -2020,6 +2095,15 @@ components:
         joined:
           description: 要求した利用者がこのチャンネルに参加しているか
           type: boolean
+        joinedAt:
+          description: >-
+            要求した利用者がこのチャンネルに参加した時刻（F-23。機能一覧 10.1）。参加していなければ null。
+            **既読位置をまだ持たない利用者の「ここから未読」の区切り線を、この時刻より後の最初のメッセージの上に出すために要る**——
+            未読数から位置を数えてはならないため、境目は時刻か id でしか決められない
+          type:
+            - string
+            - 'null'
+          format: date-time
         unread:
           description: >-
             要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。

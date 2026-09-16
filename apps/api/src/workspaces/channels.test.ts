@@ -190,7 +190,8 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
           name: `作る-${visibility}`,
           visibility,
           joined: true,
-          // 作った直後は未読なし（F-23。機能一覧 10.1）。
+          // 作った直後は未読なし（F-23。機能一覧 10.1）。参加した時刻は「ここから未読」の線に要る。
+          joinedAt: expect.any(String) as string,
           unread: 0,
           lastReadMessageId: null,
         });
@@ -293,6 +294,7 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
           name: 'mine',
           visibility: 'PRIVATE',
           joined: true,
+          joinedAt: expect.any(String) as string,
           unread: 0,
           lastReadMessageId: null,
         },
@@ -301,6 +303,8 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
           name: 'open',
           visibility: 'PUBLIC',
           joined: false,
+          // **参加していないチャンネルは、参加時刻なし**（線も未読も持たない。機能一覧 10.1）。
+          joinedAt: null,
           unread: 0,
           lastReadMessageId: null,
         },

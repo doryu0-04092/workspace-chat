@@ -148,6 +148,30 @@ export interface paths {
         patch: operations["updateMyProfile"];
         trace?: never;
     };
+    "/users/me/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自分の設定の取得（F-23）
+         * @description 利用者ごとの設定を返す（機能一覧 10.1）。**プロフィールとは別の経路である**—— プロフィールが持つのは他人に見える情報であり、設定は本人にしか返さない
+         */
+        get: operations["getMySettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 自分の設定の編集（F-23）
+         * @description 送った項目だけを変える（機能一覧 10.1）。**既読位置は動かさない**—— 「含めない」→「含める」に戻すと、過去の未読の返信が未読として現れる（一括で既読扱いにしない）
+         */
+        patch: operations["updateMySettings"];
+        trace?: never;
+    };
     "/workspaces": {
         parameters: {
             query?: never;
@@ -800,6 +824,15 @@ export interface components {
             userId: string;
             displayName: string;
         };
+        /** @description 利用者ごとの設定（F-23。機能一覧 10.1）。**プロフィール（Profile）とは分ける**—— プロフィールが持つのは他人に見える情報であり、設定は本人にしか返さない。 通知の設定（F-24・F-25）が増えたら、ここに足す */
+        UserSettings: {
+            /** @description スレッド内の未読を、チャンネルの未読に含めるか（既定は含める）。 切り替えても既読位置は動かさないため、「含めない」→「含める」で過去の未読の返信が未読として現れる（機能一覧 10.1） */
+            threadUnreadIncluded: boolean;
+        };
+        UpdateUserSettingsRequest: {
+            /** @description 送った項目だけを変える（機能一覧 10.1） */
+            threadUnreadIncluded?: boolean;
+        };
         Profile: {
             /** Format: uuid */
             id: string;
@@ -931,6 +964,11 @@ export interface components {
             visibility: components["schemas"]["ChannelVisibility"];
             /** @description 要求した利用者がこのチャンネルに参加しているか */
             joined: boolean;
+            /**
+             * Format: date-time
+             * @description 要求した利用者がこのチャンネルに参加した時刻（F-23。機能一覧 10.1）。参加していなければ null。 **既読位置をまだ持たない利用者の「ここから未読」の区切り線を、この時刻より後の最初のメッセージの上に出すために要る**—— 未読数から位置を数えてはならないため、境目は時刻か id でしか決められない
+             */
+            joinedAt: string | null;
             /** @description 要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。 既読位置をまだ持たない利用者は、参加した時点より後だけを数える。参加していないパブリックチャンネルは常に 0 */
             unread: number;
             /**
@@ -1350,6 +1388,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Profile"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getMySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 自分の設定 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateMySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description 変えた後の設定 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSettings"];
                 };
             };
             400: components["responses"]["BadRequest"];

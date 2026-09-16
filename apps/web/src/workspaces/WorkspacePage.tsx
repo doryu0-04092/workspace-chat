@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { ApiError, errorMessage } from '../api/client';
+import { useUnreadRealtime } from '../realtime/use-unread-realtime';
 import {
   type Channel,
   useChannels,
@@ -22,6 +23,7 @@ export function WorkspacePage() {
   const workspace = useWorkspace(workspaceId);
   const channels = useChannels(workspaceId);
   const join = useJoinChannel(workspaceId);
+  useUnreadRealtime(workspaceId);
 
   if (workspace.error instanceof ApiError && workspace.error.failure.status === 404) {
     return (
@@ -47,12 +49,18 @@ export function WorkspacePage() {
           {channels.data.map((channel) => (
             <li key={channel.id} className="flex items-center gap-3">
               {channel.joined ? (
-                <Link
-                  to={`/workspaces/${workspaceId}/channels/${channel.id}`}
-                  className="underline"
-                >
-                  {channelLabel(channel)}
-                </Link>
+                <>
+                  <Link
+                    to={`/workspaces/${workspaceId}/channels/${channel.id}`}
+                    className={channel.unread > 0 ? 'font-bold underline' : 'underline'}
+                  >
+                    {channelLabel(channel)}
+                  </Link>
+                  {/* **太字は装飾であり、支援技術には伝わらない**ため、未読は件数の文字でも出す（機能一覧 10.1） */}
+                  {channel.unread > 0 && (
+                    <span className="text-sm text-slate-600">{`未読 ${channel.unread} 件`}</span>
+                  )}
+                </>
               ) : (
                 <>
                   <span>{channelLabel(channel)}</span>
