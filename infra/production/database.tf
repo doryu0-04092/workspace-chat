@@ -69,6 +69,9 @@ locals {
   # 変更をメンテナンスの時間帯まで待たせない（プロバイダーの文書「Specifies whether any database modifications are applied immediately,
   # or during the next maintenance window. Default is `false`.」）。DATABASE_URL のパラメータは apply ですぐ替わるため、
   # RDS の側だけ遅れると食い違う。
+  # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の RDS の箇条が、この値を前提にしている。**
+  # 手順 3 は PendingModifiedValues から MasterUserPassword が消えるのを待つが、false にすると
+  # **変更がメンテナンスの時間帯まで当たらず、待ちが明けない**——その間、手順 1 で止めた api は止まったままである。
   db_apply_immediately = true
 
   # destroy のときに最終スナップショットを取らず、削除保護も掛けない（要件定義書 4.2「バックアップ」。デモの後に destroy する運用）。
