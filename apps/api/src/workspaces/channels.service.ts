@@ -1,9 +1,11 @@
-import { ConflictException, Injectable } from '@nestjs/common';
-import type { paths } from '@workspace-chat/shared';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { UnreadUpdatedPayload, paths } from '@workspace-chat/shared';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
+import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor } from './channel-access';
+import { unreadOfChannels } from './unread';
 import { CHANNEL_NAME_TAKEN } from './channel-errors';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { WorkspacesService } from './workspaces.service';
@@ -11,6 +13,8 @@ import { WorkspacesService } from './workspaces.service';
 type CreateOperation = paths['/workspaces/{id}/channels']['post'];
 export type CreateChannelRequest = CreateOperation['requestBody']['content']['application/json'];
 export type Channel = CreateOperation['responses'][201]['content']['application/json'];
+export type UpdateChannelReadRequest =
+  paths['/workspaces/{id}/channels/{channelId}/read']['put']['requestBody']['content']['application/json'];
 export type { ManagedChannel };
 export type ChannelMember =
   paths['/workspaces/{id}/channels/{channelId}/members']['get']['responses'][200]['content']['application/json'][number];
@@ -37,6 +41,7 @@ export class ChannelsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspacesService,
+    private readonly emitter: RealtimeEmitter,
   ) {}
 
   /**
@@ -60,7 +65,8 @@ export class ChannelsService {
           select: { id: true, name: true, visibility: true },
         });
         await tx.channelMember.create({ data: { channelId: channel.id, workspaceId, userId } });
-        return { ...channel, joined: true };
+        // 作った直後は、そのチャンネルにメッセージが1件も無い（F-23。機能一覧 10.1）。
+        return { ...channel, joined: true, unread: 0, lastReadMessageId: null };
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new ConflictException(CHANNEL_NAME_TAKEN);
@@ -88,7 +94,55 @@ export class ChannelsService {
       },
       orderBy: { name: 'asc' },
     });
-    return rows.map(({ members, ...channel }) => ({ ...channel, joined: members.length > 0 }));
+    const unread = await unreadOfChannels(
+      this.prisma,
+      userId,
+      rows.filter(({ members }) => members.length > 0).map(({ id }) => id),
+    );
+    return rows.map(({ members, ...channel }) => ({
+      ...channel,
+      joined: members.length > 0,
+      // **参加していないチャンネルは、未読 0・既読位置なし**（既読位置も参加も持たない。機能一覧 10.1）。
+      unread: unread.get(channel.id)?.unread ?? 0,
+      lastReadMessageId: unread.get(channel.id)?.lastReadMessageId ?? null,
+    }));
+  }
+
+  /**
+   * 既読位置の更新（F-23。機能一覧 10.1）。**コードは参加者一覧と同じ2段階で、オーナーの例外は及ばない**
+   * （参加していないチャンネルに既読位置を持たない）。渡された id が、そのチャンネルの削除されていないメッセージでなければ 404。
+   *
+   * **既読位置は進めるだけで戻さない**——渡された id が、いま持っている位置より古ければ何も変えない（応答は 204 のまま。10.1）。
+   */
+  async updateRead(
+    userId: string,
+    workspaceId: string,
+    channelId: string,
+    lastReadMessageId: string,
+  ): Promise<void> {
+    await this.workspaces.membershipOf(userId, workspaceId);
+    assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
+    const message = await this.prisma.message.findFirst({
+      where: { id: lastReadMessageId, channelId, deletedAt: null },
+      select: { id: true },
+    });
+    if (message === null) throw new NotFoundException();
+    await this.prisma.$executeRaw`
+      INSERT INTO "ChannelRead" ("id", "channelId", "workspaceId", "userId", "lastReadMessageId", "updatedAt")
+      VALUES (gen_random_uuid(), ${channelId}::uuid, ${workspaceId}::uuid, ${userId}::uuid, ${lastReadMessageId}::uuid, now())
+      ON CONFLICT ("channelId", "userId") DO UPDATE
+        SET "lastReadMessageId" = EXCLUDED."lastReadMessageId", "updatedAt" = now()
+        WHERE "ChannelRead"."lastReadMessageId" < EXCLUDED."lastReadMessageId"
+    `;
+    // **変わったのは自分の未読だけ**なので、自分の部屋へ1件だけ送る（機能一覧 5.2・10.1）。
+    // 資格の確認は上の2段階で済んでいる（参加者でなければここへ来ない）。
+    const unread = await unreadOfChannels(this.prisma, userId, [channelId]);
+    const payload: UnreadUpdatedPayload = {
+      channelId,
+      unread: unread.get(channelId)?.unread ?? 0,
+      sentAt: new Date().toISOString(),
+    };
+    this.emitter.toUsers([userId], 'unread:updated', payload);
   }
 
   /**

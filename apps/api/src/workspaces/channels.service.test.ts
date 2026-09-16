@@ -21,7 +21,14 @@ function createService() {
       user: { id: 'owner-1', userId: 'owner', displayName: 'オーナー' },
     })),
   };
-  return { service: new ChannelsService(prisma as never, workspaces as never), prisma, tx };
+  // 配信の出口。作成は一意制約違反で止まるため、ここでは呼ばれない（呼ばれたら落ちる形にしておく）。
+  const emitter = { toUsers: vi.fn(() => undefined) };
+  return {
+    service: new ChannelsService(prisma as never, workspaces as never, emitter as never),
+    prisma,
+    tx,
+    emitter,
+  };
 }
 
 describe('ChannelsService.create（一意制約違反。#355）', () => {

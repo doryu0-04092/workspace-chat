@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -70,6 +71,25 @@ export class MessagesController {
     @Query() query: { before?: string; limit?: string },
   ): Promise<MessagePage> {
     return this.messages.listReplies(user.id, workspaceId, channelId, messageId, query);
+  }
+
+  /** スレッドの既読位置の更新（F-23。機能一覧 10.1）。本体の形は仕様が確かめる。 */
+  @Put(':messageId/read')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  updateThreadRead(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+    @Param('channelId') channelId: string,
+    @Param('messageId') messageId: string,
+    @Body() body: { lastReadMessageId: string },
+  ): Promise<void> {
+    return this.messages.updateThreadRead(
+      user.id,
+      workspaceId,
+      channelId,
+      messageId,
+      body.lastReadMessageId,
+    );
   }
 
   @Patch(':messageId')

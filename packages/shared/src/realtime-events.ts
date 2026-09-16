@@ -115,6 +115,18 @@ export type MessageDeletedPayload = {
 };
 
 /**
+ * `unread:updated` の payload（F-23。機能一覧 10.1・5.2）。**その未読の持ち主の利用者の部屋へだけ送る**——
+ * チャンネルの部屋へは配らない（未読数はその人のものであり、他の参加者に配ると人数分の未読が全員に届く）。
+ * 送るときに、持ち主がいまもそのチャンネルの参加者であることを呼ぶ側が確かめる（5.2）。
+ * 出す契機は投稿・返信・削除・既読の更新。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
+ */
+export type UnreadUpdatedPayload = {
+  readonly channelId: string;
+  readonly unread: number;
+  readonly sentAt: string;
+};
+
+/**
  * クライアントからサーバーへの要求の名前（機能一覧 9.2「部屋（Socket.IO の room）」）。**配信の対象イベントではない**ため、
  * 上の `REALTIME_EVENT_KINDS` / `REALTIME_EVENT_NAMES` には入れない。
  * - `channelEnter`: チャンネルを開いたときの入室要求。サーバーが参加者であることを確かめてから、その接続をチャンネルの部屋に入れる

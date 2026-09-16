@@ -190,6 +190,9 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
           name: `作る-${visibility}`,
           visibility,
           joined: true,
+          // 作った直後は未読なし（F-23。機能一覧 10.1）。
+          unread: 0,
+          lastReadMessageId: null,
         });
         expect(
           await prisma.channelMember.count({ where: { channelId: channel.id, userId: owner.id } }),
@@ -285,8 +288,22 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
       );
       expect(res.status).toBe(200);
       expect((await res.json()) as Channel[]).toEqual([
-        { id: mine, name: 'mine', visibility: 'PRIVATE', joined: true },
-        { id: open, name: 'open', visibility: 'PUBLIC', joined: false },
+        {
+          id: mine,
+          name: 'mine',
+          visibility: 'PRIVATE',
+          joined: true,
+          unread: 0,
+          lastReadMessageId: null,
+        },
+        {
+          id: open,
+          name: 'open',
+          visibility: 'PUBLIC',
+          joined: false,
+          unread: 0,
+          lastReadMessageId: null,
+        },
       ]);
     });
 

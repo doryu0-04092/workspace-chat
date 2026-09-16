@@ -8,6 +8,7 @@ import {
   type MessageDeletedPayload,
   type MessageNewPayload,
   type MessageUpdatedPayload,
+  type UnreadUpdatedPayload,
   mentionedLoginIds,
   type paths,
 } from '@workspace-chat/shared';
@@ -16,6 +17,7 @@ import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
+import { unreadOfMembers } from './unread';
 import { WorkspacesService } from './workspaces.service';
 
 type MessagesPath = paths['/workspaces/{id}/channels/{channelId}/messages'];
@@ -371,7 +373,29 @@ export class MessagesService {
     });
     const payload: MessageNewPayload = { message, sentAt: new Date().toISOString() };
     this.emitter.toChannelAndUsers(channelId, mentioned, 'message:new', payload);
+    await this.announceUnread(channelId, userId);
     return message;
+  }
+
+  /**
+   * 未読数の変化を配らせる（F-23。機能一覧 10.1・5.2）。**持ち主の利用者の部屋へだけ送り、チャンネルの部屋へは配らない**
+   * ——未読数はその人のものであり、チャンネルの部屋へ配ると人数分の未読が全員に届く。
+   *
+   * **宛先ごとに値が違うため、参加者の人数だけ送る。** 5.2 が禁じているのは「同じイベントを、チャンネルの部屋と利用者の部屋へ
+   * 分けて2回送る」ことであり、**宛先ごとに中身が違うものを1人1回ずつ送ることは、それに当たらない**（1人が受け取るのは1回である）。
+   *
+   * **書いた本人には送らない**（`writerId`）——自分の投稿・自分の削除では自分の未読は変わらないため、送っても同じ値が届くだけである。
+   * **`writerId` を省くと参加者全員に送る**（スレッドの既読の更新のように、誰の投稿でもない変化のとき）。
+   * **資格の確認は数え方の側で済んでいる**（`unreadOfMembers` は、そのチャンネルの参加者で退会していない利用者だけを返す。5.2）。
+   */
+  private async announceUnread(channelId: string, writerId?: string): Promise<void> {
+    const unread = await unreadOfMembers(this.prisma, channelId);
+    const sentAt = new Date().toISOString();
+    for (const [userId, count] of unread) {
+      if (userId === writerId) continue;
+      const payload: UnreadUpdatedPayload = { channelId, unread: count, sentAt };
+      this.emitter.toUsers([userId], 'unread:updated', payload);
+    }
   }
 
   async list(
@@ -432,6 +456,7 @@ export class MessagesService {
     const counted: MessageUpdatedPayload = { message: parent, sentAt };
     this.emitter.toChannelAndUsers(channelId, mentioned, 'message:new', created);
     this.emitter.toChannel(channelId, 'message:updated', counted);
+    await this.announceUnread(channelId, userId);
     return reply;
   }
 
@@ -454,6 +479,42 @@ export class MessagesService {
     });
     if (!parent) throw new NotFoundException();
     return pageOf(this.prisma, { channelId, parentId }, query);
+  }
+
+  /**
+   * スレッドの既読位置の更新（F-23。機能一覧 10.1）。**判定は返信の一覧と同じ**（所属 → 参加の2段階 → 親の有無）。
+   * 渡された id が、その親への削除されていない返信でなければ 404。
+   *
+   * **チャンネルの既読位置とは別系統で持つ**——スレッド内の未読をチャンネルの未読に含めるかを利用者が切り替えられ、
+   * 切り替えた瞬間に集計対象が変わるためである（3.5.2）。**進めるだけで戻さない**のはチャンネルの既読位置と同じ。
+   */
+  async updateThreadRead(
+    userId: string,
+    workspaceId: string,
+    channelId: string,
+    parentId: string,
+    lastReadMessageId: string,
+  ): Promise<void> {
+    const membership = await this.workspaces.membershipOf(userId, workspaceId);
+    assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
+    // **親がそのチャンネルの本体であることは、返信の確認に含まれている**——返信を `parentId` と `channelId` の
+    // 両方で引くため、親が別のチャンネルのもの・存在しないもの・返信そのものなら、その親への返信は1件も無く 404 になる。
+    // **親だけを別に確かめる条件は到達しない**（置いても、壊して落ちるテストが書けない。変異で確かめた）。
+    const reply = await this.prisma.message.findFirst({
+      where: { id: lastReadMessageId, channelId, parentId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!reply) throw new NotFoundException();
+    await this.prisma.$executeRaw`
+      INSERT INTO "ThreadRead" ("id", "parentMessageId", "channelId", "workspaceId", "userId", "lastReadMessageId", "updatedAt")
+      VALUES (gen_random_uuid(), ${parentId}::uuid, ${channelId}::uuid, ${membership.workspace.id}::uuid, ${userId}::uuid, ${lastReadMessageId}::uuid, now())
+      ON CONFLICT ("parentMessageId", "userId") DO UPDATE
+        SET "lastReadMessageId" = EXCLUDED."lastReadMessageId", "updatedAt" = now()
+        WHERE "ThreadRead"."lastReadMessageId" < EXCLUDED."lastReadMessageId"
+    `;
+    // スレッドを読むとチャンネルの未読も減る（返信もそのチャンネルのメッセージである。機能一覧 10.1）。
+    // 減ったのは読んだ本人の分だけだが、宛先ごとに数え直すため、除外する「書いた本人」はいない。
+    await this.announceUnread(channelId);
   }
 
   /**
@@ -528,5 +589,7 @@ export class MessagesService {
       const counted: MessageUpdatedPayload = { message: parent, sentAt };
       this.emitter.toChannel(channelId, 'message:updated', counted);
     }
+    // 削除で未読が減る（削除済みは数えないため。機能一覧 10.1）。
+    await this.announceUnread(channelId, userId);
   }
 }

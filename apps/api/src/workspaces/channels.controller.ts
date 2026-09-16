@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
 import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard';
 import {
   type Channel,
@@ -6,6 +6,7 @@ import {
   ChannelsService,
   type CreateChannelRequest,
   type ManagedChannel,
+  type UpdateChannelReadRequest,
 } from './channels.service';
 
 /**
@@ -49,6 +50,21 @@ export class ChannelsController {
     @Param('channelId') channelId: string,
   ): Promise<ChannelMember[]> {
     return this.channels.members(user.id, workspaceId, channelId);
+  }
+
+  /**
+   * 既読位置の更新（F-23。機能一覧 10.1）。**進めるだけで、戻さない**——古い id を渡しても 204 で、既読位置は変わらない。
+   * 本体の形（`lastReadMessageId` が UUID であること）は仕様が確かめる。
+   */
+  @Put('channels/:channelId/read')
+  @HttpCode(204)
+  updateRead(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+    @Param('channelId') channelId: string,
+    @Body() body: UpdateChannelReadRequest,
+  ): Promise<void> {
+    return this.channels.updateRead(user.id, workspaceId, channelId, body.lastReadMessageId);
   }
 
   /** メンションの補完候補（F-20。機能一覧 9.1）。`prefix` の形と既定値（空）は仕様が持ち、openapi-validation.ts が要求に入れてから届く。 */

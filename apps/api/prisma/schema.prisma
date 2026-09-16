@@ -205,6 +205,15 @@ model User {
   statusEmoji String?
   statusText  String? @db.VarChar(100)
 
+  /// スレッド内の未読を、チャンネルの未読に含めるか（F-23。機能一覧 10.1。**既定は含める**）。
+  ///
+  /// **代償: 利用者の設定をこの表の列として持っている。** 通知の設定（F-24・F-25）が増えたら、
+  /// 利用者の設定は別の表へ移すこと（移す時点で、この列は新しいマイグレーションで落とす）。
+  ///
+  /// **切り替えても既読位置は動かさない**（一括で既読扱いにしない。要件定義書 3.5.2）——
+  /// 「含めない」→「含める」で、過去の未読の返信が未読として現れる側を採っている。
+  threadUnreadIncluded Boolean @default(true)
+
   /// 退会（F-36）。**物理削除は行わない**（要件定義書 3.4）。
   ///
   /// 代償: **利用者が「削除した」と認識した内容も DB に残り続ける。**
@@ -408,6 +417,11 @@ model Membership {
   /// **退会した利用者が参加者一覧と配信の対象に残り続ける。**
   channelMembers ChannelMember[]
 
+  /// **既読位置（F-23）も、この行が消えると消える。** 参照先を `User` ではなくここにしているのは、
+  /// **抜けた利用者の既読位置が残ると、復帰したときに抜けていた間の投稿が既読になる**ためである（機能一覧 10.1）。
+  channelReads ChannelRead[]
+  threadReads  ThreadRead[]
+
   /// 同じ利用者が同じワークスペースに二重に参加しないこと。
   /// この索引は「そのワークスペースの参加者一覧」の取得にも効き、
   /// `ChannelMember` の複合外部キーの参照先にもなる。
@@ -600,6 +614,8 @@ model Channel {
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   members   ChannelMember[]
   messages  Message[]
+  /// 既読位置（F-23）。チャンネルを消せば既読位置も消える。
+  reads     ChannelRead[]
 
   /// ワークスペース内で名前は一意。**ワークスペースをまたげば同じ名前を使える。**
   /// 一意制約の範囲が広すぎないことは、テストが別ワークスペースへの作成で確かめている。
@@ -723,6 +739,12 @@ model Message {
   replies  Message[]        @relation("Thread")
   mentions MessageMention[]
 
+  /// 既読位置（F-23）から指される向き。**参照するだけで、このメッセージの側からは読まない。**
+  /// Prisma が双方向の関連を要求するために置いている（3本とも `ChannelRead` / `ThreadRead` の側が持ち主である）。
+  readAsChannelLast ChannelRead[]
+  readAsThreadParent ThreadRead[] @relation("ThreadReadParent")
+  readAsThreadLast   ThreadRead[] @relation("ThreadReadLast")
+
   /// 返信の親を、同じチャンネルのメッセージに限る複合外部キーの参照先。
   @@unique([id, channelId])
   /// **チャンネルの一覧（本体だけ。`parentId IS NULL`）と、スレッドの返信の一覧（`parentId` で絞る）は、どちらもこの向きで引く**
@@ -750,4 +772,77 @@ model MessageMention {
 
   /// 本文に同じ利用者を2回書いても1件。メッセージの対象を引く向きにも効く。
   @@unique([messageId, userId])
+}
+
+// ============================================================================
+// 既読位置（F-23。機能一覧 10.1）
+// ============================================================================
+
+/// チャンネルの既読位置（F-23。機能一覧 10.1）。**未読は、ここからの差分で求める**（都度集計しない）。
+///
+/// **位置は時刻ではなくメッセージの id で持つ。** 同じミリ秒に入った投稿の前後が時刻では決まらない。
+/// id は UUIDv7 で作った順に増え、一覧の並び（`id` の降順）とも `Message` の索引とも同じ軸である。
+///
+/// **参照先は `ChannelMember` と同じ考え方で `Membership` である**（`User` を直接参照しない）。
+/// キック・退出（`Membership` の削除）で既読位置も連鎖して消える。**残すと、抜けた利用者の既読位置が
+/// 復帰後もそのまま効き、抜けていた間の投稿が既読になる。**
+///
+/// **行が無い利用者の未読は、参加した時点（`ChannelMember.joinedAt`）より後だけを数える**
+/// （参加する前の履歴を未読にしない）。この規約は DB では縛れず、問い合わせの側が守る。
+model ChannelRead {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  channelId String @db.Uuid
+
+  /// チャンネルが属するワークスペース。`Membership` への複合外部キーに要る（`ChannelMember` と同じ）。
+  workspaceId String @db.Uuid
+
+  userId String @db.Uuid
+
+  /// 最後に読んだメッセージの id。**戻さない**——古いページを遡っても既読は進んだままにする（10.1）。
+  lastReadMessageId String @db.Uuid
+
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  channel    Channel    @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  /// 既読位置が指すメッセージ。**チャンネルごと消えるときは同じ文の中で消えるため NoAction にする**（`Message.parent` と同じ理由）。
+  lastRead   Message    @relation(fields: [lastReadMessageId, channelId], references: [id, channelId], onDelete: NoAction)
+
+  /// 利用者とチャンネルの組で1行。未読を引く向き（「この利用者のチャンネルごとの既読位置」）にも効く。
+  @@unique([channelId, userId])
+  @@index([userId])
+}
+
+/// スレッドの既読位置（F-23。機能一覧 10.1）。**チャンネルとは別系統で持つ**——
+/// 「スレッド内の未読をチャンネルの未読に含めるか」を利用者が切り替えられ（`User.threadUnreadIncluded`）、
+/// **切り替えた瞬間に集計対象が変わる**ためである（含めない側で読み進めても、チャンネルの既読位置は動かない）。
+///
+/// **切替時に一括で既読扱いにしない**（読んでいないものが読んだことになる。要件定義書 3.5.2）。
+/// 参照先の考え方と、行が無いときの下限は `ChannelRead` と同じである。
+model ThreadRead {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// スレッドの親のメッセージ（返信は1階層のみ。`Message.parentId`）。
+  parentMessageId String @db.Uuid
+
+  /// 親が属するチャンネル。`Message` の複合一意 `(id, channelId)` を参照するために持つ。
+  channelId String @db.Uuid
+
+  workspaceId String @db.Uuid
+
+  userId String @db.Uuid
+
+  /// 最後に読んだ返信の id。
+  lastReadMessageId String @db.Uuid
+
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  parent     Message    @relation("ThreadReadParent", fields: [parentMessageId, channelId], references: [id, channelId], onDelete: NoAction)
+  lastRead   Message    @relation("ThreadReadLast", fields: [lastReadMessageId, channelId], references: [id, channelId], onDelete: NoAction)
+
+  @@unique([parentMessageId, userId])
+  @@index([userId])
 }

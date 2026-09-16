@@ -8,6 +8,8 @@ export const GENERAL = {
   name: 'general',
   visibility: 'PUBLIC',
   joined: true,
+  unread: 0,
+  lastReadMessageId: null,
 };
 /** テストで使うもう1人の利用者。 */
 export const BOB = {
