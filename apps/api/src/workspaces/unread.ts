@@ -132,7 +132,8 @@ export async function advanceReadPosition<
  * 未読数の数え方（F-23。機能一覧 10.1）。**既読位置からの差分で数え、都度の全走査をしない**。
  * 数える単位は「利用者 × チャンネル」であり、**呼ぶ側の向きが2つある**——
  * 一覧は「1人ぶんを、参加しているチャンネル全部」（`unreadOfChannels`）、配信は「1チャンネルぶんを、参加者全員」（`unreadOfMembers`）。
- * **どちらも同じ `FILTER` 句を通す**（数え方が2箇所に分かれると、片方だけが仕様とずれる）。
+ * **どちらも同じ `UNREAD_JOINS` を通す**（数え方が2箇所に分かれると、片方だけが仕様とずれる）。
+ * **数える条件はすべてその `ON` 側にあり、`FILTER` 句は使わない**（#505 第6巡の 🟡1）——ここは `COUNT(m."id")` だけである。
  *
  * 不変条件は4つである。
  * - **自分の投稿は数えない**（`m."authorId" <> cm."userId"`）
@@ -148,8 +149,18 @@ export async function advanceReadPosition<
  * 「参加した時点より後だけを数える」条件（`m."createdAt" >= cm."joinedAt"`）と合わせて見直すこと——
  * どちらか一方だけを外すと、参加する前の履歴が未読になる。
  */
-const UNREAD_COUNT = Prisma.sql`
-  COUNT(m."id") FILTER (WHERE m."parentId" IS NULL OR u."threadUnreadIncluded")
+const UNREAD_COUNT = Prisma.sql`COUNT(m."id")`;
+
+/**
+ * スレッドの返信を数えるかは利用者の設定による（`User.threadUnreadIncluded`。既定は数える。機能一覧 10.1）。
+ *
+ * **踏むと壊れる: これも結合の `ON` 側に置く。** `FILTER` 句に置くと、
+ * **「含めない」にした利用者について、参加以降の返信を結合してから捨てる**ことになる（#505 第6巡の 🟡1）。
+ * `u` は `m` より前に結合しているので `ON` 側で引ける。`LEFT JOIN` の意味も `COUNT` の値も変わらない
+ * ——ここで落ちる行は、もともと数えられていない行である。
+ */
+const COUNTS_THREAD_REPLIES = Prisma.sql`
+  (m."parentId" IS NULL OR u."threadUnreadIncluded")
 `;
 
 /**
@@ -206,6 +217,11 @@ const AFTER_THREAD_READ_POSITION = Prisma.sql`
  * 形だけ満たして実行では破ることになる（#505 第0巡の 🔴2）。
  * **`LEFT JOIN` のままなので「1参加者1行（未読が0件でも行が残る）」の意味は変わらない。**
  *
+ * **`m` を絞る条件は、例外なくこの `ON` 側にある**（`FILTER` 句には1つも置かない）。
+ * 第3巡まで「`tr` に依存する条件だけ `FILTER` に残す」としていたが、その `tr` を `NOT EXISTS` で `ON` に移した後も
+ * **利用者の設定（`u`）で返信を切る条件が `FILTER` に残っていた**（#505 第6巡の 🟡1）。**この節に置く条件を増やすときは、
+ * `FILTER` 句ではなくここへ足すこと。**
+ *
  * **踏むと壊れる: スレッドの既読位置（`ThreadRead`）も、この `ON` の中で `NOT EXISTS` として引く。**
  * `tr` を `LEFT JOIN` して問い合わせの `WHERE` で絞ると、**結合の後に行を落とす**ことになり、
  * 候補行が「既読済みの返信」だけになった参加者は**行が1つも残らず、`GROUP BY` の群ごと消える**
@@ -220,6 +236,7 @@ const UNREAD_JOINS = Prisma.sql`
     ON m."channelId" = cm."channelId"
    AND ${AFTER_READ_POSITION}
    AND ${AFTER_THREAD_READ_POSITION}
+   AND ${COUNTS_THREAD_REPLIES}
    AND m."deletedAt" IS NULL
    AND m."authorId" <> cm."userId"
    AND m."createdAt" >= cm."joinedAt"
