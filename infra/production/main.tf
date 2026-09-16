@@ -19,6 +19,11 @@
 #   その版（*_wo_version）だけにし、*_wo の値は ephemeral.random_password から作る。*_wo はリソースのブロックの中にだけ書く（locals・output に書かない）。
 #   aws_ssm_parameter のキーは name・type・tier・value_wo・value_wo_version だけにする
 # - main.tf のほかの .tf には、この注記を指す1行（「このファイルにも main.tf の冒頭の検査の条件が掛かる」）を置く。新しい .tf を足すときも置く
+#
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順は、この構成の名前・出力・設定を
+# リテラルで打っている**（クラスターとサービスの出力・SNS のトピック名・RDS の識別子・アラームの treat_missing_data・
+# apply に渡す image_tag と alarm_email）。**どれも変えても validate も plan も CI も落ちない。**
+# 名前や設定を変えるときは、その節も一緒に直す。**どの値が使われているかは、各ファイルの「踏むと壊れる」に書いてある。**
 
 terraform {
   # 1.11 以上: S3 バックエンドの use_lockfile と write-only 引数（技術スタック「インフラ（AWS）」の IaC の行）。

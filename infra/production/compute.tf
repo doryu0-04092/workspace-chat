@@ -45,6 +45,8 @@ resource "aws_ecr_repository" "migrate" {
   force_delete = local.ecr_force_delete
 }
 
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順が、このクラスターを
+# outputs.tf の ecs_cluster_name 経由で指す**（aws ecs update-service / list-tasks / wait の --cluster）。
 resource "aws_ecs_cluster" "main" {
   name = "workspace-chat"
 }

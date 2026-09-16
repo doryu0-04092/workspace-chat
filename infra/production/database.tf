@@ -103,6 +103,8 @@ resource "aws_db_parameter_group" "main" {
 }
 
 resource "aws_db_instance" "main" {
+  # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順 3 が、この識別子をリテラルで打っている**
+  # （aws rds describe-db-instances --db-instance-identifier workspace-chat）。変えるとその段が対象を見つけられない。
   identifier = "workspace-chat"
   db_name    = "workspace_chat"
   username   = "workspace_chat"

@@ -530,6 +530,12 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   topic_arn=$(aws sns list-topics --query "Topics[?ends_with(TopicArn, ':workspace-chat-alerts')].TopicArn" --output text)
   export TF_VAR_alarm_email=$(aws sns list-subscriptions-by-topic --topic-arn "$topic_arn" \
     --query "Subscriptions[?Protocol=='email'].Endpoint | [0]" --output text)
+
+  # **空のまま進まない。** 空でも変数は「設定済み」になるため apply は聞き返さず、
+  # endpoint = "" で落ちる——**落ちる位置は api を止めた後**である（全断のまま手が止まる）
+  for v in cluster service before_arns TF_VAR_image_tag TF_VAR_alarm_email; do
+    [ -n "$(eval printf %s \"\$$v\")" ] || { echo "$v が空。先に確かめる" >&2; exit 1; }
+  done
   ```
 
   **`before_arns` は、確かめる段 2 の基準である**——入れ替えの後に列挙し直し、**この集合と重なりが無いこと**を見る。
@@ -541,7 +547,8 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   渡さないと `apply` が対話で聞いてくる）。**`image_tag` は現に動いているタグを渡す**——別のタグを渡すと、
   対象を絞らない `apply` が api のタスク定義を差し替え、**入れ替えの手順が同時にデプロイになる**。
   **`alarm_email` は現に購読している宛先を渡す**——変えると購読が作り直され、
-  **確認のメールを開くまでアラートが届かない**。下の代償は「入れ替えの間はアラートが鳴る」を当てにしているので、通知先を落とすと前提が崩れる
+  **確認のメールを開くまでアラートが届かない**。**Valkey の箇条の代償は「入れ替えの間はメトリクス欠損が鳴る」を当てにしている**ので、通知先を落とすと前提が崩れる
+  （RDS と `JWT_SECRET` の箇条の 5xx 率は、要求が来ていなければそもそも鳴らない。下の代償）
 - **どの箇条も、停止や `apply` の前に「入れ替えの前の版」を控える**——
   `aws ssm get-parameter --name /workspace-chat/<名前> --query 'Parameter.Version' --output text`。
   **これが最後の確かめる段の基準値である**（控えずに進むと、上がったかどうかを判定できない）。

@@ -49,6 +49,8 @@ resource "aws_s3_bucket_versioning" "state" {
   }
 }
 
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の共通の前置きが、この出力を state_bucket という名前で読む**
+# （terraform -chdir=infra/bootstrap output -raw state_bucket）。名前を変えると、その段の init が backend を初期化できない。
 output "state_bucket" {
   value = aws_s3_bucket.state.bucket
 }
