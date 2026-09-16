@@ -420,7 +420,7 @@
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
 | **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 | **`infra/bootstrap` の state** | **取り込み直す**——state のバケットは `prevent_destroy` で残るため、`terraform import` でバケット・バージョニング・パブリックアクセスの遮断（`infra/bootstrap/main.tf` の3つのリソース）を state に戻す |
-| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで `DATABASE_URL`・`REDIS_URL` を入れ替えるときは、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが DB に繋がらない）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
+| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで入れ替えるときは、`secret: true` の3つとも、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが残る——`DATABASE_URL` なら DB に繋がらず、`JWT_SECRET` なら**漏れた鍵で偽造したトークンを受理し続ける**）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
 | **ElastiCache Valkey** | **データを戻す手順は持たない**（持つのは配信の共有と期限つきの回数だけで、蓄積しない。この節の「代償」）。**作り直したら、接続先が変わらなくても AUTH トークンは作成時に新しい乱数になるため、版を上げてから ECS のタスクを入れ替える一手が要る**（手順は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の「踏むと壊れる」） |
 | **ECR のイメージ** | **作り直して push し直す**——ソースからイメージを作り（`scripts/api-image.test.sh` と同じ `apps/api/Dockerfile` の段）、ECR に push して、ECS のタスクを入れ替える（push の手順は、イメージを出す PR で書く） |
 
@@ -509,7 +509,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 **ただし上限が無いのは `terraform destroy` までである。** `terraform destroy` の時点では、
 添付のバケットは `force_destroy` を指定するため（上記「バックアップ」）、旧バージョンごと消える。
 
-**秘密の値が漏れた疑いがあるとき**、`DATABASE_URL`・`REDIS_URL` は次のとおり入れ替える（決定・2026-09-16・作業側。依頼側の委任による。#423）。定期の入れ替えはしない（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。
+**秘密の値が漏れた疑いがあるとき**、**api が `secret: true` と宣言した設定のすべて**（`apps/api/src/config/api-config.ts` が正本。いまは `DATABASE_URL`・`REDIS_URL`・`JWT_SECRET`）は次のとおり入れ替える（決定・2026-09-16・作業側。依頼側の委任による。#423）。定期の入れ替えはしない（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。
 
 - **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
   1. **Terraform の外で** api のサービスの desired count を 0 にし、タスクが無くなるのを待つ。
@@ -530,7 +530,9 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **この間、下記「アラート」の 5xx 率が鳴る**——ALB は健全なターゲットが無いとき 503 を返すため、
   全断はそのアラートで捕まる。**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**
 - **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`-replace=aws_elasticache_replication_group.valkey` と `valkey_auth_token_version` の引き上げを同じ `apply` で行い、**その後に `aws ecs update-service --cluster … --service … --force-new-deployment` でタスクを入れ替える**——名前の採り方は上の手順 1 と同じ。**desired count を 0 にして戻す形は採らない**（この箇条が「api は止めない」と決めているため）。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）。
-  **この間、下記「アラート」のメトリクス欠損が鳴る**（作り直しで古いクラスタが消えるため）。**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**。
+  **鳴るのは作り直しの区間だけである**——古いクラスタが消える間は下記「アラート」のメトリクス欠損が鳴るが、
+  **新しいクラスタができてからタスクを入れ替えるまでは鳴らない**（同じ節が「AUTH トークンが食い違った場合」を鳴らない側に名指ししている）。
+  **アラートが収まったことを「入れ替えが終わった合図」と読まないこと**——古いトークンを持ったままでも収まる。
   **入れ替えたら、在席の表示（機能一覧 F-22）が別の端末から見えることを確かめる**——**この確認をしないと、失敗が黙って残る**。
   Valkey に繋がらなくても **api は止まらず、5xx も出ず、アラートも鳴らない**（レート制限は各タスクのメモリへ迂回し、在席の取り直しの失敗は例外にしない）ため、
   タスクの入れ替えが漏れた・版の上げ方を誤ったといった失敗は、**配信の共有と在席が止まったまま誰も気づかない状態として残る**。
