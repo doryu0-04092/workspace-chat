@@ -11,6 +11,13 @@ export const GENERAL = {
   unread: 0,
   lastReadMessageId: null,
 };
+/** テストで使うワークスペース。参加している側にする（オーナー専用の作成のフォームを出さない）。 */
+export const WORKSPACE = {
+  id: WORKSPACE_ID,
+  name: '開発チーム',
+  createdAt: '2026-09-14T00:00:00.000Z',
+  role: 'MEMBER',
+};
 /** テストで使うもう1人の利用者。 */
 export const BOB = {
   id: '01920000-0000-7000-8000-000000000002',
@@ -21,6 +28,10 @@ export const SENT_AT = '2026-09-14T00:00:00.000Z';
 
 export const CHANNEL_PATH = `/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}`;
 export const MESSAGES = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/messages`;
+/** 既読位置の更新（F-23。機能一覧 10.1）。 */
+export const READ = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/read`;
+/** 利用者ごとの設定（F-23）。 */
+export const SETTINGS = '/api/users/me/settings';
 
 /** `n` 番目のメッセージ（REST の Message と同じ形）。id は `n` から作り、作った時刻は `n` 分目にする。 */
 export function message(n: number, overrides: Record<string, unknown> = {}) {
@@ -52,7 +63,15 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
   return {
     'POST /api/auth/refresh': () => token('t1'),
     'GET /api/users/me': () => json(200, PROFILE),
+    [`GET /api/workspaces/${WORKSPACE_ID}`]: () => json(200, WORKSPACE),
     [`GET /api/workspaces/${WORKSPACE_ID}/channels`]: () => json(200, [GENERAL]),
+    [`GET ${SETTINGS}`]: () => json(200, { threadUnreadIncluded: true }),
+    [`PUT ${READ}`]: () => new Response(null, { status: 204 }),
     ...extra,
   };
+}
+
+/** 未読のあるチャンネル（F-23。既読位置は `lastReadMessageId` で渡す。機能一覧 10.1）。 */
+export function channelWithUnread(unread: number, lastReadMessageId: string | null = null) {
+  return { ...GENERAL, unread, lastReadMessageId };
 }
