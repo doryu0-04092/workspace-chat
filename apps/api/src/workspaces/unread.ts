@@ -55,8 +55,12 @@ export async function forgetReadPositions(
  *
  * **踏むと壊れる: 読んでから書く形にしない。** 同時に2つ来ると、古い方が後に書いて位置が戻る。
  * ここでは (1) 「いまの位置がこれより古い行」だけを更新し、(2) 更新できなければ作る、という順にしている。
- * (2) で一意違反になるのは「その間に誰かが作った」ときで、**その行は自分と同じか新しい位置を持つ**ため、
- * 何もしないのが正しい（進めるだけの性質は保たれる）。
+ *
+ * **踏むと壊れる: (2) の一意違反を握ったまま終わらない。** 行がまだ無い状態で同時に2つ来ると、
+ * **先に作った側が自分より古い位置を持つことがある**（A が M1 を作り、B の `create` が一意違反になる）。
+ * そこで終えると**新しい位置 M2 が捨てられる**——位置は戻らないが、**進むはずの位置が進まない**
+ * （`lastReadMessageId` が古いまま返り、「ここから未読」の線が読んだ位置より上に引かれる。#505 第4巡の 🔴1）。
+ * **握った後に (1) をやり直す。やり直しは1回で足りる**——2回目は行が必ず存在するので `create` の経路に入らない。
  */
 export async function advanceReadPosition<
   Where extends object,
@@ -71,16 +75,20 @@ export async function advanceReadPosition<
   },
   { where, create, lastReadMessageId }: { where: Where; create: Create; lastReadMessageId: string },
 ): Promise<void> {
-  const { count } = await table.updateMany({
-    where: { ...where, lastReadMessageId: { lt: lastReadMessageId } },
-    data: { lastReadMessageId },
-  });
+  const advance = () =>
+    table.updateMany({
+      where: { ...where, lastReadMessageId: { lt: lastReadMessageId } },
+      data: { lastReadMessageId },
+    });
+  const { count } = await advance();
   if (count > 0) return;
   try {
     await table.create({ data: create });
   } catch (error) {
-    // 既に行がある（同じか新しい位置を持つ）。進めるだけなので何もしない。
     if (!isUniqueViolation(error)) throw error;
+    // **その間に誰かが作った。その行は自分より古いことがある**ので、もう一度進める
+    // （行は必ず存在するため、ここで `create` の経路に戻ることはない）。
+    await advance();
   }
 }
 
@@ -118,12 +126,16 @@ const UNREAD_COUNT = Prisma.sql`
  *
  * **代償**: `ThreadRead` を持たない利用者の返信は、**スレッドを開くまで未読のまま残る**（10.1 に代償として記録した）。
  * 返信の下限を「`tr` があればそれ、無ければ `cr`」にすれば未読は早く減るが、上の受け入れ条件を満たせなくなる。
+ *
+ * **踏むと壊れる: 不等号を `CASE` 式の中に入れない。** `CASE` に包むと**索引の範囲走査の境界にならず**、
+ * `Message_channelId_id_idx`（`channelId, id`）から使えるのが先頭列までに落ちる。
+ * `OR` に展開して**素の比較**にしておくこと（#505 第4巡の 🔴3）。
  */
 const AFTER_READ_POSITION = Prisma.sql`
-  CASE WHEN m."parentId" IS NULL
-    THEN m."id" > COALESCE(cr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid)
-    ELSE TRUE
-  END
+  (
+    m."parentId" IS NOT NULL
+    OR m."id" > COALESCE(cr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid)
+  )
 `;
 
 /**

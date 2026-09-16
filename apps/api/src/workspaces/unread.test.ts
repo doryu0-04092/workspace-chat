@@ -13,6 +13,7 @@ import { stubApiEnv } from '../testing/api-env';
 import { POSTGRES_STARTUP_TIMEOUT_MS, startMigratedPostgres } from '../testing/postgres';
 import { connectRealtime, nextEvent } from '../testing/realtime-client';
 import { startValkey } from '../testing/valkey';
+import { advanceReadPosition } from './unread';
 
 type Workspace = paths['/workspaces']['post']['responses'][201]['content']['application/json'];
 type Channel =
@@ -381,6 +382,49 @@ describe('未読管理（F-23）', () => {
 
       expect((await read(bob, workspace.id, channelId, last.id)).status).toBe(204);
 
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(0);
+    });
+
+    // REVIEW.md 6章「同時実行の競合は、同時に実行して確かめる」。**行がまだ無い状態**で古い位置と新しい位置が
+    // 同時に来ると、先に作った側が古い位置を持ちうる。**一意違反を握って終えると、新しい位置が捨てられる**
+    // （位置は戻らないが、進むはずの位置が進まない。#505 第4巡の 🔴1）。
+    it('既読位置を持たない状態で、古い位置と新しい位置を同時に書いても、新しい方が残る', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const older = await posted(alice, workspace.id, channelId, '1');
+      const newer = await posted(alice, workspace.id, channelId, '2');
+
+      // **行が作られる競合を確実に起こす**。HTTP で2本同時に送るだけでは、片方が先に完了して競合にならない
+      // ——**新しい方が `create` に入る前に、古い方に行を作らせる**。`advanceReadPosition` を直に呼び、
+      // 新しい方の `create` だけを、古い方が書き終えるまで待たせる（Prisma のクライアントは差し替えない）。
+      let releaseNewer!: () => void;
+      const olderWrote = new Promise<void>((resolve) => {
+        releaseNewer = resolve;
+      });
+      const position = (lastReadMessageId: string, waitBeforeCreate: boolean) =>
+        advanceReadPosition(
+          {
+            updateMany: (args) => prisma.channelRead.updateMany(args),
+            create: async (args) => {
+              if (waitBeforeCreate) await olderWrote;
+              return prisma.channelRead.create(args);
+            },
+          },
+          {
+            where: { channelId, userId: bob.id },
+            create: { channelId, workspaceId: workspace.id, userId: bob.id, lastReadMessageId },
+            lastReadMessageId,
+          },
+        );
+
+      await Promise.all([
+        position(newer.id, true),
+        position(older.id, false).then(() => releaseNewer()),
+      ]);
+
+      expect((await channelOf(bob, workspace.id, channelId))?.lastReadMessageId).toBe(newer.id);
       expect(await unreadOf(bob, workspace.id, channelId)).toBe(0);
     });
 
