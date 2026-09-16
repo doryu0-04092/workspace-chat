@@ -531,10 +531,17 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   export TF_VAR_alarm_email=$(aws sns list-subscriptions-by-topic --topic-arn "$topic_arn" \
     --query "Subscriptions[?Protocol=='email'].Endpoint | [0]" --output text)
 
-  # **空のまま進まない。** 空でも変数は「設定済み」になるため apply は聞き返さず、
-  # endpoint = "" で落ちる——**落ちる位置は api を止めた後**である（全断のまま手が止まる）
-  for v in cluster service before_arns TF_VAR_image_tag TF_VAR_alarm_email; do
-    [ -n "$(eval printf %s \"\$$v\")" ] || { echo "$v が空。先に確かめる" >&2; exit 1; }
+  # 入れ替える設定の名前と、**入れ替えの前の版**（確かめる段 1 の基準。段 2 の基準 before_arns と同じ形にする）
+  name=DATABASE_URL   # その箇条のもの（REDIS_URL / JWT_SECRET）に替える
+  before_version=$(aws ssm get-parameter --name "/workspace-chat/$name" \
+    --query 'Parameter.Version' --output text)
+
+  # **採れなかったまま進まない。** 空でも変数は「設定済み」になるため apply は聞き返さず、
+  # endpoint = "" で落ちる——**落ちる位置は api を止めた後**である（全断のまま手が止まる）。
+  # **`None` も弾く**——`aws ... --output text` は、該当が無いとき空文字ではなく文字列 `None` を出す
+  for v in cluster service before_arns before_version TF_VAR_image_tag TF_VAR_alarm_email; do
+    value=$(eval printf %s \"\$$v\")
+    case "$value" in '' | None) echo "$v を採れていない。先に確かめる" >&2; exit 1 ;; esac
   done
   ```
 
@@ -549,9 +556,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **`alarm_email` は現に購読している宛先を渡す**——変えると購読が作り直され、
   **確認のメールを開くまでアラートが届かない**。**Valkey の箇条の代償は「入れ替えの間はメトリクス欠損が鳴る」を当てにしている**ので、通知先を落とすと前提が崩れる
   （RDS と `JWT_SECRET` の箇条の 5xx 率は、要求が来ていなければそもそも鳴らない。下の代償）
-- **どの箇条も、停止や `apply` の前に「入れ替えの前の版」を控える**——
-  `aws ssm get-parameter --name /workspace-chat/<名前> --query 'Parameter.Version' --output text`。
-  **これが最後の確かめる段の基準値である**（控えずに進むと、上がったかどうかを判定できない）。
+- **`before_version` が、最後の確かめる段 1 の基準値である**（上で束縛する。控えずに進むと、上がったかどうかを判定できない）。
   **`locals` の `*_version`（1→2）では代用できない**——Parameter Store の版とは別の番号で、
   RDS の作り直しなど別の `apply` でも SSM 側の版は上がる
 - **待つ段は `aws ecs wait` で待つ**（`release.sh` と同じ形）。タスクが無くなるのは
@@ -560,8 +565,8 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **RDS の待ちにはこれが当たらない**（下の RDS の手順 3）
 - **確かめる段は、入れ替わったことを確かめる。** 動くことを確かめるだけでは足りない——
   **版が上がっていなければ、動く側も同じように通る**（漏れた値が通用したまま「入れ替えた」と判断できる）。次の2つを見る。
-  1. **その設定の Parameter Store の版が、入れ替えの前より上がっていること**——
-     `aws ssm get-parameter --name /workspace-chat/<名前> --query 'Parameter.Version' --output text`。
+  1. **その設定の Parameter Store の版が、`before_version` より上がっていること**——
+     `aws ssm get-parameter --name "/workspace-chat/$name" --query 'Parameter.Version' --output text` で採り直して比べる。
      **`--with-decryption` を付けない**（値は取り出さない。版だけを見る）
   2. **動いているタスクがすべて、入れ替えの後に起動したものであること**——
      `aws ecs list-tasks --cluster "$cluster" --service-name "$service" --query 'taskArns' --output text` で列挙し直し、
