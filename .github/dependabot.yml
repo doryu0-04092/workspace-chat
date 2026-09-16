@@ -68,3 +68,19 @@ updates:
         patterns: ['*']
     commit-message:
       prefix: 'chore'
+# docker は足さない（決定・2026-09-16・依頼側）。
+# **設定し忘れではない。** npm の open-pull-requests-limit: 0 と同じで、
+# 「検討して採らなかった」ことをここに残す。
+#
+# 足さない理由: Dockerfile の土台はタグで指しており（apps/api/Dockerfile の NODE_IMAGE、
+# docker/postgres/Dockerfile の POSTGRES_IMAGE）、docker のエコシステムが出すのは
+# **タグの版を上げる提案**である。版を上げる提案は、上の npm と同じ方針で受け取らない
+# （README の「依存の版を上げない方針」）。
+#
+# **代わりの経路: 同じタグの中の更新（Node 24 系・PostgreSQL 17 系の中の更新と OS の修正）は、
+# イメージを作るたびに --pull で取り込む。** 付いている場所は
+# scripts/api-image.test.sh・scripts/release.sh（api の土台）と、
+# README の操作表の docker compose build --pull（db の土台）である。
+#
+# **pg_bigm の更新を追う経路は無い**（docker/postgres/Dockerfile が git clone で取り、
+# SHA-1 で固定するため、docker のエコシステムでも --pull でも追えない）。無いことをここに記録する。

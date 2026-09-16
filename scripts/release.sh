@@ -55,7 +55,8 @@ echo "== 2. イメージ（linux/arm64）を作り、ARM64 で動くことを確
 # ARM64 で動くことは CI では確かめていない（CI の code は amd64 のイメージで scripts/api-image.test.sh を回す）。
 # push の前にここで、ネイティブモジュール（argon2）・Prisma の CLI・psql が ARM64 のイメージの中で動くことを見る。
 # --pull: 土台（apps/api/Dockerfile の NODE_IMAGE。タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で本番のイメージを作り、
-# CI（scripts/api-image.test.sh も --pull）が確かめた土台とずれる（#38）。
+# CI（scripts/api-image.test.sh も --pull）が確かめた土台とずれる。
+# **土台は Dependabot で追わず、同じタグの中の更新をこの --pull で取り込むと決めている**（理由は .github/dependabot.yml の末尾）。
 docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target runtime \
   --tag "$api_repository:$IMAGE_TAG" --load .
 docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target migrate \

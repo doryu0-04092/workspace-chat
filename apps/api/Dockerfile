@@ -20,8 +20,10 @@
 #
 # **土台はダイジェストではなくタグで指す**（docker/postgres/Dockerfile と同じ扱い）。
 # 代償: タグの指す先が変わると、同じ Dockerfile から違うイメージができる。
-# それでもタグにするのは、依存の自動更新（dependabot.yml）が Dockerfile を見ておらず（#38）、
-# ダイジェストで固定すると誰かが手で上げるまで古いままになるためである。
+# それでもタグにするのは、**この土台を Dependabot で追わないと決めているため**である
+# （決定・2026-09-16・依頼側。理由は .github/dependabot.yml の末尾）。追う経路が無い以上、
+# ダイジェストで固定すると誰かが手で上げるまで古いままになる。
+# **同じタグの中の更新は、イメージを作るたびに --pull で取り込む**（下の行）。
 # 取り直しは scripts/api-image.test.sh の `docker build --pull` と、scripts/release.sh の `docker buildx build --pull` が行う（手元のイメージがあってもレジストリを見る）。
 ARG NODE_IMAGE=node:24-bookworm-slim
 
