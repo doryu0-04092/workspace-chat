@@ -93,8 +93,14 @@ updates:
 #     代償として「npm test が遅くなる」を各 docblock に書いてあるが、**速度を理由に外すと、
 #     この2つの土台の更新は誰にも届かなくなる**
 #
-# **取り直しの書き方は3通りある**（--pull / docker pull / PullPolicy.alwaysPull()）。
-# 土台を足すときは、この列挙にも足す。**フラグの綴りで数えると漏れる**（#517 の第0〜2巡で3回起きた。機械の検査は #518）。
+# **取り直しの書き方は5通りあり、土台ごとに違う。**
+#   docker build --pull / docker buildx build --pull  → api の NODE_IMAGE（api-image.test.sh・release.sh）
+#   docker compose build --pull                        → db の POSTGRES_IMAGE（README の操作表）
+#   docker compose pull                                → redis（README の操作表・compose.yaml）
+#   docker pull                                        → テストの POSTGRES_IMAGE（api-image.test.sh）
+#   PullPolicy.alwaysPull()                            → テストの POSTGRES_IMAGE と VALKEY_IMAGE
+# 土台を足すときは、この列挙にも足す。**綴りで数えると漏れる**（#517 の第0〜3巡で4回起きた。機械の検査は #518）。
+# **引くときは呼び出しの形で引く**（PullPolicy という型の名前で引くと、依存の一覧表の記述まで当たる）。
 #
 # **pg_bigm の更新を追う経路は無い**（docker/postgres/Dockerfile が SHA-1 を指定して git fetch で取るため、
 # docker のエコシステムでも --pull でも追えない）。無いことをここに記録する。
