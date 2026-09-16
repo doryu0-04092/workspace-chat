@@ -594,7 +594,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **`locals` の `*_version`（1→2）では代用できない**——Parameter Store の版とは別の番号で、
   RDS の作り直しなど別の `apply` でも SSM 側の版は上がる
 - **待つ段は `aws ecs wait` で待つ**（`release.sh` と同じ形）。タスクが無くなるのは
-  `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $before_arns`、
+  `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $before_arns`（`before_arns` は**各箇条の先頭**で束縛する）、
   サービスが安定するのは `aws ecs wait services-stable --cluster "$cluster" --services "$service"`。
   **RDS の待ちにはこれが当たらない**（下の RDS の手順 3）
 - **確かめる段は、入れ替わったことを確かめる。** 動くことを確かめるだけでは足りない——
@@ -611,7 +611,8 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 - **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
   1. **Terraform の外で** api のサービスの desired count を 0 にし、タスクが無くなるのを待つ——
      `aws ecs update-service --cluster "$cluster" --service "$service" --desired-count 0` の後、
-     `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $before_arns`（変数は上の共通の前置きで束縛する）。
+     `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $before_arns`
+     （`cluster` / `service` は共通の欄、`before_arns` は**この箇条の先頭**で束縛する）。
      **`--cluster` を省くと `default` クラスターが仮定される**（このリポジトリのクラスターは `default` ではない）。
      **`local.api_task_count`（`infra/production/service.tf`）は直さない**——直すと手順 2 の `-target` の理由が消え、
      手順 4 の対象を絞らない `apply` でも構成が 0 のままでサービスが戻らない。

@@ -23,6 +23,8 @@ locals {
   db_port = 5432
 
   # DATABASE_URL の value_wo_version と RDS の password_wo_version が一緒に使う版。
+  # 踏むと壊れる: **この版は上げるだけで、下げない**（要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の共通の前置き）。
+  # **下げても write-only の値は入れ替わる**——**戻したつもりで、また別の値になる**。
   db_password_version = 1
 
   # マスターパスワードは 32 文字。英数字だけにするのは cache.tf の random_password_special（DATABASE_URL の中に埋めるため、URL の区切りになる記号を含めない）。
