@@ -28,6 +28,24 @@ export async function announceUnreadTo(
 }
 
 /**
+ * そのチャンネルの既読位置（チャンネル・スレッドの両方）を消す（F-23。機能一覧 10.1）。
+ * **チャンネルから抜けるとき（退出 F-10・キックの F-09）に、参加を消すのと同じトランザクションで呼ぶ。**
+ *
+ * **踏むと壊れる: 既読位置は `ChannelMember` と同じ寿命にする。** 参照先が `Membership` なので、
+ * **ワークスペース単位のキック・退出では DB が連鎖して消すが、チャンネル単位では消えない**。
+ * 残すと、再参加した利用者に**抜ける前の位置**が返り、「ここから未読」の線が参加前に引かれて
+ * 未読数と食い違う（未読数の側は `m."createdAt" >= cm."joinedAt"` が守るため。#505 第2巡の 🔴1）。
+ */
+export async function forgetReadPositions(
+  tx: Pick<PrismaService, 'channelRead' | 'threadRead'>,
+  channelId: string,
+  userId: string,
+): Promise<void> {
+  await tx.channelRead.deleteMany({ where: { channelId, userId } });
+  await tx.threadRead.deleteMany({ where: { channelId, userId } });
+}
+
+/**
  * 既読位置を**進めるだけ**で書く（F-23。機能一覧 10.1）。チャンネルとスレッドで同じ形を使う。
  *
  * **主キーは Prisma に作らせる**——`schema.prisma` が `@default(uuid(7))` と宣言しており、
@@ -87,11 +105,7 @@ export async function advanceReadPosition<
  * どちらか一方だけを外すと、参加する前の履歴が未読になる。
  */
 const UNREAD_COUNT = Prisma.sql`
-  COUNT(m."id") FILTER (
-    WHERE m."parentId" IS NULL
-       OR (u."threadUnreadIncluded"
-           AND m."id" > COALESCE(tr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid))
-  )
+  COUNT(m."id") FILTER (WHERE m."parentId" IS NULL OR u."threadUnreadIncluded")
 `;
 
 /**
@@ -121,7 +135,8 @@ const AFTER_READ_POSITION = Prisma.sql`
  * 形だけ満たして実行では破ることになる（#505 第0巡の 🔴2）。
  * **`LEFT JOIN` のままなので「1参加者1行（未読が0件でも行が残る）」の意味は変わらない。**
  *
- * `tr`（スレッドの既読位置）に依存する条件だけは `FILTER` に残す——`tr` は `m` を引いた後にしか結合できないためである。
+ * `tr`（スレッドの既読位置）に依存する条件だけは、この `ON` ではなく**問い合わせの `WHERE`**（`THREAD_READ_FILTER`）に置く
+ * ——`tr` は `m` を引いた後にしか結合できないためである。**`FILTER` 句には置かない**（同じ理由で押し下げが効かない）。
  */
 const UNREAD_JOINS = Prisma.sql`
   FROM "ChannelMember" cm
@@ -133,7 +148,31 @@ const UNREAD_JOINS = Prisma.sql`
    AND m."deletedAt" IS NULL
    AND m."authorId" <> cm."userId"
    AND m."createdAt" >= cm."joinedAt"
-  LEFT JOIN "ThreadRead" tr ON tr."parentMessageId" = m."parentId" AND tr."userId" = cm."userId"
+  LEFT JOIN "ThreadRead" tr
+    ON tr."parentMessageId" = m."parentId" AND tr."userId" = cm."userId"
+`;
+
+/**
+ * **返信を、スレッドの既読位置より後のものに絞る**（機能一覧 10.1）。`tr` は `m` を引いた後にしか結合できないため、
+ * `UNREAD_JOINS` の `ON` ではなく、**それを使う問い合わせの `WHERE`** に置く。
+ *
+ * **踏むと壊れる: 返信も「既読位置より後」で切る。** 切らないと、
+ * **参加者1人につき「参加した時点より後のそのチャンネルの全返信」の行を作り、集約で捨てる**ことになり、
+ * 「都度の全走査をしない」（要件定義書 4.1）を返信の側で破る（#505 第2巡の 🔴2）。
+ *
+ * **本体はここでは絞らない**（`ON` 側の `AFTER_READ_POSITION` で既に切れている）。
+ * **`m."id" IS NULL` を通すのは、未読が0件の参加者の行を `LEFT JOIN` のまま残すためである**——
+ * これを落とすと「1参加者1行」が崩れ、未読0のチャンネルが一覧から消える。
+ *
+ * **`ThreadRead` を持たないスレッドは、参加以降の返信をすべて見る**——これは第1巡で採った形の代償であり
+ * （スレッドを開くまで未読が減らない）、**ここで消せる性質ではない**。10.1 に代償として記録してある。
+ */
+const THREAD_READ_FILTER = Prisma.sql`
+  (
+    m."id" IS NULL
+    OR m."parentId" IS NULL
+    OR m."id" > COALESCE(tr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid)
+  )
 `;
 
 /** 一覧が1つのチャンネルについて出す値（機能一覧 10.1）。 */
@@ -161,6 +200,7 @@ export async function unreadOfChannels(
            MIN(cr."lastReadMessageId"::text) AS "lastReadMessageId"
     ${UNREAD_JOINS}
     WHERE cm."userId" = ${userId}::uuid AND cm."channelId" IN (${ids})
+      AND ${THREAD_READ_FILTER}
     GROUP BY cm."channelId"
   `;
   return new Map(
@@ -183,6 +223,7 @@ export async function unreadOfMembers(
     SELECT cm."userId" AS "userId", ${UNREAD_COUNT} AS "unread"
     ${UNREAD_JOINS}
     WHERE cm."channelId" = ${channelId}::uuid AND u."deletedAt" IS NULL
+      AND ${THREAD_READ_FILTER}
     GROUP BY cm."userId"
   `;
   return new Map(rows.map(({ userId, unread }) => [userId, Number(unread)]));

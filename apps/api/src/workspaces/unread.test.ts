@@ -309,6 +309,41 @@ describe('未読管理（F-23）', () => {
       expect((await channelOf(bob, workspace.id, channelId))?.lastReadMessageId).toBe(first.id);
     });
 
+    // 既読位置は `ChannelMember` と同じ寿命にする（`schema.prisma` の `ChannelRead` の docblock）。
+    // **ワークスペース単位のキック・退出では DB が連鎖して消すが、チャンネル単位では消えない**ため、
+    // 抜けるときにアプリが消す。残すと、再参加した人に**参加前の位置**が返り、「ここから未読」の線が未読数と食い違う（#505 第2巡の 🔴1）。
+    it('チャンネルを抜けて入り直すと、既読位置は持たない状態に戻る', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const first = await posted(alice, workspace.id, channelId, '1');
+      expect((await read(bob, workspace.id, channelId, first.id)).status).toBe(204);
+      expect((await channelOf(bob, workspace.id, channelId))?.lastReadMessageId).toBe(first.id);
+
+      // 抜けて、入り直す
+      expect(
+        (
+          await request(
+            'POST',
+            `/workspaces/${workspace.id}/channels/${channelId}/leave`,
+            bob.authorization,
+          )
+        ).status,
+      ).toBe(204);
+      expect(
+        (
+          await request(
+            'POST',
+            `/workspaces/${workspace.id}/channels/${channelId}/join`,
+            bob.authorization,
+          )
+        ).status,
+      ).toBe(204);
+
+      expect((await channelOf(bob, workspace.id, channelId))?.lastReadMessageId).toBeNull();
+    });
+
     it('参加していないパブリックチャンネルの未読は常に 0', async () => {
       const alice = await login();
       const bob = await login();
