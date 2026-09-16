@@ -179,7 +179,10 @@ export function useEditMessage(workspaceId: string, channelId: string) {
   });
 }
 
-/** 自分のメッセージを削除する（F-13。論理削除。判定は api）。通ったら、編集と同じく両方のキャッシュで削除済みにする。 */
+/**
+ * 自分のメッセージを削除する（F-13。論理削除。判定は api）。
+ * 通ったら、`messagesKey` の前方一致で、チャンネルの一覧と読み込んである全ての返信のキャッシュで削除済みにする（削除の配信と同じ当て方）。
+ */
 export function useDeleteMessage(workspaceId: string, channelId: string) {
   const store = useSessionStore();
   const queryClient = useQueryClient();
