@@ -540,6 +540,35 @@ describe('未読管理（F-23）', () => {
       expect(await toBob).toBeUndefined();
     });
 
+    // **読み終えている参加者も配信の宛先に残る**（#505 第3巡の 🔴1）。
+    // 返信の絞り込みを結合の後に置くと、その人が `unreadOfMembers` の結果から消え、未読 0 が届かない
+    // ——サイドバーの太字が減らないまま残る。
+    it('スレッドまで読み終えた参加者にも、削除で減った未読が届く', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const parent = await posted(alice, workspace.id, channelId, '親');
+      const reply = await replied(alice, workspace.id, channelId, parent.id, '返信');
+      // bob は本体もスレッドも読み終えている
+      expect((await read(bob, workspace.id, channelId, parent.id)).status).toBe(204);
+      expect((await readReply(bob, workspace.id, channelId, parent.id, reply.id)).status).toBe(204);
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(0);
+      // そこへ新しい返信が来る（bob の未読は 1）
+      const added = await replied(alice, workspace.id, channelId, parent.id, '後から来た返信');
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(1);
+      const bobSocket = await open(bob);
+
+      const toBob = nextEvent(bobSocket, 'unread:updated', 3_000);
+      const removed = await fetch(
+        `${base}/api/workspaces/${workspace.id}/channels/${channelId}/messages/${added.id}`,
+        { method: 'DELETE', headers: { authorization: alice.authorization } },
+      );
+      expect(removed.status).toBe(204);
+
+      expect(((await toBob) as UnreadUpdatedPayload).unread).toBe(0);
+    });
+
     it('チャンネルの部屋には配らない——入室していない参加者にも、その人の未読数が届く', async () => {
       const alice = await login();
       const bob = await login();
@@ -639,6 +668,11 @@ describe('未読管理（F-23）', () => {
       // 古い返信を渡しても戻らない
       expect((await readReply(bob, workspace.id, channelId, parent.id, first.id)).status).toBe(204);
       expect(await unreadOf(bob, workspace.id, channelId)).toBe(0);
+
+      // **すべて読み終えても、その人の行は残る**（既読位置を返し続ける）。
+      // 返信の絞り込みを結合の後に置くと、候補行が「既読済みの返信」だけになった参加者は群ごと消え、
+      // 既読位置が null に化ける（#505 第3巡の 🔴1）。
+      expect((await channelOf(bob, workspace.id, channelId))?.lastReadMessageId).toBe(other.id);
 
       // 別のスレッドの返信・存在しない id は 404
       expect((await readReply(bob, workspace.id, channelId, other.id, first.id)).status).toBe(404);
