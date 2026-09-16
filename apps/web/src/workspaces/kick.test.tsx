@@ -231,4 +231,39 @@ describe('チャンネルの参加者（F-10・F-09）', () => {
 
     expect(await screen.findByText(/参加者を読み込めませんでした/)).toBeDefined();
   });
+
+  // 機能一覧 2.2「ワークスペースからのキック → 所属していた全チャンネルから自動的に外れる」。
+  // **キャッシュに残った参加者の一覧に、キックした相手を取り直しを待たずに描かない**（#533 第0巡の 🔴1 と同じ型。#540 第0巡の 🟡3）。
+  // チャンネル → ワークスペース（キック）→ チャンネルと辿り、**2回目の参加者の取り直しは返さない**。
+  it('ワークスペースからキックした相手は、キャッシュにあるチャンネルの参加者の一覧からも、取り直しを待たずに消える', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fakeFetch(
+      channelRoutes({
+        ...AS_OWNER,
+        [`GET ${CHANNEL_MEMBERS}`]: [
+          () => json(200, [USER, BOB]),
+          () => new Promise<Response>(() => {}),
+        ],
+        [`GET ${MEMBERS}`]: () => json(200, [ALICE_AS_OWNER, BOB_AS_MEMBER]),
+        [`DELETE ${MEMBERS}/${BOB.id}`]: () => new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+    // チャンネルの参加者を読み、キャッシュに載せる
+    const first = await openList('参加者を見る', '参加者');
+    expect(first.getByText(/ボブ/)).toBeDefined();
+
+    // ワークスペースの画面でボブをキックする
+    fireEvent.click(screen.getByRole('link', { name: 'チャンネルの一覧へ' }));
+    const members = await openList('メンバーを見る', 'メンバー');
+    fireEvent.click(members.getByRole('button', { name: 'ボブ をキックする' }));
+    await waitFor(() => expect(members.queryByText(/ボブ/)).toBeNull());
+
+    // チャンネルへ戻って参加者を見る（取り直しは返らない）
+    fireEvent.click(screen.getByRole('link', { name: '# general' }));
+    const again = await openList('参加者を見る', '参加者');
+
+    expect(again.getByText(/アリス/)).toBeDefined();
+    expect(again.queryByText(/ボブ/)).toBeNull();
+  });
 });

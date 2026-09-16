@@ -159,7 +159,24 @@ export function useWorkspaceMembers(workspaceId: string, enabled: boolean) {
   });
 }
 
-/** ワークスペースからキックする（F-09。オーナーだけ。判定は api）。通ったら、読み込んであるメンバーの一覧から外す。 */
+/** そのワークスペースの、いずれかのチャンネルの参加者の一覧の鍵か（`channelMembersKey` の形）。 */
+function isChannelMembersKeyOf(workspaceId: string, queryKey: readonly unknown[]): boolean {
+  return (
+    queryKey.length === 5 &&
+    queryKey[0] === 'workspaces' &&
+    queryKey[1] === workspaceId &&
+    queryKey[2] === 'channels' &&
+    queryKey[4] === 'members'
+  );
+}
+
+/**
+ * ワークスペースからキックする（F-09。オーナーだけ。判定は api）。
+ *
+ * **踏むと壊れる: 通ったら、メンバーの一覧と、読み込んである全てのチャンネルの参加者の一覧から、その相手をその場で外す。**
+ * キックされた利用者は所属していた全チャンネルから外れる（機能一覧 2.2）。取り直しの印を付けるだけにすると、
+ * 次に参加者の一覧を開いたとき、**取り直しが返るまでキャッシュの一覧（キックした相手を含む）が描かれる**（#533 第0巡の 🔴1 と同じ型。#540 第0巡）。
+ */
 export function useKickWorkspaceMember(workspaceId: string) {
   const store = useSessionStore();
   const queryClient = useQueryClient();
@@ -170,10 +187,15 @@ export function useKickWorkspaceMember(workspaceId: string) {
         `/api/workspaces/${segment(workspaceId)}/members/${segment(memberId)}`,
         { method: 'DELETE' },
       ),
-    onSuccess: (_, memberId) =>
+    onSuccess: (_, memberId) => {
       queryClient.setQueryData<WorkspaceMember[]>(membersKey(workspaceId), (members) =>
         members?.filter((member) => member.id !== memberId),
-      ),
+      );
+      queryClient.setQueriesData<UserSummary[]>(
+        { predicate: ({ queryKey }) => isChannelMembersKeyOf(workspaceId, queryKey) },
+        (members) => members?.filter((member) => member.id !== memberId),
+      );
+    },
   });
 }
 
