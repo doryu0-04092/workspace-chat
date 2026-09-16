@@ -113,7 +113,11 @@ export function useInviteToWorkspace(workspaceId: string) {
 
 /**
  * ワークスペースから退出する（F-38）。**オーナーは api が 403 `owner_cannot_leave` で断る**（理由は画面に出す）。
- * 抜けたら所属の一覧を取り直し、そのワークスペースの問い合わせは捨てる（もう読めない）。
+ * 抜けたら、そのワークスペースの問い合わせは捨てる（もう読めない）。
+ *
+ * **踏むと壊れる: 所属の一覧から、抜けたワークスペースをその場で外す。取り直しの印を付けるだけにしない。**
+ * 退出の時点で一覧の画面は閉じているため、`invalidateQueries` は取り直さず「古い」と印を付けるだけであり、
+ * 一覧の画面へ戻ると、**取り直しが返るまでキャッシュの一覧（抜けたワークスペースを含む）が描かれる**（#533 第0巡の 🔴1）。
  */
 export function useLeaveWorkspace(workspaceId: string) {
   const store = useSessionStore();
@@ -123,6 +127,9 @@ export function useLeaveWorkspace(workspaceId: string) {
       requestJson<void>(store, `/api/workspaces/${segment(workspaceId)}/leave`, { method: 'POST' }),
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: keys.workspace(workspaceId) });
+      queryClient.setQueryData<Workspace[]>(keys.workspaces, (workspaces) =>
+        workspaces?.filter((workspace) => workspace.id !== workspaceId),
+      );
       return queryClient.invalidateQueries({ queryKey: keys.workspaces, exact: true });
     },
   });

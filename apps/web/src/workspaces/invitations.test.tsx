@@ -269,22 +269,31 @@ describe('ワークスペースからの退出（F-38）', () => {
     expect(screen.getByRole('heading', { name: '開発チーム' })).toBeDefined();
   });
 
-  it('メンバーが退出すると api に送り、ワークスペースの一覧へ移る（抜けたワークスペースは並ばない）', async () => {
+  // **一覧の画面から入り、所属の一覧をキャッシュに載せてから抜ける**——実際の使い方の順である。
+  // ワークスペースの画面から始めると、一覧は退出の後に初めて読まれ、抜けたワークスペースが並ばないのは初回の取得の結果になる（#533 第0巡の 🔴1）。
+  // **退出の後の一覧の取り直しは返さない**——キャッシュに残った一覧が、取り直しを待つ間に描かれないことを見るため。
+  it('メンバーが退出すると api に送り、ワークスペースの一覧へ移る。抜けたワークスペースは、取り直しを待たずに並ばない', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const { count } = fakeFetch({
       ...session,
       [INVITATIONS]: () => json(200, []),
+      'GET /api/workspaces': [
+        () => json(200, [AS_MEMBER, BOOK_CLUB]),
+        () => new Promise<Response>(() => {}),
+      ],
       [`GET /api/workspaces/${AS_MEMBER.id}`]: () => json(200, AS_MEMBER),
       [`GET /api/workspaces/${AS_MEMBER.id}/channels`]: () => json(200, []),
       [`POST /api/workspaces/${AS_MEMBER.id}/leave`]: () => new Response(null, { status: 204 }),
-      'GET /api/workspaces': () => json(200, []),
     });
-    renderApp(`/workspaces/${AS_MEMBER.id}`);
+    renderApp('/workspaces');
+    fireEvent.click(await screen.findByRole('link', { name: '開発チーム' }));
     await screen.findByRole('heading', { name: '開発チーム' });
 
     fireEvent.click(screen.getByRole('button', { name: 'このワークスペースから退出する' }));
 
-    expect(await screen.findByText('所属しているワークスペースはありません。')).toBeDefined();
+    // 一覧の画面に戻ったら、残ったワークスペースは並び、抜けたワークスペースは並ばない
+    expect(await screen.findByRole('link', { name: '読書会' })).toBeDefined();
+    expect(screen.queryByRole('link', { name: '開発チーム' })).toBeNull();
     expect(count(`POST /api/workspaces/${AS_MEMBER.id}/leave`)).toBe(1);
   });
 
