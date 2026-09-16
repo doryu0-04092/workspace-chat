@@ -123,8 +123,11 @@ function ChannelMessages({
 function useAdvanceRead(workspaceId: string, channelId: string) {
   const messages = useMessages(workspaceId, channelId);
   const { mutate: advance } = useUpdateChannelRead(workspaceId, channelId);
-  // 最新のページは新しい順で、その先頭の本体が、読み込んである中でいちばん新しい
-  const newestId = messages.data?.pages[0]?.messages.find((m) => m.parentId === null)?.id ?? null;
+  // 最新のページは新しい順で、その先頭の**削除されていない本体**が、既読位置に送れる中でいちばん新しい。
+  // **一覧は削除済みも返すが、api の既読の更新は削除済みの id を 404 で断る**（channels.service.ts の updateRead）——
+  // 条件を揃えないと、最後の投稿が消されただけで既読が進まなくなり、読んでもそのチャンネルは未読のまま残る
+  const newestId =
+    messages.data?.pages[0]?.messages.find((m) => m.parentId === null && !m.deleted)?.id ?? null;
 
   // **同じ位置は送り直さない**——効果の依存が位置そのものであり、変わらないうちは走らない
   useEffect(() => {

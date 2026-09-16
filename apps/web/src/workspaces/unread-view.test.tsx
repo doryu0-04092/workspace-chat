@@ -203,6 +203,47 @@ describe('未読の画面（F-23）', () => {
       expect(sent.lastReadMessageId).toBe(body.id);
     });
 
+    // **一覧の api は削除済みも返すが、既読の更新は削除済みの id を受け取らない**（404 を返す）。
+    // 最後の投稿が消されただけで既読が進まなくなると、読んでもそのチャンネルは未読のまま残る（機能一覧 10.1・4.2）
+    it('いちばん新しい本体が削除済みなら、その1つ前の本体の id で進める', async () => {
+      const kept = message(1);
+      const removed = message(2, { body: null, deleted: true });
+      const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
+      fakeFetch(
+        routes({
+          [CHANNELS]: () => json(200, [channelWithUnread(2, null)]),
+          [`GET ${MESSAGES}`]: () => page([removed, kept]),
+          [`PUT ${READ}`]: read,
+        }),
+      );
+
+      renderApp(CHANNEL_PATH);
+
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      const sent = JSON.parse(String(read.mock.calls[0]?.[0]?.body)) as {
+        lastReadMessageId: string;
+      };
+      expect(sent.lastReadMessageId).toBe(kept.id);
+    });
+
+    it('本体がすべて削除済みなら、既読を進めない（api が断る id を送らない）', async () => {
+      const removed = message(1, { body: null, deleted: true });
+      const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
+      fakeFetch(
+        routes({
+          [CHANNELS]: () => json(200, [channelWithUnread(1, null)]),
+          [`GET ${MESSAGES}`]: () => page([removed]),
+          [`PUT ${READ}`]: read,
+        }),
+      );
+
+      renderApp(CHANNEL_PATH);
+
+      await screen.findByText('このメッセージは削除されました');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(read).not.toHaveBeenCalled();
+    });
+
     it('同じ位置を繰り返し送らない', async () => {
       const only = message(1);
       const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
