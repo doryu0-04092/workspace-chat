@@ -512,10 +512,15 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 **秘密の値が漏れた疑いがあるとき**、`DATABASE_URL`・`REDIS_URL` は次のとおり入れ替える（決定・2026-09-16・作業側。依頼側の委任による。#423）。定期の入れ替えはしない（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。
 
 - **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
-  1. api のサービスの desired count を 0 にし、タスクが無くなるのを待つ
+  1. **Terraform の外で** api のサービスの desired count を 0 にし（`aws ecs update-service --desired-count 0`）、タスクが無くなるのを待つ。
+     **`local.api_task_count`（`infra/production/service.tf`）は直さない**——直すと手順 2 の `-target` の理由が消え、
+     手順 4 の対象を絞らない `apply` でも構成が 0 のままでサービスが戻らない。
+     この値はタスク定義の `API_TASK_COUNT` にも渡っており、レート制限の数え方まで巻き込む
   2. `db_password_version` を上げ、RDS と `DATABASE_URL` のパラメータだけを対象に `apply` する（`-target=aws_db_instance.main -target=aws_ssm_parameter.database_url`。サービスの desired count を、この `apply` で戻さないため）。Terraform の文書は `-target` を例外の場合に限っており（「Use `-target=ADDRESS` in exceptional circumstances only, such as recovering from mistakes or working around Terraform limitations.」）、漏えいへの対処はその例外として扱う
   3. RDS の `PendingModifiedValues` から `MasterUserPassword` が消えるのを待つ（RDS の API リファレンス「Between the time of the request and the completion of the request, the `MasterUserPassword` element exists in the `PendingModifiedValues` element of the operation response.」）
-  4. 対象を絞らない `apply` でサービスを戻す（起動するタスクは新しいパラメータを読む）
+  4. 対象を絞らない `apply` でサービスを戻す（起動するタスクは新しいパラメータを読む）。
+     **手順 1 で作った drift が、ここで戻る**——`desired_count` は `local.api_task_count` のままで `ignore_changes` を置いていないため、
+     Terraform が 0 を構成の値に戻す
   5. ログインとメッセージの一覧で、DB に繋がることを確かめる
 
   **代償: 入れ替えの間（数分。測っていない）、サービス全体が止まる。** 一部の要求だけが失敗する状態は作らない
