@@ -3,12 +3,20 @@ import { Link, Outlet } from 'react-router';
 import { failureMessage } from '../auth/failure-message';
 import { useSession, useSessionStore } from '../auth/session-context';
 import { useRealtime } from '../realtime/realtime-context';
+import { useInvitationRealtime } from '../realtime/use-invitation-realtime';
+import { useMyInvitations } from '../workspaces/queries';
 
-/** ログインした画面の共通の枠。表示名とログアウトを持ち、リアルタイムの接続を断られたら理由を出す。 */
+/**
+ * ログインした画面の共通の枠。表示名とログアウトを持ち、リアルタイムの接続を断られたら理由を出す。
+ * **未承諾の招待があれば、どの画面にいても件数を出す**（F-38「招待された側に通知が出る」。一覧の画面を開いたときだけにしない）。
+ */
 export function SignedInLayout() {
   const store = useSessionStore();
   const session = useSession();
   const { refused } = useRealtime();
+  const invitations = useMyInvitations();
+  useInvitationRealtime();
+  const pendingInvitations = invitations.data?.length ?? 0;
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -29,6 +37,17 @@ export function SignedInLayout() {
           workspace-chat
         </Link>
         <div className="flex items-center gap-3">
+          {/* **読めなかったことを黙らない**——黙ると「招待が無い」と「読めなかった」が同じ見え方になる（一覧の画面と揃える） */}
+          {invitations.isError && (
+            <Link to="/workspaces" className="text-red-700 underline">
+              招待を読み込めませんでした
+            </Link>
+          )}
+          {pendingInvitations > 0 && (
+            <Link to="/workspaces" className="rounded bg-amber-100 px-2 py-0.5 underline">
+              {`招待 ${pendingInvitations} 件`}
+            </Link>
+          )}
           {session.status === 'signedIn' && <span>{session.user.displayName}</span>}
           <Link to="/settings" className="underline">
             設定

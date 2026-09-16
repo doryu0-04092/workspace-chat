@@ -14,6 +14,8 @@ const signedIn = {
   'POST /api/auth/refresh': () => token('t1'),
   'GET /api/users/me': () => json(200, PROFILE),
   'GET /api/workspaces': () => json(200, []),
+  // ログインした画面の枠が、未承諾の招待の件数を読む（F-38。#532）
+  'GET /api/invitations': () => json(200, []),
 };
 
 function type(label: string, value: string) {
@@ -103,6 +105,7 @@ describe('ログインの画面', () => {
     const { calls } = await openLogin({
       'POST /api/auth/login': () => loggedIn('t1'),
       'GET /api/workspaces': () => json(200, []),
+      'GET /api/invitations': () => json(200, []),
     });
 
     expect(await screen.findByText('アリス')).toBeDefined();
