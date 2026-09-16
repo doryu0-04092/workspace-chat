@@ -67,6 +67,8 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
   return {
     'POST /api/auth/refresh': () => token('t1'),
     'GET /api/users/me': () => json(200, PROFILE),
+    // ログインした画面の枠が、未承諾の招待の件数を読む（F-38。#532）
+    'GET /api/invitations': () => json(200, []),
     [`GET /api/workspaces/${WORKSPACE_ID}`]: () => json(200, WORKSPACE),
     [`GET /api/workspaces/${WORKSPACE_ID}/channels`]: () => json(200, [GENERAL]),
     [`GET ${SETTINGS}`]: () => json(200, { threadUnreadIncluded: true }),

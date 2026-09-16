@@ -28,6 +28,14 @@ export function failureMessage(failure: Failure): string {
       return '既に参加しています。';
     case 'owner_only':
       return 'この操作は、ワークスペースのオーナーだけが行えます。';
+    case 'already_invited':
+      return '既にこの利用者を招待しています。承諾されるまでお待ちください。';
+    case 'already_member':
+      return '既にこのワークスペースのメンバーです。';
+    case 'invitee_not_found':
+      return 'そのユーザーID の利用者はいません。綴りを確かめてください。';
+    case 'owner_cannot_leave':
+      return 'オーナーは退出できません。オーナーの権限を他の人に渡す機能が無いためです。';
     case 'not_found':
       return '見つかりません。一覧を開き直してください。';
     default:

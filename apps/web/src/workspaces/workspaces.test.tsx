@@ -46,6 +46,8 @@ const SECRET = {
 const session = {
   'POST /api/auth/refresh': () => token('t1'),
   'GET /api/users/me': () => json(200, PROFILE),
+  // ログインした画面の枠が、未承諾の招待の件数を読む（F-38。#532）
+  'GET /api/invitations': () => json(200, []),
 };
 
 function type(label: string, value: string) {

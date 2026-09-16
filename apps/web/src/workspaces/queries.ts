@@ -6,6 +6,11 @@ import { useSessionStore } from '../auth/session-context';
 type Schemas = components['schemas'];
 export type Workspace = Schemas['Workspace'];
 export type Channel = Schemas['Channel'];
+export type MyInvitation = Schemas['MyInvitation'];
+export type Invitation = Schemas['Invitation'];
+
+/** 自分宛ての未承諾の招待の一覧の鍵。`invitation:new` の配信（use-invitation-realtime）が取り直させる。 */
+export const invitationsKey = ['invitations'] as const;
 
 /** 見えるチャンネルの一覧の鍵。未読の配信の反映（use-unread-realtime）が同じ鍵を書き換える。 */
 export function channelsKey(workspaceId: string) {
@@ -52,6 +57,74 @@ export function useCreateWorkspace() {
     mutationFn: (body: Schemas['CreateWorkspaceRequest']) =>
       requestJson<Workspace>(store, '/api/workspaces', { method: 'POST', body }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.workspaces, exact: true }),
+  });
+}
+
+/** 自分宛ての未承諾の招待（届いた順。REST の仕様の listMyInvitations。F-38）。 */
+export function useMyInvitations() {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: invitationsKey,
+    queryFn: () => requestJson<MyInvitation[]>(store, '/api/invitations'),
+  });
+}
+
+/** 招待を承諾する（F-38）。参加が成立するので、招待の一覧と所属の一覧を取り直す。 */
+export function useAcceptInvitation() {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      requestJson<Workspace>(store, `/api/invitations/${segment(invitationId)}/accept`, {
+        method: 'POST',
+      }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: invitationsKey }),
+        queryClient.invalidateQueries({ queryKey: keys.workspaces, exact: true }),
+      ]),
+  });
+}
+
+/** 招待を辞退する（F-38）。招待が消えるだけで、所属は変わらない。 */
+export function useDeclineInvitation() {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      requestJson<void>(store, `/api/invitations/${segment(invitationId)}/decline`, {
+        method: 'POST',
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: invitationsKey }),
+  });
+}
+
+/** ワークスペースへ招待する（F-08。オーナーだけ。判定は api）。宛先はユーザーID。 */
+export function useInviteToWorkspace(workspaceId: string) {
+  const store = useSessionStore();
+  return useMutation({
+    mutationFn: (body: Schemas['CreateInvitationRequest']) =>
+      requestJson<Invitation>(store, `/api/workspaces/${segment(workspaceId)}/invitations`, {
+        method: 'POST',
+        body,
+      }),
+  });
+}
+
+/**
+ * ワークスペースから退出する（F-38）。**オーナーは api が 403 `owner_cannot_leave` で断る**（理由は画面に出す）。
+ * 抜けたら所属の一覧を取り直し、そのワークスペースの問い合わせは捨てる（もう読めない）。
+ */
+export function useLeaveWorkspace(workspaceId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      requestJson<void>(store, `/api/workspaces/${segment(workspaceId)}/leave`, { method: 'POST' }),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: keys.workspace(workspaceId) });
+      return queryClient.invalidateQueries({ queryKey: keys.workspaces, exact: true });
+    },
   });
 }
 
