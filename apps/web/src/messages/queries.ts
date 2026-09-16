@@ -140,6 +140,47 @@ export function usePostMessage(workspaceId: string, channelId: string) {
   return usePost(messagesKey(workspaceId, channelId), messagesPath(workspaceId, channelId));
 }
 
+/**
+ * 自分のメッセージを編集する（F-13。REST の仕様の editMessage。判定は api）。
+ * **通ったら、チャンネルの一覧とスレッドの返信の両方のキャッシュで置き換える**——返信の鍵はチャンネルの一覧の鍵の下にあるため、
+ * 鍵の前方一致（`setQueriesData`）で両方に届く。一覧は読み直さない。
+ */
+export function useEditMessage(workspaceId: string, channelId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, body }: { messageId: string; body: string }) =>
+      requestJson<Message>(
+        store,
+        `${messagesPath(workspaceId, channelId)}/${segment(messageId)}`,
+        // 編集の本文は投稿と同じ形（REST の仕様は editMessage の本体に PostMessageRequest を使う）
+        { method: 'PATCH', body: { body } satisfies Schemas['PostMessageRequest'] },
+      ),
+    onSuccess: (message) =>
+      queryClient.setQueriesData<MessagePages>(
+        { queryKey: messagesKey(workspaceId, channelId) },
+        (data) => replaceMessage(data, message),
+      ),
+  });
+}
+
+/** 自分のメッセージを削除する（F-13。論理削除。判定は api）。通ったら、編集と同じく両方のキャッシュで削除済みにする。 */
+export function useDeleteMessage(workspaceId: string, channelId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId: string) =>
+      requestJson<void>(store, `${messagesPath(workspaceId, channelId)}/${segment(messageId)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: (_, messageId) =>
+      queryClient.setQueriesData<MessagePages>(
+        { queryKey: messagesKey(workspaceId, channelId) },
+        (data) => markDeleted(data, messageId),
+      ),
+  });
+}
+
 /** スレッドに返信する（REST の仕様の postReply）。親の件数と参加者は、配られる `message:updated` で置き換わる。 */
 export function usePostReply(workspaceId: string, channelId: string, parentId: string) {
   return usePost(
