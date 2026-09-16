@@ -91,6 +91,12 @@ export function resolveWebOrigin(raw: string | undefined): string {
  * （docs/tech-stack.md の「本番の HTTPS・秘密情報・state の置き場」）。マイグレーション用のタスク定義の `secrets` には `DATABASE_URL` 以外を足さない
  * （運用者が ECS Exec で入る先であり、足すと認証の外に出る。docs/requirements.md 4.2 手順 5 の代償）。
  * `secret: true` の設定を3つより減らすと、api-config-infra.test.ts の「数え上げる対象がある」の下限で落ちる（減らすなら、その下限も直す）。
+ *
+ * **踏むと壊れる: `secret: true` を足したら、漏えいの疑いで入れ替えるときの手順も決めて
+ * docs/requirements.md 4.2「秘密の値が漏れた疑いがあるとき」に足す**（止めるか止めないか・その間に古い値が通用するか・代償）。
+ * **同節と docs/tech-stack.md の秘密情報の行は「`secret: true` と宣言した設定のすべて」と宣言している**ため、
+ * 足して手順を書かないと、その宣言が黙って偽になる。**この食い違いを捕まえる検査は無い**
+ * （タスク定義とパラメータの対応は api-config-infra.test.ts が見るが、入れ替えの手順が決まっているかは誰も見ない）。
  */
 type Setting<T> = {
   readonly env: string;

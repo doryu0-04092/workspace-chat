@@ -520,15 +520,25 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   対象を絞らない `apply` が api のタスク定義を差し替え、**入れ替えの手順が同時にデプロイになる**。
   **`alarm_email` は現に購読している宛先を渡す**——変えると購読が作り直され、
   **確認のメールを開くまでアラートが届かない**。下の代償は「入れ替えの間はアラートが鳴る」を当てにしているので、通知先を落とすと前提が崩れる
-- **待つ段は `aws ecs wait` で待つ**（`release.sh` と同じ形）。タスクが無くなるのは `aws ecs wait tasks-stopped`、
-  サービスが安定するのは `aws ecs wait services-stable`
+- **どの箇条も、停止や `apply` の前に「入れ替えの前の版」を控える**——
+  `aws ssm get-parameter --name /workspace-chat/<名前> --query 'Parameter.Version' --output text`。
+  **これが最後の確かめる段の基準値である**（控えずに進むと、上がったかどうかを判定できない）。
+  **`locals` の `*_version`（1→2）では代用できない**——Parameter Store の版とは別の番号で、
+  RDS の作り直しなど別の `apply` でも SSM 側の版は上がる
+- **タスクを指す段は、先にサービスのタスクを列挙する**——
+  `aws ecs list-tasks --cluster "$cluster" --service-name "$service" --query 'taskArns' --output text`。
+  `aws ecs wait tasks-stopped` と `aws ecs describe-tasks` は、どちらも `--cluster` と `--tasks` を要る
+- **待つ段は `aws ecs wait` で待つ**（`release.sh` と同じ形）。タスクが無くなるのは
+  `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $arns`（上で列挙した ARN）、
+  サービスが安定するのは `aws ecs wait services-stable --cluster "$cluster" --services "$service"`。
+  **RDS の待ちにはこれが当たらない**（下の RDS の手順 3）
 - **確かめる段は、入れ替わったことを確かめる。** 動くことを確かめるだけでは足りない——
   **版が上がっていなければ、動く側も同じように通る**（漏れた値が通用したまま「入れ替えた」と判断できる）。次の2つを見る。
   1. **その設定の Parameter Store の版が、入れ替えの前より上がっていること**——
      `aws ssm get-parameter --name /workspace-chat/<名前> --query 'Parameter.Version' --output text`。
      **`--with-decryption` を付けない**（値は取り出さない。版だけを見る）
   2. **動いているタスクがすべて、入れ替えの後に起動したものであること**——
-     `aws ecs describe-tasks` の `startedAt` と `taskDefinition` を見る。
+     上の列挙で ARN を採り、`aws ecs describe-tasks --cluster "$cluster" --tasks $arns --query 'tasks[].[startedAt,taskDefinition]'` を見る。
      **版が上がっても、古いタスクが残っていれば古い値を持ったままである**
 
 - **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
@@ -540,7 +550,10 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
      手順 4 の対象を絞らない `apply` でも構成が 0 のままでサービスが戻らない。
      この値はタスク定義の `API_TASK_COUNT` にも渡っており、レート制限の数え方まで巻き込む
   2. `db_password_version` を上げ、RDS と `DATABASE_URL` のパラメータだけを対象に `apply` する（`-target=aws_db_instance.main -target=aws_ssm_parameter.database_url`。サービスの desired count を、この `apply` で戻さないため）。Terraform の文書は `-target` を例外の場合に限っており（「Use `-target=ADDRESS` in exceptional circumstances only, such as recovering from mistakes or working around Terraform limitations.」）、漏えいへの対処はその例外として扱う
-  3. RDS の `PendingModifiedValues` から `MasterUserPassword` が消えるのを待つ（RDS の API リファレンス「Between the time of the request and the completion of the request, the `MasterUserPassword` element exists in the `PendingModifiedValues` element of the operation response.」）
+  3. RDS の `PendingModifiedValues` から `MasterUserPassword` が消えるのを待つ——
+     `aws rds describe-db-instances --db-instance-identifier workspace-chat --query 'DBInstances[0].PendingModifiedValues'`
+     を繰り返して見る（`aws ecs wait` はここには当たらない）。
+     **この待ちだけでは入れ替わりを確かめられない**——版が上がっていなければ、その要素は最初から現れない（RDS の API リファレンス「Between the time of the request and the completion of the request, the `MasterUserPassword` element exists in the `PendingModifiedValues` element of the operation response.」）
   4. 対象を絞らない `apply` でサービスを戻す（起動するタスクは新しいパラメータを読む）。
      **手順 1 で作った drift が、ここで戻る**——`desired_count` は `local.api_task_count` のままで `ignore_changes` を置いていないため、
      Terraform が 0 を構成の値に戻す
