@@ -119,10 +119,35 @@ describe('未読の画面（F-23）', () => {
       expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 2');
     });
 
-    it('既読位置を持たないチャンネルでは線を出さない（参加した時点より後の最初の上に出す決めは、位置が来てから）', async () => {
+    // **既読位置をまだ持たないチャンネルでは、参加した時点より後の最初の上に出す**（機能一覧 10.1・openapi の Channel.lastReadMessageId）。
+    // **参加した直後に初めて開いたチャンネルは全部が未読**であり、線がいちばん要る場面である
+    it('既読位置を持たないチャンネルでは、参加した時点より後の最初の上に出す', async () => {
+      const before = message(1);
+      const after = message(2);
       fakeFetch(
         routes({
-          [CHANNELS]: () => json(200, [channelWithUnread(0, null)]),
+          // 参加したのは 1 件目と 2 件目の間
+          [CHANNELS]: () => json(200, [channelWithUnread(1, null, after.createdAt)]),
+          [`GET ${MESSAGES}`]: () => page([after, before]),
+        }),
+      );
+
+      renderApp(CHANNEL_PATH);
+
+      await screen.findByRole('separator', { name: 'ここから未読' });
+      const texts = [...document.querySelectorAll('article, [role="separator"]')].map(
+        (node) => node.textContent ?? '',
+      );
+      const dividerAt = texts.findIndex((text) => text.includes('ここから未読'));
+      // 参加する前のメッセージの上には出さない
+      expect(texts[dividerAt - 1] ?? '').toContain('メッセージ 1');
+      expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 2');
+    });
+
+    it('既読位置も参加した時刻も無ければ線を出さない', async () => {
+      fakeFetch(
+        routes({
+          [CHANNELS]: () => json(200, [{ ...channelWithUnread(0, null, null), joined: true }]),
           [`GET ${MESSAGES}`]: () => page([message(1)]),
         }),
       );

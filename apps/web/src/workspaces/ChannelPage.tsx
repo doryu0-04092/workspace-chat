@@ -45,6 +45,7 @@ export function ChannelPage() {
         workspaceId={workspaceId}
         channelId={channelId}
         lastReadMessageId={channel.lastReadMessageId ?? null}
+        joinedAt={channel.joinedAt ?? null}
       />
     </main>
   );
@@ -60,10 +61,12 @@ function ChannelMessages({
   workspaceId,
   channelId,
   lastReadMessageId,
+  joinedAt,
 }: {
   workspaceId: string;
   channelId: string;
   lastReadMessageId: string | null;
+  joinedAt: string | null;
 }) {
   const rejected = useChannelRealtime(workspaceId, channelId);
   const [unreadFrom] = useState(lastReadMessageId);
@@ -93,6 +96,7 @@ function ChannelMessages({
               channelId={channelId}
               onOpenThread={(message) => setThread(message.id)}
               lastReadMessageId={unreadFrom}
+              joinedAt={joinedAt}
             />
           </section>
           <PostMessageForm workspaceId={workspaceId} channelId={channelId} />

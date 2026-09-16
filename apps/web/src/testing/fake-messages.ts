@@ -8,6 +8,9 @@ export const GENERAL = {
   name: 'general',
   visibility: 'PUBLIC',
   joined: true,
+  // 参加した時刻。**既読位置をまだ持たないチャンネルの「ここから未読」の線に要る**（F-23。機能一覧 10.1）。
+  // メッセージの雛形（`message(n)` は n 分目）より前に置き、既定ではすべてが参加より後になるようにする
+  joinedAt: '2026-09-14T00:00:00.000Z',
   unread: 0,
   lastReadMessageId: null,
 };
@@ -71,7 +74,14 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
   };
 }
 
-/** 未読のあるチャンネル（F-23。既読位置は `lastReadMessageId` で渡す。機能一覧 10.1）。 */
-export function channelWithUnread(unread: number, lastReadMessageId: string | null = null) {
-  return { ...GENERAL, unread, lastReadMessageId };
+/**
+ * 未読のあるチャンネル（F-23。機能一覧 10.1）。
+ * 既読位置は `lastReadMessageId`、**既読位置をまだ持たないときの線の境目**は `joinedAt` で渡す。
+ */
+export function channelWithUnread(
+  unread: number,
+  lastReadMessageId: string | null = null,
+  joinedAt: string | null = GENERAL.joinedAt,
+) {
+  return { ...GENERAL, unread, lastReadMessageId, joinedAt };
 }

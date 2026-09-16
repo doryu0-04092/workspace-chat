@@ -2081,6 +2081,7 @@ components:
         - name
         - visibility
         - joined
+        - joinedAt
         - unread
         - lastReadMessageId
       properties:
@@ -2094,6 +2095,15 @@ components:
         joined:
           description: 要求した利用者がこのチャンネルに参加しているか
           type: boolean
+        joinedAt:
+          description: >-
+            要求した利用者がこのチャンネルに参加した時刻（F-23。機能一覧 10.1）。参加していなければ null。
+            **既読位置をまだ持たない利用者の「ここから未読」の区切り線を、この時刻より後の最初のメッセージの上に出すために要る**——
+            未読数から位置を数えてはならないため、境目は時刻か id でしか決められない
+          type:
+            - string
+            - 'null'
+          format: date-time
         unread:
           description: >-
             要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。

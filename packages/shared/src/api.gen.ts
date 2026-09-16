@@ -964,6 +964,11 @@ export interface components {
             visibility: components["schemas"]["ChannelVisibility"];
             /** @description 要求した利用者がこのチャンネルに参加しているか */
             joined: boolean;
+            /**
+             * Format: date-time
+             * @description 要求した利用者がこのチャンネルに参加した時刻（F-23。機能一覧 10.1）。参加していなければ null。 **既読位置をまだ持たない利用者の「ここから未読」の区切り線を、この時刻より後の最初のメッセージの上に出すために要る**—— 未読数から位置を数えてはならないため、境目は時刻か id でしか決められない
+             */
+            joinedAt: string | null;
             /** @description 要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。 既読位置をまだ持たない利用者は、参加した時点より後だけを数える。参加していないパブリックチャンネルは常に 0 */
             unread: number;
             /**
