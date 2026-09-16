@@ -7,7 +7,8 @@ import { PostMessageForm } from '../messages/PostMessageForm';
 import { useMessages } from '../messages/queries';
 import { ThreadPanel } from '../messages/ThreadPanel';
 import { useChannelRealtime } from '../realtime/use-channel-realtime';
-import { useChannels, useUpdateChannelRead } from './queries';
+import { ChannelMembers } from './MemberLists';
+import { useChannels, useUpdateChannelRead, useWorkspace } from './queries';
 
 /** 開いているスレッドの親の id を持つ URL のパラメータ（機能一覧 6。開き直しても同じスレッドを開く）。 */
 const THREAD_PARAM = 'thread';
@@ -16,6 +17,8 @@ const THREAD_PARAM = 'thread';
 export function ChannelPage() {
   const { workspaceId = '', channelId = '' } = useParams();
   const channels = useChannels(workspaceId);
+  // オーナーかどうか（参加者の一覧で「チャンネルから外す」を出すため。F-09。判定は api）
+  const workspace = useWorkspace(workspaceId);
   const channel = channels.data?.find((c) => c.id === channelId && c.joined);
 
   if (channels.isPending) {
@@ -41,6 +44,12 @@ export function ChannelPage() {
       <Link to={`/workspaces/${workspaceId}`} className="text-sm underline">
         チャンネルの一覧へ
       </Link>
+      <ChannelMembers
+        key={`members-${channelId}`}
+        workspaceId={workspaceId}
+        channelId={channelId}
+        isOwner={workspace.data?.role === 'OWNER'}
+      />
       <ChannelMessages
         key={channelId}
         workspaceId={workspaceId}
