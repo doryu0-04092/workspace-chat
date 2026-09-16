@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { failureMessage } from '../auth/failure-message';
+import { MessageChannelProvider } from '../messages/message-channel';
 import { MessageList } from '../messages/MessageList';
 import { PostMessageForm } from '../messages/PostMessageForm';
 import { useMessages } from '../messages/queries';
@@ -82,7 +83,8 @@ function ChannelMessages({
     });
 
   return (
-    <>
+    // 一覧とスレッドの自分のメッセージに、編集・削除を出すため（F-13）
+    <MessageChannelProvider workspaceId={workspaceId} channelId={channelId}>
       {rejected && (
         <p role="alert" className="mt-4 text-red-700">
           リアルタイムの反映を始められませんでした。{failureMessage(rejected)}
@@ -111,7 +113,7 @@ function ChannelMessages({
           />
         )}
       </div>
-    </>
+    </MessageChannelProvider>
   );
 }
 

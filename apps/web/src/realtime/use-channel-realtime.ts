@@ -12,11 +12,11 @@ import { useEffect, useState } from 'react';
 import type { Failure } from '../auth/failure';
 import {
   addMessage,
+  listKeyOf,
   markDeleted,
   type Message,
   type MessagePages,
   messagesKey,
-  repliesKey,
   replaceMessage,
 } from '../messages/queries';
 import { useRealtime } from './realtime-context';
@@ -46,9 +46,8 @@ export function useChannelRealtime(workspaceId: string, channelId: string): Fail
   useEffect(() => {
     const key = messagesKey(workspaceId, channelId);
     const room: ChannelRoomRequest = { channelId };
-    /** 本体のメッセージはチャンネルの一覧に、返信はその親の返信に。読み込んでいないキャッシュは作らない（更新が undefined を返す）。 */
-    const listOf = (message: Message) =>
-      message.parentId === null ? key : repliesKey(workspaceId, channelId, message.parentId);
+    /** 本体のメッセージはチャンネルの一覧に、返信はその親の返信に（`listKeyOf`。編集の応答と同じ決め方）。読み込んでいないキャッシュは作らない（更新が undefined を返す）。 */
+    const listOf = (message: Message) => listKeyOf(workspaceId, channelId, message);
     const update = (
       target: readonly unknown[],
       change: (data: MessagePages | undefined) => MessagePages | undefined,

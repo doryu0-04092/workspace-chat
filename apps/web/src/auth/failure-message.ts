@@ -26,6 +26,8 @@ export function failureMessage(failure: Failure): string {
       return 'このチャンネルに参加していません。';
     case 'already_channel_member':
       return '既に参加しています。';
+    case 'not_message_author':
+      return '自分のメッセージだけを編集・削除できます。';
     case 'owner_only':
       return 'この操作は、ワークスペースのオーナーだけが行えます。';
     case 'already_invited':

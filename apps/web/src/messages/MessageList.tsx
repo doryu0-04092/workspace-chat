@@ -1,7 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { errorMessage } from '../api/client';
+import { useSession } from '../auth/session-context';
+import { EditMessageForm, MessageActions } from './MessageActions';
 import { MessageBody } from './MessageBody';
+import { useMessageChannel } from './message-channel';
 import { type Message, useMessages } from './queries';
 
 /**
@@ -222,7 +225,10 @@ function OlderMessages({ context }: { context: ListContext }) {
   );
 }
 
-/** 1件のメッセージ。退会した投稿者は「削除済みの利用者」（機能一覧 1.5）、削除済みは本文を置き換える（4.2）。 */
+/**
+ * 1件のメッセージ。退会した投稿者は「削除済みの利用者」（機能一覧 1.5）、削除済みは本文を置き換える（4.2）。
+ * **自分のメッセージで削除済みでなければ、編集・削除を出す**（F-13。チャンネルの画面が `MessageChannelProvider` を置いているときだけ）。
+ */
 export function MessageItem({
   message,
   onOpenThread,
@@ -230,6 +236,17 @@ export function MessageItem({
   message: Message;
   onOpenThread?: (message: Message) => void;
 }) {
+  const scope = useMessageChannel();
+  const session = useSession();
+  const [editing, setEditing] = useState(false);
+  const ownScope =
+    scope !== null &&
+    session.status === 'signedIn' &&
+    message.body !== null &&
+    message.author?.id === session.user.id
+      ? scope
+      : null;
+
   return (
     <article className="px-2 py-2">
       <header className="flex items-baseline gap-2 text-sm">
@@ -243,8 +260,13 @@ export function MessageItem({
       </header>
       {message.body === null ? (
         <p className="text-slate-500">このメッセージは削除されました</p>
+      ) : ownScope && editing ? (
+        <EditMessageForm scope={ownScope} message={message} onDone={() => setEditing(false)} />
       ) : (
         <MessageBody body={message.body} mentions={message.mentions} />
+      )}
+      {ownScope && !editing && (
+        <MessageActions scope={ownScope} message={message} onEdit={() => setEditing(true)} />
       )}
       {onOpenThread && <ThreadSummary message={message} onOpen={() => onOpenThread(message)} />}
     </article>
