@@ -57,6 +57,20 @@ describe('招待の通知（F-38）', () => {
     expect(notice.getAttribute('href')).toBe('/workspaces');
   });
 
+  // **読めなかったことを、どの画面でも黙らない**——ヘッダーが黙ると、チャンネルを見ている利用者には
+  // 「招待が無い」と「読めなかった」が同じ見え方になる（一覧の画面は理由を出している。#533 第0巡の 🟡3）。
+  it('招待の一覧を読めなければ、どの画面でもヘッダーにそのことを出す', async () => {
+    fakeFetch({
+      ...session,
+      [INVITATIONS]: () => error(500, 'internal_error'),
+      'GET /api/users/me/settings': () => json(200, { threadUnreadIncluded: true }),
+    });
+    renderApp('/settings');
+
+    expect(await screen.findByText('招待を読み込めませんでした')).toBeDefined();
+    expect(screen.queryByRole('link', { name: /招待 \d+ 件/ })).toBeNull();
+  });
+
   it('未承諾の招待が無ければ、ヘッダーに件数を出さない', async () => {
     fakeFetch({
       ...session,

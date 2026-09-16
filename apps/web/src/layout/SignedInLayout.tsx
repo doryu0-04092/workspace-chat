@@ -37,6 +37,12 @@ export function SignedInLayout() {
           workspace-chat
         </Link>
         <div className="flex items-center gap-3">
+          {/* **読めなかったことを黙らない**——黙ると「招待が無い」と「読めなかった」が同じ見え方になる（一覧の画面と揃える） */}
+          {invitations.isError && (
+            <Link to="/workspaces" className="text-red-700 underline">
+              招待を読み込めませんでした
+            </Link>
+          )}
           {pendingInvitations > 0 && (
             <Link to="/workspaces" className="rounded bg-amber-100 px-2 py-0.5 underline">
               {`招待 ${pendingInvitations} 件`}
