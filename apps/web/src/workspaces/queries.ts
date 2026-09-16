@@ -7,6 +7,7 @@ type Schemas = components['schemas'];
 export type Workspace = Schemas['Workspace'];
 export type Channel = Schemas['Channel'];
 export type WorkspaceMember = Schemas['WorkspaceMember'];
+export type ManagedChannel = Schemas['ManagedChannel'];
 export type UserSummary = Schemas['UserSummary'];
 export type MyInvitation = Schemas['MyInvitation'];
 export type Invitation = Schemas['Invitation'];
@@ -133,6 +134,90 @@ export function useLeaveWorkspace(workspaceId: string) {
         workspaces?.filter((workspace) => workspace.id !== workspaceId),
       );
       return queryClient.invalidateQueries({ queryKey: keys.workspaces, exact: true });
+    },
+  });
+}
+
+function managedChannelsKey(workspaceId: string) {
+  return ['workspaces', workspaceId, 'managed-channels'] as const;
+}
+
+/**
+ * オーナーの管理用のチャンネル一覧（REST の仕様の listManagedChannels。F-35・機能一覧 3.1）。
+ * 参加していないプライベートとアーカイブ済みも含み、項目は id・名前・種別・参加者数・アーカイブ済みかだけ。
+ * **`enabled` が false の間は読まない**（「チャンネルを管理する」を押したときにだけ読む）。
+ */
+export function useManagedChannels(workspaceId: string, enabled: boolean) {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: managedChannelsKey(workspaceId),
+    queryFn: () =>
+      requestJson<ManagedChannel[]>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/managed-channels`,
+      ),
+    enabled,
+  });
+}
+
+/** 管理用の一覧の、同じ id の項目を置き換える。 */
+function replaceManaged(
+  channels: ManagedChannel[] | undefined,
+  channel: ManagedChannel,
+): ManagedChannel[] | undefined {
+  return channels?.map((current) => (current.id === channel.id ? channel : current));
+}
+
+/**
+ * チャンネルをアーカイブする（F-35。オーナーだけ。判定は api）。
+ *
+ * **踏むと壊れる: 通ったら、一般のチャンネル一覧からその場で外す。取り直しの印を付けるだけにしない。**
+ * アーカイブ済みは一般の一覧から外れる（機能一覧 3.2）。印を付けるだけだと、取り直しが返るまでアーカイブしたチャンネルが一覧に残る
+ * （#533 第0巡の 🔴1 と同じ型）。管理用の一覧の項目は応答で置き換える（アーカイブで名前に番号が付く。general → general-1）。
+ * **一般の一覧の取り直しは `exact` で当てる**——鍵の前方にはメッセージと参加者の一覧のキャッシュも入っている。
+ */
+export function useArchiveChannel(workspaceId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (channelId: string) =>
+      requestJson<ManagedChannel>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/archive`,
+        { method: 'POST' },
+      ),
+    onSuccess: (channel) => {
+      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+        replaceManaged(channels, channel),
+      );
+      queryClient.setQueryData<Channel[]>(keys.channels(workspaceId), (channels) =>
+        channels?.filter((current) => current.id !== channel.id),
+      );
+      return queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
+    },
+  });
+}
+
+/**
+ * チャンネルを復元する（F-35。オーナーだけ。名前と番号は外れない）。
+ * 通ったら管理用の一覧の項目を応答で置き換え、一般のチャンネル一覧を取り直す——一般の一覧に戻るか（パブリックか・参加しているか）と
+ * 未読の値は画面では決められないため、足すのではなく読み直す。
+ */
+export function useRestoreChannel(workspaceId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (channelId: string) =>
+      requestJson<ManagedChannel>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/restore`,
+        { method: 'POST' },
+      ),
+    onSuccess: (channel) => {
+      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+        replaceManaged(channels, channel),
+      );
+      return queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
     },
   });
 }

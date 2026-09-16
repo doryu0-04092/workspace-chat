@@ -2,6 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError, errorMessage } from '../api/client';
 import { useUnreadRealtime } from '../realtime/use-unread-realtime';
+import { ManagedChannels } from './ManagedChannels';
 import { WorkspaceMembers } from './MemberLists';
 import {
   type Channel,
@@ -95,6 +96,7 @@ export function WorkspacePage() {
       )}
       {workspace.data?.role === 'OWNER' && <CreateChannelForm workspaceId={workspaceId} />}
       {workspace.data?.role === 'OWNER' && <InviteForm workspaceId={workspaceId} />}
+      {workspace.data?.role === 'OWNER' && <ManagedChannels workspaceId={workspaceId} />}
       {workspace.data && (
         <WorkspaceMembers workspaceId={workspaceId} isOwner={workspace.data.role === 'OWNER'} />
       )}
