@@ -22,6 +22,9 @@
 #   アラートのメールの購読は、届く確認のメールのリンクを開くまで有効にならない。
 #
 # 前提: aws（資格情報と ap-northeast-1）・terraform・docker（buildx で linux/arm64 を作れること——x86 の端末では QEMU の登録が要る）・node と npm。
+#   **レジストリ（Docker Hub）へ届くこと。** 手順 2 は土台を --pull で取り直すため、手元にイメージがあっても届かなければ落ちる
+#   （同じ代償は scripts/api-image.test.sh と apps/api/src/testing/postgres.ts にもある）。
+#   **落ちるのは手順 1 の apply が済んだ後である**（ECR のリポジトリは作られた状態で止まる）。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -54,9 +57,12 @@ aws ecr get-login-password | docker login --username AWS --password-stdin "$regi
 echo "== 2. イメージ（linux/arm64）を作り、ARM64 で動くことを確かめてから push する"
 # ARM64 で動くことは CI では確かめていない（CI の code は amd64 のイメージで scripts/api-image.test.sh を回す）。
 # push の前にここで、ネイティブモジュール（argon2）・Prisma の CLI・psql が ARM64 のイメージの中で動くことを見る。
-docker buildx build --platform linux/arm64 --file apps/api/Dockerfile --target runtime \
+# --pull: 土台（apps/api/Dockerfile の NODE_IMAGE。タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で本番のイメージを作り、
+# CI（scripts/api-image.test.sh も --pull）が確かめた土台とずれる。
+# **土台は Dependabot で追わず、同じタグの中の更新をこの --pull で取り込むと決めている**（理由は .github/dependabot.yml の末尾）。
+docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target runtime \
   --tag "$api_repository:$IMAGE_TAG" --load .
-docker buildx build --platform linux/arm64 --file apps/api/Dockerfile --target migrate \
+docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target migrate \
   --tag "$migrate_repository:$IMAGE_TAG" --load .
 docker run --rm --platform linux/arm64 --entrypoint node "$api_repository:$IMAGE_TAG" \
   -e 'require(require("node:module").createRequire("/app/apps/api/dist/main.js").resolve("argon2"))' ||
