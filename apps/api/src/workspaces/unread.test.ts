@@ -451,6 +451,27 @@ describe('未読管理（F-23）', () => {
       expect(await toCarol).toBeUndefined();
     });
 
+    // 既読を進めて変わるのは**その人の未読だけ**である。参加者全員を数え直して配ると、
+    // 1要求が人数分の集計と配信に増幅する（#505 第0巡の 🔴3）。
+    it('スレッドの既読を進めると、進めた本人にだけ届き、他の参加者には届かない', async () => {
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const workspace = await workspaceWith(alice, bob, carol);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob, carol]);
+      const parent = await posted(alice, workspace.id, channelId, '親');
+      const reply = await replied(alice, workspace.id, channelId, parent.id, '返信');
+      const bobSocket = await open(bob);
+      const carolSocket = await open(carol);
+
+      const toBob = nextEvent(bobSocket, 'unread:updated', 3_000);
+      const toCarol = nextEvent(carolSocket, 'unread:updated', 1_500);
+      expect((await readReply(bob, workspace.id, channelId, parent.id, reply.id)).status).toBe(204);
+
+      expect(((await toBob) as UnreadUpdatedPayload).channelId).toBe(channelId);
+      expect(await toCarol).toBeUndefined();
+    });
+
     it('既読を更新すると、その人の部屋に減った後の未読数が届く', async () => {
       const alice = await login();
       const bob = await login();
@@ -528,6 +549,38 @@ describe('未読管理（F-23）', () => {
 
       expect((await readReply(bob, workspace.id, channelId, parent.id, reply.id)).status).toBe(204);
 
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(0);
+    });
+
+    // 既読位置は「利用者 × スレッド」で持つ（機能一覧 10.1）。チャンネル単位で持つと、
+    // **1つのスレッドを読んだだけで、別のスレッドの返信まで既読になる**。
+    it('あるスレッドを読んでも、別のスレッドの返信は未読のまま残る', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const first = await posted(alice, workspace.id, channelId, '親1');
+      const second = await posted(alice, workspace.id, channelId, '親2');
+      const toFirst = await replied(alice, workspace.id, channelId, first.id, '返信1');
+      const toSecond = await replied(alice, workspace.id, channelId, second.id, '返信2');
+      // 本体（親2つ）まではチャンネルの既読位置で読み終えている
+      expect((await read(bob, workspace.id, channelId, second.id)).status).toBe(204);
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(2);
+
+      // **古い返信のスレッドを先に読む**（ここで「利用者 × スレッド」の行が1つできる）
+      expect((await readReply(bob, workspace.id, channelId, first.id, toFirst.id)).status).toBe(
+        204,
+      );
+
+      // もう片方の返信は未読のまま
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(1);
+
+      // **次に新しい返信のスレッドを読むと、そちらにも行ができて両方が既読になる。**
+      // 既読位置をチャンネル単位で持つと、ここで**さきほどのスレッドの行を書き換えてしまい**、
+      // 新しい返信の分が未読に残る（機能一覧 10.1 の「利用者 × スレッド」）
+      expect((await readReply(bob, workspace.id, channelId, second.id, toSecond.id)).status).toBe(
+        204,
+      );
       expect(await unreadOf(bob, workspace.id, channelId)).toBe(0);
     });
 

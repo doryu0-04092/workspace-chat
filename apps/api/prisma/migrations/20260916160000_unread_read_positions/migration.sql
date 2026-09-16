@@ -29,6 +29,10 @@ CREATE TABLE "ThreadRead" (
     CONSTRAINT "ThreadRead_pkey" PRIMARY KEY ("id")
 );
 
+-- 未読の集計は ("channelId", "id" > 既読位置) で引く。(channelId, parentId, id) では2列目が parentId のため前方一致にならない。
+-- CreateIndex
+CREATE INDEX "Message_channelId_id_idx" ON "Message"("channelId", "id");
+
 -- CreateIndex
 CREATE UNIQUE INDEX "ChannelRead_channelId_userId_key" ON "ChannelRead"("channelId", "userId");
 

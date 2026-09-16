@@ -747,6 +747,10 @@ model Message {
 
   /// 返信の親を、同じチャンネルのメッセージに限る複合外部キーの参照先。
   @@unique([id, channelId])
+  /// **未読の集計はこの向きで引く**（`channelId = ? AND id > 既読位置`。F-23。機能一覧 10.1）。
+  /// **上の `@@index([channelId, parentId, id])` では代わりにならない**——2列目が `parentId` のため、
+  /// 本体と返信をまとめて「既読位置より後」で切る条件が前方一致にならない。
+  @@index([channelId, id])
   /// **チャンネルの一覧（本体だけ。`parentId IS NULL`）と、スレッドの返信の一覧（`parentId` で絞る）は、どちらもこの向きで引く**
   /// （新しい順・`before` より古いもの）。**踏むと壊れる: 返信を引く問い合わせは必ず `channelId` を伴う**——`parentId` だけで引くと、この索引の前方を使えない。
   @@index([channelId, parentId, id(sort: Desc)])

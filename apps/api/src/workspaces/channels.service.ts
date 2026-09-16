@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor } from './channel-access';
-import { unreadOfChannels } from './unread';
+import { advanceReadPosition, unreadOfChannels } from './unread';
 import { CHANNEL_NAME_TAKEN } from './channel-errors';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { WorkspacesService } from './workspaces.service';
@@ -127,13 +127,11 @@ export class ChannelsService {
       select: { id: true },
     });
     if (message === null) throw new NotFoundException();
-    await this.prisma.$executeRaw`
-      INSERT INTO "ChannelRead" ("id", "channelId", "workspaceId", "userId", "lastReadMessageId", "updatedAt")
-      VALUES (gen_random_uuid(), ${channelId}::uuid, ${workspaceId}::uuid, ${userId}::uuid, ${lastReadMessageId}::uuid, now())
-      ON CONFLICT ("channelId", "userId") DO UPDATE
-        SET "lastReadMessageId" = EXCLUDED."lastReadMessageId", "updatedAt" = now()
-        WHERE "ChannelRead"."lastReadMessageId" < EXCLUDED."lastReadMessageId"
-    `;
+    await advanceReadPosition(this.prisma.channelRead, {
+      where: { channelId, userId },
+      create: { channelId, workspaceId, userId, lastReadMessageId },
+      lastReadMessageId,
+    });
     // **変わったのは自分の未読だけ**なので、自分の部屋へ1件だけ送る（機能一覧 5.2・10.1）。
     // 資格の確認は上の2段階で済んでいる（参加者でなければここへ来ない）。
     const unread = await unreadOfChannels(this.prisma, userId, [channelId]);

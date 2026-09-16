@@ -1,5 +1,45 @@
 import { Prisma } from '../generated/prisma/client';
+import { isUniqueViolation } from '../prisma-errors';
 import type { PrismaService } from '../prisma.service';
+
+/**
+ * 既読位置を**進めるだけ**で書く（F-23。機能一覧 10.1）。チャンネルとスレッドで同じ形を使う。
+ *
+ * **主キーは Prisma に作らせる**——`schema.prisma` が `@default(uuid(7))` と宣言しており、
+ * **要件定義書 3.5.2 が「主キーはすべて UUIDv7」と決めている**。生の SQL の `gen_random_uuid()` は UUIDv4 であり、
+ * 宣言と実態が食い違ううえ、索引の局所性（UUIDv7 を選んだ理由）もその表だけ失われる。
+ * PostgreSQL 17 には組み込みの `uuidv7()` が無いため、**DB 側の関数では作れない**（`schema.prisma` 冒頭の決め）。
+ *
+ * **踏むと壊れる: 読んでから書く形にしない。** 同時に2つ来ると、古い方が後に書いて位置が戻る。
+ * ここでは (1) 「いまの位置がこれより古い行」だけを更新し、(2) 更新できなければ作る、という順にしている。
+ * (2) で一意違反になるのは「その間に誰かが作った」ときで、**その行は自分と同じか新しい位置を持つ**ため、
+ * 何もしないのが正しい（進めるだけの性質は保たれる）。
+ */
+export async function advanceReadPosition<
+  Where extends object,
+  Create extends { lastReadMessageId: string },
+>(
+  table: {
+    updateMany: (args: {
+      where: Where & { lastReadMessageId: { lt: string } };
+      data: { lastReadMessageId: string };
+    }) => Promise<{ count: number }>;
+    create: (args: { data: Create }) => Promise<unknown>;
+  },
+  { where, create, lastReadMessageId }: { where: Where; create: Create; lastReadMessageId: string },
+): Promise<void> {
+  const { count } = await table.updateMany({
+    where: { ...where, lastReadMessageId: { lt: lastReadMessageId } },
+    data: { lastReadMessageId },
+  });
+  if (count > 0) return;
+  try {
+    await table.create({ data: create });
+  } catch (error) {
+    // 既に行がある（同じか新しい位置を持つ）。進めるだけなので何もしない。
+    if (!isUniqueViolation(error)) throw error;
+  }
+}
 
 /**
  * 未読数の数え方（F-23。機能一覧 10.1）。**既読位置からの差分で数え、都度の全走査をしない**。
@@ -23,24 +63,33 @@ import type { PrismaService } from '../prisma.service';
  */
 const UNREAD_COUNT = Prisma.sql`
   COUNT(m."id") FILTER (
-    WHERE m."authorId" <> cm."userId"
-      AND m."deletedAt" IS NULL
-      AND m."id" > COALESCE(cr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid)
-      AND m."createdAt" >= cm."joinedAt"
-      AND (
-        m."parentId" IS NULL
-        OR (u."threadUnreadIncluded"
-            AND m."id" > COALESCE(tr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid))
-      )
+    WHERE m."parentId" IS NULL
+       OR (u."threadUnreadIncluded"
+           AND m."id" > COALESCE(tr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid))
   )
 `;
 
-/** 未読を数える結合（利用者・既読位置・メッセージ・スレッドの既読位置）。上の `UNREAD_COUNT` と対で使う。 */
+/**
+ * 未読を数える結合（利用者・既読位置・メッセージ・スレッドの既読位置）。上の `UNREAD_COUNT` と対で使う。
+ *
+ * **踏むと壊れる: メッセージを絞る条件は、この `ON` 側に置く。** `FILTER` 句へ移すと、
+ * **プランナが結合まで押し下げられず**（集約の段でしか評価できない）、参加者数 × そのチャンネルの全メッセージを
+ * 作ってから捨てる形になる。それは「既読位置からの差分で求め、都度の全走査をしない」（要件定義書 4.1）を、
+ * 形だけ満たして実行では破ることになる（#505 第0巡の 🔴2）。
+ * **`LEFT JOIN` のままなので「1参加者1行（未読が0件でも行が残る）」の意味は変わらない。**
+ *
+ * `tr`（スレッドの既読位置）に依存する条件だけは `FILTER` に残す——`tr` は `m` を引いた後にしか結合できないためである。
+ */
 const UNREAD_JOINS = Prisma.sql`
   FROM "ChannelMember" cm
   JOIN "User" u ON u."id" = cm."userId"
   LEFT JOIN "ChannelRead" cr ON cr."channelId" = cm."channelId" AND cr."userId" = cm."userId"
-  LEFT JOIN "Message" m ON m."channelId" = cm."channelId"
+  LEFT JOIN "Message" m
+    ON m."channelId" = cm."channelId"
+   AND m."id" > COALESCE(cr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid)
+   AND m."deletedAt" IS NULL
+   AND m."authorId" <> cm."userId"
+   AND m."createdAt" >= cm."joinedAt"
   LEFT JOIN "ThreadRead" tr ON tr."parentMessageId" = m."parentId" AND tr."userId" = cm."userId"
 `;
 

@@ -485,7 +485,7 @@ export interface paths {
         get?: never;
         /**
          * チャンネルの既読位置の更新（F-23）
-         * @description 読んだ位置（そのチャンネルのメッセージの id）を渡して既読位置を進める（機能一覧 10.1）。 既読位置は戻さない——渡した id が既に読んだ位置より古ければ、何も変えずに 204 を返す。 コードは参加者一覧と同じ2段階: 所属していなければ種別によらず 404、所属していて参加者でなければパブリックは 403 not_a_channel_member・プライベートは 404。オーナーの例外は及ばない（参加していないチャンネルに既読位置を持たない）。 別のチャンネルのメッセージ・存在しないメッセージ・削除済みのメッセージの id は 404
+         * @description 読んだ位置（そのチャンネルのメッセージの id）を渡して既読位置を進める（機能一覧 10.1）。 既読位置は戻さない——渡した id が既に読んだ位置より古ければ、何も変えずに 204 を返す。 コードは参加者一覧と同じ2段階: 所属していなければ種別によらず 404、所属していて参加者でなければパブリックは 403 not_a_channel_member・プライベートは 404。オーナーの例外は及ばない（参加していないチャンネルに既読位置を持たない）。 別のチャンネルのメッセージ・存在しないメッセージ・削除済みのメッセージの id は 404。 利用者ごとに1分 120 回まで（メッセージの書き込みとは別枠。機能一覧 10.1）
          */
         put: operations["updateChannelRead"];
         post?: never;
@@ -512,7 +512,7 @@ export interface paths {
         get?: never;
         /**
          * スレッドの既読位置の更新（F-23）
-         * @description スレッド（親のメッセージ）の中で読んだ位置を進める（機能一覧 10.1。「利用者 × スレッド」の既読位置）。 チャンネルの既読位置とは別系統で持つ——スレッド内の未読をチャンネルの未読に含めるかを利用者が切り替えられ、 切り替えた瞬間に集計対象が変わるためである。チャンネルの既読位置と同じく、進めるだけで戻さない。 判定は返信の一覧と同じ（所属 → 参加の2段階 → 親の有無。そのチャンネルに無い・返信なら 404）。 渡す id は、その親への削除されていない返信でなければ 404
+         * @description スレッド（親のメッセージ）の中で読んだ位置を進める（機能一覧 10.1。「利用者 × スレッド」の既読位置）。 チャンネルの既読位置とは別系統で持つ——スレッド内の未読をチャンネルの未読に含めるかを利用者が切り替えられ、 切り替えた瞬間に集計対象が変わるためである。チャンネルの既読位置と同じく、進めるだけで戻さない。 判定は返信の一覧と同じ（所属 → 参加の2段階 → 親の有無。そのチャンネルに無い・返信なら 404）。 渡す id は、その親への削除されていない返信でなければ 404。 利用者ごとに1分 120 回まで（メッセージの書き込みとは別枠。機能一覧 10.1）
          */
         put: operations["updateThreadRead"];
         post?: never;
@@ -2005,6 +2005,7 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -2050,6 +2051,7 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };

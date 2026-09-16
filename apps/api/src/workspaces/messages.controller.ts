@@ -15,6 +15,8 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard';
 import { MessageWriteRateLimitGuard } from '../rate-limit/message-write-rate-limit.guard';
+import { UserRateLimitGuard } from '../rate-limit/user-rate-limit.guard';
+import { READ_UPDATE_LIMIT } from './channels.controller';
 import {
   type Message,
   type MessagePage,
@@ -76,6 +78,8 @@ export class MessagesController {
   /** スレッドの既読位置の更新（F-23。機能一覧 10.1）。本体の形は仕様が確かめる。 */
   @Put(':messageId/read')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(UserRateLimitGuard)
+  @Throttle({ default: READ_UPDATE_LIMIT })
   updateThreadRead(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') workspaceId: string,

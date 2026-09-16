@@ -17,7 +17,7 @@ import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
-import { unreadOfMembers } from './unread';
+import { advanceReadPosition, unreadOfChannels, unreadOfMembers } from './unread';
 import { WorkspacesService } from './workspaces.service';
 
 type MessagesPath = paths['/workspaces/{id}/channels/{channelId}/messages'];
@@ -398,6 +398,20 @@ export class MessagesService {
     }
   }
 
+  /**
+   * 1人ぶんだけ配る（既読を進めたときのように、**その人の未読しか変わらない**とき）。
+   * **参加者全員を数え直さない**——1要求が人数分の集計と配信に増幅するため（#505 第0巡の 🔴3）。
+   */
+  private async announceUnreadTo(channelId: string, userId: string): Promise<void> {
+    const unread = await unreadOfChannels(this.prisma, userId, [channelId]);
+    const payload: UnreadUpdatedPayload = {
+      channelId,
+      unread: unread.get(channelId)?.unread ?? 0,
+      sentAt: new Date().toISOString(),
+    };
+    this.emitter.toUsers([userId], 'unread:updated', payload);
+  }
+
   async list(
     userId: string,
     workspaceId: string,
@@ -505,16 +519,20 @@ export class MessagesService {
       select: { id: true },
     });
     if (!reply) throw new NotFoundException();
-    await this.prisma.$executeRaw`
-      INSERT INTO "ThreadRead" ("id", "parentMessageId", "channelId", "workspaceId", "userId", "lastReadMessageId", "updatedAt")
-      VALUES (gen_random_uuid(), ${parentId}::uuid, ${channelId}::uuid, ${membership.workspace.id}::uuid, ${userId}::uuid, ${lastReadMessageId}::uuid, now())
-      ON CONFLICT ("parentMessageId", "userId") DO UPDATE
-        SET "lastReadMessageId" = EXCLUDED."lastReadMessageId", "updatedAt" = now()
-        WHERE "ThreadRead"."lastReadMessageId" < EXCLUDED."lastReadMessageId"
-    `;
-    // スレッドを読むとチャンネルの未読も減る（返信もそのチャンネルのメッセージである。機能一覧 10.1）。
-    // 減ったのは読んだ本人の分だけだが、宛先ごとに数え直すため、除外する「書いた本人」はいない。
-    await this.announceUnread(channelId);
+    await advanceReadPosition(this.prisma.threadRead, {
+      where: { parentMessageId: parentId, userId },
+      create: {
+        parentMessageId: parentId,
+        channelId,
+        workspaceId: membership.workspace.id,
+        userId,
+        lastReadMessageId,
+      },
+      lastReadMessageId,
+    });
+    // **変わったのは読んだ本人の未読だけ**なので、本人の部屋へ1件だけ送る（機能一覧 5.2・10.1）。
+    // **参加者全員へ配らない**——1要求が人数分の集計と配信に増幅する（#505 第0巡の 🔴3）。
+    await this.announceUnreadTo(channelId, userId);
   }
 
   /**
