@@ -3,6 +3,7 @@
 # 要件定義書 4.2 の「バックアップ」と「RDS の障害から復旧するとき」。
 #
 # 秘密の値は state とプランに残さない: マスターパスワードは ephemeral の random_password で作り、write-only 引数でだけ渡す。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。秘密の値の渡し方の条件もそこにある。
 #
 # 踏むと壊れる: write-only 引数で渡した値は、*_wo_version を上げるまで入れ替わらない。
 # DATABASE_URL の value_wo_version と RDS の password_wo_version は同じ乱数を渡すため、下の locals の db_password_version だけで上げる
@@ -127,6 +128,8 @@ resource "aws_db_instance" "main" {
   deletion_protection     = local.db_deletion_protection
 }
 
+# 踏むと壊れる: name は渡す設定の名前（/DATABASE_URL）で終わらせ、type は local.parameter_type（SecureString）にする
+# （apps/api/src/config/api-config-infra.test.ts が確かめる。cache.tf の redis_url・jwt_secret と同じ）。
 resource "aws_ssm_parameter" "database_url" {
   name             = "/workspace-chat/DATABASE_URL"
   type             = local.parameter_type

@@ -58,43 +58,92 @@ function mapMessages(
   };
 }
 
+/**
+ * スレッドの返信（F-17）。**チャンネルの一覧の鍵の下に置く**——入室のときの一覧の読み直し（`invalidateQueries` は鍵の前方で一致する）と
+ * 削除の反映が、開いているスレッドの返信にも届く。
+ */
+export function repliesKey(workspaceId: string, channelId: string, parentId: string) {
+  return [...messagesKey(workspaceId, channelId), parentId, 'replies'] as const;
+}
+
 function messagesPath(workspaceId: string, channelId: string): string {
   return `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/messages`;
 }
 
+function repliesPath(workspaceId: string, channelId: string, parentId: string): string {
+  return `${messagesPath(workspaceId, channelId)}/${segment(parentId)}/replies`;
+}
+
 /**
- * チャンネルのメッセージ（F-11・F-12。REST の仕様の listMessages）。
- * 1ページ目が最新で、続きは `nextBefore` を `before` に渡して古い側へ遡る（カーソルページネーション。機能一覧 4.1）。
+ * 新しい順のページを遡って読む。1ページ目が最新で、続きは `nextBefore` を `before` に渡して古い側へ遡る（カーソルページネーション。機能一覧 4.1・6）。
+ * `enabled` が false なら読まず、同じ鍵のキャッシュを見るだけにする。
  */
-export function useMessages(workspaceId: string, channelId: string) {
+function usePages(key: readonly unknown[], path: string, enabled = true) {
   const store = useSessionStore();
   return useInfiniteQuery({
-    queryKey: messagesKey(workspaceId, channelId),
+    queryKey: key,
     queryFn: ({ pageParam }) =>
       requestJson<MessagePage>(
         store,
-        pageParam === null
-          ? messagesPath(workspaceId, channelId)
-          : `${messagesPath(workspaceId, channelId)}?${new URLSearchParams({ before: pageParam })}`,
+        pageParam === null ? path : `${path}?${new URLSearchParams({ before: pageParam })}`,
       ),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextBefore,
+    enabled,
   });
 }
 
-/** 投稿する（REST の仕様の postMessage）。応答のメッセージを最新のページの先頭に足し、一覧は読み直さない。 */
-export function usePostMessage(workspaceId: string, channelId: string) {
+/** チャンネルのメッセージ（F-11・F-12。REST の仕様の listMessages）。 */
+export function useMessages(workspaceId: string, channelId: string) {
+  return usePages(messagesKey(workspaceId, channelId), messagesPath(workspaceId, channelId));
+}
+
+/** チャンネルの一覧に読み込み済みのメッセージ。読み込んでいなければ undefined（一覧を読み直さない）。 */
+export function useLoadedMessage(
+  workspaceId: string,
+  channelId: string,
+  messageId: string,
+): Message | undefined {
+  const messages = usePages(
+    messagesKey(workspaceId, channelId),
+    messagesPath(workspaceId, channelId),
+    false,
+  );
+  return messages.data?.pages.flatMap((page) => page.messages).find((m) => m.id === messageId);
+}
+
+/** スレッドの返信（F-17。REST の仕様の listReplies）。 */
+export function useReplies(workspaceId: string, channelId: string, parentId: string) {
+  return usePages(
+    repliesKey(workspaceId, channelId, parentId),
+    repliesPath(workspaceId, channelId, parentId),
+  );
+}
+
+/** 本文を送り、応答のメッセージを最新のページの先頭に足す。一覧は読み直さない。 */
+function usePost(key: readonly unknown[], path: string) {
   const store = useSessionStore();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: string) =>
-      requestJson<Message>(store, messagesPath(workspaceId, channelId), {
+      requestJson<Message>(store, path, {
         method: 'POST',
         body: { body } satisfies Schemas['PostMessageRequest'],
       }),
     onSuccess: (message) =>
-      queryClient.setQueryData<MessagePages>(messagesKey(workspaceId, channelId), (data) =>
-        addMessage(data, message),
-      ),
+      queryClient.setQueryData<MessagePages>(key, (data) => addMessage(data, message)),
   });
+}
+
+/** 投稿する（REST の仕様の postMessage）。 */
+export function usePostMessage(workspaceId: string, channelId: string) {
+  return usePost(messagesKey(workspaceId, channelId), messagesPath(workspaceId, channelId));
+}
+
+/** スレッドに返信する（REST の仕様の postReply）。親の件数と参加者は、配られる `message:updated` で置き換わる。 */
+export function usePostReply(workspaceId: string, channelId: string, parentId: string) {
+  return usePost(
+    repliesKey(workspaceId, channelId, parentId),
+    repliesPath(workspaceId, channelId, parentId),
+  );
 }

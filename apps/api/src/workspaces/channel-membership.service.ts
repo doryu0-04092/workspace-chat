@@ -15,6 +15,7 @@ import {
   CHANNEL_NOT_PRIVATE,
 } from './channel-errors';
 import { assertChannelParticipant, lockedChannelFor } from './channel-access';
+import { forgetReadPositions } from './unread';
 import { WorkspacesService } from './workspaces.service';
 
 export type InviteChannelMemberRequest =
@@ -69,8 +70,12 @@ export class ChannelMembershipService {
    */
   async leave(userId: string, workspaceId: string, channelId: string): Promise<void> {
     await this.workspaces.membershipOf(userId, workspaceId);
-    const { count } = await this.prisma.channelMember.deleteMany({
-      where: { channelId, workspaceId, userId },
+    const count = await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.channelMember.deleteMany({
+        where: { channelId, workspaceId, userId },
+      });
+      if (count === 1) await forgetReadPositions(tx, channelId, userId);
+      return count;
     });
     if (count !== 1) throw new NotFoundException();
     this.rooms.removeFromChannels(userId, [channelId]);
@@ -125,8 +130,12 @@ export class ChannelMembershipService {
     memberId: string,
   ): Promise<void> {
     await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
-    const { count } = await this.prisma.channelMember.deleteMany({
-      where: { channelId, workspaceId, userId: memberId },
+    const count = await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.channelMember.deleteMany({
+        where: { channelId, workspaceId, userId: memberId },
+      });
+      if (count === 1) await forgetReadPositions(tx, channelId, memberId);
+      return count;
     });
     if (count !== 1) throw new NotFoundException();
     this.rooms.removeFromChannels(memberId, [channelId]);
