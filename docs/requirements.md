@@ -420,7 +420,7 @@
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
 | **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 | **`infra/bootstrap` の state** | **取り込み直す**——state のバケットは `prevent_destroy` で残るため、`terraform import` でバケット・バージョニング・パブリックアクセスの遮断（`infra/bootstrap/main.tf` の3つのリソース）を state に戻す |
-| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで入れ替えるときは、`secret: true` の3つとも、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが残る——`DATABASE_URL` なら DB に繋がらず、`JWT_SECRET` なら**漏れた鍵で偽造したトークンを受理し続ける**）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
+| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで入れ替えるときは、`secret: true` のすべて、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが残る——`DATABASE_URL` なら DB に繋がらず、`JWT_SECRET` なら**漏れた鍵で偽造したトークンを受理し続ける**）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
 | **ElastiCache Valkey** | **データを戻す手順は持たない**（持つのは配信の共有と期限つきの回数だけで、蓄積しない。この節の「代償」）。**作り直したら、接続先が変わらなくても AUTH トークンは作成時に新しい乱数になるため、版を上げてから ECS のタスクを入れ替える一手が要る**（手順は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の「踏むと壊れる」） |
 | **ECR のイメージ** | **作り直して push し直す**——ソースからイメージを作り（`scripts/api-image.test.sh` と同じ `apps/api/Dockerfile` の段）、ECR に push して、ECS のタスクを入れ替える（push の手順は、イメージを出す PR で書く） |
 
@@ -533,8 +533,13 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   export TF_VAR_image_tag=$(aws ecs describe-task-definition --task-definition "$task_def" \
     --query 'taskDefinition.containerDefinitions[0].image' --output text | sed 's/.*://')
   topic_arn=$(aws sns list-topics --query "Topics[?ends_with(TopicArn, ':workspace-chat-alerts')].TopicArn" --output text)
-  export TF_VAR_alarm_email=$(aws sns list-subscriptions-by-topic --topic-arn "$topic_arn" \
-    --query "Subscriptions[?Protocol=='email'].Endpoint | [0]" --output text)
+  # **email の購読がちょうど1つであることまで確かめる**——list-subscriptions-by-topic は
+  # Terraform が管理していない購読も返す（手で足した宛先・置き換えの途中で残った未確認の購読）。
+  # 先頭を採ると、**いま購読されている宛先と違う値を渡し、対象を絞らない apply が購読を作り直す**
+  # （確認のメールを開くまでアラートが届かない。variables.tf の「踏むと壊れる」）
+  emails=$(aws sns list-subscriptions-by-topic --topic-arn "$topic_arn" \
+    --query "Subscriptions[?Protocol=='email'].Endpoint" --output text)
+  export TF_VAR_alarm_email=$emails
 
   # **採れなかったまま進まない。** 空でも変数は「設定済み」になるため apply は聞き返さず、
   # endpoint = "" で落ちる——**落ちる位置は api を止めた後**である（全断のまま手が止まる）。
@@ -545,7 +550,14 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
     case "$value" in '' | None) missing="$missing $v" ;; esac
   done
   [ -z "$missing" ] && echo "そろっている" || echo "採れていない:$missing。先へ進まない"
+
+  # email の購読が2つ以上あると、上の $emails は**空白で区切られた複数**になる。そのまま渡さない
+  case "$TF_VAR_alarm_email" in *[[:space:]]*) echo "email の購読が複数ある。どれを残すか決めてから進む" ;; esac
   ```
+
+  **`exit` は使わない**——この前置きは**貼った同じシェルに値を残すこと**が存在理由であり、
+  `exit` を踏むと**シェルごと終わって、既に採れていた束縛まで全部消える**。
+  採れなかったものを列挙して、**そろうまで以降の段へ進まない**。
 
   **以降の段の `apply` は、すべて `tf apply …` と打つ**——`-chdir` を書き忘れると、
   **手元の作業ディレクトリの構成に当たる**（`infra/production` の外で打つと何も当たらないか、別の構成に当たる）。
@@ -560,10 +572,6 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   「下げない」が**ふつうの git の操作で破れ、次の `apply` で値がまた入れ替わる**。
   **入れ方は[開発フロー](../CLAUDE.md)どおりである**——`main` へ直接 push せず、この変更だけの Pull Request にする
   （**漏えいへの対処なので、他の作業と混ぜない**）。
-
-  **`exit` は使わない**——この前置きは**貼った同じシェルに値を残すこと**が存在理由であり、
-  `exit` を踏むと**シェルごと終わって、既に採れていた束縛まで全部消える**。
-  採れなかったものを列挙して、**そろうまで以降の段へ進まない**。
 - **確かめる段の2つの基準（設定の名前と版・入れ替え前のタスク）は、箇条の中で採る**（**上の共通の欄には置かない**）。
 
   ```sh

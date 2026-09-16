@@ -100,7 +100,9 @@ export function resolveWebOrigin(raw: string | undefined): string {
  * **踏むと壊れる: `secret: true` を足したら、漏えいの疑いで入れ替えるときの手順も決めて
  * docs/requirements.md 4.2「秘密の値が漏れた疑いがあるとき」に足す**（止めるか止めないか・その間に古い値が通用するか・代償）。
  * **同節と docs/tech-stack.md の秘密情報の行は「`secret: true` と宣言した設定のすべて」と宣言している**ため、
- * 足して手順を書かないと、その宣言が黙って偽になる。**この食い違いを捕まえる検査は無い**
+ * 足して手順を書かないと、その宣言が黙って偽になる。
+ * **あわせて、値を名前で並べている3箇所も直す**——docs/requirements.md の復旧の表の「Parameter Store の値」の行と
+ * 同 4.2 の節の導入文、docs/tech-stack.md の秘密情報の行が「いまは …」として名前を挙げている。**この食い違いを捕まえる検査は無い**
  * （タスク定義とパラメータの対応は api-config-infra.test.ts が見るが、入れ替えの手順が決まっているかは誰も見ない）。
  */
 type Setting<T> = {
