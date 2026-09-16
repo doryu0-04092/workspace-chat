@@ -66,6 +66,22 @@ export function repliesKey(workspaceId: string, channelId: string, parentId: str
   return [...messagesKey(workspaceId, channelId), parentId, 'replies'] as const;
 }
 
+/**
+ * メッセージを載せる一覧の鍵（F-11・F-17）。**本体はチャンネルの一覧、返信はその親の返信。**
+ * **1件のメッセージを一覧に反映するとき（編集の応答・`message:new`・`message:updated`）は、この鍵に当てる**——
+ * 要求の経路と配信の経路で決め方を分けると、反映先の規則を変えるときに片方だけが変わる（#536 第0巡の設計の提案①）。
+ * 削除は配信が親を持たないため、`messagesKey` の前方一致で当てる（`markDeleted`）。
+ */
+export function listKeyOf(
+  workspaceId: string,
+  channelId: string,
+  message: Pick<Message, 'parentId'>,
+): readonly unknown[] {
+  return message.parentId === null
+    ? messagesKey(workspaceId, channelId)
+    : repliesKey(workspaceId, channelId, message.parentId);
+}
+
 function messagesPath(workspaceId: string, channelId: string): string {
   return `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/messages`;
 }
@@ -142,8 +158,8 @@ export function usePostMessage(workspaceId: string, channelId: string) {
 
 /**
  * 自分のメッセージを編集する（F-13。REST の仕様の editMessage。判定は api）。
- * **通ったら、チャンネルの一覧とスレッドの返信の両方のキャッシュで置き換える**——返信の鍵はチャンネルの一覧の鍵の下にあるため、
- * 鍵の前方一致（`setQueriesData`）で両方に届く。一覧は読み直さない。
+ * **通ったら、そのメッセージを載せる一覧（`listKeyOf`。本体はチャンネルの一覧、返信はその親の返信）で置き換える**。一覧は読み直さない。
+ * スレッドの親はチャンネルの一覧から読む（`useLoadedMessage`）ので、本体の置き換えはスレッドの親にも届く。
  */
 export function useEditMessage(workspaceId: string, channelId: string) {
   const store = useSessionStore();
@@ -157,9 +173,8 @@ export function useEditMessage(workspaceId: string, channelId: string) {
         { method: 'PATCH', body: { body } satisfies Schemas['PostMessageRequest'] },
       ),
     onSuccess: (message) =>
-      queryClient.setQueriesData<MessagePages>(
-        { queryKey: messagesKey(workspaceId, channelId) },
-        (data) => replaceMessage(data, message),
+      queryClient.setQueryData<MessagePages>(listKeyOf(workspaceId, channelId, message), (data) =>
+        replaceMessage(data, message),
       ),
   });
 }
