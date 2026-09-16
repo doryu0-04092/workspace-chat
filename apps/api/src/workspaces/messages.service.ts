@@ -8,7 +8,6 @@ import {
   type MessageDeletedPayload,
   type MessageNewPayload,
   type MessageUpdatedPayload,
-  type UnreadUpdatedPayload,
   mentionedLoginIds,
   type paths,
 } from '@workspace-chat/shared';
@@ -17,7 +16,7 @@ import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
-import { advanceReadPosition, announceUnreadTo, unreadOfMembers } from './unread';
+import { advanceReadPosition, announceUnreadTo, announceUnreadToMembers } from './unread';
 import { WorkspacesService } from './workspaces.service';
 
 type MessagesPath = paths['/workspaces/{id}/channels/{channelId}/messages'];
@@ -378,24 +377,11 @@ export class MessagesService {
   }
 
   /**
-   * 未読数の変化を配らせる（F-23。機能一覧 10.1・5.2）。**持ち主の利用者の部屋へだけ送り、チャンネルの部屋へは配らない**
-   * ——未読数はその人のものであり、チャンネルの部屋へ配ると人数分の未読が全員に届く。
-   *
-   * **宛先ごとに値が違うため、参加者の人数だけ送る。** 5.2 が禁じているのは「同じイベントを、チャンネルの部屋と利用者の部屋へ
-   * 分けて2回送る」ことであり、**宛先ごとに中身が違うものを1人1回ずつ送ることは、それに当たらない**（1人が受け取るのは1回である）。
-   *
-   * **書いた本人には送らない**（`writerId`）——自分の投稿・自分の削除では自分の未読は変わらないため、送っても同じ値が届くだけである。
-   * **`writerId` を省くと参加者全員に送る**（スレッドの既読の更新のように、誰の投稿でもない変化のとき）。
-   * **資格の確認は数え方の側で済んでいる**（`unreadOfMembers` は、そのチャンネルの参加者で退会していない利用者だけを返す。5.2）。
+   * 未読数の変化を配らせる（F-23。機能一覧 10.1・5.2）。**payload の組み立てと宛先の決め方は `unread.ts` に置く**
+   * ——2箇所に分かれると、項目を足すときや宛先の規則を変えるときに片方だけが変わる（#505 第5巡の 🟡2）。
    */
-  private async announceUnread(channelId: string, writerId?: string): Promise<void> {
-    const unread = await unreadOfMembers(this.prisma, channelId);
-    const sentAt = new Date().toISOString();
-    for (const [userId, count] of unread) {
-      if (userId === writerId) continue;
-      const payload: UnreadUpdatedPayload = { channelId, unread: count, sentAt };
-      this.emitter.toUsers([userId], 'unread:updated', payload);
-    }
+  private announceUnread(channelId: string, writerId?: string): Promise<void> {
+    return announceUnreadToMembers(this.emitter, this.prisma, channelId, writerId);
   }
 
   async list(

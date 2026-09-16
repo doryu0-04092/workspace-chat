@@ -19,12 +19,48 @@ export async function announceUnreadTo(
   userId: string,
 ): Promise<void> {
   const unread = await unreadOfChannels(prisma, userId, [channelId]);
-  const payload: UnreadUpdatedPayload = {
+  send(emitter, channelId, [[userId, unread.get(channelId)?.unread ?? 0]]);
+}
+
+/**
+ * **そのチャンネルの参加者それぞれに、その人の未読数を配る**（F-23。機能一覧 5.2・10.1）。
+ * 投稿・返信・削除のように、**全員の未読が変わりうる**ときに使う。
+ *
+ * **書いた本人には送らない**（`writerId`）——自分の投稿・自分の削除では自分の未読は変わらないため、送っても同じ値が届くだけである。
+ * **`writerId` を省くと参加者全員に送る**。
+ * **資格の確認は `unreadOfMembers` で済む**——参加者で退会していない利用者だけを返すため、その結果から宛先を作ってよい（5.2）。
+ */
+export async function announceUnreadToMembers(
+  emitter: RealtimeEmitter,
+  prisma: PrismaService,
+  channelId: string,
+  writerId?: string,
+): Promise<void> {
+  const unread = await unreadOfMembers(prisma, channelId);
+  send(
+    emitter,
     channelId,
-    unread: unread.get(channelId)?.unread ?? 0,
-    sentAt: new Date().toISOString(),
-  };
-  emitter.toUsers([userId], 'unread:updated', payload);
+    [...unread].filter(([userId]) => userId !== writerId),
+  );
+}
+
+/**
+ * `unread:updated` を、宛先ごとに1回ずつ送る（F-23。機能一覧 5.2）。**payload の組み立てと宛先の決め方をここだけに置く**
+ * ——2箇所に分かれると、項目を足すときや宛先の規則を変えるときに**片方だけが変わる**（#505 第1巡の 🟡3・第5巡の 🟡2）。
+ *
+ * **宛先ごとに値が違うため、人数だけ送る。** 5.2 が禁じているのは「同じイベントを、チャンネルの部屋と利用者の部屋へ
+ * 分けて2回送る」ことであり、**宛先ごとに中身が違うものを1人1回ずつ送ることは、それに当たらない**（1人が受け取るのは1回である）。
+ */
+function send(
+  emitter: RealtimeEmitter,
+  channelId: string,
+  unreadByUser: readonly (readonly [string, number])[],
+): void {
+  const sentAt = new Date().toISOString();
+  for (const [userId, unread] of unreadByUser) {
+    const payload: UnreadUpdatedPayload = { channelId, unread, sentAt };
+    emitter.toUsers([userId], 'unread:updated', payload);
+  }
 }
 
 /**
