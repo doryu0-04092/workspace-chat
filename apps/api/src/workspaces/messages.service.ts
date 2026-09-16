@@ -16,6 +16,7 @@ import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
+import { advanceReadPosition, announceUnreadTo, announceUnreadToMembers } from './unread';
 import { WorkspacesService } from './workspaces.service';
 
 type MessagesPath = paths['/workspaces/{id}/channels/{channelId}/messages'];
@@ -371,7 +372,16 @@ export class MessagesService {
     });
     const payload: MessageNewPayload = { message, sentAt: new Date().toISOString() };
     this.emitter.toChannelAndUsers(channelId, mentioned, 'message:new', payload);
+    await this.announceUnread(channelId, userId);
     return message;
+  }
+
+  /**
+   * 未読数の変化を配らせる（F-23。機能一覧 10.1・5.2）。**payload の組み立てと宛先の決め方は `unread.ts` に置く**
+   * ——2箇所に分かれると、項目を足すときや宛先の規則を変えるときに片方だけが変わる（#505 第5巡の 🟡2）。
+   */
+  private announceUnread(channelId: string, writerId?: string): Promise<void> {
+    return announceUnreadToMembers(this.emitter, this.prisma, channelId, writerId);
   }
 
   async list(
@@ -432,6 +442,7 @@ export class MessagesService {
     const counted: MessageUpdatedPayload = { message: parent, sentAt };
     this.emitter.toChannelAndUsers(channelId, mentioned, 'message:new', created);
     this.emitter.toChannel(channelId, 'message:updated', counted);
+    await this.announceUnread(channelId, userId);
     return reply;
   }
 
@@ -454,6 +465,46 @@ export class MessagesService {
     });
     if (!parent) throw new NotFoundException();
     return pageOf(this.prisma, { channelId, parentId }, query);
+  }
+
+  /**
+   * スレッドの既読位置の更新（F-23。機能一覧 10.1）。**判定は返信の一覧と同じ**（所属 → 参加の2段階 → 親の有無）。
+   * 渡された id が、その親への削除されていない返信でなければ 404。
+   *
+   * **チャンネルの既読位置とは別系統で持つ**——スレッド内の未読をチャンネルの未読に含めるかを利用者が切り替えられ、
+   * 切り替えた瞬間に集計対象が変わるためである（3.5.2）。**進めるだけで戻さない**のはチャンネルの既読位置と同じ。
+   */
+  async updateThreadRead(
+    userId: string,
+    workspaceId: string,
+    channelId: string,
+    parentId: string,
+    lastReadMessageId: string,
+  ): Promise<void> {
+    const membership = await this.workspaces.membershipOf(userId, workspaceId);
+    assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
+    // **親がそのチャンネルの本体であることは、返信の確認に含まれている**——返信を `parentId` と `channelId` の
+    // 両方で引くため、親が別のチャンネルのもの・存在しないもの・返信そのものなら、その親への返信は1件も無く 404 になる。
+    // **親だけを別に確かめる条件は到達しない**（置いても、壊して落ちるテストが書けない。変異で確かめた）。
+    const reply = await this.prisma.message.findFirst({
+      where: { id: lastReadMessageId, channelId, parentId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!reply) throw new NotFoundException();
+    await advanceReadPosition(this.prisma.threadRead, {
+      where: { parentMessageId: parentId, userId },
+      create: {
+        parentMessageId: parentId,
+        channelId,
+        workspaceId: membership.workspace.id,
+        userId,
+        lastReadMessageId,
+      },
+      lastReadMessageId,
+    });
+    // **変わったのは読んだ本人の未読だけ**なので、本人の部屋へ1件だけ送る（機能一覧 5.2・10.1）。
+    // **参加者全員へ配らない**——1要求が人数分の集計と配信に増幅する（#505 第0巡の 🔴3）。
+    await announceUnreadTo(this.emitter, this.prisma, channelId, userId);
   }
 
   /**
@@ -528,5 +579,7 @@ export class MessagesService {
       const counted: MessageUpdatedPayload = { message: parent, sentAt };
       this.emitter.toChannel(channelId, 'message:updated', counted);
     }
+    // 削除で未読が減る（削除済みは数えないため。機能一覧 10.1）。
+    await this.announceUnread(channelId, userId);
   }
 }

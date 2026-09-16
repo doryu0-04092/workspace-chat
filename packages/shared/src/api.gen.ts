@@ -470,6 +470,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/channels/{channelId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * チャンネルの既読位置の更新（F-23）
+         * @description 読んだ位置（そのチャンネルのメッセージの id）を渡して既読位置を進める（機能一覧 10.1）。 既読位置は戻さない——渡した id が既に読んだ位置より古ければ、何も変えずに 204 を返す。 コードは参加者一覧と同じ2段階: 所属していなければ種別によらず 404、所属していて参加者でなければパブリックは 403 not_a_channel_member・プライベートは 404。オーナーの例外は及ばない（参加していないチャンネルに既読位置を持たない）。 別のチャンネルのメッセージ・存在しないメッセージ・削除済みのメッセージの id は 404。 利用者ごとに1分 120 回まで（メッセージの書き込みとは別枠。機能一覧 10.1）
+         */
+        put: operations["updateChannelRead"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/messages/{messageId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * スレッドの既読位置の更新（F-23）
+         * @description スレッド（親のメッセージ）の中で読んだ位置を進める（機能一覧 10.1。「利用者 × スレッド」の既読位置）。 チャンネルの既読位置とは別系統で持つ——スレッド内の未読をチャンネルの未読に含めるかを利用者が切り替えられ、 切り替えた瞬間に集計対象が変わるためである。チャンネルの既読位置と同じく、進めるだけで戻さない。 判定は返信の一覧と同じ（所属 → 参加の2段階 → 親の有無。そのチャンネルに無い・返信なら 404）。 渡す id は、その親への削除されていない返信でなければ 404。 利用者ごとに1分 120 回まで（メッセージの書き込みとは別枠。機能一覧 10.1）
+         */
+        put: operations["updateThreadRead"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{id}/channels/{channelId}/archive": {
         parameters: {
             query?: never;
@@ -805,6 +857,13 @@ export interface components {
          * @enum {string}
          */
         ChannelVisibility: "PUBLIC" | "PRIVATE";
+        UpdateChannelReadRequest: {
+            /**
+             * Format: uuid
+             * @description 読んだ位置（そのチャンネルのメッセージの id。F-23。機能一覧 10.1）。 既読位置は戻さないため、いま持っている位置より古い id を渡しても既読位置は変わらない
+             */
+            lastReadMessageId: string;
+        };
         CreateChannelRequest: {
             /** @description 1〜50 文字（文字数はコードポイントで数える）。空白だけは不可（決定・2026-09-12・依頼側。#290）。 上限は入力にだけ置く（アーカイブ時の接尾辞 -<採番> はこの外側に付くため、応答と DB の列には置かない。同決定） */
             name: string;
@@ -872,6 +931,13 @@ export interface components {
             visibility: components["schemas"]["ChannelVisibility"];
             /** @description 要求した利用者がこのチャンネルに参加しているか */
             joined: boolean;
+            /** @description 要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。 既読位置をまだ持たない利用者は、参加した時点より後だけを数える。参加していないパブリックチャンネルは常に 0 */
+            unread: number;
+            /**
+             * Format: uuid
+             * @description 要求した利用者の既読位置（F-23。機能一覧 10.1）。「ここから未読」の区切り線を、この次のメッセージの上に出す。 まだ既読位置を持たない利用者と、参加していないチャンネルでは null（線は、参加した時点より後の最初のメッセージの上に出す）。 未読数から位置を数えてはならない——自分の投稿と削除済みは未読に数えないが、一覧には並ぶため必ずずれる
+             */
+            lastReadMessageId: string | null;
         };
         /** @description オーナーの管理用の一覧の項目。持つのはこれだけで、メッセージ・添付ファイル・未読数・在席は持たない（機能一覧 3.1 の但し書き） */
         ManagedChannel: {
@@ -1896,6 +1962,96 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateChannelRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateChannelReadRequest"];
+            };
+        };
+        responses: {
+            /** @description 既読位置を進めた（進まなかった場合も 204） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description そのチャンネルの参加者でない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateThreadRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateChannelReadRequest"];
+            };
+        };
+        responses: {
+            /** @description 既読位置を進めた（進まなかった場合も 204） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description そのチャンネルの参加者でない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };

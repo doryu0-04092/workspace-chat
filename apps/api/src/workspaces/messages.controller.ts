@@ -8,12 +8,16 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard';
 import { MessageWriteRateLimitGuard } from '../rate-limit/message-write-rate-limit.guard';
+import { UserRateLimitGuard } from '../rate-limit/user-rate-limit.guard';
+import { READ_UPDATE_LIMIT } from './channels.controller';
+import type { UpdateChannelReadRequest } from './channels.service';
 import {
   type Message,
   type MessagePage,
@@ -70,6 +74,27 @@ export class MessagesController {
     @Query() query: { before?: string; limit?: string },
   ): Promise<MessagePage> {
     return this.messages.listReplies(user.id, workspaceId, channelId, messageId, query);
+  }
+
+  /** スレッドの既読位置の更新（F-23。機能一覧 10.1）。本体の形は仕様が確かめる。 */
+  @Put(':messageId/read')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @UseGuards(UserRateLimitGuard)
+  @Throttle({ default: READ_UPDATE_LIMIT })
+  updateThreadRead(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+    @Param('channelId') channelId: string,
+    @Param('messageId') messageId: string,
+    @Body() body: UpdateChannelReadRequest,
+  ): Promise<void> {
+    return this.messages.updateThreadRead(
+      user.id,
+      workspaceId,
+      channelId,
+      messageId,
+      body.lastReadMessageId,
+    );
   }
 
   @Patch(':messageId')

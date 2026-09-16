@@ -20,18 +20,24 @@ const GENERAL = {
   name: 'general',
   visibility: 'PUBLIC',
   joined: true,
+  unread: 0,
+  lastReadMessageId: null,
 };
 const RANDOM = {
   id: '01920000-0000-7000-8000-0000000000c2',
   name: 'random',
   visibility: 'PUBLIC',
   joined: false,
+  unread: 0,
+  lastReadMessageId: null,
 };
 const SECRET = {
   id: '01920000-0000-7000-8000-0000000000c3',
   name: 'secret',
   visibility: 'PRIVATE',
   joined: true,
+  unread: 0,
+  lastReadMessageId: null,
 };
 
 const session = {
