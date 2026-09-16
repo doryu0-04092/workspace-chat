@@ -93,6 +93,9 @@ resource "aws_elasticache_replication_group" "valkey" {
 
 # 踏むと壊れる: secrets で渡すパラメータ（ここの2つと database.tf の database_url）の name は、渡す設定の名前（/REDIS_URL など）で終わらせ、
 # type は local.parameter_type（SecureString）にする。apps/api/src/config/api-config-infra.test.ts が確かめる。
+# 踏むと壊れる: **接頭辞（/workspace-chat/）も、要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の前置きと
+# 確かめる段がリテラルで打っている。** 上の検査は**末尾しか見ない**ため、接頭辞を変えても CI は緑のまま、
+# **4.2 の段だけが対象を見つけられなくなる**。
 resource "aws_ssm_parameter" "redis_url" {
   name             = "/workspace-chat/REDIS_URL"
   type             = local.parameter_type

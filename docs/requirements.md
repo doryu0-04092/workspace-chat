@@ -539,11 +539,17 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   # **採れなかったまま進まない。** 空でも変数は「設定済み」になるため apply は聞き返さず、
   # endpoint = "" で落ちる——**落ちる位置は api を止めた後**である（全断のまま手が止まる）。
   # **`None` も弾く**——`aws ... --output text` は、該当が無いとき空文字ではなく文字列 `None` を出す
+  missing=
   for v in cluster service before_arns before_version TF_VAR_image_tag TF_VAR_alarm_email; do
     value=$(eval printf %s \"\$$v\")
-    case "$value" in '' | None) echo "$v を採れていない。先に確かめる" >&2; exit 1 ;; esac
+    case "$value" in '' | None) missing="$missing $v" ;; esac
   done
+  [ -z "$missing" ] && echo "そろっている" || echo "採れていない:$missing。先へ進まない"
   ```
+
+  **`exit` は使わない**——この前置きは**貼った同じシェルに値を残すこと**が存在理由であり、
+  `exit` を踏むと**シェルごと終わって、既に採れていた束縛まで全部消える**。
+  採れなかったものを列挙して、**そろうまで以降の段へ進まない**。
 
   **`before_arns` は、確かめる段 2 の基準である**——入れ替えの後に列挙し直し、**この集合と重なりが無いこと**を見る。
   `--force-new-deployment` で入れ替える箇条（Valkey）は**タスク定義のリビジョンが変わらない**ため、

@@ -137,6 +137,9 @@ resource "aws_db_instance" "main" {
 
 # 踏むと壊れる: name は渡す設定の名前（/DATABASE_URL）で終わらせ、type は local.parameter_type（SecureString）にする
 # （apps/api/src/config/api-config-infra.test.ts が確かめる。cache.tf の redis_url・jwt_secret と同じ）。
+# 踏むと壊れる: **接頭辞（/workspace-chat/）も、要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の前置きと
+# 確かめる段がリテラルで打っている。** 上の検査は**末尾しか見ない**ため、接頭辞を変えても CI は緑のまま、
+# **4.2 の段だけが対象を見つけられなくなる**（落ちる位置は前置きの弾く段で、api を止める前ではある）。
 resource "aws_ssm_parameter" "database_url" {
   name             = "/workspace-chat/DATABASE_URL"
   type             = local.parameter_type
