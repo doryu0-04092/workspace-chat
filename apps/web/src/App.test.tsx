@@ -58,6 +58,34 @@ describe('起動時の復元と行き先', () => {
     await screen.findByText('アリス');
     expect(count('POST /api/auth/refresh')).toBe(1);
   });
+
+  it('ログインの状態を確かめられなければ（429 で待つ秒数が長い）、ログインの画面に移さず、時間をおいて再読み込みする案内とボタンを出す', async () => {
+    fakeFetch({
+      'POST /api/auth/refresh': () => error(429, 'too_many_requests', { 'Retry-After': '600' }),
+    });
+    renderAt('/workspaces');
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      '時間をおいて、再読み込みしてください',
+    );
+    expect(screen.getByRole('button', { name: '再読み込み' })).toBeDefined();
+    expect(screen.queryByRole('heading', { name: 'ログイン' })).toBeNull();
+  });
+
+  it('ログインの状態を確かめられなくても、利用者が自分で開いたログインの画面・登録の画面は塞がない', async () => {
+    for (const [path, heading] of [
+      ['/login', 'ログイン'],
+      ['/register', '新規登録'],
+    ] as const) {
+      fakeFetch({
+        'POST /api/auth/refresh': () => error(429, 'too_many_requests', { 'Retry-After': '600' }),
+      });
+      const { unmount } = renderApp(path);
+      expect(await screen.findByRole('heading', { name: heading }), path).toBeDefined();
+      expect(screen.queryByRole('button', { name: '再読み込み' }), path).toBeNull();
+      unmount();
+    }
+  });
 });
 
 describe('ログインの画面', () => {
