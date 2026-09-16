@@ -420,7 +420,7 @@
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
 | **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 | **`infra/bootstrap` の state** | **取り込み直す**——state のバケットは `prevent_destroy` で残るため、`terraform import` でバケット・バージョニング・パブリックアクセスの遮断（`infra/bootstrap/main.tf` の3つのリソース）を state に戻す |
-| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
+| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで入れ替えるときは、`secret: true` のすべて、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが残る——`DATABASE_URL` なら DB に繋がらず、`JWT_SECRET` なら**漏れた鍵で偽造したトークンを受理し続ける**）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
 | **ElastiCache Valkey** | **データを戻す手順は持たない**（持つのは配信の共有と期限つきの回数だけで、蓄積しない。この節の「代償」）。**作り直したら、接続先が変わらなくても AUTH トークンは作成時に新しい乱数になるため、版を上げてから ECS のタスクを入れ替える一手が要る**（手順は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の「踏むと壊れる」） |
 | **ECR のイメージ** | **作り直して push し直す**——ソースからイメージを作り（`scripts/api-image.test.sh` と同じ `apps/api/Dockerfile` の段）、ECR に push して、ECS のタスクを入れ替える（push の手順は、イメージを出す PR で書く） |
 
@@ -509,6 +509,187 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 **ただし上限が無いのは `terraform destroy` までである。** `terraform destroy` の時点では、
 添付のバケットは `force_destroy` を指定するため（上記「バックアップ」）、旧バージョンごと消える。
 
+**秘密の値が漏れた疑いがあるとき**、**api が `secret: true` と宣言した設定のすべて**（`apps/api/src/config/api-config.ts` が正本。いまは `DATABASE_URL`・`REDIS_URL`・`JWT_SECRET`）は次のとおり入れ替える（決定・2026-09-16・作業側。依頼側の委任による。#423）。定期の入れ替えはしない（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。
+
+**どの箇条にも共通する前置き**（書き写さず、ここを見る）。
+
+- **まず、以降の段が使う値を束縛する**（`release.sh` と同じ代入の形。以降の段はこれを参照する）。
+
+  ```sh
+  # 以降の terraform は、この tf を通して打つ（release.sh と同じ形。-chdir をここに1回だけ書く）。
+  # **リポジトリの根から採る**ので、**リポジトリの中でなら**どのディレクトリで打っても同じ構成に当たる
+  # （外で打つと git rev-parse がその場で落ちる）
+  repo=$(git rev-parse --show-toplevel)
+  tf() { terraform -chdir="$repo/infra/production" "$@"; }
+
+  TF_STATE_BUCKET=$(terraform -chdir="$repo/infra/bootstrap" output -raw state_bucket)
+  tf init -input=false -backend-config="bucket=$TF_STATE_BUCKET"
+  cluster=$(tf output -raw ecs_cluster_name)
+  service=$(tf output -raw ecs_service_name)
+
+  # apply に渡す2つは、**いま動いているものから採る**（新しく決めない）
+  task_def=$(aws ecs describe-services --cluster "$cluster" --services "$service" \
+    --query 'services[0].taskDefinition' --output text)
+  export TF_VAR_image_tag=$(aws ecs describe-task-definition --task-definition "$task_def" \
+    --query 'taskDefinition.containerDefinitions[0].image' --output text | sed 's/.*://')
+  topic_arn=$(aws sns list-topics --query "Topics[?ends_with(TopicArn, ':workspace-chat-alerts')].TopicArn" --output text)
+  # **email の購読がちょうど1つであることまで確かめる**——list-subscriptions-by-topic は
+  # Terraform が管理していない購読も返す（手で足した宛先・置き換えの途中で残った未確認の購読）。
+  # 先頭を採ると、**いま購読されている宛先と違う値を渡し、対象を絞らない apply が購読を作り直す**
+  # （確認のメールを開くまでアラートが届かない。variables.tf の「踏むと壊れる」）
+  emails=$(aws sns list-subscriptions-by-topic --topic-arn "$topic_arn" \
+    --query "Subscriptions[?Protocol=='email'].Endpoint" --output text)
+  export TF_VAR_alarm_email=$emails
+
+  # **採れなかったまま進まない。** 空でも変数は「設定済み」になるため apply は聞き返さず、
+  # endpoint = "" で落ちる——**落ちる位置は api を止めた後**である（全断のまま手が止まる）。
+  # **`None` も弾く**——`aws ... --output text` は、該当が無いとき空文字ではなく文字列 `None` を出す
+  missing=
+  for v in repo cluster service TF_VAR_image_tag TF_VAR_alarm_email; do
+    value=$(eval printf %s \"\$$v\")
+    case "$value" in '' | None) missing="$missing $v" ;; esac
+  done
+  [ -z "$missing" ] && echo "そろっている" || echo "採れていない:$missing。先へ進まない"
+
+  # email の購読が2つ以上あると、上の $emails は**空白で区切られた複数**になる。そのまま渡さない
+  case "$TF_VAR_alarm_email" in *[[:space:]]*) echo "email の購読が複数ある。どれを残すか決めてから進む" ;; esac
+  ```
+
+  **`exit` は使わない**——この前置きは**貼った同じシェルに値を残すこと**が存在理由であり、
+  `exit` を踏むと**シェルごと終わって、既に採れていた束縛まで全部消える**。
+  採れなかったものを列挙して、**そろうまで以降の段へ進まない**。
+
+  **以降の段の `apply` は、すべて `tf apply …` と打つ**——`-chdir` を書き忘れると、
+  **手元の作業ディレクトリの構成に当たる**（`infra/production` の外で打つと何も当たらないか、別の構成に当たる）。
+  **`apply` に `-auto-approve` を付けない**——**漏えいへの対処こそ、プランを読んでから通す**。
+  値の渡し忘れは、上の**弾く段**が `apply` の前に捕まえる。
+  **`-input=false` は付けてもよい**——**このフラグが止めるのは変数の入力だけで、承認のプロンプトは止めない**
+  （Terraform 1.15.7 で確認。`scripts/release.sh` の `apply` は付けている）。
+- **版は上げるだけで、下げない。** 版の数字は追跡下のファイル（`infra/production` の `locals`）にあり、
+  **下げても write-only の値は入れ替わる**——**戻したつもりで、また別の値になる**。
+  差分はプランに出る（`apply` に `-auto-approve` は付けない）ので黙っては通らないが、**読み飛ばすと気づけない**。
+- **版を上げたら、その変更をコミットして push する**（`apply` の後、確かめる段の前でよい）。
+  **追跡下のファイルなので、コミットしないまま `git checkout` や `pull` を踏むと版が戻る**——
+  「下げない」が**ふつうの git の操作で破れ、次の `apply` で値がまた入れ替わる**。
+  **入れ方は[開発フロー](../CLAUDE.md)どおりである**——`main` へ直接 push せず、この変更だけの Pull Request にする
+  （**漏えいへの対処なので、他の作業と混ぜない**）。
+- **確かめる段の2つの基準（設定の名前と版・入れ替え前のタスク）は、箇条の中で採る**（**上の共通の欄には置かない**）。
+
+  ```sh
+  # その箇条の先頭で、毎回これを打ち直す
+  name=DATABASE_URL   # その箇条のもの（REDIS_URL / JWT_SECRET）に替える
+  before_version=$(aws ssm get-parameter --name "/workspace-chat/$name" \
+    --query 'Parameter.Version' --output text)
+  before_arns=$(aws ecs list-tasks --cluster "$cluster" --service-name "$service" \
+    --query 'taskArns' --output text)
+  for v in before_version before_arns; do
+    value=$(eval printf %s \"\$$v\")
+    case "$value" in '' | None) echo "$name の $v を採れていない。先へ進まない" ;; esac
+  done
+  ```
+
+  **踏むと壊れる: 3つの箇条を続けて流すとき、この3つを採り直さないと、前の箇条の値が生き残る。**
+  - **版**（`name` / `before_version`）——確かめる段 1 が**別の設定の版と比べて通る**。
+    **入れ替えていない設定でも「上がった」と判定できてしまう**。`JWT_SECRET` は**版の確認だけが唯一の検出経路**であり
+    （下の箇条のとおり、動作の確認では区別できない）、**漏れた鍵が生きたまま緑になる**
+  - **タスク**（`before_arns`）——確かめる段 2 が**前の箇条の入れ替えで消えたタスクと比べる**。
+    2つ目以降の箇条では**入れ替えが起きていなくても「重なりが無い」を満たす**
+
+  **踏むと壊れる: 版は箇条ごとに1つずつ上げ、その箇条を終えてから次の箇条へ進む。**
+  まとめて上げてから流すと、**対象を絞らない `apply`**（RDS の手順 4・`JWT_SECRET` の手順 3）が
+  Valkey の `auth_token_wo_version` を **`-replace` 無しで上げる**——ROTATE は古いトークンを残すため
+  （下の `REDIS_URL` の箇条）、**漏れたトークンが通用したまま残る**。
+  そのうえ **`REDIS_URL` の確かめる段は通る**——版は上がり、他の箇条の入れ替えでタスクも入れ替わっているため、
+  **確かめる段 1 も 2 も満たす。漏れた値が生きたまま緑になる。**
+
+  **`before_arns` は、確かめる段 2 の基準である**——入れ替えの後に列挙し直し、**この集合と重なりが無いこと**を見る。
+  `--force-new-deployment` で入れ替える箇条（Valkey）は**タスク定義のリビジョンが変わらない**ため、
+  `taskDefinition` では区別できない。
+- **`image_tag` は現に動いているタグでなければならない**——別のタグだと、
+  対象を絞らない `apply` が api のタスク定義を差し替え、**入れ替えの手順が同時にデプロイになる**。
+  **`alarm_email` も現に購読している宛先でなければならない**——変えると購読が作り直され、
+  **確認のメールを開くまでアラートが届かない**。**Valkey の箇条の代償は「入れ替えの間はメトリクス欠損が鳴りうる」を当てにしている**ので、通知先を落とすと前提が崩れる
+  （**鳴るのは欠損が評価期間だけ続いたときである**。下の箇条）
+  （RDS と `JWT_SECRET` の箇条の 5xx 率は、要求が来ていなければそもそも鳴らない。下の代償）
+- **`before_version` が、最後の確かめる段 1 の基準値である**（上で束縛する。控えずに進むと、上がったかどうかを判定できない）。
+  **`locals` の `*_version`（1→2）では代用できない**——Parameter Store の版とは別の番号で、
+  RDS の作り直しなど別の `apply` でも SSM 側の版は上がる
+- **待つ段は `aws ecs wait` で待つ**（`release.sh` と同じ形）。タスクが無くなるのは
+  `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $before_arns`（`before_arns` は**各箇条の先頭**で束縛する）、
+  サービスが安定するのは `aws ecs wait services-stable --cluster "$cluster" --services "$service"`。
+  **RDS の待ちにはこれが当たらない**（下の RDS の手順 3）
+- **確かめる段は、入れ替わったことを確かめる。** 動くことを確かめるだけでは足りない——
+  **版が上がっていなければ、動く側も同じように通る**（漏れた値が通用したまま「入れ替えた」と判断できる）。次の2つを見る。
+  1. **その設定の Parameter Store の版が、`before_version` より上がっていること**——
+     `aws ssm get-parameter --name "/workspace-chat/$name" --query 'Parameter.Version' --output text` で採り直して比べる。
+     **`--with-decryption` を付けない**（値は取り出さない。版だけを見る）
+  2. **動いているタスクがすべて、入れ替えの後に起動したものであること**——
+     `aws ecs list-tasks --cluster "$cluster" --service-name "$service" --query 'taskArns' --output text` で列挙し直し、
+     **列挙が空でないこと**と、**`before_arns` と重なりが無いこと**を見る。
+     **空集合は「重なりが無い」を満たしてしまう**ため、空でないことを先に見る（止めた直後は 0 件である）。
+     **版が上がっても、古いタスクが残っていれば古い値を持ったままである**
+
+- **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
+  1. **Terraform の外で** api のサービスの desired count を 0 にし、タスクが無くなるのを待つ——
+     `aws ecs update-service --cluster "$cluster" --service "$service" --desired-count 0` の後、
+     `aws ecs wait tasks-stopped --cluster "$cluster" --tasks $before_arns`
+     （`cluster` / `service` は共通の欄、`before_arns` は**この箇条の先頭**で束縛する）。
+     **`--cluster` を省くと `default` クラスターが仮定される**（このリポジトリのクラスターは `default` ではない）。
+     **`local.api_task_count`（`infra/production/service.tf`）は直さない**——直すと手順 2 の `-target` の理由が消え、
+     手順 4 の対象を絞らない `apply` でも構成が 0 のままでサービスが戻らない。
+     この値はタスク定義の `API_TASK_COUNT` にも渡っており、レート制限の数え方まで巻き込む
+  2. `db_password_version` を上げ、RDS と `DATABASE_URL` のパラメータだけを対象に流す——
+     `tf apply -target=aws_db_instance.main -target=aws_ssm_parameter.database_url`
+     （サービスの desired count を、この `apply` で戻さないため）。Terraform の文書は `-target` を例外の場合に限っており（「Use `-target=ADDRESS` in exceptional circumstances only, such as recovering from mistakes or working around Terraform limitations.」）、漏えいへの対処はその例外として扱う
+  3. RDS の `PendingModifiedValues` から `MasterUserPassword` が消えるのを待つ——
+     `aws rds describe-db-instances --db-instance-identifier workspace-chat --query 'DBInstances[0].PendingModifiedValues'`
+     を繰り返して見る（`aws ecs wait` はここには当たらない）。
+     **この待ちだけでは入れ替わりを確かめられない**——版が上がっていなければ、その要素は最初から現れない（RDS の API リファレンス「Between the time of the request and the completion of the request, the `MasterUserPassword` element exists in the `PendingModifiedValues` element of the operation response.」）
+  4. 対象を絞らない `tf apply` でサービスを戻し、**`aws ecs wait services-stable --cluster "$cluster" --services "$service"` で安定を待つ**
+     （起動するタスクは新しいパラメータを読む）。**`apply` は待たない**——`aws_ecs_service.api` は `wait_for_steady_state` を置いておらず、
+     UpdateService を呼んだ時点で戻る。**待たずに次の段へ進むと、動いているタスクが 0 件のまま確かめる段を通る。**
+     **手順 1 で作った drift が、ここで戻る**——`desired_count` は `local.api_task_count` のままで `ignore_changes` を置いていないため、
+     Terraform が 0 を構成の値に戻す
+  5. **上の共通の前置きの「確かめる段」を当てる**（`DATABASE_URL` の版が上がったこと・全タスクが入れ替わったこと）。
+     そのうえで、ログインとメッセージの一覧で DB に繋がることを確かめる。
+     **順序を逆にしない**——繋がることだけを見ると、**版が上がらなかったとき（編集を保存し忘れた・`apply` が `No changes` を返した・
+     `-target` を打ち間違えた）にも通る**。手順 3 の待ちも捕まえない（版が上がっていなければ、その要素は最初から現れない）
+
+  **代償: 入れ替えの間（数分。測っていない）、サービス全体が止まる。** 一部の要求だけが失敗する状態は作らない。
+  **この間、下記「アラート」の 5xx 率が鳴りうる**——ALB は健全なターゲットが無いとき 503 を返すためである。
+  **ただし必ず鳴るわけではない**——このアラームは割合で、`treat_missing_data = "notBreaching"` である
+  （`infra/production/alarms.tf`。要求が無い時間帯は割合が求まらず、鳴らさない）。
+  **要求の来ない時間帯に入れ替えれば、全断でも鳴らない。**
+  鳴ったときは、**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**
+- **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`valkey_auth_token_version` を上げ、`tf apply -replace=aws_elasticache_replication_group.valkey` で**同じ `apply` の中で**作り直し、**その後に `aws ecs update-service --cluster "$cluster" --service "$service" --force-new-deployment` でタスクを入れ替え、`aws ecs wait services-stable --cluster "$cluster" --services "$service"` で安定を待つ**（変数は上の共通の前置きで束縛する）。**desired count を 0 にして戻す形は採らない**（この箇条が「api は止めない」と決めているため）。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）。
+  **鳴るのは作り直しの区間だけで、しかも欠損が評価期間だけ続いたときである**（アラームの評価の設定は
+  [alarms.tf](../infra/production/alarms.tf) の `locals`。**作り直しがそれより短ければ鳴らない**）——
+  古いクラスタが消える間は下記「アラート」のメトリクス欠損が鳴りうるが、
+  **新しいクラスタができてからタスクを入れ替えるまでは鳴らない**（同じ節が「AUTH トークンが食い違った場合」を鳴らない側に名指ししている）。
+  **アラートが収まったことを「入れ替えが終わった合図」と読まないこと**——古いトークンを持ったままでも収まる。
+  **入れ替えたら、上の共通の前置きの「確かめる段」を当て**（`REDIS_URL` の版が上がったこと・全タスクが入れ替わったこと）、
+  **そのうえで在席の表示（機能一覧 F-22）が別の端末から見えることを確かめる**——**この確認をしないと、失敗が黙って残る**。
+  **この箇条では、在席の確認も「入れ替わったこと」を見ている**——古いクラスタごとトークンが消えるため、
+  在席が見えることは新しいトークンで繋がっていることを意味する。それでも版と全タスクを先に見るのは、他の2つと同じ形に揃えるためである。
+  Valkey に繋がらなくても **api は止まらず、5xx も出ず、アラートも鳴らない**（レート制限は各タスクのメモリへ迂回し、在席の取り直しの失敗は例外にしない）ため、
+  タスクの入れ替えが漏れた・版の上げ方を誤ったといった失敗は、**配信の共有と在席が止まったまま誰も気づかない状態として残る**。
+  上の「作り直しの間と、タスクを入れ替えるまで」という**期間を限った代償は、この確認があって初めて成り立つ**
+- **`JWT_SECRET` も、api を止めてから入れ替える。** 署名と検証は HS256 の共有鍵であり、**漏れた鍵があれば任意の利用者のアクセストークンを作れる**（上記 3.5 の脅威）。版を上げた `apply` の後も、**ECS のタスクを入れ替えるまで動いているコンテナは古い鍵を持つ**ため、止めずに入れ替えると、**偽造したトークンを古いタスクが受理し続ける窓**が残る。止めれば窓は消える。
+  1. 手順は上の RDS と同じ（Terraform の外で desired count を 0 にし、タスクが無くなるのを待つ）
+  2. `jwt_secret_version` を上げ、`JWT_SECRET` のパラメータだけを対象に流す——
+     `tf apply -target=aws_ssm_parameter.jwt_secret`
+  3. 対象を絞らない `tf apply` でサービスを戻し、**`aws ecs wait services-stable --cluster "$cluster" --services "$service"` で安定を待つ**
+     （上の RDS の手順 4 と同じ理由——`apply` はタスクの起動を待たない）
+  4. **上の共通の前置きの「確かめる段」を当てる**（`JWT_SECRET` の版が上がったこと・全タスクが入れ替わったこと）。
+     そのうえで、ログインしたまま画面を開き直し、ログインし直さずに使えることを確かめる（下の代償のとおり、リフレッシュで取り直せる）。
+     **こちらは動作の確認だけでは特に弱い**——**鍵が替わらなかったときのほうが容易に通る**（発行済みのトークンがそのまま通る）ため、
+     どちらでも通ってしまい、漏れた鍵が生きているかを区別できない
+
+  **代償: 入れ替えの間、サービス全体が止まる**（上の RDS と同じく、この間は 5xx 率のアラートが鳴りうる。
+  **要求の来ない時間帯なら鳴らない**——同じ理由）。
+  **発行済みのアクセストークンはすべて無効になるが、利用者はログインし直さずに済む**——リフレッシュトークンは DB に置く乱数で、署名の鍵に依らないためである
+- **2つの DB 利用者を交互に使い、止めずに入れ替える形は採らない**（Secrets Manager の文書が可用性の要る場合に勧める形。「After rotation, both `user` and `user_clone` credentials are valid.」）。DB は外から繋げないため、利用者の作成・権限の付与・パスワードの設定を、psql を持つマイグレーション用のタスクで流す仕組みが要る。**代償は、上の RDS の計画停止である**
+
 - **RTO（復旧までの目標時間）は定めない。** 学習用途であり、停止が業務に影響しないため
 - **RDS の RPO（失ってよいデータの範囲）は、トランザクションログの退避の間隔である。**
   日次スナップショットの間隔ではない。**復元する時点を指定しなければ、実際に取れる復旧地点より
@@ -534,6 +715,9 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 **鳴り続けるアラートも同じである。**
 
 **タスクの全断は 5xx 率で捕まえる**——ALB は健全なターゲットが無いとき 503 を返す。
+**ただし要求が来ていなければ捕まえられない**——このアラームは割合であり、`treat_missing_data = "notBreaching"` である
+（[alarms.tf](../infra/production/alarms.tf)。要求が無い時間帯は割合が求まらず、鳴らさない）。
+**全断そのものを常時検知する経路は持たない**（上の「秘密の値が漏れた疑いがあるとき」の代償も、この前提の上に立つ）。
 **5xx 率は ALB のメトリクスから取る（決定）。** アプリのログで数える形は採らない——
 **全断のときメトリクスの発行そのものが止まり、値は 0 ではなく欠損になるため**
 （接続数のメトリクスを発行するのもアプリ自身である。4.6）。**アプリ側を選ぶと全断の検知が

@@ -8,6 +8,12 @@
 # REDIS_URL の value_wo_version と ElastiCache の auth_token_wo_version は同じ乱数を渡すため、下の locals の
 # valkey_auth_token_version だけで上げる（片方だけ上げると、api が Valkey に繋がらない。技術スタックの秘密情報の行）。
 # 版を上げた apply の後も、ECS のタスクを入れ替えるまで動いているコンテナは古い値を持つ。
+#
+# 踏むと壊れる: **漏えいの疑いで入れ替えるときは、この版を上げても漏れたトークンは通用したまま残る**。
+# 要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順による（レプリケーショングループを -replace で作り直す）。
+# **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し、
+# 古いトークンを外す SET には最後のトークンと同じ値が要るが、乱数は ephemeral で手元に置かないため渡せない。
+# 版を上げただけで「入れ替えた」と判断すると、漏れた値が通用する状態が残る。
 
 # 踏むと壊れる: 技術スタックが決めた値は、この locals にだけ書く（下のブロックには、名前と説明のほかにリテラルの値を書かない）。
 # どの値も、変えても validate も plan も CI も落ちない（apply が落ちるのは AWS の制約の外に出たときだけ）。
@@ -18,9 +24,20 @@ locals {
   valkey_port = 6379
 
   # REDIS_URL の value_wo_version と ElastiCache の auth_token_wo_version が一緒に使う版。
+  # 踏むと壊れる: **この版は上げるだけで、下げない**（要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の共通の前置き）。
+  # **下げても write-only の値は入れ替わる**——**戻したつもりで、また別の値になる**。
+  # **上げたらコミットする**——このファイルは追跡下にあり、コミットしないまま git checkout や pull を踏むと版が戻る。
   valkey_auth_token_version = 1
 
   # JWT_SECRET の value_wo_version。上げると、発行済みのアクセストークンがすべて無効になる（要件定義書 4.2 の「Parameter Store の値」の行）。
+  # 踏むと壊れる: **この版も上げるだけで、下げない**——**下げても値は入れ替わる**（戻したつもりで、また別の鍵になる）。
+  # **上げたらコミットする**（上の valkey_auth_token_version と同じ理由）。
+  # 代償: **止めずにローリングで入れ替えると、新旧の鍵を持つタスクが同時に動く区間ができる**。
+  # ALB にスティッキーセッションを置いていないため、発行済みのトークンを持つ利用者の要求が、当たったタスクによって通ったり 401 になったりする
+  # （リフレッシュで取り直せるが、その間は失敗が見える）。
+  # 踏むと壊れる: **漏えいの疑いで入れ替えるときは、api を止めてから行う**
+  # （要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の JWT_SECRET の行）。
+  # 止めずに版を上げると、タスクを入れ替えるまで**古いタスクが漏れた鍵を持ち、偽造したトークンを受理し続ける**。
   jwt_secret_version = 1
 
   # 乱数の長さ。下げても AWS の制約（AUTH トークンは 16–128 文字）の内側なら、トークンと鍵の強さだけが下がる。
@@ -61,6 +78,9 @@ resource "aws_elasticache_subnet_group" "valkey" {
   subnet_ids = aws_subnet.private[*].id
 }
 
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の REDIS_URL の箇条が、
+# このアドレス（aws_elasticache_replication_group.valkey）を -replace でリテラルで打っている。**
+# 名前を変えると、**作り直しが起きないまま版だけが上がる**（漏れたトークンが古いクラスタに残る）。
 resource "aws_elasticache_replication_group" "valkey" {
   replication_group_id = "workspace-chat"
   description          = "workspace-chat realtime adapter and rate limit counters"
@@ -81,6 +101,9 @@ resource "aws_elasticache_replication_group" "valkey" {
 
 # 踏むと壊れる: secrets で渡すパラメータ（ここの2つと database.tf の database_url）の name は、渡す設定の名前（/REDIS_URL など）で終わらせ、
 # type は local.parameter_type（SecureString）にする。apps/api/src/config/api-config-infra.test.ts が確かめる。
+# 踏むと壊れる: **接頭辞（/workspace-chat/）も、要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の前置きと
+# 確かめる段がリテラルで打っている。** 上の検査は**末尾しか見ない**ため、接頭辞を変えても CI は緑のまま、
+# **4.2 の段だけが対象を見つけられなくなる**。
 resource "aws_ssm_parameter" "redis_url" {
   name             = "/workspace-chat/REDIS_URL"
   type             = local.parameter_type
@@ -89,6 +112,8 @@ resource "aws_ssm_parameter" "redis_url" {
   value_wo_version = local.valkey_auth_token_version
 }
 
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の JWT_SECRET の箇条が、
+# このアドレス（aws_ssm_parameter.jwt_secret）を -target でリテラルで打っている。** 名前を変えるとその段が対象を絞れない。
 resource "aws_ssm_parameter" "jwt_secret" {
   name             = "/workspace-chat/JWT_SECRET"
   type             = local.parameter_type

@@ -9,6 +9,11 @@
 # DATABASE_URL の value_wo_version と RDS の password_wo_version は同じ乱数を渡すため、下の locals の db_password_version だけで上げる
 # （片方だけ上げると、api が DB に繋がらない）。RDS を作り直す（復元を含む）apply でも、同じ apply でこの版を上げる（要件定義書 4.2 手順 3）。
 # 版を上げた apply の後も、ECS のタスクを入れ替えるまで動いているコンテナは古い値を持つ。
+#
+# 踏むと壊れる: **漏えいの疑いで入れ替えるときは、この版を上げるだけでは足りない**。
+# 要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順による（api を止めてから入れ替える）。
+# 止めずに版を上げると、変更が当たってから古いタスクが入れ替わるまで、**古いタスクが新しく張る接続が断られる**。
+# 死活確認は DB を見ないため、その間も ALB は正常と判定し続ける。
 
 # 踏むと壊れる: 技術スタックと要件定義書が決めた値は、この locals にだけ書く（下のブロックには、名前と説明のほかにリテラルの値を書かない）。
 # どの値も、変えても validate も plan も CI も落ちない（apply が落ちるのは AWS の制約の外に出たときだけ）。
@@ -18,6 +23,9 @@ locals {
   db_port = 5432
 
   # DATABASE_URL の value_wo_version と RDS の password_wo_version が一緒に使う版。
+  # 踏むと壊れる: **この版は上げるだけで、下げない**（要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の共通の前置き）。
+  # **下げても write-only の値は入れ替わる**——**戻したつもりで、また別の値になる**。
+  # **上げたらコミットする**——このファイルは追跡下にあり、コミットしないまま git checkout や pull を踏むと版が戻る。
   db_password_version = 1
 
   # マスターパスワードは 32 文字。英数字だけにするのは cache.tf の random_password_special（DATABASE_URL の中に埋めるため、URL の区切りになる記号を含めない）。
@@ -64,6 +72,9 @@ locals {
   # 変更をメンテナンスの時間帯まで待たせない（プロバイダーの文書「Specifies whether any database modifications are applied immediately,
   # or during the next maintenance window. Default is `false`.」）。DATABASE_URL のパラメータは apply ですぐ替わるため、
   # RDS の側だけ遅れると食い違う。
+  # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の RDS の箇条が、この値を前提にしている。**
+  # 手順 3 は PendingModifiedValues から MasterUserPassword が消えるのを待つが、false にすると
+  # **変更がメンテナンスの時間帯まで当たらず、待ちが明けない**——その間、手順 1 で止めた api は止まったままである。
   db_apply_immediately = true
 
   # destroy のときに最終スナップショットを取らず、削除保護も掛けない（要件定義書 4.2「バックアップ」。デモの後に destroy する運用）。
@@ -97,7 +108,11 @@ resource "aws_db_parameter_group" "main" {
   }
 }
 
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の RDS の箇条が、
+# このアドレス（aws_db_instance.main）を -target でリテラルで打っている。** 名前を変えるとその段が対象を絞れない。
 resource "aws_db_instance" "main" {
+  # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順 3 が、この識別子をリテラルで打っている**
+  # （aws rds describe-db-instances --db-instance-identifier workspace-chat）。変えるとその段が対象を見つけられない。
   identifier = "workspace-chat"
   db_name    = "workspace_chat"
   username   = "workspace_chat"
@@ -130,6 +145,10 @@ resource "aws_db_instance" "main" {
 
 # 踏むと壊れる: name は渡す設定の名前（/DATABASE_URL）で終わらせ、type は local.parameter_type（SecureString）にする
 # （apps/api/src/config/api-config-infra.test.ts が確かめる。cache.tf の redis_url・jwt_secret と同じ）。
+# 踏むと壊れる: **接頭辞（/workspace-chat/）も、要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の前置きと
+# 確かめる段がリテラルで打っている。** 上の検査は**末尾しか見ない**ため、接頭辞を変えても CI は緑のまま、
+# **4.2 の段だけが対象を見つけられなくなる**（落ちる位置は前置きの弾く段で、api を止める前ではある）。
+# 踏むと壊れる: **4.2 の RDS の箇条が、このアドレス（aws_ssm_parameter.database_url）を -target で打っている。**
 resource "aws_ssm_parameter" "database_url" {
   name             = "/workspace-chat/DATABASE_URL"
   type             = local.parameter_type
