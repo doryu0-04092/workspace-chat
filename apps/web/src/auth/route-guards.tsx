@@ -41,12 +41,19 @@ export function RequireSignedIn() {
   return <Outlet />;
 }
 
-/** ログインしていない利用者だけに見せる（ログイン・登録）。ログインしたら元の行き先かワークスペースの画面へ移す。 */
+/**
+ * ログインしていない利用者だけに見せる（ログイン・登録）。ログインしたら元の行き先かワークスペースの画面へ移す。
+ *
+ * **`unavailable` でも塞がない。** 起動時の復元を確かめられなかっただけで、利用者が自分で開いた
+ * ログイン・登録の画面まで出さないと、**本来ログインできる利用者がログインできなくなる**——
+ * リフレッシュの枠（発信元単位で 15 分に 60 回）とログインの枠（同 20 回）は別であり、
+ * 前者が尽きていても後者は空いている（機能一覧 1.2・1.1）。`Unavailable` を出すのは
+ * `RequireSignedIn` の側だけである（決定は「ログインの画面へ**移さない**」であって「塞ぐ」ではない）。
+ */
 export function GuestOnly() {
   const session = useSession();
   const location = useLocation();
   if (session.status === 'checking') return <Loading />;
-  if (session.status === 'unavailable') return <Unavailable />;
   if (session.status === 'signedIn') {
     const from = (location.state as { from?: unknown } | null)?.from;
     return <Navigate to={typeof from === 'string' ? from : '/workspaces'} replace />;
