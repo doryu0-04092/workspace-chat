@@ -10,6 +10,12 @@
 locals {
   # 0.25 vCPU / 0.5 GB × 2 タスク（技術スタックの「リソースのサイジング」の ECS Fargate の行）。
   # api_task_count は API_TASK_COUNT にも渡す（apps/api/src/rate-limit/rate-limit-config.ts。Valkey が止まっている間、上限をこの数で割る）。
+  #
+  # 踏むと壊れる: **秘密の値の入れ替えで api を止めるときに、この値を 0 にしない**
+  # （要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の、**api を止める箇条（DATABASE_URL と JWT_SECRET）**。
+  # 止めるのは Terraform の外である）。ここを 0 にして apply すると、対象を絞る段の理由が消え、
+  # **サービスを戻す段の対象を絞らない apply でも構成が 0 のままで戻らない**（どちらの箇条でも全断が続く）。
+  # API_TASK_COUNT も 0 になり、レート制限の数え方まで巻き込む。
   api_task_cpu    = 256
   api_task_memory = 512
   api_task_count  = 2
@@ -77,6 +83,11 @@ resource "aws_ecs_task_definition" "api" {
   # api のコンテナの environment を空にしない（検査の「数え上げる対象がある」の下限で落ちる。空にするなら、その下限も直す）。
   container_definitions = jsonencode([
     {
+      # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の前置きが、
+      # このコンテナを containerDefinitions[0] という位置で、image を <URL>:<タグ> という形で読み、
+      # 末尾のタグを TF_VAR_image_tag に採る。** 並びを変える・image の形を変えると、
+      # **採るタグが別のものになるか採れなくなり、対象を絞らない apply が別のイメージを本番へ出す。**
+      # validate も plan も CI も落ちない。
       name         = "api"
       image        = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
       essential    = true
@@ -140,9 +151,14 @@ resource "aws_ecs_task_definition" "migrate" {
 }
 
 resource "aws_ecs_service" "api" {
-  name                              = "workspace-chat-api"
-  cluster                           = aws_ecs_cluster.main.id
-  task_definition                   = aws_ecs_task_definition.api.arn
+  name            = "workspace-chat-api"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.api.arn
+  # 踏むと壊れる: **この desired_count に lifecycle { ignore_changes } を置かない。**
+  # 要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の **api を止める箇条（DATABASE_URL と JWT_SECRET）の
+  # サービスを戻す段**は、**止めるときに Terraform の外から 0 にした drift を、対象を絞らない apply が
+  # 構成の値に戻すこと**に依存している。置くと Terraform がその drift を無視し、
+  # **どちらの箇条でも api を止めたまま全断が続く。** validate も plan も CI も落ちない。
   desired_count                     = local.api_task_count
   launch_type                       = "FARGATE"
   health_check_grace_period_seconds = local.api_health_check_grace_seconds

@@ -1,4 +1,7 @@
 # リリースの手順（scripts/release.sh）が読む値（#452）。web_url と web_bucket は delivery.tf にある。
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の共通の前置きも、ecs_cluster_name と
+# ecs_service_name をこの名前で読む**（terraform output -raw）。名前を変えると、その段が空になる。
+# **空でも変数は「設定済み」になるため apply は聞き返さない**——前置きは空を弾く段を持つが、気づく経路はそこだけである。
 # 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 
 output "ecr_api_repository_url" {
