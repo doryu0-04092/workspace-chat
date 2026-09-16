@@ -177,6 +177,11 @@ const COUNTS_THREAD_REPLIES = Prisma.sql`
  * **踏むと壊れる: 不等号を `CASE` 式の中に入れない。** `CASE` に包むと**索引の範囲走査の境界にならず**、
  * `Message_channelId_id_idx`（`channelId, id`）から使えるのが先頭列までに落ちる。
  * `OR` に展開して**素の比較**にしておくこと（#505 第4巡の 🔴3）。
+ *
+ * **範囲の境界になるのは本体（`parentId IS NULL`）の側だけである。** 左枝の `m."parentId" IS NOT NULL` は
+ * **id によらず返信を全部通す**ので、返信は `m."createdAt" >= cm."joinedAt"` 以降の全件が候補に入る。
+ * これは束5 で採った形の帰結（`ThreadRead` を持たない返信は、スレッドを開くまで未読に残る）であって誤りではない。
+ * **「既読位置で走査が切れている」と読まないこと**（#505 第7巡の 🟡1）。返信の側を切るのは `AFTER_THREAD_READ_POSITION` である。
  */
 const AFTER_READ_POSITION = Prisma.sql`
   (
