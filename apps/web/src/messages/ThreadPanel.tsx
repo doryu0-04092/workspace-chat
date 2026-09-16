@@ -32,7 +32,9 @@ export function ThreadPanel({
       {parent && <MessageItem message={parent} />}
       <PagedMessages pages={replies} labels={REPLY_LABELS} />
       <MessageForm
-        post={post}
+        submit={post.mutate}
+        pending={post.isPending}
+        error={post.error}
         workspaceId={workspaceId}
         channelId={channelId}
         label="返信"

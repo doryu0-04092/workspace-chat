@@ -1,14 +1,13 @@
-import { type FormEvent, useId, useState } from 'react';
 import { errorMessage } from '../api/client';
-import { MentionInput } from './MentionInput';
+import { MessageForm } from './PostMessageForm';
 import { type Message, useDeleteMessage, useEditMessage } from './queries';
 
 type Scope = { workspaceId: string; channelId: string };
 
 /**
  * 自分のメッセージの本文をその場で編集する（F-13。機能一覧 4.2）。
- * 空・空白だけでは保存できない（api も 400 で断る）。断られたら理由を出し、入力を残す。通ったら閉じる。
- * 入力欄はメンションを補完する（投稿と同じ `MentionInput`）。
+ * **本文を送るフォームの不変条件は `MessageForm` が持つ**（空・空白だけでは保存できない・断られたら理由を出して入力を残す・Enter では送らない）。
+ * ここで足すのは、元の本文から始めること・通ったら閉じること・取り消せることだけである。
  */
 export function EditMessageForm({
   scope,
@@ -19,44 +18,23 @@ export function EditMessageForm({
   message: Message;
   onDone: () => void;
 }) {
-  const id = useId();
   const edit = useEditMessage(scope.workspaceId, scope.channelId);
-  const [body, setBody] = useState(message.body ?? '');
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    edit.mutate({ messageId: message.id, body }, { onSuccess: onDone });
-  }
-
   return (
-    <form className="flex flex-col gap-2" onSubmit={submit}>
-      <label htmlFor={id} className="sr-only">
-        メッセージを編集
-      </label>
-      <MentionInput
-        id={id}
-        workspaceId={scope.workspaceId}
-        channelId={scope.channelId}
-        value={body}
-        onChange={setBody}
-      />
-      {edit.isError && (
-        <p role="alert" className="text-red-700">
-          {errorMessage(edit.error)}
-        </p>
-      )}
-      <div className="flex gap-2">
-        <button
-          className="rounded bg-slate-800 px-3 py-1 text-white disabled:opacity-50"
-          disabled={edit.isPending || body.trim() === ''}
-        >
-          保存する
-        </button>
-        <button type="button" className="rounded border px-3 py-1" onClick={onDone}>
-          取り消す
-        </button>
-      </div>
-    </form>
+    <MessageForm
+      submit={(body, options) => edit.mutate({ messageId: message.id, body }, options)}
+      pending={edit.isPending}
+      error={edit.error}
+      workspaceId={scope.workspaceId}
+      channelId={scope.channelId}
+      label="メッセージを編集"
+      hideLabel
+      submitLabel="保存する"
+      initialBody={message.body ?? ''}
+      clearOnSuccess={false}
+      onSubmitted={onDone}
+      onCancel={onDone}
+      className="flex flex-col gap-2"
+    />
   );
 }
 
