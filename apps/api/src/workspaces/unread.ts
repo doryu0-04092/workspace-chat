@@ -1,6 +1,31 @@
+import type { UnreadUpdatedPayload } from '@workspace-chat/shared';
 import { Prisma } from '../generated/prisma/client';
 import { isUniqueViolation } from '../prisma-errors';
 import type { PrismaService } from '../prisma.service';
+import type { RealtimeEmitter } from '../realtime/realtime.emitter';
+
+/**
+ * **その人の未読しか変わらないとき**に、その人の部屋へ1件だけ配る（F-23。機能一覧 5.2・10.1）。
+ * 既読を進めた経路（チャンネル・スレッドの2つ）が使う。
+ *
+ * **参加者全員を数え直さない**——1要求が人数分の集計と配信に増幅する（#505 第0巡の 🔴3）。
+ * **1箇所に置く**——payload の組み立てと宛先の決め方が2箇所に分かれると、片方だけが変わりうる（#505 第1巡の 🟡3）。
+ * **資格の確認は呼ぶ側にある**（既読を進められたのは、参加の2段階を通った本人だけである。5.2）。
+ */
+export async function announceUnreadTo(
+  emitter: RealtimeEmitter,
+  prisma: PrismaService,
+  channelId: string,
+  userId: string,
+): Promise<void> {
+  const unread = await unreadOfChannels(prisma, userId, [channelId]);
+  const payload: UnreadUpdatedPayload = {
+    channelId,
+    unread: unread.get(channelId)?.unread ?? 0,
+    sentAt: new Date().toISOString(),
+  };
+  emitter.toUsers([userId], 'unread:updated', payload);
+}
 
 /**
  * 既読位置を**進めるだけ**で書く（F-23。機能一覧 10.1）。チャンネルとスレッドで同じ形を使う。
@@ -70,6 +95,24 @@ const UNREAD_COUNT = Prisma.sql`
 `;
 
 /**
+ * 既読位置より後か（機能一覧 10.1）。**本体はチャンネルの既読位置（`cr`）、返信はスレッドの既読位置（`tr`）で決める。**
+ *
+ * **踏むと壊れる: 返信に `cr` を当てない。** チャンネルの一覧は本体だけを返すため、
+ * **返信より新しい本体を読んだだけで、スレッドを一度も開いていない返信まで既読になる**。
+ * そうなると 10.1 の受け入れ条件「設定を『含めない』→『含める』に切り替えると、過去のスレッド返信のうち
+ * 未読のものが未読として現れる」も満たせない（#505 第1巡の 🔴1）。
+ *
+ * **代償**: `ThreadRead` を持たない利用者の返信は、**スレッドを開くまで未読のまま残る**（10.1 に代償として記録した）。
+ * 返信の下限を「`tr` があればそれ、無ければ `cr`」にすれば未読は早く減るが、上の受け入れ条件を満たせなくなる。
+ */
+const AFTER_READ_POSITION = Prisma.sql`
+  CASE WHEN m."parentId" IS NULL
+    THEN m."id" > COALESCE(cr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid)
+    ELSE TRUE
+  END
+`;
+
+/**
  * 未読を数える結合（利用者・既読位置・メッセージ・スレッドの既読位置）。上の `UNREAD_COUNT` と対で使う。
  *
  * **踏むと壊れる: メッセージを絞る条件は、この `ON` 側に置く。** `FILTER` 句へ移すと、
@@ -86,7 +129,7 @@ const UNREAD_JOINS = Prisma.sql`
   LEFT JOIN "ChannelRead" cr ON cr."channelId" = cm."channelId" AND cr."userId" = cm."userId"
   LEFT JOIN "Message" m
     ON m."channelId" = cm."channelId"
-   AND m."id" > COALESCE(cr."lastReadMessageId", '00000000-0000-0000-0000-000000000000'::uuid)
+   AND ${AFTER_READ_POSITION}
    AND m."deletedAt" IS NULL
    AND m."authorId" <> cm."userId"
    AND m."createdAt" >= cm."joinedAt"

@@ -17,7 +17,7 @@ import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
-import { advanceReadPosition, unreadOfChannels, unreadOfMembers } from './unread';
+import { advanceReadPosition, announceUnreadTo, unreadOfMembers } from './unread';
 import { WorkspacesService } from './workspaces.service';
 
 type MessagesPath = paths['/workspaces/{id}/channels/{channelId}/messages'];
@@ -398,20 +398,6 @@ export class MessagesService {
     }
   }
 
-  /**
-   * 1人ぶんだけ配る（既読を進めたときのように、**その人の未読しか変わらない**とき）。
-   * **参加者全員を数え直さない**——1要求が人数分の集計と配信に増幅するため（#505 第0巡の 🔴3）。
-   */
-  private async announceUnreadTo(channelId: string, userId: string): Promise<void> {
-    const unread = await unreadOfChannels(this.prisma, userId, [channelId]);
-    const payload: UnreadUpdatedPayload = {
-      channelId,
-      unread: unread.get(channelId)?.unread ?? 0,
-      sentAt: new Date().toISOString(),
-    };
-    this.emitter.toUsers([userId], 'unread:updated', payload);
-  }
-
   async list(
     userId: string,
     workspaceId: string,
@@ -532,7 +518,7 @@ export class MessagesService {
     });
     // **変わったのは読んだ本人の未読だけ**なので、本人の部屋へ1件だけ送る（機能一覧 5.2・10.1）。
     // **参加者全員へ配らない**——1要求が人数分の集計と配信に増幅する（#505 第0巡の 🔴3）。
-    await this.announceUnreadTo(channelId, userId);
+    await announceUnreadTo(this.emitter, this.prisma, channelId, userId);
   }
 
   /**

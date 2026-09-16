@@ -1,11 +1,11 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { UnreadUpdatedPayload, paths } from '@workspace-chat/shared';
+import type { paths } from '@workspace-chat/shared';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor } from './channel-access';
-import { advanceReadPosition, unreadOfChannels } from './unread';
+import { advanceReadPosition, announceUnreadTo, unreadOfChannels } from './unread';
 import { CHANNEL_NAME_TAKEN } from './channel-errors';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { WorkspacesService } from './workspaces.service';
@@ -122,8 +122,10 @@ export class ChannelsService {
   ): Promise<void> {
     await this.workspaces.membershipOf(userId, workspaceId);
     assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
+    // **チャンネルの既読位置に入れてよいのは本体だけである**（`parentId: null`）。返信を入れると、
+    // スレッドの既読位置（`ThreadRead`）で決めるはずの範囲を、チャンネルの側から動かせてしまう（#505 第1巡の 🔴1）。
     const message = await this.prisma.message.findFirst({
-      where: { id: lastReadMessageId, channelId, deletedAt: null },
+      where: { id: lastReadMessageId, channelId, parentId: null, deletedAt: null },
       select: { id: true },
     });
     if (message === null) throw new NotFoundException();
@@ -134,13 +136,7 @@ export class ChannelsService {
     });
     // **変わったのは自分の未読だけ**なので、自分の部屋へ1件だけ送る（機能一覧 5.2・10.1）。
     // 資格の確認は上の2段階で済んでいる（参加者でなければここへ来ない）。
-    const unread = await unreadOfChannels(this.prisma, userId, [channelId]);
-    const payload: UnreadUpdatedPayload = {
-      channelId,
-      unread: unread.get(channelId)?.unread ?? 0,
-      sentAt: new Date().toISOString(),
-    };
-    this.emitter.toUsers([userId], 'unread:updated', payload);
+    await announceUnreadTo(this.emitter, this.prisma, channelId, userId);
   }
 
   /**

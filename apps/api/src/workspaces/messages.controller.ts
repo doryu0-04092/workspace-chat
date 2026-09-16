@@ -17,6 +17,7 @@ import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard'
 import { MessageWriteRateLimitGuard } from '../rate-limit/message-write-rate-limit.guard';
 import { UserRateLimitGuard } from '../rate-limit/user-rate-limit.guard';
 import { READ_UPDATE_LIMIT } from './channels.controller';
+import type { UpdateChannelReadRequest } from './channels.service';
 import {
   type Message,
   type MessagePage,
@@ -85,7 +86,7 @@ export class MessagesController {
     @Param('id') workspaceId: string,
     @Param('channelId') channelId: string,
     @Param('messageId') messageId: string,
-    @Body() body: { lastReadMessageId: string },
+    @Body() body: UpdateChannelReadRequest,
   ): Promise<void> {
     return this.messages.updateThreadRead(
       user.id,

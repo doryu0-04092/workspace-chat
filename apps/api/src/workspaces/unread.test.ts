@@ -612,6 +612,46 @@ describe('未読管理（F-23）', () => {
       );
     });
 
+    // **返信より新しい本体が後から来る並び**（#505 第1巡の 🔴1）。チャンネルの一覧は本体だけを返すので、
+    // 「最新のページを読み込んだ時点で既読にする」と、既読位置は**返信より新しい本体**まで進む。
+    // ここで返信にもチャンネルの既読位置を当てると、**スレッドを一度も開いていない返信が未読から消える**。
+    it('返信より後に本体が来ても、チャンネルを読んだだけでは返信は未読のまま残る', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const parent = await posted(alice, workspace.id, channelId, '親');
+      await replied(alice, workspace.id, channelId, parent.id, '返信');
+      // 返信の**後**に本体が来る
+      const latest = await posted(alice, workspace.id, channelId, '後から来た本体');
+
+      // 一覧の最新（本体）まで読む
+      expect((await read(bob, workspace.id, channelId, latest.id)).status).toBe(204);
+
+      // 本体2つは既読、返信だけが残る
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(1);
+
+      // 「含めない」→「含める」で、その返信が現れることも変わらない（10.1 の受け入れ条件）
+      await prisma.user.update({ where: { id: bob.id }, data: { threadUnreadIncluded: false } });
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(0);
+      await prisma.user.update({ where: { id: bob.id }, data: { threadUnreadIncluded: true } });
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(1);
+    });
+
+    it('チャンネルの既読位置に返信の id は渡せない（404）', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const parent = await posted(alice, workspace.id, channelId, '親');
+      const reply = await replied(alice, workspace.id, channelId, parent.id, '返信');
+
+      const res = await read(bob, workspace.id, channelId, reply.id);
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual(NOT_FOUND);
+    });
+
     it('「含めない」に切り替えると返信を数えず、「含める」に戻すと過去の未読の返信が未読として現れる', async () => {
       const alice = await login();
       const bob = await login();
