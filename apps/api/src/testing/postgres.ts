@@ -28,9 +28,10 @@ import { PullPolicy } from 'testcontainers';
  * 2回目以降の起動で手元のイメージを使っていた）、レジストリに届かない環境では、手元にイメージがあっても起動できない**
  * （scripts/api-image.test.sh と同じ）。
  *
- * **踏むと壊れる: この取り直しが、この土台の更新を受け取る唯一の経路である。**
- * 土台は Dependabot で追わないと決めており（理由は .github/dependabot.yml の末尾）、
- * 速度を理由に取り直しをやめると、同じタグの中の更新（PostgreSQL 17 系の中の更新と OS の修正）が誰にも届かなくなる。
+ * **踏むと壊れる: 速度を理由に取り直しをやめると、手元の緑が CI と同じ版の土台で出なくなる。**
+ * このタグ（postgres:17）を取り直す経路は、これと scripts/api-image.test.sh の `docker pull` の2本だけである
+ * （**db の土台 postgres:17-bookworm とは別のタグ**）。土台は Dependabot で追わないと決めており、
+ * タグごとの経路の一覧は .github/dependabot.yml の末尾にある。
  */
 export const POSTGRES_IMAGE = 'postgres:17';
 

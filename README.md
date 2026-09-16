@@ -332,9 +332,13 @@ redis は既製のイメージをそのまま使う。**`docker compose pull red
 これを叩かない限り、**最初に `up` した日の 8.x のまま動き続ける。**
 
 **上の2つ（db と redis）を叩くかどうかは、この表を見て判断する。**
-**土台は Dependabot で追わないと決めており**（理由と、土台ごとの取り込みの経路の一覧は
-[dependabot.yml](.github/dependabot.yml) の末尾）、**この操作が唯一の取り込みの経路である。**
-api の土台と、テストで使う土台2つは、**イメージを作るたび・テストを流すたびに自動で取り直す**（同じ一覧）。
+**土台は Dependabot で追わないと決めており**（理由と、タグごとの取り込みの経路の一覧は
+[dependabot.yml](.github/dependabot.yml) の末尾）、次のとおりである。
+
+- **db（`postgres:17-bookworm`）: `docker compose build --pull db` が唯一の経路である。** 叩かなければ古いまま。
+- **redis（`valkey/valkey:8-alpine`）: `docker compose pull redis` のほかに、`npm test` のたびに取り直す経路がある**
+  （テストが同じタグを使う）。**手元でテストを回さないなら、この操作だけが経路になる。**
+- api の土台は、**イメージを作るたびに自動で取り直す**（同じ一覧）。
 
 **接続先の組み立て方**（この節を「接続先の組み立て方」と呼ぶ。`DATABASE_URL` を含む）。
 `.env` に書いた値から組み立てる。
