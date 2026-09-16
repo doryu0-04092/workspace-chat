@@ -516,10 +516,12 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 - **まず、以降の段が使う値を束縛する**（`release.sh` と同じ代入の形。以降の段はこれを参照する）。
 
   ```sh
-  # 以降の terraform は、この tf を通して打つ（release.sh と同じ形。-chdir をここに1回だけ書く）
-  tf() { terraform -chdir=infra/production "$@"; }
+  # 以降の terraform は、この tf を通して打つ（release.sh と同じ形。-chdir をここに1回だけ書く）。
+  # **リポジトリの根から採る**ので、どのディレクトリで打っても同じ構成に当たる
+  repo=$(git rev-parse --show-toplevel)
+  tf() { terraform -chdir="$repo/infra/production" "$@"; }
 
-  TF_STATE_BUCKET=$(terraform -chdir=infra/bootstrap output -raw state_bucket)
+  TF_STATE_BUCKET=$(terraform -chdir="$repo/infra/bootstrap" output -raw state_bucket)
   tf init -input=false -backend-config="bucket=$TF_STATE_BUCKET"
   cluster=$(tf output -raw ecs_cluster_name)
   service=$(tf output -raw ecs_service_name)
@@ -537,7 +539,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   # endpoint = "" で落ちる——**落ちる位置は api を止めた後**である（全断のまま手が止まる）。
   # **`None` も弾く**——`aws ... --output text` は、該当が無いとき空文字ではなく文字列 `None` を出す
   missing=
-  for v in cluster service TF_VAR_image_tag TF_VAR_alarm_email; do
+  for v in repo cluster service TF_VAR_image_tag TF_VAR_alarm_email; do
     value=$(eval printf %s \"\$$v\")
     case "$value" in '' | None) missing="$missing $v" ;; esac
   done
@@ -547,6 +549,9 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **以降の段の `apply` は、すべて `tf apply -input=false …` と打つ**——`-chdir` を書き忘れると、
   **手元の作業ディレクトリの構成に当たる**（`infra/production` の外で打つと何も当たらないか、別の構成に当たる）。
   `-input=false` を付けるのは、**値を渡し忘れたときに対話で止めず、その場で落とす**ためである。
+- **版は上げるだけで、下げない。** 版の数字は追跡下のファイル（`infra/production` の `locals`）にあり、
+  **下げても write-only の値は入れ替わる**——**戻したつもりで、また別の値になる**。
+  差分はプランに出る（`apply` に `-auto-approve` は付けない）ので黙っては通らないが、**読み飛ばすと気づけない**。
 
   **`exit` は使わない**——この前置きは**貼った同じシェルに値を残すこと**が存在理由であり、
   `exit` を踏むと**シェルごと終わって、既に採れていた束縛まで全部消える**。
