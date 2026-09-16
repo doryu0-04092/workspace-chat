@@ -19,11 +19,12 @@ export async function announceUnreadTo(
   userId: string,
 ): Promise<void> {
   const unread = await unreadOfChannels(prisma, userId, [channelId]);
-  send(emitter, channelId, [[userId, unread.get(channelId)?.unread ?? 0]]);
+  const { unread: count = 0, mentions = 0 } = unread.get(channelId) ?? {};
+  send(emitter, channelId, [[userId, { unread: count, mentions }]]);
 }
 
 /**
- * **そのチャンネルの参加者それぞれに、その人の未読数を配る**（F-23。機能一覧 5.2・10.1）。
+ * **そのチャンネルの参加者それぞれに、その人の未読数とメンションの件数を配る**（F-23・F-24。機能一覧 5.2・10.1・10.2）。
  * 投稿・返信・削除のように、**全員の未読が変わりうる**ときに使う。
  *
  * **書いた本人には送らない**（`writerId`）——自分の投稿・自分の削除では自分の未読は変わらないため、送っても同じ値が届くだけである。
@@ -54,11 +55,11 @@ export async function announceUnreadToMembers(
 function send(
   emitter: RealtimeEmitter,
   channelId: string,
-  unreadByUser: readonly (readonly [string, number])[],
+  unreadByUser: readonly (readonly [string, UnreadCounts])[],
 ): void {
   const sentAt = new Date().toISOString();
-  for (const [userId, unread] of unreadByUser) {
-    const payload: UnreadUpdatedPayload = { channelId, unread, sentAt };
+  for (const [userId, { unread, mentions }] of unreadByUser) {
+    const payload: UnreadUpdatedPayload = { channelId, unread, mentions, sentAt };
     emitter.toUsers([userId], 'unread:updated', payload);
   }
 }
@@ -152,6 +153,16 @@ export async function advanceReadPosition<
 const UNREAD_COUNT = Prisma.sql`COUNT(m."id")`;
 
 /**
+ * メンションの件数（F-24。機能一覧 10.2）。**未読の行（`m`）のうち、その参加者をメンションしているもの**を数える。
+ * `mm` は `UNREAD_JOINS` の最後の `LEFT JOIN` である。
+ *
+ * **踏むと壊れる: 未読と別の問い合わせで数えない。** 同じ `UNREAD_JOINS` を通すから、既読位置・削除済み・自分の投稿・
+ * 返信を含める設定がそのまま効き、**メンションの件数は常に未読以下**になる（既読を進めると一緒に減る）。
+ * **`FILTER` 句も使わない**——上の `UNREAD_COUNT` の不変条件と同じ理由で、数える条件は結合の `ON` 側に置く。
+ */
+const MENTION_COUNT = Prisma.sql`COUNT(mm."messageId")`;
+
+/**
  * スレッドの返信を数えるかは利用者の設定による（`User.threadUnreadIncluded`。既定は数える。機能一覧 10.1）。
  *
  * **踏むと壊れる: これも結合の `ON` 側に置く。** `FILTER` 句に置くと、
@@ -214,7 +225,8 @@ const AFTER_THREAD_READ_POSITION = Prisma.sql`
 `;
 
 /**
- * 未読を数える結合（利用者・既読位置・メッセージ・スレッドの既読位置）。上の `UNREAD_COUNT` と対で使う。
+ * 未読を数える結合（利用者・既読位置・メッセージ・スレッドの既読位置・メンションの対象）。上の `UNREAD_COUNT` と `MENTION_COUNT` の両方と対で使う
+ * （メンションの対象〔`mm`〕は最後の `LEFT JOIN` で、`MENTION_COUNT` だけが数える）。
  *
  * **踏むと壊れる: メッセージを絞る条件は、この `ON` 側に置く。** `FILTER` 句へ移すと、
  * **プランナが結合まで押し下げられず**（集約の段でしか評価できない）、参加者数 × そのチャンネルの全メッセージを
@@ -245,13 +257,23 @@ const UNREAD_JOINS = Prisma.sql`
    AND m."deletedAt" IS NULL
    AND m."authorId" <> cm."userId"
    AND m."createdAt" >= cm."joinedAt"
+  LEFT JOIN "MessageMention" mm
+    ON mm."messageId" = m."id"
+   AND mm."userId" = cm."userId"
 `;
+// **踏むと壊れる: `mm` の結合は、メッセージ1件につき高々1行でなければならない。** `MessageMention` の
+// `@@unique([messageId, userId])` がそれを保証しており、だから `UNREAD_COUNT` の値が変わらない。
+// この一意制約を外すと、同じ人を2回メンションした投稿が未読に2件と数えられる。
 
-/** 一覧が1つのチャンネルについて出す値（機能一覧 10.1）。 */
-export type ChannelUnread = { unread: number; lastReadMessageId: string | null };
+/** 未読数とメンションの件数（機能一覧 10.1・10.2）。 */
+export type UnreadCounts = { unread: number; mentions: number };
+
+/** 一覧が1つのチャンネルについて出す値（機能一覧 10.1・10.2）。 */
+export type ChannelUnread = UnreadCounts & { lastReadMessageId: string | null };
 
 /**
- * 1人ぶんの未読数と既読位置を、参加しているチャンネルごとに返す（一覧。`Channel.unread` と `Channel.lastReadMessageId`）。
+ * 1人ぶんの未読数・メンションの件数・既読位置を、参加しているチャンネルごとに返す
+ * （一覧。`Channel.unread`・`Channel.mentions`・`Channel.lastReadMessageId`）。
  *
  * **既読位置も一緒に返す**——「ここから未読」の区切り線は、この位置の次のメッセージの上に出す（10.1）。
  * **未読数から位置を数えてはならない**: 自分の投稿と削除済みは未読に数えないが、一覧には並ぶため必ずずれる。
@@ -265,36 +287,42 @@ export async function unreadOfChannels(
   if (channelIds.length === 0) return new Map();
   const ids = Prisma.join(channelIds.map((id) => Prisma.sql`${id}::uuid`));
   const rows = await prisma.$queryRaw<
-    { channelId: string; unread: bigint; lastReadMessageId: string | null }[]
+    { channelId: string; unread: bigint; mentions: bigint; lastReadMessageId: string | null }[]
   >`
     SELECT cm."channelId" AS "channelId",
            ${UNREAD_COUNT} AS "unread",
+           ${MENTION_COUNT} AS "mentions",
            MIN(cr."lastReadMessageId"::text) AS "lastReadMessageId"
     ${UNREAD_JOINS}
     WHERE cm."userId" = ${userId}::uuid AND cm."channelId" IN (${ids})
     GROUP BY cm."channelId"
   `;
   return new Map(
-    rows.map(({ channelId, unread, lastReadMessageId }) => [
+    rows.map(({ channelId, unread, mentions, lastReadMessageId }) => [
       channelId,
-      { unread: Number(unread), lastReadMessageId },
+      { unread: Number(unread), mentions: Number(mentions), lastReadMessageId },
     ]),
   );
 }
 
 /**
- * 1チャンネルぶんの未読数を、そのチャンネルの参加者ごとに返す（配信。`unread:updated`）。
+ * 1チャンネルぶんの未読数とメンションの件数を、そのチャンネルの参加者ごとに返す（配信。`unread:updated`）。
  * **返すのは参加者だけである**——`unread:updated` の宛先を、この結果からそのまま作ってよい（5.2 の資格の確認がここで済む）。
  */
 export async function unreadOfMembers(
   prisma: PrismaService,
   channelId: string,
-): Promise<Map<string, number>> {
-  const rows = await prisma.$queryRaw<{ userId: string; unread: bigint }[]>`
-    SELECT cm."userId" AS "userId", ${UNREAD_COUNT} AS "unread"
+): Promise<Map<string, UnreadCounts>> {
+  const rows = await prisma.$queryRaw<{ userId: string; unread: bigint; mentions: bigint }[]>`
+    SELECT cm."userId" AS "userId", ${UNREAD_COUNT} AS "unread", ${MENTION_COUNT} AS "mentions"
     ${UNREAD_JOINS}
     WHERE cm."channelId" = ${channelId}::uuid AND u."deletedAt" IS NULL
     GROUP BY cm."userId"
   `;
-  return new Map(rows.map(({ userId, unread }) => [userId, Number(unread)]));
+  return new Map(
+    rows.map(({ userId, unread, mentions }) => [
+      userId,
+      { unread: Number(unread), mentions: Number(mentions) },
+    ]),
+  );
 }

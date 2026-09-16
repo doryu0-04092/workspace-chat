@@ -290,7 +290,7 @@
 | `message:updated` | メッセージの編集（スレッドの返信件数が変わった親を含む） |
 | `message:deleted` | メッセージの削除 |
 | `reaction:changed` | リアクションの追加・取り消し |
-| `unread:updated` | 未読件数の変化 |
+| `unread:updated` | 未読件数とメンションの件数の変化 |
 | `typing:start` / `typing:stop` | 入力中インジケータ（提-3 / [機能一覧](features.md) F-34） |
 | `presence:changed` | 在席状態の変化（[機能一覧](features.md) F-22） |
 | `invitation:new` | ワークスペースへの招待が届いた（招待された利用者の部屋へ送る。[機能一覧](features.md) F-38。**提案・承認済・2026-09-12**。#326） |

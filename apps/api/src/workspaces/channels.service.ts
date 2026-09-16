@@ -74,6 +74,7 @@ export class ChannelsService {
           joined: true,
           joinedAt: member.joinedAt.toISOString(),
           unread: 0,
+          mentions: 0,
           lastReadMessageId: null,
         };
       });
@@ -112,9 +113,10 @@ export class ChannelsService {
     return rows.map(({ members, ...channel }) => ({
       ...channel,
       joined: members.length > 0,
-      // **参加していないチャンネルは、参加時刻なし・未読 0・既読位置なし**（既読位置も参加も持たない。機能一覧 10.1）。
+      // **参加していないチャンネルは、参加時刻なし・未読 0・メンション 0・既読位置なし**（既読位置も参加も持たない。機能一覧 10.1・10.2）。
       joinedAt: members[0]?.joinedAt.toISOString() ?? null,
       unread: unread.get(channel.id)?.unread ?? 0,
+      mentions: unread.get(channel.id)?.mentions ?? 0,
       lastReadMessageId: unread.get(channel.id)?.lastReadMessageId ?? null,
     }));
   }

@@ -74,7 +74,7 @@ export function useJoinChannel(workspaceId: string) {
 /**
  * 既読位置を進める（F-23。REST の仕様の updateChannelRead）。
  * **戻さないのは api が持つ不変条件である**（渡した位置が今より古ければ何もしない。機能一覧 10.1）。
- * 一覧は読み直さない——進めた後の未読数は `unread:updated` で届く。
+ * 一覧は読み直さない——進めた後の未読数とメンションの件数は `unread:updated` で届く。
  */
 export function useUpdateChannelRead(workspaceId: string, channelId: string) {
   const store = useSessionStore();
@@ -91,13 +91,15 @@ export function useUpdateChannelRead(workspaceId: string, channelId: string) {
   });
 }
 
-/** 配信で届いた未読数を、読み込んである一覧に当てる。読み込んでいなければ何もしない（一覧を作らない）。 */
+/** 配信で届いた未読数とメンションの件数を、読み込んである一覧に当てる。読み込んでいなければ何もしない（一覧を作らない）。 */
 export function setChannelUnread(
   channels: Channel[] | undefined,
   channelId: string,
-  unread: number,
+  { unread, mentions }: { unread: number; mentions: number },
 ): Channel[] | undefined {
-  return channels?.map((channel) => (channel.id === channelId ? { ...channel, unread } : channel));
+  return channels?.map((channel) =>
+    channel.id === channelId ? { ...channel, unread, mentions } : channel,
+  );
 }
 
 export function useCreateChannel(workspaceId: string) {

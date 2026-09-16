@@ -12,6 +12,7 @@ export const GENERAL = {
   // メッセージの雛形（`message(n)` は n 分目）より前に置き、既定ではすべてが参加より後になるようにする
   joinedAt: '2026-09-14T00:00:00.000Z',
   unread: 0,
+  mentions: 0,
   lastReadMessageId: null,
 };
 /** テストで使うワークスペース。参加している側にする（オーナー専用の作成のフォームを出さない）。 */
@@ -78,10 +79,16 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
  * 未読のあるチャンネル（F-23。機能一覧 10.1）。
  * 既読位置は `lastReadMessageId`、**既読位置をまだ持たないときの線の境目**は `joinedAt` で渡す。
  */
-export function channelWithUnread(
-  unread: number,
-  lastReadMessageId: string | null = null,
-  joinedAt: string | null = GENERAL.joinedAt,
-) {
-  return { ...GENERAL, unread, lastReadMessageId, joinedAt };
+export function channelWithUnread({
+  unread,
+  mentions = 0,
+  lastReadMessageId = null,
+  joinedAt = GENERAL.joinedAt,
+}: {
+  unread: number;
+  mentions?: number;
+  lastReadMessageId?: string | null;
+  joinedAt?: string | null;
+}) {
+  return { ...GENERAL, unread, mentions, lastReadMessageId, joinedAt };
 }

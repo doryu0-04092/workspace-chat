@@ -783,6 +783,11 @@ model MessageMention {
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   /// 本文に同じ利用者を2回書いても1件。メッセージの対象を引く向きにも効く。
+  ///
+  /// **踏むと壊れる: 未読とメンションの集計が、この一意制約に頼っている**（F-23・F-24。機能一覧 10.1・10.2）。
+  /// `unread.ts` の `UNREAD_JOINS` は、この表を `messageId` と `userId` で `LEFT JOIN` している。
+  /// 1組に1行だから `COUNT(m."id")` の値が変わらない。**この制約を外す・別の組に変えると、同じ組の行が2つあるメッセージを
+  /// 未読に2件と数える**——メンションの件数だけでなく、**未読数まで実体より多くなる**。
   @@unique([messageId, userId])
 }
 

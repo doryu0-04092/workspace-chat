@@ -7,7 +7,7 @@ import { useRealtime } from './realtime-context';
 const UNREAD_UPDATED = 'unread:updated' satisfies RealtimeEventName;
 
 /**
- * 未読数のリアルタイムの反映（F-23。機能一覧 10.1・5.2）。
+ * 未読数とメンションの件数のリアルタイムの反映（F-23・F-24。機能一覧 10.1・10.2・5.2）。
  * **配信で届いた値を、読み込んである一覧に当てるだけで、一覧は読み直さない**（技術スタックの「データ取得」）。
  * **配信はその未読の持ち主にだけ届く**ため、届いた値をそのまま自分の未読として扱ってよい。
  */
@@ -16,9 +16,9 @@ export function useUnreadRealtime(workspaceId: string) {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const onUnread = ({ channelId, unread }: UnreadUpdatedPayload) => {
+    const onUnread = ({ channelId, unread, mentions }: UnreadUpdatedPayload) => {
       queryClient.setQueryData<Channel[]>(channelsKey(workspaceId), (channels) =>
-        setChannelUnread(channels, channelId, unread),
+        setChannelUnread(channels, channelId, { unread, mentions }),
       );
     };
     socket.on(UNREAD_UPDATED, onUnread);

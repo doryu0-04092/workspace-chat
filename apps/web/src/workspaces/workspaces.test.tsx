@@ -21,6 +21,7 @@ const GENERAL = {
   visibility: 'PUBLIC',
   joined: true,
   unread: 0,
+  mentions: 0,
   lastReadMessageId: null,
 };
 const RANDOM = {
@@ -29,6 +30,7 @@ const RANDOM = {
   visibility: 'PUBLIC',
   joined: false,
   unread: 0,
+  mentions: 0,
   lastReadMessageId: null,
 };
 const SECRET = {
@@ -37,6 +39,7 @@ const SECRET = {
   visibility: 'PRIVATE',
   joined: true,
   unread: 0,
+  mentions: 0,
   lastReadMessageId: null,
 };
 
