@@ -512,7 +512,10 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 **秘密の値が漏れた疑いがあるとき**、`DATABASE_URL`・`REDIS_URL` は次のとおり入れ替える（決定・2026-09-16・作業側。依頼側の委任による。#423）。定期の入れ替えはしない（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。
 
 - **RDS のマスターパスワード（`DATABASE_URL`）は、api を止めてから入れ替える。** 1つの DB 利用者に新旧のパスワードを同時に通用させる手段は、確かめた文書の中に無い。api の接続プールは使っていない接続を 10 秒で閉じる（pg-pool の既定の `idleTimeoutMillis`）ため、止めずに入れ替えると、変更が当たってから古いタスクが入れ替わるまで、古いタスクが新しく張る接続が断られる。死活確認は DB を見ない（[機能一覧](features.md) 14.1）ため、その間も ALB は正常と判定する
-  1. **Terraform の外で** api のサービスの desired count を 0 にし（`aws ecs update-service --desired-count 0`）、タスクが無くなるのを待つ。
+  1. **Terraform の外で** api のサービスの desired count を 0 にし、タスクが無くなるのを待つ。
+     クラスターとサービスの名前は `terraform output` から採る（`ecs_cluster_name` / `ecs_service_name`。`infra/production/outputs.tf`）——
+     `aws ecs update-service --cluster "$(terraform -chdir=infra/production output -raw ecs_cluster_name)" --service "$(terraform -chdir=infra/production output -raw ecs_service_name)" --desired-count 0`。
+     **`--cluster` を省くと `default` クラスターが仮定される**（このリポジトリのクラスターは `default` ではない）。
      **`local.api_task_count`（`infra/production/service.tf`）は直さない**——直すと手順 2 の `-target` の理由が消え、
      手順 4 の対象を絞らない `apply` でも構成が 0 のままでサービスが戻らない。
      この値はタスク定義の `API_TASK_COUNT` にも渡っており、レート制限の数え方まで巻き込む
@@ -523,8 +526,11 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
      Terraform が 0 を構成の値に戻す
   5. ログインとメッセージの一覧で、DB に繋がることを確かめる
 
-  **代償: 入れ替えの間（数分。測っていない）、サービス全体が止まる。** 一部の要求だけが失敗する状態は作らない
-- **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`-replace=aws_elasticache_replication_group.valkey` と `valkey_auth_token_version` の引き上げを同じ `apply` で行い、その後に ECS のタスクを入れ替える。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）
+  **代償: 入れ替えの間（数分。測っていない）、サービス全体が止まる。** 一部の要求だけが失敗する状態は作らない。
+  **この間、下記「アラート」の 5xx 率が鳴る**——ALB は健全なターゲットが無いとき 503 を返すため、
+  全断はそのアラートで捕まる。**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**
+- **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`-replace=aws_elasticache_replication_group.valkey` と `valkey_auth_token_version` の引き上げを同じ `apply` で行い、その後に ECS のタスクを入れ替える。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）。
+  **この間、下記「アラート」のメトリクス欠損が鳴る**（作り直しで古いクラスタが消えるため）。**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**
 - **2つの DB 利用者を交互に使い、止めずに入れ替える形は採らない**（Secrets Manager の文書が可用性の要る場合に勧める形。「After rotation, both `user` and `user_clone` credentials are valid.」）。DB は外から繋げないため、利用者の作成・権限の付与・パスワードの設定を、psql を持つマイグレーション用のタスクで流す仕組みが要る。**代償は、上の RDS の計画停止である**
 
 - **RTO（復旧までの目標時間）は定めない。** 学習用途であり、停止が業務に影響しないため

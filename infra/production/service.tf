@@ -10,6 +10,11 @@
 locals {
   # 0.25 vCPU / 0.5 GB × 2 タスク（技術スタックの「リソースのサイジング」の ECS Fargate の行）。
   # api_task_count は API_TASK_COUNT にも渡す（apps/api/src/rate-limit/rate-limit-config.ts。Valkey が止まっている間、上限をこの数で割る）。
+  #
+  # 踏むと壊れる: **秘密の値の入れ替えで api を止めるときに、この値を 0 にしない**
+  # （要件定義書 4.2「秘密の値が漏れた疑いがあるとき」手順 1。止めるのは Terraform の外である）。
+  # ここを 0 にして apply すると、手順 2 が対象を絞る理由が消え、**手順 4 の対象を絞らない apply でも
+  # 構成が 0 のままでサービスが戻らない**（全断が続く）。API_TASK_COUNT も 0 になり、レート制限の数え方まで巻き込む。
   api_task_cpu    = 256
   api_task_memory = 512
   api_task_count  = 2
