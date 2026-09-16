@@ -875,14 +875,28 @@ describe('未読管理（F-23）', () => {
       expect(await mentionsOf(bob, workspace.id, channelId)).toBe(0);
     });
 
-    it('参加していないチャンネルのメンションの件数は常に 0', async () => {
+    // **メンションの行を実在させてから抜ける。** 参加していない利用者へのメンションは行を作らない（9.1）ため、
+    // 参加させずに投稿すると、どんな数え方でも 0 になり、このテストは落ちようがない（#531 第2巡の 🔴1）。
+    // `MessageMention` は退出しても残る（schema.prisma）ので、参加で絞らずに数える形に変えるとここで落ちる。
+    it('参加していないチャンネルのメンションの件数は常に 0——抜ける前にメンションされていても', async () => {
       const alice = await login();
       const bob = await login();
       const workspace = await workspaceWith(alice, bob);
-      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice]);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      await posted(alice, workspace.id, channelId, `@${bob.loginId} 抜ける前に`);
+      expect(await mentionsOf(bob, workspace.id, channelId)).toBe(1);
 
-      await posted(alice, workspace.id, channelId, `@${bob.loginId} 参加していない人へ`);
+      expect(
+        (
+          await request(
+            'POST',
+            `/workspaces/${workspace.id}/channels/${channelId}/leave`,
+            bob.authorization,
+          )
+        ).status,
+      ).toBe(204);
 
+      expect(await prisma.messageMention.count({ where: { userId: bob.id } })).toBe(1);
       const channel = await channelOf(bob, workspace.id, channelId);
       expect(channel?.joined).toBe(false);
       expect(channel?.mentions).toBe(0);
