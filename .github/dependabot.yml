@@ -87,6 +87,16 @@ updates:
 #   - redis（Valkey）のイメージ: **build: を持たないため --pull の対象にならない。**
 #     取り込むには docker compose pull redis が要る（compose.yaml の redis の注記と README の操作表）。
 #     db 側と同じく、人が叩いたときだけである
+#   - テストの土台2つ（apps/api/src/testing/postgres.ts の POSTGRES_IMAGE、
+#     apps/api/src/testing/valkey.ts の VALKEY_IMAGE）: **npm test を流すたびに取り直す**
+#     （testcontainers の PullPolicy.alwaysPull()）。**api 側と同じ強さである。**
+#     代償として「npm test が遅くなる」を各 docblock に書いてあるが、**速度を理由に外すと、
+#     この2つの土台の更新は誰にも届かなくなる**
 #
-# **pg_bigm の更新を追う経路は無い**（docker/postgres/Dockerfile が git clone で取り、
-# SHA-1 で固定するため、docker のエコシステムでも --pull でも追えない）。無いことをここに記録する。
+# **取り直しの書き方は3通りある**（--pull / docker pull / PullPolicy.alwaysPull()）。
+# 土台を足すときは、この列挙にも足す。**フラグの綴りで数えると漏れる**（#517 の第0〜2巡で3回起きた。機械の検査は #518）。
+#
+# **pg_bigm の更新を追う経路は無い**（docker/postgres/Dockerfile が SHA-1 を指定して git fetch で取るため、
+# docker のエコシステムでも --pull でも追えない）。無いことをここに記録する。
+# **clone してから SHA-1 を照合する形は、その Dockerfile がやめている**（同ファイルの注記。
+# それでは「同じ中身をビルドできる」ことを守れないため）。

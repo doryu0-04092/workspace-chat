@@ -27,6 +27,10 @@ import { PullPolicy } from 'testcontainers';
  * **代償: 土台を起動するたびにレジストリへ問い合わせるため npm test が遅くなり（手元でも CI でも。CI も同じジョブの中では
  * 2回目以降の起動で手元のイメージを使っていた）、レジストリに届かない環境では、手元にイメージがあっても起動できない**
  * （scripts/api-image.test.sh と同じ）。
+ *
+ * **踏むと壊れる: この取り直しが、この土台の更新を受け取る唯一の経路である。**
+ * 土台は Dependabot で追わないと決めており（理由は .github/dependabot.yml の末尾）、
+ * 速度を理由に取り直しをやめると、同じタグの中の更新（PostgreSQL 17 系の中の更新と OS の修正）が誰にも届かなくなる。
  */
 export const POSTGRES_IMAGE = 'postgres:17';
 
