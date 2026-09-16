@@ -6,6 +6,8 @@ import { useSessionStore } from '../auth/session-context';
 type Schemas = components['schemas'];
 export type Workspace = Schemas['Workspace'];
 export type Channel = Schemas['Channel'];
+export type WorkspaceMember = Schemas['WorkspaceMember'];
+export type UserSummary = Schemas['UserSummary'];
 export type MyInvitation = Schemas['MyInvitation'];
 export type Invitation = Schemas['Invitation'];
 
@@ -132,6 +134,81 @@ export function useLeaveWorkspace(workspaceId: string) {
       );
       return queryClient.invalidateQueries({ queryKey: keys.workspaces, exact: true });
     },
+  });
+}
+
+function membersKey(workspaceId: string) {
+  return ['workspaces', workspaceId, 'members'] as const;
+}
+
+function channelMembersKey(workspaceId: string, channelId: string) {
+  return ['workspaces', workspaceId, 'channels', channelId, 'members'] as const;
+}
+
+/**
+ * ワークスペースのメンバー（参加した順。REST の仕様の listWorkspaceMembers。F-06）。
+ * **`enabled` が false の間は読まない**——一覧を開いたときにだけ読む（画面を開くたびに読まない）。
+ */
+export function useWorkspaceMembers(workspaceId: string, enabled: boolean) {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: membersKey(workspaceId),
+    queryFn: () =>
+      requestJson<WorkspaceMember[]>(store, `/api/workspaces/${segment(workspaceId)}/members`),
+    enabled,
+  });
+}
+
+/** ワークスペースからキックする（F-09。オーナーだけ。判定は api）。通ったら、読み込んであるメンバーの一覧から外す。 */
+export function useKickWorkspaceMember(workspaceId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (memberId: string) =>
+      requestJson<void>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/members/${segment(memberId)}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: (_, memberId) =>
+      queryClient.setQueryData<WorkspaceMember[]>(membersKey(workspaceId), (members) =>
+        members?.filter((member) => member.id !== memberId),
+      ),
+  });
+}
+
+/**
+ * チャンネルの参加者（REST の仕様の listChannelMembers。F-10）。**`enabled` が false の間は読まない**（一覧を開いたときにだけ読む）。
+ */
+export function useChannelMembers(workspaceId: string, channelId: string, enabled: boolean) {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: channelMembersKey(workspaceId, channelId),
+    queryFn: () =>
+      requestJson<UserSummary[]>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/members`,
+      ),
+    enabled,
+  });
+}
+
+/** チャンネルから外す（F-09。オーナーだけ。そのチャンネルだけから外す。判定は api）。通ったら、読み込んである参加者の一覧から外す。 */
+export function useKickChannelMember(workspaceId: string, channelId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (memberId: string) =>
+      requestJson<void>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/members/${segment(memberId)}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: (_, memberId) =>
+      queryClient.setQueryData<UserSummary[]>(
+        channelMembersKey(workspaceId, channelId),
+        (members) => members?.filter((member) => member.id !== memberId),
+      ),
   });
 }
 
