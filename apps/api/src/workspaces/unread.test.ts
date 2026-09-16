@@ -786,4 +786,159 @@ describe('未読管理（F-23）', () => {
       expect(await unreadOf(bob, workspace.id, channelId)).toBe(2);
     });
   });
+
+  // 機能一覧 10.2（F-24）: 自分宛のメンション件数。**未読のうち、自分をメンションしているもの**として数える
+  // （同じ `UNREAD_JOINS` を通す。数え方を未読と分けると、片方だけが仕様とずれる）。#516。
+  describe('メンションの件数（F-24）', () => {
+    async function mentionsOf(
+      by: LoggedIn,
+      workspaceId: string,
+      channelId: string,
+    ): Promise<number> {
+      const channel = await channelOf(by, workspaceId, channelId);
+      expect(channel).toBeDefined();
+      return channel?.mentions ?? -1;
+    }
+
+    it('未読のうち、自分をメンションしているものだけを数える', async () => {
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const workspace = await workspaceWith(alice, bob, carol);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob, carol]);
+
+      await posted(alice, workspace.id, channelId, `@${bob.loginId} 見てください`);
+      await posted(alice, workspace.id, channelId, 'メンションなし');
+      await posted(alice, workspace.id, channelId, `@${carol.loginId} こちらはキャロルへ`);
+
+      expect(await unreadOf(bob, workspace.id, channelId)).toBe(3);
+      expect(await mentionsOf(bob, workspace.id, channelId)).toBe(1);
+      expect(await mentionsOf(carol, workspace.id, channelId)).toBe(1);
+      expect(await mentionsOf(alice, workspace.id, channelId)).toBe(0);
+    });
+
+    it('自分で自分をメンションした投稿は数えない', async () => {
+      const alice = await login();
+      const workspace = await workspaceWith(alice);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice]);
+
+      await posted(alice, workspace.id, channelId, `@${alice.loginId} 自分宛のメモ`);
+
+      expect(await mentionsOf(alice, workspace.id, channelId)).toBe(0);
+    });
+
+    it('削除されたメッセージのメンションは数えない', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const message = await posted(alice, workspace.id, channelId, `@${bob.loginId} 消します`);
+      expect(await mentionsOf(bob, workspace.id, channelId)).toBe(1);
+
+      const res = await fetch(
+        `${base}/api/workspaces/${workspace.id}/channels/${channelId}/messages/${message.id}`,
+        { method: 'DELETE', headers: { authorization: alice.authorization } },
+      );
+      expect(res.status).toBe(204);
+
+      expect(await mentionsOf(bob, workspace.id, channelId)).toBe(0);
+    });
+
+    it('既読を進めると、その位置までのメンションは数えなくなる', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const first = await posted(alice, workspace.id, channelId, `@${bob.loginId} 1つ目`);
+      await posted(alice, workspace.id, channelId, `@${bob.loginId} 2つ目`);
+      expect(await mentionsOf(bob, workspace.id, channelId)).toBe(2);
+
+      expect((await read(bob, workspace.id, channelId, first.id)).status).toBe(204);
+
+      expect(await mentionsOf(bob, workspace.id, channelId)).toBe(1);
+    });
+
+    // **メンションの件数は未読の部分集合である**——返信を未読に含めない設定の利用者には、返信の中のメンションも数えない。
+    // 代償として機能一覧 10.2 に記録した。
+    it('スレッドの返信のメンションは、返信を未読に含める設定のときだけ数える', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const parent = await posted(alice, workspace.id, channelId, '親');
+      await replied(alice, workspace.id, channelId, parent.id, `@${bob.loginId} 返信の中で`);
+      expect((await read(bob, workspace.id, channelId, parent.id)).status).toBe(204);
+      expect(await mentionsOf(bob, workspace.id, channelId)).toBe(1);
+
+      await prisma.user.update({ where: { id: bob.id }, data: { threadUnreadIncluded: false } });
+
+      expect(await mentionsOf(bob, workspace.id, channelId)).toBe(0);
+    });
+
+    it('参加していないチャンネルのメンションの件数は常に 0', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice]);
+
+      await posted(alice, workspace.id, channelId, `@${bob.loginId} 参加していない人へ`);
+
+      const channel = await channelOf(bob, workspace.id, channelId);
+      expect(channel?.joined).toBe(false);
+      expect(channel?.mentions).toBe(0);
+    });
+
+    it('作った直後のチャンネルのメンションの件数は 0', async () => {
+      const alice = await login();
+      const workspace = await workspaceWith(alice);
+
+      const res = await request(
+        'POST',
+        `/workspaces/${workspace.id}/channels`,
+        alice.authorization,
+        {
+          name: `mention-new-${Date.now().toString(36)}`,
+          visibility: 'PUBLIC',
+        },
+      );
+
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as Channel).mentions).toBe(0);
+    });
+
+    it('投稿されると、メンションされた参加者にはその件数が、されていない参加者には 0 が届く', async () => {
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const workspace = await workspaceWith(alice, bob, carol);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob, carol]);
+      const bobSocket = await open(bob);
+      const carolSocket = await open(carol);
+
+      const toBob = nextEvent(bobSocket, 'unread:updated', 3_000);
+      const toCarol = nextEvent(carolSocket, 'unread:updated', 3_000);
+      await posted(alice, workspace.id, channelId, `@${bob.loginId} ボブへ`);
+
+      const bobPayload = (await toBob) as UnreadUpdatedPayload;
+      expect(bobPayload).toMatchObject({ channelId, unread: 1, mentions: 1 });
+      const carolPayload = (await toCarol) as UnreadUpdatedPayload;
+      expect(carolPayload).toMatchObject({ channelId, unread: 1, mentions: 0 });
+    });
+
+    // **途中まで読む**——全部読むと届くのが 0 になり、配る値を 0 に固定しても通ってしまう。
+    it('既読を更新すると、減った後のメンションの件数が届く', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channelId = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const first = await posted(alice, workspace.id, channelId, `@${bob.loginId} 1つ目`);
+      await posted(alice, workspace.id, channelId, `@${bob.loginId} 2つ目`);
+      const bobSocket = await open(bob);
+
+      const toBob = nextEvent(bobSocket, 'unread:updated', 3_000);
+      expect((await read(bob, workspace.id, channelId, first.id)).status).toBe(204);
+
+      expect((await toBob) as UnreadUpdatedPayload).toMatchObject({ unread: 1, mentions: 1 });
+    });
+  });
 });

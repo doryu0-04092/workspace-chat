@@ -119,10 +119,12 @@ export type MessageDeletedPayload = {
  * チャンネルの部屋へは配らない（未読数はその人のものであり、他の参加者に配ると人数分の未読が全員に届く）。
  * 送るときに、持ち主がいまもそのチャンネルの参加者であることを呼ぶ側が確かめる（5.2）。
  * 出す契機は投稿・返信・削除・既読の更新。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
+ * `mentions` は、未読のうちその持ち主をメンションしているものの件数（F-24。機能一覧 10.2。REST の `Channel.mentions` と同じ値）。
  */
 export type UnreadUpdatedPayload = {
   readonly channelId: string;
   readonly unread: number;
+  readonly mentions: number;
   readonly sentAt: string;
 };
 
