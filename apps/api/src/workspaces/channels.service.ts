@@ -1,9 +1,11 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
+import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor } from './channel-access';
+import { advanceReadPosition, announceUnreadTo, unreadOfChannels } from './unread';
 import { CHANNEL_NAME_TAKEN } from './channel-errors';
 import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from './managed-channel';
 import { WorkspacesService } from './workspaces.service';
@@ -11,25 +13,35 @@ import { WorkspacesService } from './workspaces.service';
 type CreateOperation = paths['/workspaces/{id}/channels']['post'];
 export type CreateChannelRequest = CreateOperation['requestBody']['content']['application/json'];
 export type Channel = CreateOperation['responses'][201]['content']['application/json'];
+export type UpdateChannelReadRequest =
+  paths['/workspaces/{id}/channels/{channelId}/read']['put']['requestBody']['content']['application/json'];
 export type { ManagedChannel };
 export type ChannelMember =
   paths['/workspaces/{id}/channels/{channelId}/members']['get']['responses'][200]['content']['application/json'][number];
 
 /**
- * チャンネルの作成・一覧・オーナーの管理用の一覧・参加者一覧（F-10。機能一覧 3.1）。
+ * メンションの補完候補の上限（機能一覧 9.1。実装時に決めた値）。
+ * **踏むと壊れる: 変えるなら `packages/shared/openapi/openapi.yaml` の `listMentionCandidates` の `maxItems` と description、機能一覧 9.1 も同じ値にする**
+ * ——応答は仕様で検証しない（openapi-validation.ts の `validateResponses: false`）ため、片方だけ変えても何も落ちない。
+ */
+const MENTION_CANDIDATE_LIMIT = 10;
+
+/**
+ * チャンネルの作成・一覧・オーナーの管理用の一覧・参加者一覧（F-10。機能一覧 3.1）と、メンションの補完候補（F-20。9.1）。
  *
  * - **要求する側の所属（`Membership`・退会していない）を最初に確かめ、無ければ存在の有無を区別せず 404**
  *   （`WorkspacesService.membershipOf`。機能一覧 1.4 の2段構えの1段目もここで満たす）
  * - **プライベートチャンネルの可視性の根拠は `ChannelMember` の有無である**（CLAUDE.md 2。`schema.prisma` の `ChannelMember`）。
  *   **オーナーでも、参加していなければ一般の一覧には出さない**——オーナーの例外は管理用の一覧と参加者一覧（人の出入りの管理）と、アーカイブ・復元の応答（管理用の一覧と同じ項目）だけ
  * - 条件の形は `apps/api/src/prisma-schema.test.ts` の参照実装（`visibleChannels` / `manageableChannels` / `channelMemberViewers` /
- *   `channelMemberList`）に揃える。値はクライアントの問い合わせ API で渡す（文字列に埋め込まない）
+ *   `channelMemberList` / `mentionCandidatesByPrefix`）に揃える。値はクライアントの問い合わせ API か、`$queryRaw` のタグ付きテンプレートのプレースホルダで渡す（文字列に埋め込まない）
  */
 @Injectable()
 export class ChannelsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspacesService,
+    private readonly emitter: RealtimeEmitter,
   ) {}
 
   /**
@@ -52,8 +64,18 @@ export class ChannelsService {
           },
           select: { id: true, name: true, visibility: true },
         });
-        await tx.channelMember.create({ data: { channelId: channel.id, workspaceId, userId } });
-        return { ...channel, joined: true };
+        const member = await tx.channelMember.create({
+          data: { channelId: channel.id, workspaceId, userId },
+          select: { joinedAt: true },
+        });
+        // 作った直後は、そのチャンネルにメッセージが1件も無い（F-23。機能一覧 10.1）。
+        return {
+          ...channel,
+          joined: true,
+          joinedAt: member.joinedAt.toISOString(),
+          unread: 0,
+          lastReadMessageId: null,
+        };
       });
     } catch (error) {
       if (isUniqueViolation(error)) throw new ConflictException(CHANNEL_NAME_TAKEN);
@@ -77,11 +99,55 @@ export class ChannelsService {
         id: true,
         name: true,
         visibility: true,
-        members: { where: { userId }, select: { id: true } },
+        // **参加した時刻は「ここから未読」の線に要る**（既読位置をまだ持たない利用者。機能一覧 10.1）。
+        members: { where: { userId }, select: { id: true, joinedAt: true } },
       },
       orderBy: { name: 'asc' },
     });
-    return rows.map(({ members, ...channel }) => ({ ...channel, joined: members.length > 0 }));
+    const unread = await unreadOfChannels(
+      this.prisma,
+      userId,
+      rows.filter(({ members }) => members.length > 0).map(({ id }) => id),
+    );
+    return rows.map(({ members, ...channel }) => ({
+      ...channel,
+      joined: members.length > 0,
+      // **参加していないチャンネルは、参加時刻なし・未読 0・既読位置なし**（既読位置も参加も持たない。機能一覧 10.1）。
+      joinedAt: members[0]?.joinedAt.toISOString() ?? null,
+      unread: unread.get(channel.id)?.unread ?? 0,
+      lastReadMessageId: unread.get(channel.id)?.lastReadMessageId ?? null,
+    }));
+  }
+
+  /**
+   * 既読位置の更新（F-23。機能一覧 10.1）。**コードは参加者一覧と同じ2段階で、オーナーの例外は及ばない**
+   * （参加していないチャンネルに既読位置を持たない）。渡された id が、そのチャンネルの削除されていないメッセージでなければ 404。
+   *
+   * **既読位置は進めるだけで戻さない**——渡された id が、いま持っている位置より古ければ何も変えない（応答は 204 のまま。10.1）。
+   */
+  async updateRead(
+    userId: string,
+    workspaceId: string,
+    channelId: string,
+    lastReadMessageId: string,
+  ): Promise<void> {
+    await this.workspaces.membershipOf(userId, workspaceId);
+    assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
+    // **チャンネルの既読位置に入れてよいのは本体だけである**（`parentId: null`）。返信を入れると、
+    // スレッドの既読位置（`ThreadRead`）で決めるはずの範囲を、チャンネルの側から動かせてしまう（#505 第1巡の 🔴1）。
+    const message = await this.prisma.message.findFirst({
+      where: { id: lastReadMessageId, channelId, parentId: null, deletedAt: null },
+      select: { id: true },
+    });
+    if (message === null) throw new NotFoundException();
+    await advanceReadPosition(this.prisma.channelRead, {
+      where: { channelId, userId },
+      create: { channelId, workspaceId, userId, lastReadMessageId },
+      lastReadMessageId,
+    });
+    // **変わったのは自分の未読だけ**なので、自分の部屋へ1件だけ送る（機能一覧 5.2・10.1）。
+    // 資格の確認は上の2段階で済んでいる（参加者でなければここへ来ない）。
+    await announceUnreadTo(this.emitter, this.prisma, channelId, userId);
   }
 
   /**
@@ -114,5 +180,35 @@ export class ChannelsService {
       orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
     });
     return rows.map(({ membership: { user } }) => toUserSummary(user));
+  }
+
+  /**
+   * メンションの補完候補（F-20。機能一覧 9.1。参照実装は prisma-schema.test.ts の `mentionCandidatesByPrefix`）。
+   * **候補は投稿時の宛先解決（経路1）で解決できる利用者と一致させる**——対象も要求する側も、そのチャンネルの参加者で退会していない。違うのは前方一致であることだけ。
+   * **オーナーの例外は及ばない**（`members` と違い、役割によらず参加の2段階を当てる。候補に出た利用者は、参加者でなければ投稿で解決されない）。
+   * - 照合は `lower()` の前方一致で、**`LIKE` を使わない**（`_` はユーザーID の文字であり、`LIKE` のワイルドカードでもある）
+   * - **踏むと壊れる: 生の SQL は schema.prisma の列名の写し（`@map`）を通らない**——`User.loginId` の列は `"userId"` である
+   */
+  async mentionCandidates(
+    userId: string,
+    workspaceId: string,
+    channelId: string,
+    prefix: string,
+  ): Promise<ChannelMember[]> {
+    await this.workspaces.membershipOf(userId, workspaceId);
+    assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
+    const rows = await this.prisma.$queryRaw<
+      { id: string; loginId: string; displayName: string }[]
+    >`
+      SELECT u."id", u."userId" AS "loginId", u."displayName"
+      FROM "User" u
+      JOIN "ChannelMember" cm ON cm."userId" = u."id" AND cm."channelId" = ${channelId}::uuid
+      JOIN "ChannelMember" vcm ON vcm."channelId" = ${channelId}::uuid AND vcm."userId" = ${userId}::uuid
+      JOIN "User" viewer ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
+      WHERE starts_with(lower(u."userId"), lower(${prefix})) AND u."deletedAt" IS NULL
+      ORDER BY lower(u."userId")
+      LIMIT ${MENTION_CANDIDATE_LIMIT}
+    `;
+    return rows.map(toUserSummary);
   }
 }

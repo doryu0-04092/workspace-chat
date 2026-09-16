@@ -1,4 +1,5 @@
 # ネットワーク（#452）。技術スタック「本番の HTTPS・秘密情報・state の置き場」の「ECS のタスクの置き場」と「HTTPS とドメイン」。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 #
 #   パブリックサブネット  … ECS のタスク（公開 IP 付き。イメージの取得の経路）
 #   プライベートサブネット … ALB（CloudFront の VPC オリジン）・RDS・ElastiCache

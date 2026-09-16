@@ -88,8 +88,8 @@ export type InvitationNewPayload = {
 };
 
 /**
- * `message:new` の payload（F-11。機能一覧 4.1・5.2）。チャンネルの部屋へ送る。
- * `message` は投稿の応答（REST の Message）と同じ形。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
+ * `message:new` の payload（F-11・F-17・F-20。機能一覧 4.1・5.2・6・9.1）。チャンネルの部屋へ送る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で送る。
+ * `message` は投稿・返信の応答（REST の Message）と同じ形（返信は `parentId` を持つ）。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
  */
 export type MessageNewPayload = {
   readonly message: components['schemas']['Message'];
@@ -97,7 +97,8 @@ export type MessageNewPayload = {
 };
 
 /**
- * `message:updated` の payload（F-13。機能一覧 4.2・5.2）。チャンネルの部屋へ送る。`message` は編集の応答と同じ形（`editedAt` を持つ）。
+ * `message:updated` の payload（F-13・F-17。機能一覧 4.2・5.2・6）。チャンネルの部屋へ送る。`message` は編集の応答と同じ形（`editedAt` を持つ）。
+ * **返信の投稿・削除で返信件数（`replyCount`）が変わった親も、これで送る**（`editedAt` は変わらない）。
  */
 export type MessageUpdatedPayload = {
   readonly message: components['schemas']['Message'];
@@ -110,6 +111,18 @@ export type MessageUpdatedPayload = {
 export type MessageDeletedPayload = {
   readonly channelId: string;
   readonly messageId: string;
+  readonly sentAt: string;
+};
+
+/**
+ * `unread:updated` の payload（F-23。機能一覧 10.1・5.2）。**その未読の持ち主の利用者の部屋へだけ送る**——
+ * チャンネルの部屋へは配らない（未読数はその人のものであり、他の参加者に配ると人数分の未読が全員に届く）。
+ * 送るときに、持ち主がいまもそのチャンネルの参加者であることを呼ぶ側が確かめる（5.2）。
+ * 出す契機は投稿・返信・削除・既読の更新。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
+ */
+export type UnreadUpdatedPayload = {
+  readonly channelId: string;
+  readonly unread: number;
   readonly sentAt: string;
 };
 

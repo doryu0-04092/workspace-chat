@@ -1,5 +1,6 @@
 # アラート（#452・#477）。要件定義書 4.2「アラート」と 4.6 の監視項目。
 # 通知先は SNS のメール購読（決定・2026-09-12・依頼側。送れるところまで作り、購読の確認は依頼側が行う）。夜間・休日の対応はしない。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 
 # 閾値は Terraform に置き、文書に数値を書かない（要件定義書 4.2「アラート」）。
 # 踏むと壊れる: どの値も、変えても validate も plan も CI も落ちない。変えるときは要件定義書 4.2「アラート」の意図に照らす。
@@ -30,6 +31,7 @@ locals {
   log_metric_namespace = "WorkspaceChat"
 }
 
+# トピックに発行を許すポリシー（aws_sns_topic_policy など）は IAM の面に入る——足すときは、main.tf の冒頭の条件に従い、検査の iamSurface の表も直す。
 resource "aws_sns_topic" "alerts" {
   name = "workspace-chat-alerts"
 }
