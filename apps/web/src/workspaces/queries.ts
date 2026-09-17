@@ -138,6 +138,11 @@ export function useLeaveWorkspace(workspaceId: string) {
   });
 }
 
+/**
+ * 管理用の一覧の鍵。
+ * **踏むと壊れる: チャンネルの参加者数か行を変える操作を足したら、通ったときにこの一覧を直すか取り直す。**
+ * 行に「参加者 N 人」と参加者の一覧を並べて出しており、片方だけ変わると同じ行の中で食い違う（#545 第0巡の 🔴1）。
+ */
 function managedChannelsKey(workspaceId: string) {
   return ['workspaces', workspaceId, 'managed-channels'] as const;
 }
@@ -330,6 +335,42 @@ export function useKickChannelMember(workspaceId: string, channelId: string) {
             : channel,
         ),
       );
+    },
+  });
+}
+
+/**
+ * チャンネルから抜ける（F-10。REST の仕様の leaveChannel）。
+ * 通ったら、一般の一覧で、パブリックは未参加に、プライベートは一覧から外す（見えなくなる）。
+ * 管理用の一覧（F-35）のそのチャンネルの人数は、抜けた本人の分だけ減らす。**どちらも取り直しを待たずにその場で直す**（#533 第0巡の 🔴1）。
+ */
+export function useLeaveChannel(workspaceId: string, channelId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      requestJson<void>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/leave`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      queryClient.setQueryData<Channel[]>(keys.channels(workspaceId), (channels) =>
+        channels?.flatMap((channel) => {
+          if (channel.id !== channelId) return [channel];
+          if (channel.visibility === 'PRIVATE') return [];
+          return [{ ...channel, joined: false }];
+        }),
+      );
+      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+        channels?.map((channel) =>
+          channel.id === channelId
+            ? { ...channel, memberCount: Math.max(0, channel.memberCount - 1) }
+            : channel,
+        ),
+      );
+      // **取り直しを待たない**——待つと、取り直しが返るまで画面を移れない（一覧はその場で直してある）
+      void queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
     },
   });
 }

@@ -1,0 +1,137 @@
+import { act, fireEvent, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { error, fakeFetch, json } from '../testing/fake-api';
+import {
+  CHANNEL_PATH,
+  GENERAL,
+  MESSAGES,
+  page,
+  routes,
+  WORKSPACE,
+  WORKSPACE_ID,
+} from '../testing/fake-messages';
+import { renderApp } from '../testing/render-app';
+
+// 機能一覧 2.2（F-10）: チャンネルからの退出の web。#541。
+
+const CHANNELS = `GET /api/workspaces/${WORKSPACE_ID}/channels`;
+const LEAVE = `POST /api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/leave`;
+const MANAGED = `GET /api/workspaces/${WORKSPACE_ID}/managed-channels`;
+const SECRET = { ...GENERAL, name: 'secret', visibility: 'PRIVATE' };
+
+/** メッセージの一覧は空で返す（返さないと、その読み込みの失敗の alert を、退出の失敗と取り違える）。 */
+function channelRoutes(extra: Parameters<typeof routes>[0] = {}) {
+  return routes({ [`GET ${MESSAGES}`]: () => page([]), ...extra });
+}
+
+/** 初回だけ返し、取り直しは返さない応答——キャッシュの一覧が、取り直しを待つ間にどう描かれるかを見るため。 */
+function onceThenNever(first: () => Response) {
+  let calls = 0;
+  return () => (calls++ === 0 ? first() : new Promise<Response>(() => {}));
+}
+
+async function pause() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('チャンネルからの退出（F-10）', () => {
+  it('確かめを取り消したら、api に送らない', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { count } = fakeFetch(channelRoutes());
+    renderApp(CHANNEL_PATH);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'このチャンネルから抜ける' }));
+    await pause();
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(count(LEAVE)).toBe(0);
+    expect(screen.getByRole('heading', { name: '# general' })).toBeDefined();
+  });
+
+  // **一覧の取り直しは返さない**——抜けたチャンネルが、取り直しを待つ間も参加しているように描かれないことを見る（#533 第0巡の 🔴1 と同じ型）。
+  it('パブリックチャンネルから抜けるとワークスペースの画面へ移り、取り直しを待たずに「参加する」に変わる', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { count } = fakeFetch(
+      channelRoutes({
+        [CHANNELS]: onceThenNever(() => json(200, [GENERAL])),
+        [LEAVE]: () => new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'このチャンネルから抜ける' }));
+
+    const list = within(await screen.findByRole('list', { name: 'チャンネル' }));
+    expect(list.getByRole('button', { name: 'general に参加する' })).toBeDefined();
+    expect(list.queryByRole('link', { name: /general/ })).toBeNull();
+    expect(count(LEAVE)).toBe(1);
+  });
+
+  it('プライベートチャンネルから抜けるときは戻れないことを確かめ、抜けたら取り直しを待たずに一覧から外す', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const other = { ...GENERAL, id: '01920000-0000-7000-8000-0000000000c2', name: 'random' };
+    fakeFetch(
+      channelRoutes({
+        [CHANNELS]: onceThenNever(() => json(200, [other, SECRET])),
+        [LEAVE]: () => new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'このチャンネルから抜ける' }));
+
+    const list = within(await screen.findByRole('list', { name: 'チャンネル' }));
+    expect(list.getByRole('link', { name: '# random' })).toBeDefined();
+    expect(list.queryByText(/secret/)).toBeNull();
+    expect(confirm.mock.calls[0]?.[0]).toContain('招待');
+  });
+
+  it('断られたら理由を出して、チャンネルの画面に留まる', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fakeFetch(channelRoutes({ [LEAVE]: () => error(404, 'not_found') }));
+    renderApp(CHANNEL_PATH);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'このチャンネルから抜ける' }));
+
+    expect(await screen.findByRole('alert')).toBeDefined();
+    expect(screen.getByRole('heading', { name: '# general' })).toBeDefined();
+  });
+
+  // 管理用の一覧（F-35）の「参加者 N 人」は、抜けた本人の分だけ減る。**開き直したときの取り直しは返さない**——
+  // キャッシュの人数が、取り直しを待つ間に抜ける前のまま描かれないことを見る。
+  it('オーナーが抜けたら、管理用の一覧のそのチャンネルの人数を、取り直しを待たずに1人減らす', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const managed = {
+      id: GENERAL.id,
+      name: 'general',
+      visibility: 'PUBLIC',
+      memberCount: 2,
+      archived: false,
+    };
+    fakeFetch(
+      channelRoutes({
+        [`GET /api/workspaces/${WORKSPACE_ID}`]: () => json(200, { ...WORKSPACE, role: 'OWNER' }),
+        [CHANNELS]: onceThenNever(() => json(200, [GENERAL])),
+        [MANAGED]: onceThenNever(() => json(200, [managed])),
+        [LEAVE]: () => new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(`/workspaces/${WORKSPACE_ID}`);
+    fireEvent.click(await screen.findByRole('button', { name: 'チャンネルを管理する' }));
+    expect(await screen.findByText('参加者 2 人')).toBeDefined();
+
+    fireEvent.click(await screen.findByRole('link', { name: '# general' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'このチャンネルから抜ける' }));
+    await screen.findByRole('button', { name: 'general に参加する' });
+    fireEvent.click(await screen.findByRole('button', { name: 'チャンネルを管理する' }));
+
+    expect(await screen.findByText('参加者 1 人')).toBeDefined();
+  });
+});
