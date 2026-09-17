@@ -88,6 +88,10 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
     [`PUT ${READ}`]: () => new Response(null, { status: 204 }),
     // チャンネルの画面が、ピン留め済みの印を出すためにピン留めの一覧を読む（F-33）
     [`GET ${PINS}`]: () => json(200, { pins: [] }),
+    // 配信の署名付き Cookie（F-04・F-29）。既定は署名鍵を設定していない api と同じ 204（取り直さない）
+    'POST /api/avatars/cookies': () => new Response(null, { status: 204 }),
+    [`POST /api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/files/cookies`]: () =>
+      new Response(null, { status: 204 }),
     ...extra,
   };
 }

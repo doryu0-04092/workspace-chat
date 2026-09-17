@@ -67,6 +67,8 @@ resource "aws_ecs_task_definition" "api" {
   cpu                      = local.api_task_cpu
   memory                   = local.api_task_memory
   execution_role_arn       = aws_iam_role.task_execution.arn
+  # 確定の主体と、署名者のロールの引き受け（compute.tf の api_task。#427）。
+  task_role_arn = aws_iam_role.api_task.arn
 
   runtime_platform {
     cpu_architecture        = local.task_cpu_architecture
@@ -79,7 +81,8 @@ resource "aws_ecs_task_definition" "api" {
   # container_definitions は jsonencode([ … ]) の1つだけで、その要素はその場に書いたオブジェクトにする（local・merge・for で作ると、中身を読めずに検査が落ちる）。
   # コンテナの属性は name・image・essential・portMappings・environment・secrets・logConfiguration だけ（logConfiguration の中は logDriver・options だけ）。
   # 属性を足すときは、秘密を渡す別の経路（environmentFiles・secretOptions など）でないことを確かめてから、検査の許可リストにも足す。
-  # environment・secrets はその場に書いたリスト（[ … ]）にし、要素の name は文字列、secrets の valueFrom は aws_ssm_parameter.<名前>.arn の形で書く。
+  # environment・secrets はその場に書いたリスト（[ … ]）にし、要素の name は文字列、secrets の valueFrom は aws_ssm_parameter.<名前>.arn
+  # （Terraform が値を作る）か local.<名前>_arn（Terraform の外で値を置く。検査の externalParameters にあるものだけ）の形で書く。
   # api のコンテナの environment を空にしない（検査の「数え上げる対象がある」の下限で落ちる。空にするなら、その下限も直す）。
   container_definitions = jsonencode([
     {
@@ -95,15 +98,21 @@ resource "aws_ecs_task_definition" "api" {
       environment = [
         { name = "TRUST_PROXY_HOPS", value = tostring(local.trust_proxy_hops) },
         { name = "API_TASK_COUNT", value = tostring(local.api_task_count) },
-        { name = "WEB_ORIGIN", value = "https://${aws_cloudfront_distribution.main.domain_name}" },
+        { name = "WEB_ORIGIN", value = local.web_origin },
         # 添付とアバターのバケット（attachments.tf）。S3_ENDPOINT・S3_FORCE_PATH_STYLE は渡さない（AWS の既定の宛先と仮想ホスト形式）。
         { name = "S3_BUCKET", value = aws_s3_bucket.attachments.bucket },
         { name = "S3_REGION", value = data.aws_region.current.region },
+        # アップロード用の署名付き URL の署名者のロール（compute.tf の upload_signer。#427）。
+        { name = "S3_UPLOAD_ROLE_ARN", value = aws_iam_role.upload_signer.arn },
+        # 署名付き Cookie の公開鍵の ID（秘密ではない。delivery.tf）。対の秘密鍵は secrets の CLOUDFRONT_PRIVATE_KEY。
+        { name = "CLOUDFRONT_KEY_PAIR_ID", value = aws_cloudfront_public_key.signing[local.cloudfront_signing_key_name].id },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.database_url.arn },
         { name = "REDIS_URL", valueFrom = aws_ssm_parameter.redis_url.arn },
         { name = "JWT_SECRET", valueFrom = aws_ssm_parameter.jwt_secret.arn },
+        # Terraform の外で置くパラメータ（compute.tf の locals。値は state とプランに出ない）。
+        { name = "CLOUDFRONT_PRIVATE_KEY", valueFrom = local.cloudfront_private_key_parameter_arn },
       ]
       logConfiguration = {
         logDriver = "awslogs"

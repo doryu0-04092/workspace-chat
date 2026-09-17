@@ -78,7 +78,7 @@ describe('アバター画像（F-04）', () => {
     // S3 へはアクセストークンを送らない
     expect(headerOf(sent.init, 'Authorization')).toBeNull();
     expect(sent.init.body).toBe(file);
-    expect(calls.map((c) => c.key).filter((key) => /avatar|PUT/.test(key))).toEqual([
+    expect(calls.map((c) => c.key).filter((key) => /avatar\/uploads|PUT/.test(key))).toEqual([
       'POST /api/users/me/avatar/uploads',
       `PUT ${UPLOAD_URL}`,
       `POST /api/users/me/avatar/uploads/${UPLOAD_ID}/complete`,

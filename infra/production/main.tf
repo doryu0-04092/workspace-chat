@@ -18,6 +18,8 @@
 #   値を読むデータソース aws_ssm_parameter を使わない）。どのリソースでも password・secret・token を含むキーは write-only 引数（*_wo）と
 #   その版（*_wo_version）だけにし、*_wo の値は ephemeral.random_password から作る。*_wo はリソースのブロックの中にだけ書く（locals・output に書かない）。
 #   aws_ssm_parameter のキーは name・type・tier・value_wo・value_wo_version だけにする
+# - Terraform の外で値を置くパラメータ（CloudFront の署名鍵。#427）は、検査の externalParameters に名指しし、locals の <名前>_name と
+#   <名前>_arn（名前から組み立てた ARN）で渡す。aws_ssm_parameter のリソースもデータソースも作らない。値を置く手順は scripts/ のスクリプトにある
 # - main.tf のほかの .tf には、この注記を指す1行（「このファイルにも main.tf の冒頭の検査の条件が掛かる」）を置く。新しい .tf を足すときも置く
 #
 # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順は、この構成の名前・出力・設定を

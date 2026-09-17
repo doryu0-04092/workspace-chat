@@ -64,5 +64,7 @@ import { WorkspacesService } from './workspaces.service';
     ReactionsService,
     AttachmentsService,
   ],
+  // 添付の配信の Cookie の発行（delivery/）が、所属の判定に使う
+  exports: [WorkspacesService],
 })
 export class WorkspacesModule {}
