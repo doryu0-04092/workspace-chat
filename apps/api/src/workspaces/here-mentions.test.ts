@@ -120,7 +120,8 @@ describe('@here / @channel（F-21）', () => {
           );
         }
       },
-      { timeout: 3_000, interval: 50 },
+      // CI では、他のタスクへの在席の通知が手元より遅れて届く（10 本をまとめた PR の CI で、3 秒では1人ぶん届かなかった）
+      { timeout: 15_000, interval: 50 },
     );
   }
 
