@@ -223,6 +223,25 @@ describe('チャンネルの参加者（F-10・F-09）', () => {
     expect(count(`DELETE ${CHANNEL_MEMBERS}/${BOB.id}`)).toBe(0);
   });
 
+  it('チャンネルから外すのが断られたら理由を出し、一覧に残す', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { count } = fakeFetch(
+      channelRoutes({
+        ...AS_OWNER,
+        [`GET ${CHANNEL_MEMBERS}`]: () => json(200, [USER, BOB]),
+        [`DELETE ${CHANNEL_MEMBERS}/${BOB.id}`]: () => error(404, 'not_found'),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+    const list = await openList('参加者を見る', '参加者');
+
+    fireEvent.click(list.getByRole('button', { name: 'ボブ をチャンネルから外す' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('見つかりません');
+    expect(count(`DELETE ${CHANNEL_MEMBERS}/${BOB.id}`)).toBe(1);
+    expect(list.getByText(/ボブ/)).toBeDefined();
+  });
+
   it('参加者の一覧を読めなければ、理由を出す', async () => {
     fakeFetch(channelRoutes({ [`GET ${CHANNEL_MEMBERS}`]: () => error(500, 'internal_error') }));
     renderApp(CHANNEL_PATH);

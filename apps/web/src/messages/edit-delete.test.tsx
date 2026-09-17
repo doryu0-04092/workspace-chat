@@ -45,6 +45,28 @@ describe('編集・削除の操作を出す相手', () => {
     expect(within(deleted).queryByRole('button', { name: '編集する' })).toBeNull();
     expect(within(deleted).queryByRole('button', { name: '削除する' })).toBeNull();
   });
+
+  // 機能一覧 4.2 は、操作を出す場所を「チャンネルの一覧・スレッドの親・スレッドの返信」の3つに挙げる。
+  // **スレッドの親は `PagedMessages` を通らず、`ThreadPanel` が直接描く別の経路である**（#537）
+  it('スレッドの親が自分のメッセージなら、スレッドの中の親にも編集と削除を出す', async () => {
+    const parent = mine(2, { replyCount: 1 });
+    fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () => page([parent]),
+        [`GET ${MESSAGES}/${parent.id}/replies`]: () => page([message(3, { parentId: parent.id })]),
+      }),
+    );
+    renderApp(`${CHANNEL_PATH}?thread=${parent.id}`);
+    const thread = within(await screen.findByRole('region', { name: 'スレッド' }));
+
+    // 親はチャンネルの一覧が読み込まれてから出る。編集していないので、本文の文字は入力欄には無い
+    const own = (await thread.findByText('メッセージ 2')).closest('article')!;
+    expect(within(own).getByRole('button', { name: '編集する' })).toBeDefined();
+    expect(within(own).getByRole('button', { name: '削除する' })).toBeDefined();
+    // 返信は他人のメッセージで、出さない（取り違えていないことの確認）
+    const others = (await thread.findByText('メッセージ 3')).closest('article')!;
+    expect(within(others).queryByRole('button', { name: '編集する' })).toBeNull();
+  });
 });
 
 describe('編集（F-13）', () => {
