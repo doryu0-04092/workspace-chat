@@ -4,7 +4,8 @@ import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough';
 import { gfmAutolinkLiteral } from 'micromark-extension-gfm-autolink-literal';
 import { gfmStrikethrough } from 'micromark-extension-gfm-strikethrough';
 import Markdown from 'react-markdown';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import rehypeHighlight from 'rehype-highlight';
+import rehypeSanitize, { defaultSchema, type Options } from 'rehype-sanitize';
 import remarkBreaks from 'remark-breaks';
 
 /**
@@ -66,7 +67,7 @@ const ALLOWED_ELEMENTS = [
   'li',
   'code',
   'pre',
-  // メンション（F-20）。`mentionSpans` が作るものだけで、class は `MENTION_SCHEMA` が `mention` だけに絞る
+  // メンション（F-20）とコードブロックの色付け（F-32）。`mentionSpans` と rehype-highlight が作るものだけで、class は `SANITIZE_SCHEMA` が絞る
   'span',
 ];
 
@@ -121,10 +122,28 @@ function mentionSpans(mentions: readonly Mention[]) {
   };
 }
 
-/** 既定のスキーマに、メンションの `span` の class（`mention` だけ）を足す。ほかの要素と属性は既定のまま。 */
-const MENTION_SCHEMA = {
+/**
+ * 色付け（F-32）の字句の class。rehype-highlight（lowlight）が作る形だけを通す——
+ * 字句の種類は `hljs-` に英小文字と `-`・`_`（`hljs-built_in`・`hljs-selector-tag`）、段を重ねた種類の2段目以降は英小文字に `_` を段の数だけ（`class_`・`invoke__`）。
+ * 埋め込まれた別の言語を包む `span` の class（`css`・`javascript` など、言語の名前そのもの）は通さない（色付けの見た目に使われない）。
+ */
+const HIGHLIGHT_TOKEN_CLASSES = [/^hljs-[a-z]+(?:[-_][a-z]+)*$/, /^[a-z]+_+$/];
+
+/**
+ * 描画の手前で要素と属性を絞るスキーマ。**既定のスキーマに足すのは、次の class の名前だけ**で、ほかの要素と属性は既定のまま。
+ * - `span`: メンション（F-20）の `mention` と、色付け（F-32）の字句の class（`HIGHLIGHT_TOKEN_CLASSES`）
+ * - `code`: 既定の `language-*` に、色付けした印の `hljs`
+ *
+ * **踏むと壊れる: rehype-highlight より後に置く**——前に置くと、色付けが足した要素が絞られずに描かれる。
+ * **class をまとめて通す（`['className']`）・`style` を通す形に広げない**——プラグインが混ぜたものが素通りする。
+ */
+export const SANITIZE_SCHEMA: Options = {
   ...defaultSchema,
-  attributes: { ...defaultSchema.attributes, span: [['className', 'mention']] },
+  attributes: {
+    ...defaultSchema.attributes,
+    span: [['className', 'mention', ...HIGHLIGHT_TOKEN_CLASSES]],
+    code: [['className', /^language-./, 'hljs']],
+  },
 };
 
 /**
@@ -197,7 +216,8 @@ function withoutQuoteMarkers(written: string, quoteDepth: number): string {
  *   文字のまま出したものの中の URL は自動リンクになる。画像の記法の中だけは、読んだ後に文字へ替えるためリンクにならない（4.3）
  * - **リンクの URL は http / https / mailto など安全なスキームと相対 URL だけを残す**（react-markdown の既定の `urlTransform`）。
  *   **`urlTransform` と下の rehype-sanitize の両方を残す**——片方だけを外しても `javascript:` の href は残らないが、両方を外すと通る
- * - プラグインが足した要素も、描画の前に rehype-sanitize で落とす（既定のスキーマに、メンションの `span` の class `mention` だけを足したもの。`MENTION_SCHEMA`）
+ * - プラグインが足した要素も、描画の前に rehype-sanitize で落とす（既定のスキーマに、メンションと色付けの class の名前だけを足したもの。`SANITIZE_SCHEMA`）
+ * - 言語を指定したコードブロックは色付けする（F-32。rehype-highlight）。**言語の指定が無いものは推測しない**（`detect: false`）。登録されていない言語は色付けせず文字のまま出す
  * - 応答の `mentions` に載ったユーザーID の `@` だけを `@表示名` の `span.mention` にする（F-20。`mentionSpans`。コードとリンクの文字の中は置き換えない）
  * - 段落の中の改行（入力欄の Enter）は改行の要素にする（remark-breaks。Markdown の既定は空白1つに畳む）
  * - **踏むと壊れる: `remarkPlugins` の並びを変えない。** `remarkBreaks` を `asWrittenText` より前に置くと、
@@ -214,7 +234,10 @@ export function MessageBody({
     <div className="break-words">
       <Markdown
         remarkPlugins={[f14Syntax, asWrittenText, remarkBreaks, mentionSpans(mentions)]}
-        rehypePlugins={[[rehypeSanitize, MENTION_SCHEMA]]}
+        rehypePlugins={[
+          [rehypeHighlight, { detect: false }],
+          [rehypeSanitize, SANITIZE_SCHEMA],
+        ]}
         allowedElements={ALLOWED_ELEMENTS}
         unwrapDisallowed
       >

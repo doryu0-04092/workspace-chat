@@ -1,6 +1,7 @@
 import { render } from '@testing-library/react';
+import rehypeSanitize from 'rehype-sanitize';
 import { describe, expect, it } from 'vitest';
-import { MessageBody } from './MessageBody';
+import { MessageBody, SANITIZE_SCHEMA } from './MessageBody';
 import type { Message } from './queries';
 
 function renderBody(body: string): HTMLElement {
@@ -159,6 +160,117 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       expect(container.querySelector('pre')?.textContent).toContain(
         '**太字ではない** <b>要素ではない</b>',
       );
+    });
+  });
+
+  // 機能一覧 13.1（F-32）: バッククォート3つで囲んだ範囲の色付けと、言語指定。#581。
+  // CLAUDE.md「必ずテストを書く箇所」: 色付けを足しても Markdown が HTML として解釈されないこと（XSS）。
+  describe('コードブロックの色付け（F-32）', () => {
+    it('言語を指定したコードブロックは、字句を色付けの class を持つ span に分ける（書いた文字は変えない）', () => {
+      const container = renderBody("```ts\nconst a = 'x';\n```");
+
+      const code = container.querySelector('pre > code');
+      expect(code?.classList.contains('hljs')).toBe(true);
+      expect(code?.classList.contains('language-ts')).toBe(true);
+      expect(code?.querySelector('span.hljs-keyword')?.textContent).toBe('const');
+      expect(code?.querySelector('span.hljs-string')?.textContent).toBe("'x'");
+      expect(code?.textContent).toBe("const a = 'x';\n");
+    });
+
+    it('複数の段の字句（`title.class_` など）も、色付けの class を残す', () => {
+      const code = renderBody('```js\nclass Foo extends Bar {}\n```').querySelector('pre > code');
+
+      const title = code?.querySelector('span.hljs-title');
+      expect(title?.classList.contains('class_')).toBe(true);
+    });
+
+    it.each([
+      ['言語の指定が無い', '```\nconst a = 1;\n```'],
+      ['登録されていない言語を指定した', '```nosuchlanguage\nconst a = 1;\n```'],
+    ])('%sコードブロックは色付けせず、書いた文字のまま出す', (_name, body) => {
+      const code = renderBody(body).querySelector('pre > code');
+
+      expect(code?.querySelector('span')).toBeNull();
+      expect(code?.textContent).toBe('const a = 1;\n');
+    });
+
+    it('インラインコードは色付けしない', () => {
+      const code = renderBody('`const a = 1`').querySelector('code');
+
+      expect(code?.querySelector('span')).toBeNull();
+      expect(code?.textContent).toBe('const a = 1');
+    });
+
+    it('色付けした HTML のコードも、要素にならず書いた文字のまま出す', () => {
+      const source = '<script>alert(1)</script>\n<img src=x onerror="alert(1)">';
+      const container = renderBody(`\`\`\`html\n${source}\n\`\`\``);
+
+      expect(container.querySelector('script, img')).toBeNull();
+      expect(container.querySelector('pre > code span.hljs-tag')).not.toBeNull();
+      expect(container.querySelector('pre > code')?.textContent).toBe(`${source}\n`);
+    });
+
+    it('言語の指定に書いた HTML は、要素にも属性にもならない', () => {
+      const container = renderBody('```"><img src=x onerror=alert(1)>\nconst a = 1;\n```');
+
+      expect(container.querySelector('img')).toBeNull();
+      const code = container.querySelector('pre > code');
+      expect(code?.getAttribute('onerror')).toBeNull();
+      expect(code?.textContent).toBe('const a = 1;\n');
+    });
+
+    // 描画の手前の sanitize は、色付けのプラグインが足した要素も通す（MessageBody.tsx の SANITIZE_SCHEMA）。
+    // **許可に足すのは色付けの class の名前だけ**——それより広げると、プラグインが属性や class を混ぜたときに素通りする。
+    it('sanitize は、色付けとメンションの class だけを残し、ほかの class・属性・要素を落とす', () => {
+      const tree = {
+        type: 'root',
+        children: [
+          {
+            type: 'element',
+            tagName: 'pre',
+            properties: {},
+            children: [
+              {
+                type: 'element',
+                tagName: 'code',
+                properties: {
+                  className: ['hljs', 'language-ts', 'evil'],
+                  style: 'color:red',
+                  onClick: 'alert(1)',
+                },
+                children: [
+                  {
+                    type: 'element',
+                    tagName: 'span',
+                    properties: {
+                      className: ['hljs-title', 'class_', 'mention', 'evil', 'hljs-<x>', 'x_y'],
+                      style: 'background:url(https://example.com/)',
+                      onMouseOver: 'alert(1)',
+                    },
+                    children: [{ type: 'text', value: 'Foo' }],
+                  },
+                  {
+                    type: 'element',
+                    tagName: 'script',
+                    properties: {},
+                    children: [{ type: 'text', value: 'alert(1)' }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+      type Tree = Parameters<ReturnType<typeof rehypeSanitize>>[0];
+
+      const sanitized = rehypeSanitize(SANITIZE_SCHEMA)(tree as unknown as Tree);
+
+      const code = (sanitized.children[0] as unknown as (typeof tree.children)[0]).children[0];
+      expect(code?.properties).toEqual({ className: ['hljs', 'language-ts'] });
+      expect(code?.children.map((child) => child.tagName)).toEqual(['span']);
+      expect(code?.children[0]?.properties).toEqual({
+        className: ['hljs-title', 'class_', 'mention'],
+      });
     });
   });
 
