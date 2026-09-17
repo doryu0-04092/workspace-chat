@@ -682,7 +682,7 @@ export interface paths {
         put?: never;
         /**
          * チャンネルへのメッセージの投稿（F-11）
-         * @description 参加者だけが投稿できる。コードは一覧と同じ2段階（所属していなければ 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・ プライベートは 404。オーナーでも参加していなければ同じ）。アーカイブ済みのチャンネルには投稿できない（409 channel_archived。機能一覧 3.2）。 本文は 1〜4000 文字（コードポイント）で、空白だけは不可（機能一覧 4.1）。 作ったメッセージを message:new としてチャンネルの部屋へ配る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で配る（機能一覧 5.2・9.1）。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
+         * @description 参加者だけが投稿できる。コードは一覧と同じ2段階（所属していなければ 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・ プライベートは 404。オーナーでも参加していなければ同じ）。アーカイブ済みのチャンネルには投稿できない（409 channel_archived。機能一覧 3.2）。 本文は 1〜4000 文字（コードポイント）で、空白だけは不可（機能一覧 4.1）。 作ったメッセージを message:new としてチャンネルの部屋へ配る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で配る（機能一覧 5.2・9.1）。 attachmentIds で確定した添付を付けられる（自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけ。そうでなければ 422 attachment_unavailable で投稿しない。機能一覧 11.1）。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
          */
         post: operations["postMessage"];
         delete?: never;
@@ -747,6 +747,58 @@ export interface paths {
          * @description 判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→ そのチャンネルに無い・削除済みのメッセージと、返信（返信に返信はできない。1階層のみ）は 404 → アーカイブ済みのチャンネルは 409 channel_archived。 本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。親の返信件数（replyCount）を同じトランザクションで1つ増やす（要件定義書 4.1）。 作った返信を message:new として、返信件数が増えた親を message:updated として、チャンネルの部屋へ配る（機能一覧 5.2・6）。返信の本文のメンションの対象がいれば、返信の message:new はその利用者の部屋も加えて1回で配る（機能一覧 9.1）。 投稿・編集・削除と同じ枠で数える（利用者単位で1分に60回。機能一覧 4.1・4.2）
          */
         post: operations["postReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/attachments/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 添付ファイルのアップロード用の署名付き URL の発行（F-27・F-28）
+         * @description チャンネルの添付を上げる署名付き URL を発行する（機能一覧 11.1）。参加者だけが発行できる。コードは2段階: 所属していなければ種別によらず 404。 所属していて参加していなければ、パブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも参加していなければ同じ）。 URL の宛先は隔離用のキー quarantine/workspace/{id}/channel/{channelId}/{uploadId}/{保存名} であり、キーはすべてサーバーが組み立てる （保存名はファイル名の英数字・.・_・- 以外と先頭の . を _ に置き換え、キー全体が 1,024 バイトに収まるよう切り詰めたもの）。 有効期限は 5 分で、Content-Type と If-None-Match: * を署名に含む。 申告した Content-Type が許可リスト（画像 jpeg / png / gif / webp、動画 mp4 / webm、文書 pdf / txt / csv / md / docx / xlsx / pptx、圧縮 zip）に無ければ 422 unsupported_file_type、種別の上限（画像 10 MB・動画 100 MB・文書と圧縮 25 MB）を超えれば 422 file_too_large。 申告は信用せず、確定で中身から検証する。利用者単位で 10 分に 30 回まで
+         */
+        post: operations["createAttachmentUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/attachments/uploads/{uploadId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 添付ファイルのアップロードの確定（F-27・F-28）
+         * @description 本人に払い出され、このワークスペースとチャンネルで発行した識別子だけを確定できる（そうでなければ 404。識別子の存在を認めず、確定の権利も使わない）。 キーとやり直す参加者判定の対象チャンネルは、発行のときにサーバーが保持した値から組み立てる（機能一覧 11.1）。 確定の時点で参加者判定をやり直し、落ちたら発行と同じ2段階のコード（404 / 403 not_a_channel_member）を返して隔離用のキーを削除する。 通れば中身から形式を検証し、検証した版に固定して配信用のキー workspace/{id}/channel/{channelId}/{uploadId}/{保存名} へコピーし、隔離用のキーを削除する （保存名の拡張子は検証した形式のものに付け替え、配信の Content-Type と Content-Disposition は検証した形式から決める）。 検証に通らなければ配信用のキーへ移さず隔離用のキーを削除し、422 を返す——許可リストに無い・中身が形式に合わない（unsupported_file_type）、 種別の上限を超える（file_too_large）、本体が PUT されていない（upload_not_received）。 確定は識別子ごとに1回だけ行い、2回目以降はコピーも削除もやり直さず、1回目と同じ結果を返す（参加者判定に落ちたときも同じ。やり直すには発行からやり直す）。 確定の途中にもう1つ確定を求めると 409 upload_in_progress。確定した添付は、投稿（postMessage）の attachmentIds で投稿に付ける。 利用者単位で 10 分に 30 回まで
+         */
+        post: operations["completeAttachmentUpload"];
         delete?: never;
         options?: never;
         head?: never;
@@ -828,7 +880,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "unsupported_file_type" | "file_too_large" | "upload_not_received" | "upload_in_progress" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "unsupported_file_type" | "file_too_large" | "upload_not_received" | "upload_in_progress" | "attachment_unavailable" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -998,6 +1050,34 @@ export interface components {
             name: string;
             visibility: components["schemas"]["ChannelVisibility"];
         };
+        /** @description チャンネルへの投稿の本体（機能一覧 4.1）。本文は PostMessageRequest と同じ形で、確定した添付を最大 10 件付けられる */
+        CreateMessageRequest: {
+            /** @description 1〜4000 文字（文字数はコードポイントで数える）。空白だけは不可（機能一覧 4.1） */
+            body: string;
+            /** @description 付ける添付の識別子（確定の応答の id）。自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけを付けられる （1つでも当たらなければ 422 attachment_unavailable で、投稿しない）。並びは上げた順になる */
+            attachmentIds?: string[];
+        };
+        /** @description 添付ファイル（機能一覧 11.1・11.2） */
+        Attachment: {
+            /**
+             * Format: uuid
+             * @description アップロードの識別子
+             */
+            id: string;
+            /** @description 利用者が付けた元のファイル名（表示用。保存名とは違う） */
+            fileName: string;
+            /** @description 配信の Content-Type（検証した形式からサーバーが決めた値。テキスト系は text/plain; charset=utf-8） */
+            contentType: string;
+            /**
+             * @description 種別（画像は表示し、動画は
+             * @enum {string}
+             */
+            kind: "image" | "video" | "document" | "archive";
+            /** @description 大きさ（バイト） */
+            size: number;
+            /** @description 配信 URL のパス（/files/workspace/{workspaceId}/channel/{channelId}/{id}/{保存名}）。CloudFront の署名付き Cookie で取得する（機能一覧 11.2） */
+            url: string;
+        };
         PostMessageRequest: {
             /** @description 1〜4000 文字（文字数はコードポイントで数える）。空白だけは不可（機能一覧 4.1） */
             body: string;
@@ -1035,6 +1115,8 @@ export interface components {
             deleted: boolean;
             /** @description 本文のメンションの対象（機能一覧 9.1）。投稿・返信のときに、そのチャンネルの参加者で退会していない利用者へ解決できた `@ユーザーID` を保存し、本文に最初に現れた順に1人1件で載せる。編集では、本文にユーザーID が残っている対象は解決し直さずに残す （チャンネルを抜けた・退会した対象も残り、退会した対象は user が null）。本文から消えた対象は外し、新しく書いた `@` は投稿と同じく解決して足す。 削除済みのメッセージは空 */
             mentions: components["schemas"]["MessageMention"][];
+            /** @description 投稿に付けた添付（上げた順）。削除済みのメッセージは空（本文を返さないのと同じく返さない。機能一覧 4.2） */
+            attachments: components["schemas"]["Attachment"][];
         };
         /** @description メンションの対象（表示時の参照先。機能一覧 9.1 の経路2。対象がいまそのチャンネルの参加者かは問わない） */
         MessageMention: {
@@ -2515,7 +2597,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PostMessageRequest"];
+                "application/json": components["schemas"]["CreateMessageRequest"];
             };
         };
         responses: {
@@ -2552,6 +2634,15 @@ export interface operations {
             };
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            /** @description 付けられない添付がある（attachment_unavailable） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
@@ -2761,6 +2852,121 @@ export interface operations {
             };
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createAttachmentUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadRequest"];
+            };
+        };
+        responses: {
+            /** @description 発行したアップロード */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadTicket"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description 受け付けない形式（unsupported_file_type）か、上限を超える大きさ（file_too_large） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    completeAttachmentUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 確定した添付 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attachment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 同じ識別子の確定が進行中（upload_in_progress） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 検証に通らなかった（unsupported_file_type・file_too_large・upload_not_received） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };

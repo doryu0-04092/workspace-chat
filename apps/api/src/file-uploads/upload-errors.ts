@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
 import { type ErrorResponse, errorBodyForStatus } from '../error-response';
+import { NOT_A_CHANNEL_MEMBER } from '../workspaces/channel-errors';
 
 /**
  * 受け付けない形式（422。機能一覧 11.1 の許可リスト）。発行では申告した Content-Type が許可リストに無いとき、
@@ -34,7 +35,16 @@ export const UPLOAD_IN_PROGRESS: ErrorResponse = {
  */
 export function rejectionOf(status: number, code: string): HttpException {
   if (status === HttpStatus.NOT_FOUND) return new NotFoundException();
-  const known = [UNSUPPORTED_FILE_TYPE, FILE_TOO_LARGE, UPLOAD_NOT_RECEIVED];
+  const known = [UNSUPPORTED_FILE_TYPE, FILE_TOO_LARGE, UPLOAD_NOT_RECEIVED, NOT_A_CHANNEL_MEMBER];
   const body = known.find((candidate) => candidate.code === code);
   return new HttpException(body ?? errorBodyForStatus(status), status);
 }
+
+/**
+ * 投稿に付けられない添付がある（422。機能一覧 11.1）。自分が上げ、そのチャンネルで確定に成功し、まだどの投稿にも付いていないものだけを付けられる。
+ * **どれに当たらなかったか・なぜかを区別しない**（他の利用者の添付の有無を漏らさない）。
+ */
+export const ATTACHMENT_UNAVAILABLE: ErrorResponse = {
+  code: 'attachment_unavailable',
+  message: '付けられない添付があります。アップロードからやり直してください',
+};

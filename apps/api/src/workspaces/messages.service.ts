@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   type MessageDeletedPayload,
@@ -12,8 +13,10 @@ import {
   type paths,
 } from '@workspace-chat/shared';
 import { PrismaService } from '../prisma.service';
+import { ATTACHMENT_UNAVAILABLE } from '../file-uploads/upload-errors';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
+import { ATTACHMENT_SELECT, type Attachment, toAttachment } from './attachment-view';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
 import { advanceReadPosition, announceUnreadTo, announceUnreadToMembers } from './unread';
@@ -103,6 +106,35 @@ async function replaceMentions(
   }
 }
 
+/**
+ * 投稿に添付を結び付ける（機能一覧 11.1）。**本人が上げ、そのチャンネルで確定に成功し、まだどの投稿にも付いていないものだけ**を条件付きで結び付け、
+ * **1つでも当たらなければ 422 `attachment_unavailable` で投稿ごと取り消す**（同じトランザクションで投げる）。どれがなぜ当たらなかったかは返さない。
+ * 条件付きの更新で行を掴むため、同じ添付を同時に2つの投稿に付けても、片方だけが通る。
+ */
+async function attachTo(
+  tx: Pick<PrismaService, 'attachment'>,
+  {
+    messageId,
+    attachmentIds,
+    ...owner
+  }: {
+    messageId: string;
+    uploaderId: string;
+    workspaceId: string;
+    channelId: string;
+    attachmentIds: string[];
+  },
+): Promise<void> {
+  if (attachmentIds.length === 0) return;
+  const { count } = await tx.attachment.updateMany({
+    where: { id: { in: attachmentIds }, ...owner, state: 'SUCCEEDED', messageId: null },
+    data: { messageId },
+  });
+  if (count !== attachmentIds.length) {
+    throw new UnprocessableEntityException(ATTACHMENT_UNAVAILABLE);
+  }
+}
+
 const MESSAGE_SELECT = {
   id: true,
   channelId: true,
@@ -135,6 +167,7 @@ function toMessage(
   row: MessageRow,
   replyParticipants: UserSummary[],
   mentions: MentionTarget[],
+  attachments: Attachment[],
 ): Message {
   const deleted = row.deletedAt !== null;
   return {
@@ -149,6 +182,7 @@ function toMessage(
     replyCount: row.replyCount,
     replyParticipants,
     mentions,
+    attachments,
   };
 }
 
@@ -198,6 +232,28 @@ async function participantsOf(
 type MentionTarget = Message['mentions'][number];
 
 /**
+ * 投稿に付けた添付（機能一覧 11.1）を、渡したメッセージの分まとめて1回で引く（上げた順＝識別子の順）。
+ * **要求する側の条件を持たない**——呼ぶ側が読んでよいと決めたメッセージだけを渡す（`mentionsOf` と同じ）。
+ */
+async function attachmentsOf(
+  db: Pick<PrismaService, 'attachment'>,
+  messageIds: string[],
+): Promise<Map<string, Attachment[]>> {
+  const attachments = new Map<string, Attachment[]>();
+  if (messageIds.length === 0) return attachments;
+  const rows = await db.attachment.findMany({
+    where: { messageId: { in: messageIds }, state: 'SUCCEEDED' },
+    orderBy: { id: 'asc' },
+    select: { ...ATTACHMENT_SELECT, messageId: true },
+  });
+  for (const { messageId, ...row } of rows) {
+    if (messageId === null) continue;
+    attachments.set(messageId, [...(attachments.get(messageId) ?? []), toAttachment(row)]);
+  }
+  return attachments;
+}
+
+/**
  * 表示時の参照先解決（機能一覧 9.1 の経路2。参照実装は prisma-schema.test.ts の `mentionDisplayTarget`）。
  * 渡したメッセージの保存した対象の `User` を、**まとめて1回で引く**（メッセージごとに引かない）。
  * **`ChannelMember` を条件にしない**（対象がいま参加しているかを問わない）。退会した対象は `user: null`（削除済みの利用者。1.5）。並びは本文に最初に現れた順。
@@ -238,7 +294,7 @@ async function mentionsOf(
  * **トランザクションの中でも呼ぶため、2つの問い合わせは順に出す**（同じ接続で並べない）。
  */
 async function toMessages(
-  db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
+  db: Pick<PrismaService, '$queryRaw' | 'messageMention' | 'attachment'>,
   rows: MessageRow[],
 ): Promise<Message[]> {
   const participants = await participantsOf(
@@ -249,8 +305,18 @@ async function toMessages(
     db,
     rows.filter((row) => row.deletedAt === null && mentionedLoginIds(row.body).length > 0),
   );
+  // 削除済みのメッセージは、本文を返さないのと同じく添付も返さない（機能一覧 4.2）
+  const attachments = await attachmentsOf(
+    db,
+    rows.filter((row) => row.deletedAt === null).map((row) => row.id),
+  );
   return rows.map((row) =>
-    toMessage(row, participants.get(row.id) ?? [], mentions.get(row.id) ?? []),
+    toMessage(
+      row,
+      participants.get(row.id) ?? [],
+      mentions.get(row.id) ?? [],
+      attachments.get(row.id) ?? [],
+    ),
   );
 }
 
@@ -298,7 +364,7 @@ async function assertEditableMessage(
  * 既定値（50）と範囲（1〜100）は仕様の `limit` が持ち、openapi-validation.ts が要求に入れてから届く。
  */
 async function pageOf(
-  db: Pick<PrismaService, 'message' | '$queryRaw' | 'messageMention'>,
+  db: Pick<PrismaService, 'message' | '$queryRaw' | 'messageMention' | 'attachment'>,
   where: { channelId: string; parentId: string | null },
   query: PageQuery,
 ): Promise<MessagePage> {
@@ -316,7 +382,7 @@ async function pageOf(
 
 /** 1件の行を応答のメッセージにする（`toMessages` と同じく、返信のある本体のメッセージには参加者を載せる）。 */
 async function messageOf(
-  db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
+  db: Pick<PrismaService, '$queryRaw' | 'messageMention' | 'attachment'>,
   row: MessageRow,
 ): Promise<Message> {
   const [message] = await toMessages(db, [row]);
@@ -367,6 +433,13 @@ export class MessagesService {
         viewerId: userId,
         channelId,
         body: input.body,
+      });
+      await attachTo(tx, {
+        messageId: row.id,
+        uploaderId: userId,
+        workspaceId,
+        channelId,
+        attachmentIds: input.attachmentIds ?? [],
       });
       return { message: await messageOf(tx, row), mentioned };
     });

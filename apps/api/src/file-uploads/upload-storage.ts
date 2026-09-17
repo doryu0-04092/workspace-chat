@@ -33,13 +33,19 @@ export type SignedUpload = {
 };
 
 export type PromoteResult =
-  | { readonly ok: true; readonly format: UploadFormat; readonly deliveryKey: string }
+  | {
+      readonly ok: true;
+      readonly format: UploadFormat;
+      readonly deliveryKey: string;
+      /** 検証した版の大きさ（バイト）。 */
+      readonly size: number;
+    }
   | { readonly ok: false; readonly error: ErrorResponse };
 
 const TEXT_FORMATS: ReadonlySet<UploadFormatId> = new Set(['txt', 'csv', 'md']);
 
 /** 配信する `Content-Type`。**検証した形式からサーバーが決め、テキスト系は `text/plain; charset=utf-8` に固定する**（11.1。決定・2026-09-11・依頼側）。 */
-function servedContentType(format: UploadFormat): string {
+export function servedContentType(format: UploadFormat): string {
   return TEXT_FORMATS.has(format.id) ? 'text/plain; charset=utf-8' : format.contentType;
 }
 
@@ -125,6 +131,13 @@ export class UploadStorage {
     }
   }
 
+  /** 検証せずに隔離用のキーを削除する（確定で参加者判定のやり直しに落ちたとき。11.1）。 */
+  async discard(quarantineKey: string): Promise<void> {
+    await this.s3.send(
+      new DeleteObjectCommand({ Bucket: this.config.s3Bucket, Key: quarantineKey }),
+    );
+  }
+
   private async verifyAndCopy(input: {
     readonly quarantineKey: string;
     readonly declaredContentType: string;
@@ -190,6 +203,6 @@ export class UploadStorage {
         ContentDisposition: servedContentDisposition(format, storedName),
       }),
     );
-    return { ok: true, format, deliveryKey };
+    return { ok: true, format, deliveryKey, size };
   }
 }

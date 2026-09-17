@@ -1241,13 +1241,14 @@ paths:
         プライベートは 404。オーナーでも参加していなければ同じ）。アーカイブ済みのチャンネルには投稿できない（409 channel_archived。機能一覧 3.2）。
         本文は 1〜4000 文字（コードポイント）で、空白だけは不可（機能一覧 4.1）。
         作ったメッセージを message:new としてチャンネルの部屋へ配る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で配る（機能一覧 5.2・9.1）。
+        attachmentIds で確定した添付を付けられる（自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけ。そうでなければ 422 attachment_unavailable で投稿しない。機能一覧 11.1）。
         投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PostMessageRequest'
+              $ref: '#/components/schemas/CreateMessageRequest'
       responses:
         '201':
           description: 作ったメッセージ
@@ -1279,6 +1280,12 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: 付けられない添付がある（attachment_unavailable）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1474,6 +1481,119 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/attachments/uploads:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    post:
+      operationId: createAttachmentUpload
+      summary: 添付ファイルのアップロード用の署名付き URL の発行（F-27・F-28）
+      description: >-
+        チャンネルの添付を上げる署名付き URL を発行する（機能一覧 11.1）。参加者だけが発行できる。コードは2段階: 所属していなければ種別によらず 404。
+        所属していて参加していなければ、パブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも参加していなければ同じ）。
+        URL の宛先は隔離用のキー quarantine/workspace/{id}/channel/{channelId}/{uploadId}/{保存名} であり、キーはすべてサーバーが組み立てる
+        （保存名はファイル名の英数字・.・_・- 以外と先頭の . を _ に置き換え、キー全体が 1,024 バイトに収まるよう切り詰めたもの）。
+        有効期限は 5 分で、Content-Type と If-None-Match: * を署名に含む。
+        申告した Content-Type が許可リスト（画像 jpeg / png / gif / webp、動画 mp4 / webm、文書 pdf / txt / csv / md / docx / xlsx / pptx、圧縮 zip）に無ければ
+        422 unsupported_file_type、種別の上限（画像 10 MB・動画 100 MB・文書と圧縮 25 MB）を超えれば 422 file_too_large。
+        申告は信用せず、確定で中身から検証する。利用者単位で 10 分に 30 回まで
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+      responses:
+        '201':
+          description: 発行したアップロード
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadTicket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: 受け付けない形式（unsupported_file_type）か、上限を超える大きさ（file_too_large）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/attachments/uploads/{uploadId}/complete:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/UploadId'
+    post:
+      operationId: completeAttachmentUpload
+      summary: 添付ファイルのアップロードの確定（F-27・F-28）
+      description: >-
+        本人に払い出され、このワークスペースとチャンネルで発行した識別子だけを確定できる（そうでなければ 404。識別子の存在を認めず、確定の権利も使わない）。
+        キーとやり直す参加者判定の対象チャンネルは、発行のときにサーバーが保持した値から組み立てる（機能一覧 11.1）。
+        確定の時点で参加者判定をやり直し、落ちたら発行と同じ2段階のコード（404 / 403 not_a_channel_member）を返して隔離用のキーを削除する。
+        通れば中身から形式を検証し、検証した版に固定して配信用のキー workspace/{id}/channel/{channelId}/{uploadId}/{保存名} へコピーし、隔離用のキーを削除する
+        （保存名の拡張子は検証した形式のものに付け替え、配信の Content-Type と Content-Disposition は検証した形式から決める）。
+        検証に通らなければ配信用のキーへ移さず隔離用のキーを削除し、422 を返す——許可リストに無い・中身が形式に合わない（unsupported_file_type）、
+        種別の上限を超える（file_too_large）、本体が PUT されていない（upload_not_received）。
+        確定は識別子ごとに1回だけ行い、2回目以降はコピーも削除もやり直さず、1回目と同じ結果を返す（参加者判定に落ちたときも同じ。やり直すには発行からやり直す）。
+        確定の途中にもう1つ確定を求めると 409 upload_in_progress。確定した添付は、投稿（postMessage）の attachmentIds で投稿に付ける。
+        利用者単位で 10 分に 30 回まで
+      responses:
+        '200':
+          description: 確定した添付
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: 同じ識別子の確定が進行中（upload_in_progress）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: 検証に通らなかった（unsupported_file_type・file_too_large・upload_not_received）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -1737,6 +1857,7 @@ components:
             - file_too_large
             - upload_not_received
             - upload_in_progress
+            - attachment_unavailable
             - request_rejected
             - internal_error
         message:
@@ -2145,6 +2266,68 @@ components:
           pattern: '\S'
         visibility:
           $ref: '#/components/schemas/ChannelVisibility'
+    CreateMessageRequest:
+      description: >-
+        チャンネルへの投稿の本体（機能一覧 4.1）。本文は PostMessageRequest と同じ形で、確定した添付を最大 10 件付けられる
+      type: object
+      additionalProperties: false
+      required:
+        - body
+      properties:
+        body:
+          description: 1〜4000 文字（文字数はコードポイントで数える）。空白だけは不可（機能一覧 4.1）
+          type: string
+          minLength: 1
+          maxLength: 4000
+          pattern: '\S'
+        attachmentIds:
+          description: >-
+            付ける添付の識別子（確定の応答の id）。自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけを付けられる
+            （1つでも当たらなければ 422 attachment_unavailable で、投稿しない）。並びは上げた順になる
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+    Attachment:
+      description: 添付ファイル（機能一覧 11.1・11.2）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - fileName
+        - contentType
+        - kind
+        - size
+        - url
+      properties:
+        id:
+          description: アップロードの識別子
+          type: string
+          format: uuid
+        fileName:
+          description: 利用者が付けた元のファイル名（表示用。保存名とは違う）
+          type: string
+        contentType:
+          description: 配信の Content-Type（検証した形式からサーバーが決めた値。テキスト系は text/plain; charset=utf-8）
+          type: string
+        kind:
+          description: 種別（画像は表示し、動画は #t=30 の位置を表示し、それ以外はリンクにする。機能一覧 11.1）
+          type: string
+          enum:
+            - image
+            - video
+            - document
+            - archive
+        size:
+          description: 大きさ（バイト）
+          type: integer
+          minimum: 1
+        url:
+          description: >-
+            配信 URL のパス（/files/workspace/{workspaceId}/channel/{channelId}/{id}/{保存名}）。CloudFront の署名付き Cookie で取得する（機能一覧 11.2）
+          type: string
     PostMessageRequest:
       type: object
       additionalProperties: false
@@ -2173,6 +2356,7 @@ components:
         - replyCount
         - replyParticipants
         - mentions
+        - attachments
       properties:
         id:
           description: UUIDv7。一覧のカーソル（before）にそのまま使う
@@ -2230,6 +2414,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MessageMention'
+        attachments:
+          description: >-
+            投稿に付けた添付（上げた順）。削除済みのメッセージは空（本文を返さないのと同じく返さない。機能一覧 4.2）
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
     MessageMention:
       description: メンションの対象（表示時の参照先。機能一覧 9.1 の経路2。対象がいまそのチャンネルの参加者かは問わない）
       type: object

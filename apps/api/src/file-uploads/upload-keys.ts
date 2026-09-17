@@ -21,3 +21,29 @@ export function avatarQuarantineDirectory(userId: string, uploadId: string): str
 export function avatarUrlPath(deliveryKey: string): string {
   return `/${deliveryKey}`;
 }
+
+/**
+ * 添付の配信用のキーの `{ファイル名}` の前まで（`workspace/{ws}/channel/{ch}/{UUID}/`。機能一覧 11.1）。
+ * **この構造が配信の認可の一部である**——署名付き Cookie の対象は `/files/workspace/{ws}/channel/{ch}/*`（11.2）。
+ */
+export function attachmentKeyDirectory(
+  workspaceId: string,
+  channelId: string,
+  uploadId: string,
+): string {
+  return `workspace/${workspaceId}/channel/${channelId}/${uploadId}/`;
+}
+
+/** 添付の隔離用のキーの `{ファイル名}` の前まで（`quarantine/workspace/{ws}/channel/{ch}/{UUID}/`）。 */
+export function attachmentQuarantineDirectory(
+  workspaceId: string,
+  channelId: string,
+  uploadId: string,
+): string {
+  return `${QUARANTINE_PREFIX}${attachmentKeyDirectory(workspaceId, channelId, uploadId)}`;
+}
+
+/** 添付の配信 URL のパス（`/files` を前置する。CloudFront の関数が剥がしてバケットへ渡す。要件定義書 4.3）。 */
+export function attachmentUrlPath(deliveryKey: string): string {
+  return `/files/${deliveryKey}`;
+}
