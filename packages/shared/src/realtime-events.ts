@@ -129,6 +129,37 @@ export type UnreadUpdatedPayload = {
 };
 
 /**
+ * DM で起きる `message:new` / `message:updated` の payload（F-19。機能一覧 5.2 の DM の箇条・8）。**イベント名はチャンネルと同じ**（配信の種類は増やさない。5.1）。
+ * **当事者2人のうち、いまそのワークスペースの退会していないメンバーである利用者の部屋へ1回で送る**（DM はチャンネルの部屋を持たない）。
+ * `message` は REST の DmMessage と同じ形で、**`channelId` ではなく `dmId` を持つ**——受け取る側は `dmId` の有無でチャンネルのメッセージと見分ける。
+ */
+export type DmMessageNewPayload = {
+  readonly message: components['schemas']['DmMessage'];
+  readonly sentAt: string;
+};
+
+/** DM で起きる `message:updated` の payload（F-19。宛先は `DmMessageNewPayload` と同じ）。 */
+export type DmMessageUpdatedPayload = DmMessageNewPayload;
+
+/** DM で起きる `message:deleted` の payload（F-19。宛先は `DmMessageNewPayload` と同じ）。**本文は載せない**。 */
+export type DmMessageDeletedPayload = {
+  readonly dmId: string;
+  readonly messageId: string;
+  readonly sentAt: string;
+};
+
+/**
+ * DM の未読の `unread:updated` の payload（「利用者 × DM」。F-19・F-23。機能一覧 10.1・5.2）。**その未読の持ち主の利用者の部屋へだけ送る**（相手には送らない）。
+ * 送るときに、持ち主がいまもその DM の当事者で、そのワークスペースの退会していないメンバーであることを呼ぶ側が確かめる（5.2）。
+ * **`channelId` ではなく `dmId` を持つ**——受け取る側は `dmId` の有無でチャンネルの未読と見分ける。DM はメンションを数えないため `mentions` を持たない。
+ */
+export type DmUnreadUpdatedPayload = {
+  readonly dmId: string;
+  readonly unread: number;
+  readonly sentAt: string;
+};
+
+/**
  * クライアントからサーバーへの要求の名前（機能一覧 9.2「部屋（Socket.IO の room）」）。**配信の対象イベントではない**ため、
  * 上の `REALTIME_EVENT_KINDS` / `REALTIME_EVENT_NAMES` には入れない。
  * - `channelEnter`: チャンネルを開いたときの入室要求。サーバーが参加者であることを確かめてから、その接続をチャンネルの部屋に入れる

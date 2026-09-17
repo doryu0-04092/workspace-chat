@@ -9,6 +9,8 @@ import { ChannelRoomsGateway } from './channel-rooms.gateway';
 import { ChannelRoomsService } from './channel-rooms.service';
 import { ChannelsController } from './channels.controller';
 import { ChannelsService } from './channels.service';
+import { DmsController } from './dms.controller';
+import { DmsService } from './dms.service';
 import { InvitationsController } from './invitations.controller';
 import { InvitationsService } from './invitations.service';
 import { MessagesController } from './messages.controller';
@@ -31,6 +33,7 @@ import { WorkspacesService } from './workspaces.service';
     ChannelMembershipController,
     ChannelArchiveController,
     MessagesController,
+    DmsController,
   ],
   providers: [
     WorkspacesService,
@@ -41,6 +44,7 @@ import { WorkspacesService } from './workspaces.service';
     ChannelRoomsService,
     ChannelRoomsGateway,
     MessagesService,
+    DmsService,
   ],
 })
 export class WorkspacesModule {}

@@ -710,6 +710,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/dms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 自分が当事者の DM の一覧（F-19・F-23）
+         * @description そのワークスペースで、要求した利用者が当事者の DM だけを返す（機能一覧 8）。所属していなければ 404。 新しいメッセージのある順（メッセージの無い DM は始めた順の位置に並ぶ）。 相手がキック・退出・退会した DM も返す（過去のメッセージは残る。機能一覧 1.5・2.2）——相手が退会していれば counterpart は null、 いまメンバーでなければ writable は false（投稿できない）
+         */
+        get: operations["listDms"];
+        put?: never;
+        /**
+         * DM を始める・開く（F-19）
+         * @description 相手（User.id）との DM を返す。まだ無ければ作る。同じ相手との DM は1つに集約され、既にあればそれを返す（機能一覧 8）。 相手は同じワークスペースの、退会していないメンバーに限る（そうでなければ 422 dm_counterpart_not_found）。 自分自身とは始められない（422 dm_with_self）。所属していなければ 404
+         */
+        post: operations["startDm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/dms/{dmId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * DM のメッセージの一覧（F-19）
+         * @description 新しい順。before・limit・nextBefore の扱いはチャンネルの一覧と同じ（機能一覧 4.1）。 当事者だけが取得できる。所属していなければ 404、当事者でない DM・無い DM・別のワークスペースの DM も 404（存在の有無を区別しない。機能一覧 8）。 相手がいまメンバーでなくても、当事者は過去のメッセージを読める（機能一覧 1.5・2.2）。 退会した書き手のメッセージは author を null にする（機能一覧 1.5）
+         */
+        get: operations["listDmMessages"];
+        put?: never;
+        /**
+         * DM へのメッセージの投稿（F-19）
+         * @description 当事者だけが投稿できる（所属していない・当事者でない・無い DM は 404）。 相手がいまそのワークスペースの退会していないメンバーでなければ 409 dm_counterpart_unavailable（機能一覧 8「相手は同一ワークスペースのメンバーに限る」）。 本文の形はチャンネルの投稿と同じ（1〜4000 文字・空白だけは不可）。 作ったメッセージを message:new として、当事者2人のうち、いまそのワークスペースの退会していないメンバーである利用者の部屋へ1回で配る（機能一覧 5.2 の DM の箇条）。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（チャンネルのメッセージの書き込みと同じ枠。機能一覧 4.1）
+         */
+        post: operations["postDmMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/dms/{dmId}/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * DM のメッセージの削除（F-19・F-13）
+         * @description 論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、 以後の応答と配信では返さない（body: null・deleted: true）。message:deleted（本文を載せない）を投稿と同じ宛先へ配る。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（機能一覧 4.1・4.2）
+         */
+        delete: operations["deleteDmMessage"];
+        options?: never;
+        head?: never;
+        /**
+         * DM のメッセージの編集（F-19・F-13）
+         * @description 自分のメッセージだけを編集できる。判定の順: 所属していなければ 404 → 当事者でない・無い DM は 404 → その DM に無い・削除済みのメッセージは 404 → 作者でなければ 403 not_message_author。 相手がいまメンバーでなくても、自分のメッセージは編集できる。本文の形は投稿と同じ。 編集したメッセージを message:updated として、投稿と同じ宛先へ配る（機能一覧 5.2 の DM の箇条）。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（機能一覧 4.1・4.2）
+         */
+        patch: operations["editDmMessage"];
+        trace?: never;
+    };
+    "/workspaces/{id}/dms/{dmId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * DM の既読位置の更新（F-23）
+         * @description 読んだ位置（その DM のメッセージの id）を渡して既読位置を進める（「利用者 × DM」の既読位置。機能一覧 10.1）。 既読位置は戻さない——渡した id が既に読んだ位置より古ければ、何も変えずに 204 を返す。 所属していない・当事者でない・無い DM は 404。その DM に無いメッセージ・削除済みのメッセージの id も 404。 進めた後の未読数を unread:updated として本人の部屋へだけ配る（機能一覧 5.2）。 利用者ごとに1分 120 回まで（チャンネル・スレッドの既読の更新とは別の枠。機能一覧 10.1）
+         */
+        put: operations["updateDmRead"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invitations": {
         parameters: {
             query?: never;
@@ -785,7 +897,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "dm_with_self" | "dm_counterpart_not_found" | "dm_counterpart_unavailable" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -1047,6 +1159,73 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        StartDmRequest: {
+            /**
+             * Format: uuid
+             * @description 相手の User.id（ワークスペースの参加者一覧が返す id。ユーザーID ではない）
+             */
+            userId: string;
+        };
+        UpdateDmReadRequest: {
+            /**
+             * Format: uuid
+             * @description 読んだ位置（その DM のメッセージの id。F-23。機能一覧 10.1）。 既読位置は戻さないため、いま持っている位置より古い id を渡しても既読位置は変わらない
+             */
+            lastReadMessageId: string;
+        };
+        /** @description 自分が当事者の DM（機能一覧 8・10.1） */
+        Dm: {
+            /** Format: uuid */
+            id: string;
+            /** @description 相手。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            counterpart: components["schemas"]["UserSummary"] | null;
+            /** @description 相手がいまこのワークスペースの退会していないメンバーか。false なら投稿できない（409 dm_counterpart_unavailable。機能一覧 8）。 過去のメッセージは読める */
+            writable: boolean;
+            /**
+             * Format: date-time
+             * @description 要求した利用者がこのワークスペースに参加した時刻（F-23。機能一覧 10.1）。既読位置をまだ持たないとき、 未読はこの時刻より後のメッセージだけを数え、「ここから未読」の区切り線もこの時刻より後の最初のメッセージの上に出す
+             */
+            joinedAt: string;
+            /** @description 要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。 既読位置をまだ持たない利用者は、joinedAt より後だけを数える */
+            unread: number;
+            /**
+             * Format: uuid
+             * @description 要求した利用者の既読位置（F-23。機能一覧 10.1）。「ここから未読」の区切り線を、この次のメッセージの上に出す。 まだ既読位置を持たなければ null。未読数から線の位置を数えてはならない
+             */
+            lastReadMessageId: string | null;
+        };
+        /** @description DM のメッセージ（機能一覧 8・4.2） */
+        DmMessage: {
+            /**
+             * Format: uuid
+             * @description UUIDv7。一覧のカーソル（before）にそのまま使う
+             */
+            id: string;
+            /** Format: uuid */
+            dmId: string;
+            /** @description 書き手。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            author: components["schemas"]["UserSummary"] | null;
+            /** @description 本文。削除済みなら null（本文は DB に残るが返さない。機能一覧 4.2） */
+            body: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最後に編集した時刻。編集していなければ null（機能一覧 4.2）
+             */
+            editedAt: string | null;
+            /** @description 削除済みか（機能一覧 4.2） */
+            deleted: boolean;
+        };
+        DmMessagePage: {
+            /** @description 新しい順 */
+            messages: components["schemas"]["DmMessage"][];
+            /**
+             * Format: uuid
+             * @description 続きを取るときに before に渡す id。続きが無ければ null
+             */
+            nextBefore: string | null;
+        };
     };
     responses: {
         /** @description Authorization ヘッダーが無い、または Bearer 方式でない（authentication_required）か、 Bearer 方式で資格情報が無い・壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
@@ -1142,6 +1321,8 @@ export interface components {
         ChannelId: string;
         /** @description メッセージの id。形が uuid でなければ 400 */
         MessageId: string;
+        /** @description DM の id。形が uuid でなければ 400 */
+        DmId: string;
         /** @description 招待の id。形が uuid でなければ 400 */
         InvitationId: string;
         /** @description ワークスペースの id。形が uuid でなければ 400 */
@@ -2597,6 +2778,281 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listDms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DM（新しいメッセージのある順） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dm"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    startDm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartDmRequest"];
+            };
+        };
+        responses: {
+            /** @description 相手との DM（作ったもの、または既にあったもの） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dm"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description 相手がこのワークスペースの退会していないメンバーでない（dm_counterpart_not_found）か、自分自身（dm_with_self） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listDmMessages: {
+        parameters: {
+            query?: {
+                /** @description これより古いメッセージを返す（メッセージの id）。形が uuid でなければ 400 */
+                before?: string;
+                /** @description 返す件数の上限。1〜100、既定は 50（チャンネルの一覧と同じ。機能一覧 4.1） */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description メッセージ（新しい順）と、続きを取るための before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmMessagePage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    postDmMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description 作ったメッセージ */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmMessage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 相手がいまこのワークスペースの退会していないメンバーでない（dm_counterpart_unavailable） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteDmMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 削除した */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 自分のメッセージではない（not_message_author） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    editDmMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description 編集したメッセージ（editedAt を持つ） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmMessage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 自分のメッセージではない（not_message_author） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateDmRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDmReadRequest"];
+            };
+        };
+        responses: {
+            /** @description 既読位置を進めた（進まなかった場合も 204） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["TooManyRequests"];
