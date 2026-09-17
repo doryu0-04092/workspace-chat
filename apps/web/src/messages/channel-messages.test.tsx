@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { error, fakeFetch, headerOf, json, USER } from '../testing/fake-api';
 import { CHANNEL_PATH, GENERAL, MESSAGES, message, page, routes } from '../testing/fake-messages';
@@ -236,5 +236,25 @@ describe('チャンネルへの投稿', () => {
     expect(send.disabled).toBe(true);
     type('a');
     expect(send.disabled).toBe(false);
+  });
+
+  // `MessageForm` の「Enter では送信しない」（投稿 F-11・返信 F-17・編集 F-13 が共有する。#537 の追記）。
+  // **jsdom は Enter による暗黙の送信（1行の input）を再現しない**ため、入力欄が textarea であることは形で確かめる
+  it('Enter では送信しない（補完の一覧が無いとき）', async () => {
+    const { count } = fakeFetch(routes({ [`GET ${MESSAGES}`]: () => page([]) }));
+    renderApp(CHANNEL_PATH);
+    await screen.findByText('まだメッセージはありません。');
+    const input = screen.getByLabelText('メッセージ');
+    expect(input.tagName).toBe('TEXTAREA');
+
+    type('こんにちは');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    // **要求は非同期で出る**ので、送ってしまう実装でもキーの直後はまだ 0 である。出る分だけ待ってから数える
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(count(`POST ${MESSAGES}`)).toBe(0);
+    expect((input as HTMLTextAreaElement).value).toBe('こんにちは');
   });
 });
