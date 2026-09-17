@@ -1,5 +1,5 @@
 import type { components } from '@workspace-chat/shared';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { requestJson, segment } from '../api/client';
 import { useSessionStore } from '../auth/session-context';
 
@@ -156,6 +156,11 @@ export function useLeaveWorkspace(workspaceId: string) {
   });
 }
 
+/**
+ * 管理用の一覧の鍵。
+ * **踏むと壊れる: チャンネルの参加者数か行を変える操作を足したら、通ったときにこの一覧を直すか取り直す。**
+ * 行に「参加者 N 人」と参加者の一覧を並べて出しており、片方だけ変わると同じ行の中で食い違う（#545 第0巡の 🔴1）。
+ */
 function managedChannelsKey(workspaceId: string) {
   return ['workspaces', workspaceId, 'managed-channels'] as const;
 }
@@ -184,6 +189,28 @@ function replaceManaged(
   channel: ManagedChannel,
 ): ManagedChannel[] | undefined {
   return channels?.map((current) => (current.id === channel.id ? channel : current));
+}
+
+/**
+ * チャンネルから1人外れたこと（キック・退出）を、読み込んである参加者の一覧と、管理用の一覧のそのチャンネルの人数に、取り直しを待たずに当てる。
+ * **2つを1つの処理で変える**——管理用の一覧の行に並べて出しており、片方だけ変えると同じ行の中で食い違う（#545 第0巡・#549 第0巡の 🔴1）。
+ */
+function removeFromChannel(
+  queryClient: QueryClient,
+  workspaceId: string,
+  channelId: string,
+  memberId: string,
+): void {
+  queryClient.setQueryData<UserSummary[]>(channelMembersKey(workspaceId, channelId), (members) =>
+    members?.filter((member) => member.id !== memberId),
+  );
+  queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+    channels?.map((channel) =>
+      channel.id === channelId
+        ? { ...channel, memberCount: Math.max(0, channel.memberCount - 1) }
+        : channel,
+    ),
+  );
 }
 
 /**
@@ -343,19 +370,39 @@ export function useKickChannelMember(workspaceId: string, channelId: string) {
         `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/members/${segment(memberId)}`,
         { method: 'DELETE' },
       ),
-    onSuccess: (_, memberId) => {
-      queryClient.setQueryData<UserSummary[]>(
-        channelMembersKey(workspaceId, channelId),
-        (members) => members?.filter((member) => member.id !== memberId),
+    onSuccess: (_, memberId) => removeFromChannel(queryClient, workspaceId, channelId, memberId),
+  });
+}
+
+/**
+ * チャンネルから抜ける（F-10。REST の仕様の leaveChannel）。
+ * 通ったら、一般の一覧で、パブリックは未参加に、プライベートは一覧から外す（見えなくなる）。
+ * 参加者の一覧と管理用の一覧（F-35）の人数から、抜けた本人を外す。**どれも取り直しを待たずにその場で直す**（#533 第0巡の 🔴1）。
+ */
+export function useLeaveChannel(workspaceId: string, channelId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      requestJson<void>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/leave`,
+        { method: 'POST' },
+      ),
+    onSuccess: () => {
+      queryClient.setQueryData<Channel[]>(keys.channels(workspaceId), (channels) =>
+        channels?.flatMap((channel) => {
+          if (channel.id !== channelId) return [channel];
+          if (channel.visibility === 'PRIVATE') return [];
+          return [{ ...channel, joined: false }];
+        }),
       );
-      // **管理用の一覧のそのチャンネルの人数も、その場で1つ減らす**（F-35。同じ行に参加者の一覧と並べて出しており、食い違ったまま残さない）
-      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
-        channels?.map((channel) =>
-          channel.id === channelId
-            ? { ...channel, memberCount: Math.max(0, channel.memberCount - 1) }
-            : channel,
-        ),
-      );
+      const session = store.getState();
+      if (session.status === 'signedIn') {
+        removeFromChannel(queryClient, workspaceId, channelId, session.user.id);
+      }
+      // **取り直しを待たない**——待つと、取り直しが返るまで画面を移れない（一覧はその場で直してある）
+      void queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
     },
   });
 }

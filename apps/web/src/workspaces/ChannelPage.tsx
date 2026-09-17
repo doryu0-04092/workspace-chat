@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { errorMessage } from '../api/client';
 import { failureMessage } from '../auth/failure-message';
 import { MessageChannelProvider } from '../messages/message-channel';
 import { MessageList } from '../messages/MessageList';
@@ -8,7 +9,14 @@ import { useMessages } from '../messages/queries';
 import { ThreadPanel } from '../messages/ThreadPanel';
 import { useChannelRealtime } from '../realtime/use-channel-realtime';
 import { ChannelMembers } from './MemberLists';
-import { useArchivedChannels, useChannels, useUpdateChannelRead, useWorkspace } from './queries';
+import {
+  type Channel,
+  useArchivedChannels,
+  useChannels,
+  useLeaveChannel,
+  useUpdateChannelRead,
+  useWorkspace,
+} from './queries';
 
 /** 開いているスレッドの親の id を持つ URL のパラメータ（機能一覧 6。開き直しても同じスレッドを開く）。 */
 const THREAD_PARAM = 'thread';
@@ -52,6 +60,7 @@ export function ChannelPage() {
           アーカイブ済みのチャンネルです。読むことだけができます（投稿・返信・編集・削除はできません）。
         </p>
       )}
+      <LeaveChannel key={`leave-${channelId}`} workspaceId={workspaceId} channel={channel} />
       <ChannelMembers
         key={`members-${channelId}`}
         workspaceId={workspaceId}
@@ -67,6 +76,47 @@ export function ChannelPage() {
         readOnly={!current}
       />
     </main>
+  );
+}
+
+/**
+ * チャンネルから抜ける（F-10）。確かめてから送り、通ったらワークスペースの画面へ移る。
+ * プライベートは、抜けると招待されない限り戻れないことを確かめの文で伝える。
+ */
+function LeaveChannel({ workspaceId, channel }: { workspaceId: string; channel: Channel }) {
+  const leave = useLeaveChannel(workspaceId, channel.id);
+  const navigate = useNavigate();
+
+  function confirmAndLeave() {
+    const question =
+      channel.visibility === 'PRIVATE'
+        ? 'このチャンネルから抜けますか？ 戻るには、招待し直してもらう必要があります。'
+        : 'このチャンネルから抜けますか？';
+    if (!window.confirm(question)) return;
+    // **`mutate` の `onSuccess` には移動を置かない**——通った時点で一覧から参加が外れてこの部品が消え、部品ごとの `onSuccess` は呼ばれない。
+    // 断られた理由は `leave.error` で出す
+    leave.mutateAsync().then(
+      () => navigate(`/workspaces/${workspaceId}`),
+      () => {},
+    );
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      <button
+        type="button"
+        className="self-start rounded border border-red-700 px-2 py-0.5 text-sm text-red-700 disabled:opacity-50"
+        disabled={leave.isPending}
+        onClick={confirmAndLeave}
+      >
+        このチャンネルから抜ける
+      </button>
+      {leave.isError && (
+        <p role="alert" className="text-red-700">
+          {errorMessage(leave.error)}
+        </p>
+      )}
+    </div>
   );
 }
 

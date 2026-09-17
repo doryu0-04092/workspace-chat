@@ -64,6 +64,9 @@ export function LoginPage() {
       <p className="mt-6 text-sm">
         アカウントが無ければ <Link to="/register">新規登録</Link>
       </p>
+      <p className="mt-2 text-sm">
+        <Link to="/recovery">パスワードを忘れた</Link>
+      </p>
     </main>
   );
 }
