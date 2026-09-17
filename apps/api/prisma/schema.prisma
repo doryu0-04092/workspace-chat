@@ -15,7 +15,7 @@
 //   2. `Membership_single_owner_per_workspace` … 1ワークスペースにオーナーは1人
 //   3. `RecoveryCode_single_unused_per_user`   … 未使用のリカバリーコードは1人1つ
 //   4. `Channel_archive_naming_check`          … アーカイブと採番と改名が不可分
-//   5. `Message_body_check`                    … 本文は 1〜4000 文字で、空白だけではない
+//   5. `Message_body_check`                    … 本文は 4000 文字まで（空・空白だけは添付だけの投稿のため許す。#614）
 //   6. `Message_replyCount_check`              … 返信件数は負にならない
 //   7. `Dm_participants_check`                 … DM の当事者は小さい User.id が先で、自分自身ではない
 //   8. `DmMessage_body_check`                  … DM の本文も 1〜4000 文字で、空白だけではない
@@ -747,7 +747,8 @@ model Message {
   /// 投稿者。**退会しても行は残る**（利用者は論理削除。機能一覧 1.5）。
   authorId String @db.Uuid
 
-  /// 1〜4000 文字で、空白だけではない（検査制約 `Message_body_check`。マイグレーションに置く）。
+  /// 4000 文字まで（検査制約 `Message_body_check`。マイグレーションに置く）。**空・空白だけは DB では止めない**——添付だけの投稿は本文が空でよく（#614）、
+  /// 添付が無いときに断るのは REST の仕様（CreateMessageRequest）である。
   body String
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)

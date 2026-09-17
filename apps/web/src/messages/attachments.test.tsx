@@ -115,6 +115,53 @@ describe('添付ファイルを付けて投稿する（F-27）', () => {
     );
   });
 
+  it('本文が空でも、確定した添付があれば送信でき、空の本文と添付の識別子を送る（画像だけの投稿。#614）', async () => {
+    const posted = message(2, { author: USER, body: '', attachments: [PNG] });
+    const { calls } = fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () => page([]),
+        [`POST ${UPLOADS}`]: () => json(201, ticket()),
+        [`PUT ${UPLOAD_URL}`]: () => new Response(null, { status: 200 }),
+        [`POST ${UPLOADS}/${UPLOAD_ID}/complete`]: () => json(200, PNG),
+        [`POST ${MESSAGES}`]: () => json(201, posted),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+    await screen.findByLabelText('ファイルを添付');
+    const send = () => screen.getByRole('button', { name: '送信する' }) as HTMLButtonElement;
+    expect(send().disabled).toBe(true);
+
+    choose(pngFile());
+
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+
+    await waitFor(() => expect(calls.some((c) => c.key === `POST ${MESSAGES}`)).toBe(true));
+    const post = calls.find((c) => c.key === `POST ${MESSAGES}`)!;
+    expect(JSON.parse(String(post.init.body))).toEqual({ body: '', attachmentIds: [UPLOAD_ID] });
+    expect((await screen.findByRole('img', { name: '会議の写真.png' })).getAttribute('src')).toBe(
+      PNG.url,
+    );
+  });
+
+  it('本文が空で、添付が上げられなかったものだけなら送信できない（#614）', async () => {
+    fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () => page([]),
+        [`POST ${UPLOADS}`]: () => error(500, 'internal_error'),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+    await screen.findByLabelText('ファイルを添付');
+
+    choose(pngFile());
+
+    await screen.findByText(/上げられませんでした/);
+    expect((screen.getByRole('button', { name: '送信する' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
   it('上げている間は送信できない', async () => {
     const put = deferred();
     fakeFetch(

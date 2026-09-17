@@ -1391,9 +1391,9 @@ export interface components {
             name: string;
             visibility: components["schemas"]["ChannelVisibility"];
         };
-        /** @description チャンネルへの投稿の本体（機能一覧 4.1）。本文は PostMessageRequest と同じ形で、確定した添付を最大 10 件付けられる */
+        /** @description チャンネルへの投稿の本体（機能一覧 4.1）。確定した添付を最大 10 件付けられる。 本文は 4000 文字まで。添付が無ければ PostMessageRequest と同じく 1 文字以上で空白だけは不可、 添付が 1 件以上あれば空・空白だけでもよい（画像だけの投稿。#614） */
         CreateMessageRequest: {
-            /** @description 1〜4000 文字（文字数はコードポイントで数える）。空白だけは不可（機能一覧 4.1） */
+            /** @description 4000 文字まで（文字数はコードポイントで数える）。添付が無ければ 1 文字以上で空白だけは不可（機能一覧 4.1・#614） */
             body: string;
             /** @description 付ける添付の識別子（確定の応答の id）。自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけを付けられる （1つでも当たらなければ 422 attachment_unavailable で、投稿しない）。並びは上げた順になる */
             attachmentIds?: string[];
