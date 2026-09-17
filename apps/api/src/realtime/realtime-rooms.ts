@@ -23,4 +23,12 @@ export class RealtimeRooms {
     this.gateway.server.in(userRoom(userId)).socketsLeave(channelIds.map(channelRoom));
     this.presence.userRemoved(channelIds, userId);
   }
+
+  /**
+   * その利用者の接続をすべて切る（アカウントの削除。機能一覧 1.5）。他のタスクの接続にも効く（利用者の部屋を通す）。
+   * 切断で全部の部屋から出て、在席の変化は切断の経路（ChannelRoomsGateway の `disconnecting`）が配る。
+   */
+  disconnectUser(userId: string): void {
+    this.gateway.server.in(userRoom(userId)).disconnectSockets(true);
+  }
 }

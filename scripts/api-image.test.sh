@@ -90,6 +90,8 @@ docker run --detach --name "$api" --network "$network" --publish 127.0.0.1::3000
   --env TRUST_PROXY_HOPS=0 \
   --env JWT_SECRET="$jwt_secret" \
   --env WEB_ORIGIN="http://web.test" \
+  --env S3_BUCKET="workspace-chat-image-test" \
+  --env S3_REGION="ap-northeast-1" \
   "$runtime_image" >/dev/null
 port=$(docker port "$api" 3000/tcp | head -n 1 | sed 's/.*://')
 status=""

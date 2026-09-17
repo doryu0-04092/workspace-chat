@@ -40,6 +40,10 @@ export function failureMessage(failure: Failure): string {
       return 'そのユーザーID の利用者はいません。綴りを確かめてください。';
     case 'owner_cannot_leave':
       return 'オーナーは退出できません。オーナーの権限を他の人に渡す機能が無いためです。';
+    case 'password_mismatch':
+      return 'パスワードが違います。';
+    case 'owner_cannot_delete_account':
+      return 'ワークスペースのオーナーは、アカウントを削除できません。オーナーの権限を他の人に渡す機能が無いためです。';
     case 'not_found':
       return '見つかりません。一覧を開き直してください。';
     default:

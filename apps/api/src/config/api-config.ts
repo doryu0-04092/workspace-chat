@@ -5,7 +5,14 @@ import {
   resolveRedisUrl,
   resolveTrustProxyHops,
 } from '../rate-limit/rate-limit-config';
+import {
+  resolveS3Bucket,
+  resolveS3Endpoint,
+  resolveS3ForcePathStyle,
+  resolveS3Region,
+} from '../storage/s3-config';
 import { resolveDatabaseUrl } from './database-url';
+import { isHttpOrigin } from './http-origin';
 
 /**
  * アプリの組み立てに要る設定。createApp が環境変数から resolveApiConfig で作り、組み立ての前にすべて検証する。
@@ -22,6 +29,10 @@ export interface ApiConfig {
   readonly registrationEnabled: boolean;
   readonly jwtSecret: string;
   readonly webOrigin: string;
+  readonly s3Bucket: string;
+  readonly s3Region: string;
+  readonly s3Endpoint: string | undefined;
+  readonly s3ForcePathStyle: boolean;
 }
 
 /** ApiConfig を注入するトークン。 */
@@ -70,17 +81,7 @@ export function resolveWebOrigin(raw: string | undefined): string {
       'WEB_ORIGIN が設定されていません（web の origin。例: https://chat.example.com）',
     );
   }
-  let url: URL | undefined;
-  try {
-    url = new URL(raw);
-  } catch {
-    url = undefined;
-  }
-  if (
-    url === undefined ||
-    (url.protocol !== 'https:' && url.protocol !== 'http:') ||
-    url.origin !== raw
-  ) {
+  if (!isHttpOrigin(raw)) {
     throw new Error(
       `WEB_ORIGIN の値が不正です（スキーム://ホスト[:ポート] の形で、末尾の / やパスを付けない）: ${JSON.stringify(raw)}`,
     );
@@ -139,6 +140,14 @@ export const API_SETTINGS: ApiSettings = {
     hint: `${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す`,
   },
   webOrigin: { env: 'WEB_ORIGIN', resolve: resolveWebOrigin, secret: false },
+  s3Bucket: { env: 'S3_BUCKET', resolve: resolveS3Bucket, secret: false },
+  s3Region: { env: 'S3_REGION', resolve: resolveS3Region, secret: false },
+  s3Endpoint: { env: 'S3_ENDPOINT', resolve: resolveS3Endpoint, secret: false },
+  s3ForcePathStyle: {
+    env: 'S3_FORCE_PATH_STYLE',
+    resolve: resolveS3ForcePathStyle,
+    secret: false,
+  },
 };
 
 /**

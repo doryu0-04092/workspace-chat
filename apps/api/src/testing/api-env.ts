@@ -14,6 +14,9 @@ export const TEST_WEB_ORIGIN = 'http://web.test';
 /** 繋がらない Valkey の宛先。レート制限はメモリへ迂回する。 */
 export const UNREACHABLE_REDIS_URL = 'redis://127.0.0.1:9';
 
+/** 繋がらない S3 の宛先。読み書きしないテストはこれでよい。**未設定にすると AWS の既定の宛先へ送る**ため、既定で必ず差し替える。 */
+export const UNREACHABLE_S3_ENDPOINT = 'http://127.0.0.1:9';
+
 type ApiEnvName =
   | 'DATABASE_URL'
   | 'REDIS_URL'
@@ -21,7 +24,11 @@ type ApiEnvName =
   | 'API_TASK_COUNT'
   | 'REGISTRATION_ENABLED'
   | 'JWT_SECRET'
-  | 'WEB_ORIGIN';
+  | 'WEB_ORIGIN'
+  | 'S3_BUCKET'
+  | 'S3_REGION'
+  | 'S3_ENDPOINT'
+  | 'S3_FORCE_PATH_STYLE';
 
 /**
  * 起動の設定（config/api-config.ts）の環境変数を、既定のテスト用の値に `overrides` を重ねて差し替える。
@@ -39,6 +46,10 @@ export function stubApiEnv(overrides: Partial<Record<ApiEnvName, string | undefi
     REGISTRATION_ENABLED: undefined,
     JWT_SECRET: randomBytes(32).toString('base64url'),
     WEB_ORIGIN: TEST_WEB_ORIGIN,
+    S3_BUCKET: 'workspace-chat-test',
+    S3_REGION: 'ap-northeast-1',
+    S3_ENDPOINT: UNREACHABLE_S3_ENDPOINT,
+    S3_FORCE_PATH_STYLE: 'true',
     ...overrides,
   };
   for (const [name, value] of Object.entries(env)) {

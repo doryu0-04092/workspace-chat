@@ -340,6 +340,45 @@ paths:
           $ref: '#/components/responses/UnsupportedMediaType'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /users/me/delete:
+    post:
+      operationId: deleteMyAccount
+      summary: 自分のアカウントの削除（退会。F-36）
+      description: >-
+        本人だけ（アクセストークンの利用者を削除する。他人を指す手段を持たない）。パスワードの再入力で本人であることを確かめる。
+        パスワードが違えば 403 password_mismatch、ワークスペースのオーナーなら 403 owner_cannot_delete_account（理由のメッセージを返す）。
+        論理削除であり、同一トランザクションで未使用のリカバリーコードを使用済みにし、所属（Membership。チャンネル参加は連鎖して消える）を消し、
+        リフレッシュトークンをすべて失効させる。その利用者の WebSocket 接続を切り、refresh_token の Cookie を消す（機能一覧 1.5）。
+        ユーザーID ごとに、パスワードを連続して誤った回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+      responses:
+        '204':
+          description: 削除した（Cookie を消す）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パスワードが違う（password_mismatch）か、ワークスペースのオーナーである（owner_cannot_delete_account）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces:
     post:
       operationId: createWorkspace
@@ -1680,6 +1719,8 @@ components:
             - already_invited
             - already_member
             - owner_cannot_leave
+            - password_mismatch
+            - owner_cannot_delete_account
             - channel_name_taken
             - not_a_channel_member
             - already_channel_member
@@ -1860,6 +1901,17 @@ components:
             スレッド内の未読を、チャンネルの未読に含めるか（既定は含める）。
             切り替えても既読位置は動かさないため、「含めない」→「含める」で過去の未読の返信が未読として現れる（機能一覧 10.1）
           type: boolean
+    DeleteAccountRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - password
+      properties:
+        password:
+          description: 今のパスワード。1〜128文字（LoginRequest の password と同じ）
+          type: string
+          minLength: 1
+          maxLength: 128
     UpdateUserSettingsRequest:
       type: object
       additionalProperties: false

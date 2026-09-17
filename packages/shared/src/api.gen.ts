@@ -172,6 +172,26 @@ export interface paths {
         patch: operations["updateMySettings"];
         trace?: never;
     };
+    "/users/me/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 自分のアカウントの削除（退会。F-36）
+         * @description 本人だけ（アクセストークンの利用者を削除する。他人を指す手段を持たない）。パスワードの再入力で本人であることを確かめる。 パスワードが違えば 403 password_mismatch、ワークスペースのオーナーなら 403 owner_cannot_delete_account（理由のメッセージを返す）。 論理削除であり、同一トランザクションで未使用のリカバリーコードを使用済みにし、所属（Membership。チャンネル参加は連鎖して消える）を消し、 リフレッシュトークンをすべて失効させる。その利用者の WebSocket 接続を切り、refresh_token の Cookie を消す（機能一覧 1.5）。 ユーザーID ごとに、パスワードを連続して誤った回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える）
+         */
+        post: operations["deleteMyAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces": {
         parameters: {
             query?: never;
@@ -808,7 +828,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "password_mismatch" | "owner_cannot_delete_account" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -874,6 +894,10 @@ export interface components {
         UserSettings: {
             /** @description スレッド内の未読を、チャンネルの未読に含めるか（既定は含める）。 切り替えても既読位置は動かさないため、「含めない」→「含める」で過去の未読の返信が未読として現れる（機能一覧 10.1） */
             threadUnreadIncluded: boolean;
+        };
+        DeleteAccountRequest: {
+            /** @description 今のパスワード。1〜128文字（LoginRequest の password と同じ） */
+            password: string;
         };
         UpdateUserSettingsRequest: {
             /** @description 送った項目だけを変える（機能一覧 10.1） */
@@ -1533,6 +1557,44 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteMyAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description 削除した（Cookie を消す） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パスワードが違う（password_mismatch）か、ワークスペースのオーナーである（owner_cannot_delete_account） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };
