@@ -90,12 +90,20 @@ export async function startTwoTasks(
   const diagnostic = (task: string): LoggerService => ({
     log: () => undefined,
     warn: (message: unknown, ...rest: unknown[]) =>
-      console.warn(`[two-tasks ${ipPrefix} ${task}] warn`, JSON.stringify(message), JSON.stringify(rest)),
+      console.warn(
+        `[two-tasks ${ipPrefix} ${task}] warn`,
+        JSON.stringify(message),
+        JSON.stringify(rest),
+      ),
     error: (message: unknown, ...rest: unknown[]) =>
-      console.error(`[two-tasks ${ipPrefix} ${task}] error`, JSON.stringify(message), JSON.stringify(rest)),
+      console.error(
+        `[two-tasks ${ipPrefix} ${task}] error`,
+        JSON.stringify(message),
+        JSON.stringify(rest),
+      ),
   });
-  const first = await createApp({ logger: options.logger ?? diagnostic("first") });
-  const second = await createApp({ logger: options.logger ?? diagnostic("second") });
+  const first = await createApp({ logger: options.logger ?? diagnostic('first') });
+  const second = await createApp({ logger: options.logger ?? diagnostic('second') });
   const firstBase = await listen(first);
   const secondBase = await listen(second);
   const prisma = first.get(PrismaService);
