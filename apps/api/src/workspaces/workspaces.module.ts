@@ -13,6 +13,8 @@ import { InvitationsController } from './invitations.controller';
 import { InvitationsService } from './invitations.service';
 import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
+import { ReactionsController } from './reactions.controller';
+import { ReactionsService } from './reactions.service';
 import { WorkspacesController } from './workspaces.controller';
 import { WorkspacesService } from './workspaces.service';
 
@@ -31,6 +33,7 @@ import { WorkspacesService } from './workspaces.service';
     ChannelMembershipController,
     ChannelArchiveController,
     MessagesController,
+    ReactionsController,
   ],
   providers: [
     WorkspacesService,
@@ -41,6 +44,7 @@ import { WorkspacesService } from './workspaces.service';
     ChannelRoomsService,
     ChannelRoomsGateway,
     MessagesService,
+    ReactionsService,
   ],
 })
 export class WorkspacesModule {}

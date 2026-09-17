@@ -16,6 +16,7 @@ export type {
   MessageNewPayload,
   MessageUpdatedPayload,
   PresenceChangedPayload,
+  ReactionChangedPayload,
   RealtimeEventKind,
   RealtimeEventName,
   UnreadUpdatedPayload,

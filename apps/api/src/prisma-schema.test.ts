@@ -203,7 +203,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('マイグレーションの適用', () => {
-    it('12のモデルの表がすべて作られている', async () => {
+    it('14のモデルの表がすべて作られている', async () => {
       const output = await expectSqlToSucceed(
         `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -219,6 +219,8 @@ describe('Prisma のスキーマとマイグレーション', () => {
           'Membership',
           'Message',
           'MessageMention',
+          'MessageReaction',
+          'MessageReactionCount',
           'RecoveryCode',
           'RefreshToken',
           'ThreadRead',
@@ -239,7 +241,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **この検査は検査制約・部分一意索引・式に対する索引（`lower(...)`）を見ない。**
       // Prisma がそれらをスキーマとして扱わないためである
       // （検査制約を消して確かめた。`User_userId_lower_key` を足しても差分は出ない）。
-      // **手書きした制約は6つあり、その6つは下の各テストが個別に見ている。**
+      // **手書きした制約は7つあり、その7つは下の各テストが個別に見ている。**
       // ここが通ったからといって、マイグレーションの手書き部分まで
       // 守られているわけではない。列挙は `schema.prisma` の冒頭と揃えてある。
       expect(() =>
@@ -266,7 +268,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
          ORDER BY c.table_name;`,
       );
       const types = output.split('\n').filter((line) => line.length > 0);
-      expect(types).toHaveLength(12);
+      expect(types).toHaveLength(14);
       for (const type of types) {
         expect(type).toMatch(/:uuid$/);
       }
@@ -668,6 +670,31 @@ describe('Prisma のスキーマとマイグレーション', () => {
 
     it('返信件数 0 は入れられる', async () => {
       const { exitCode, output } = await insertMessage(0);
+      expect(exitCode, output).toBe(0);
+    });
+  });
+
+  // 機能一覧 7: リアクションの件数はカウンタ列で、1 以上（0 になった絵文字の行は消す）。アプリの増減を誤っても DB が止める。
+  describe('リアクションの件数', () => {
+    async function insertCount(count: number): Promise<{ exitCode: number; output: string }> {
+      const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
+      const messageId = randomUUID();
+      return psql(
+        `INSERT INTO "Message" ("id", "channelId", "workspaceId", "authorId", "body")
+           VALUES ('${messageId}', '${channelId}', '${workspaceId}', '${userId}', 'あ');
+         INSERT INTO "MessageReactionCount" ("id", "messageId", "emoji", "count")
+           VALUES ('${randomUUID()}', '${messageId}', '👍', ${count});`,
+      );
+    }
+
+    it.each([0, -1])('件数 %i は入れられない', async (count) => {
+      const { exitCode, output } = await insertCount(count);
+      expect(exitCode).not.toBe(0);
+      expect(output).toContain('MessageReactionCount_count_check');
+    });
+
+    it('件数 1 は入れられる', async () => {
+      const { exitCode, output } = await insertCount(1);
       expect(exitCode, output).toBe(0);
     });
   });
