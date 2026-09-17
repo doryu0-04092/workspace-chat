@@ -1,11 +1,12 @@
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import { errorMessage } from '../api/client';
+import { useTypingNotifier } from '../realtime/use-typing';
 import { type AttachmentDraft, useAttachmentDrafts } from './attachment-drafts';
 import { MentionInput } from './MentionInput';
 import { usePostMessage } from './queries';
 
 /**
- * チャンネルへの投稿（F-11）。添付ファイル（F-27）を付けられる——選んだらすぐに上げ、確定したものの識別子を本文と一緒に送る。
+ * チャンネルへの投稿（F-11）。入力中の知らせ（F-34）を送る。添付ファイル（F-27）を付けられる——選んだらすぐに上げ、確定したものの識別子を本文と一緒に送る。
  * **上げている間は送信できない**（確定していない添付を付けて送らない）。上げられなかったものは送信に含めない。
  */
 export function PostMessageForm({
@@ -17,8 +18,10 @@ export function PostMessageForm({
 }) {
   const post = usePostMessage(workspaceId, channelId);
   const attachments = useAttachmentDrafts(workspaceId, channelId);
+  const notifyTyping = useTypingNotifier(channelId);
   return (
     <MessageForm
+      onBodyChange={notifyTyping}
       submit={(body, options) =>
         post.mutate(
           { body, attachmentIds: attachments.readyIds },
@@ -119,7 +122,7 @@ function AttachmentField({
  *   （DM。F-19。DM のメンションは解決しないため、補完の候補も出さない）
  *
  * 通ったら、既定では入力を空にする（投稿・返信）。`onSubmitted` を渡すと通った後に呼ぶ（編集は欄を閉じる）。
- * `onCancel` を渡すと「取り消す」を出す。
+ * `onCancel` を渡すと「取り消す」を出す。`onBodyChange` を渡すと、本文が変わるたび（通って空にしたときを含む）にいまの本文を渡す。
  */
 export function MessageForm({
   submit,
@@ -135,6 +138,7 @@ export function MessageForm({
   onSubmitted,
   onCancel,
   extra,
+  onBodyChange,
   className = 'mt-4 flex flex-col gap-2',
 }: {
   submit: (body: string, options: { onSuccess: () => void }) => void;
@@ -151,11 +155,16 @@ export function MessageForm({
   onCancel?: () => void;
   /** 入力欄の下に置く欄（投稿の添付） */
   extra?: ReactNode;
+  onBodyChange?: (body: string) => void;
   className?: string;
 }) {
   // 投稿・スレッドの返信・編集のフォームが同じ画面に並ぶため、入力欄の id を固定しない
   const id = useId();
-  const [body, setBody] = useState(initialBody);
+  const [body, setBodyState] = useState(initialBody);
+  const setBody = (value: string) => {
+    setBodyState(value);
+    onBodyChange?.(value);
+  };
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();

@@ -216,3 +216,14 @@ export type PresenceChangedPayload = {
   readonly present: boolean;
   readonly sentAt: string;
 };
+
+/**
+ * `typing:start` / `typing:stop` の payload（F-34。機能一覧 13.3）。そのチャンネルの部屋へ送る。
+ * **クライアントは同じ名前で、本体に `ChannelRoomRequest` を載せてサーバーへ送る**（部屋に入っている参加者の接続からだけ受け付ける）。
+ * `user` は入力している利用者（「○○さんが入力中…」の表示名のため）。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため（機能一覧 5.2）。
+ */
+export type TypingPayload = {
+  readonly channelId: string;
+  readonly user: components['schemas']['UserSummary'];
+  readonly sentAt: string;
+};

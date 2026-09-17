@@ -9,6 +9,7 @@ import { PinnedMessages } from '../messages/PinnedMessages';
 import { PostMessageForm } from '../messages/PostMessageForm';
 import { useMessages } from '../messages/queries';
 import { ThreadPanel } from '../messages/ThreadPanel';
+import { TypingIndicator } from '../messages/TypingIndicator';
 import { useChannelRealtime } from '../realtime/use-channel-realtime';
 import { ChannelMembers, InviteToChannel } from './MemberLists';
 import {
@@ -186,7 +187,12 @@ function ChannelMessages({
               joinedAt={joinedAt}
             />
           </section>
-          {!readOnly && <PostMessageForm workspaceId={workspaceId} channelId={channelId} />}
+          {!readOnly && (
+            <>
+              <TypingIndicator channelId={channelId} />
+              <PostMessageForm workspaceId={workspaceId} channelId={channelId} />
+            </>
+          )}
         </div>
         {threadId && (
           <ThreadPanel
