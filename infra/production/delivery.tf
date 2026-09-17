@@ -43,6 +43,31 @@ locals {
   # web のバケットはビルドの成果物だけを持ち、destroy で中身ごと消す（ソースから作り直せる）。
   web_force_destroy       = true
   web_block_public_access = true
+
+  # 画面と api の応答に付けるセキュリティヘッダー（#609。決定・2026-09-18・依頼側）。
+  # 踏むと壊れる: connect-src から添付のバケットを外さない。ブラウザは署名付き URL で S3 へ直接 PUT する（外すと添付とアバターが上がらない）。
+  # WebSocket（/api/socket.io/）は同じ origin であり、'self' が wss の同じホストに当たる（CSP Level 3）。
+  # index.html はインラインのスクリプトもスタイルも持たない（Vite の成果物）。インラインを足すなら、この CSP を先に直す。
+  web_content_security_policy = join("; ", [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "media-src 'self'",
+    "connect-src 'self' https://${aws_s3_bucket.attachments.bucket_regional_domain_name}",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ])
+  web_hsts_max_age_sec        = 31536000
+  web_hsts_include_subdomains = false
+  web_hsts_preload            = false
+  web_frame_option            = "DENY"
+  web_referrer_policy         = "strict-origin-when-cross-origin"
+  web_removed_headers         = ["X-Powered-By"]
+  security_headers_override   = true
 }
 
 # --- web の静的配信のバケット ------------------------------------------------------
@@ -148,6 +173,44 @@ data "aws_cloudfront_response_headers_policy" "security_headers" {
   name = "Managed-SecurityHeadersPolicy"
 }
 
+# 画面（既定のビヘイビア）と api（/api/*）の応答に付けるセキュリティヘッダー（#609）。値は上の locals にある。
+resource "aws_cloudfront_response_headers_policy" "web" {
+  name = "workspace-chat-web-security-headers"
+
+  security_headers_config {
+    content_security_policy {
+      content_security_policy = local.web_content_security_policy
+      override                = local.security_headers_override
+    }
+    strict_transport_security {
+      access_control_max_age_sec = local.web_hsts_max_age_sec
+      include_subdomains         = local.web_hsts_include_subdomains
+      preload                    = local.web_hsts_preload
+      override                   = local.security_headers_override
+    }
+    content_type_options {
+      override = local.security_headers_override
+    }
+    frame_options {
+      frame_option = local.web_frame_option
+      override     = local.security_headers_override
+    }
+    referrer_policy {
+      referrer_policy = local.web_referrer_policy
+      override        = local.security_headers_override
+    }
+  }
+
+  remove_headers_config {
+    dynamic "items" {
+      for_each = local.web_removed_headers
+      content {
+        header = items.value
+      }
+    }
+  }
+}
+
 # --- api（ALB。VPC オリジン） ------------------------------------------------------
 
 resource "aws_cloudfront_vpc_origin" "api" {
@@ -231,11 +294,12 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "web"
-    viewer_protocol_policy = local.web_viewer_protocol_policy
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
+    target_origin_id           = "web"
+    viewer_protocol_policy     = local.web_viewer_protocol_policy
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.web.id
 
     function_association {
       event_type   = "viewer-request"
@@ -244,13 +308,14 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   ordered_cache_behavior {
-    path_pattern             = local.api_path_pattern
-    target_origin_id         = "api"
-    viewer_protocol_policy   = local.api_viewer_protocol_policy
-    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods           = ["GET", "HEAD"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    path_pattern               = local.api_path_pattern
+    target_origin_id           = "api"
+    viewer_protocol_policy     = local.api_viewer_protocol_policy
+    allowed_methods            = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.web.id
   }
 
   # 添付（機能一覧 11.2）。Cookie の対象は /files/workspace/{ws}/channel/{ch}/*、Path 属性は /files（api が発行する）。
