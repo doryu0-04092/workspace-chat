@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeFetch, headerOf, json, PROFILE, token, USER } from '../testing/fake-api';
+import { hang, manualTimeouts } from '../testing/manual-timeouts';
 import { createSessionStore, type RefreshLocks } from './session-store';
 
 afterEach(() => {
@@ -179,6 +180,84 @@ describe('起動時の復元', () => {
       expect(store.getState()).toEqual({ status: 'unavailable' });
       expect(waited).toEqual([]);
       expect(count('POST /api/auth/refresh')).toBe(1);
+    });
+
+    describe('応答が返らないとき（#530）', () => {
+      it('リフレッシュが返らなければ、10 秒の時限で打ち切って通信の失敗として1回だけやり直し、やり直しも返らなければ確かめられなかった状態になる', async () => {
+        const { count } = fakeFetch({ 'POST /api/auth/refresh': [hang, hang] });
+        const { waited, wait } = recordingWait();
+        const timeouts = manualTimeouts();
+        const store = createSessionStore({ wait, timeoutSignal: timeouts.timeoutSignal });
+
+        const restoring = store.restore();
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(1));
+        expect(timeouts.requested).toEqual([10_000]);
+        expect(store.getState()).toEqual({ status: 'checking' });
+        timeouts.fire(0);
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(2));
+        timeouts.fire(1);
+        await restoring;
+
+        expect(store.getState()).toEqual({ status: 'unavailable' });
+        expect(waited).toEqual([1000]);
+        expect(count('POST /api/auth/refresh')).toBe(2);
+        expect(count('GET /api/users/me')).toBe(0);
+      });
+
+      it('自分の情報の読み込みが返らなければ、打ち切って読み込みだけを1回やり直し、やり直しも返らなければ確かめられなかった状態になる', async () => {
+        const { count } = fakeFetch({
+          'POST /api/auth/refresh': () => token('t1'),
+          'GET /api/users/me': [hang, hang],
+        });
+        const timeouts = manualTimeouts();
+        const store = createSessionStore({
+          wait: recordingWait().wait,
+          timeoutSignal: timeouts.timeoutSignal,
+        });
+
+        const restoring = store.restore();
+        // 0 番目はリフレッシュの時限（応答が返ったので切らない）
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(2));
+        timeouts.fire(1);
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(3));
+        timeouts.fire(2);
+        await restoring;
+
+        expect(store.getState()).toEqual({ status: 'unavailable' });
+        expect(timeouts.requested).toEqual([10_000, 10_000, 10_000]);
+        expect(count('POST /api/auth/refresh')).toBe(1);
+        expect(count('GET /api/users/me')).toBe(2);
+      });
+
+      it('打ち切ったリフレッシュの応答が後から届いても、そのトークンを使わず、状態を書き換えない', async () => {
+        let deliverLate: ((response: Response) => void) | undefined;
+        // 打ち切りを無視して後から応答を返す要求（打ち切りが fetch に届かなかった場合）
+        const late = () =>
+          new Promise<Response>((resolve) => {
+            deliverLate = resolve;
+          });
+        const { count } = fakeFetch({
+          'POST /api/auth/refresh': [late, hang],
+          'GET /api/users/me': () => json(200, PROFILE),
+        });
+        const timeouts = manualTimeouts();
+        const store = createSessionStore({
+          wait: recordingWait().wait,
+          timeoutSignal: timeouts.timeoutSignal,
+        });
+
+        const restoring = store.restore();
+        await vi.waitFor(() => expect(deliverLate).toBeDefined());
+        timeouts.fire(0);
+        deliverLate!(token('t-late'));
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(2));
+        timeouts.fire(1);
+        await restoring;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        expect(store.getState()).toEqual({ status: 'unavailable' });
+        expect(count('GET /api/users/me')).toBe(0);
+      });
     });
   });
 
