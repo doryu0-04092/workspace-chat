@@ -154,13 +154,37 @@ const UNREAD_COUNT = Prisma.sql`COUNT(m."id")`;
 
 /**
  * メンションの件数（F-24。機能一覧 10.2）。**未読の行（`m`）のうち、その参加者をメンションしているもの**を数える。
- * `mm` は `UNREAD_JOINS` の最後の `LEFT JOIN` である。
+ * `mention` は `UNREAD_JOINS` の最後の `LEFT JOIN` である（`MENTIONS_PARTICIPANT`）。
  *
  * **踏むと壊れる: 未読と別の問い合わせで数えない。** 同じ `UNREAD_JOINS` を通すから、既読位置・削除済み・自分の投稿・
  * 返信を含める設定がそのまま効き、**メンションの件数は常に未読以下**になる（既読を進めると一緒に減る）。
  * **`FILTER` 句も使わない**——上の `UNREAD_COUNT` の不変条件と同じ理由で、数える条件は結合の `ON` 側に置く。
  */
-const MENTION_COUNT = Prisma.sql`COUNT(mm."messageId")`;
+const MENTION_COUNT = Prisma.sql`COUNT(mention."hit")`;
+
+/**
+ * 未読の行（`m`）が、その参加者（`cm`）をメンションしているか（F-20・F-21・F-24。機能一覧 9.1・9.2・10.2）。次のどれかである。
+ * - 個人メンションの対象である（`MessageMention`）
+ * - 本文に `@channel` がある（`Message.mentionsChannel`。参加者全員）
+ * - 本文に `@here` があり、その参加者が受け取りを返した（`HereMentionRecipient.receivedAt`。**受け取りを返した利用者にだけ通知を作る**。9.2）
+ *
+ * **踏むと壊れる: 1つの未読の行につき高々1行を返す形（`LATERAL` の中の `SELECT 1 … WHERE`）にしておく。**
+ * 条件ごとに表を `LEFT JOIN` すると、個人メンションと `@here` の両方に当たる行が2行になり、`COUNT` を通して未読数まで実体より多くなる。
+ * `m` が無い行（未読が0件）では `WHERE` が偽になり、行を返さない。
+ */
+const MENTIONS_PARTICIPANT = Prisma.sql`
+  (
+    m."mentionsChannel"
+    OR EXISTS (
+      SELECT 1 FROM "MessageMention" mm
+       WHERE mm."messageId" = m."id" AND mm."userId" = cm."userId"
+    )
+    OR (m."mentionsHere" AND EXISTS (
+      SELECT 1 FROM "HereMentionRecipient" hr
+       WHERE hr."messageId" = m."id" AND hr."userId" = cm."userId" AND hr."receivedAt" IS NOT NULL
+    ))
+  )
+`;
 
 /**
  * スレッドの返信を数えるかは利用者の設定による（`User.threadUnreadIncluded`。既定は数える。機能一覧 10.1）。
@@ -225,8 +249,8 @@ const AFTER_THREAD_READ_POSITION = Prisma.sql`
 `;
 
 /**
- * 未読を数える結合（利用者・既読位置・メッセージ・スレッドの既読位置・メンションの対象）。上の `UNREAD_COUNT` と `MENTION_COUNT` の両方と対で使う
- * （メンションの対象〔`mm`〕は最後の `LEFT JOIN` で、`MENTION_COUNT` だけが数える）。
+ * 未読を数える結合（利用者・既読位置・メッセージ・スレッドの既読位置・メンション）。上の `UNREAD_COUNT` と `MENTION_COUNT` の両方と対で使う
+ * （メンション〔`mention`〕は最後の `LEFT JOIN` で、`MENTION_COUNT` だけが数える）。
  *
  * **踏むと壊れる: メッセージを絞る条件は、この `ON` 側に置く。** `FILTER` 句へ移すと、
  * **プランナが結合まで押し下げられず**（集約の段でしか評価できない）、参加者数 × そのチャンネルの全メッセージを
@@ -257,13 +281,10 @@ const UNREAD_JOINS = Prisma.sql`
    AND m."deletedAt" IS NULL
    AND m."authorId" <> cm."userId"
    AND m."createdAt" >= cm."joinedAt"
-  LEFT JOIN "MessageMention" mm
-    ON mm."messageId" = m."id"
-   AND mm."userId" = cm."userId"
+  LEFT JOIN LATERAL (SELECT 1 AS "hit" WHERE ${MENTIONS_PARTICIPANT}) mention ON TRUE
 `;
-// **踏むと壊れる: `mm` の結合は、メッセージ1件につき高々1行でなければならない。** `MessageMention` の
-// `@@unique([messageId, userId])` がそれを保証しており、だから `UNREAD_COUNT` の値が変わらない。
-// この一意制約を外すと、同じ人を2回メンションした投稿が未読に2件と数えられる。
+// **踏むと壊れる: `mention` の結合は、メッセージ1件につき高々1行でなければならない**（`MENTIONS_PARTICIPANT`）。
+// 2行になると `UNREAD_COUNT` の値まで変わり、同じ人を2通りでメンションした投稿が未読に2件と数えられる。
 
 /** 未読数とメンションの件数（機能一覧 10.1・10.2）。 */
 export type UnreadCounts = { unread: number; mentions: number };

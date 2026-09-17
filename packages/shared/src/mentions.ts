@@ -24,3 +24,18 @@ export function mentionedLoginIds(body: string): string[] {
   }
   return [...new Set(found)];
 }
+
+/**
+ * 一斉メンション（F-21。機能一覧 9.2）の記法。`@here` はそのチャンネルの在席中の参加者、`@channel` は参加者全員へ知らせる。
+ * **本文から拾う規則は `MENTION_PATTERN` と同じで、大文字小文字によらない**（api が宛先を決めるのと、web が強調するのとで同じものを使う）。
+ * **同じ綴りのユーザーID の利用者への個人メンションは、これとは別にそのまま解決する**（#497。どちらを優先するかは決めていない）。
+ */
+export const BROADCAST_MENTIONS = ['here', 'channel'] as const;
+
+export type BroadcastMention = (typeof BROADCAST_MENTIONS)[number];
+
+/** 本文に現れた一斉メンション。 */
+export function broadcastMentionsOf(body: string): ReadonlySet<BroadcastMention> {
+  const found = new Set<string>(mentionedLoginIds(body));
+  return new Set(BROADCAST_MENTIONS.filter((mention) => found.has(mention)));
+}

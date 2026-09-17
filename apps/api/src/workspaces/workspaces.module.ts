@@ -14,6 +14,7 @@ import { ChannelsController } from './channels.controller';
 import { ChannelsService } from './channels.service';
 import { DmsController } from './dms.controller';
 import { DmsService } from './dms.service';
+import { HereMentions } from './here-mentions';
 import { InvitationsController } from './invitations.controller';
 import { InvitationsService } from './invitations.service';
 import { PinsController } from './pins.controller';
@@ -63,6 +64,7 @@ import { WorkspacesService } from './workspaces.service';
     SearchService,
     ReactionsService,
     AttachmentsService,
+    HereMentions,
   ],
   // 添付の配信の Cookie の発行（delivery/）が、所属の判定に使う
   exports: [WorkspacesService],

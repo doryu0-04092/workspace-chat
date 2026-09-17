@@ -11,6 +11,7 @@ import { useMessages } from '../messages/queries';
 import { ThreadPanel } from '../messages/ThreadPanel';
 import { TypingIndicator } from '../messages/TypingIndicator';
 import { useChannelRealtime } from '../realtime/use-channel-realtime';
+import { useHereReceipt } from '../realtime/use-here-receipt';
 import { ChannelMembers, InviteToChannel } from './MemberLists';
 import {
   type Channel,
@@ -154,6 +155,8 @@ function ChannelMessages({
   const rejected = useChannelRealtime(workspaceId, channelId);
   // 添付の配信の Cookie は、参加しているチャンネルを開いている間だけ取り直す（機能一覧 11.2）
   useChannelFileCookies(workspaceId, channelId);
+  // 開いているチャンネルの @here にだけ受け取りを返す（F-21）
+  useHereReceipt(channelId);
   const [unreadFrom] = useState(lastReadMessageId);
   useAdvanceRead(workspaceId, channelId);
   const [searchParams, setSearchParams] = useSearchParams();

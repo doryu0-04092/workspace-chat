@@ -3,6 +3,7 @@ import type Redis from 'ioredis';
 import { AuthModule } from '../auth/auth.module';
 import { MetricsWriter } from '../logging/metrics';
 import { VALKEY_CLIENT, ValkeyModule } from '../rate-limit/rate-limit.module';
+import { HereReceipts } from './here-receipts';
 import { PresenceRegistry } from './presence-registry';
 import { RealtimeEmitter } from './realtime.emitter';
 import { RealtimeGateway } from './realtime.gateway';
@@ -21,6 +22,7 @@ import { RoomMembershipReconciler } from './room-membership-reconciler';
     PresenceRegistry,
     RealtimePresence,
     RoomMembershipReconciler,
+    HereReceipts,
     MetricsWriter,
     {
       provide: REALTIME_VALKEY_CLIENTS,
@@ -33,6 +35,7 @@ import { RoomMembershipReconciler } from './room-membership-reconciler';
     RealtimeRooms,
     PresenceRegistry,
     RealtimePresence,
+    HereReceipts,
     REALTIME_VALKEY_CLIENTS,
   ],
 })

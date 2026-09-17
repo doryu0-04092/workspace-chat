@@ -1,6 +1,30 @@
-import { MENTION_BEING_TYPED } from '@workspace-chat/shared';
+import {
+  BROADCAST_MENTIONS,
+  type BroadcastMention,
+  MENTION_BEING_TYPED,
+} from '@workspace-chat/shared';
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 import { type UserSummary, useMentionCandidates } from './mention-candidates';
+
+/** 一斉メンション（F-21。機能一覧 9.2）の候補の説明。候補の一覧で、ユーザーID の代わりに記法を出す。 */
+const BROADCAST_LABELS: Record<BroadcastMention, string> = {
+  here: 'このチャンネルを開いている参加者',
+  channel: 'このチャンネルの参加者全員',
+};
+
+/**
+ * 書きかけに当たる一斉メンションの候補（前方一致。大文字小文字によらない）。参加者の候補と同じ形にして、差し込みを1つにする。
+ * `id` は利用者の id と重ならない値にする（一覧の key に使う）。
+ */
+function broadcastCandidates(prefix: string): UserSummary[] {
+  return BROADCAST_MENTIONS.filter((mention) => mention.startsWith(prefix.toLowerCase())).map(
+    (mention) => ({
+      id: `broadcast:${mention}`,
+      userId: mention,
+      displayName: BROADCAST_LABELS[mention],
+    }),
+  );
+}
 
 /**
  * メンションの補完つきの入力欄（F-20。機能一覧 9.1）。プレーンな `textarea`（要件定義書の UI の表）を combobox にし、
@@ -11,6 +35,7 @@ import { type UserSummary, useMentionCandidates } from './mention-candidates';
  *   （要件定義書のアクセシビリティ「メンション補完でフォーカスを閉じ込め」）。一覧が無いときは妨げない
  * - Escape で閉じ、入力が変わるまで開かない
  * - 候補が0人・読めないときは一覧を出さない
+ * - **書きかけに当たる `@here` / `@channel`（F-21）を、参加者の候補の前に出す**（候補の読み込みを待たない）
  */
 export function MentionInput({
   id,
@@ -39,7 +64,8 @@ export function MentionInput({
   const typed = caret === null ? null : MENTION_BEING_TYPED.exec(value.slice(0, caret));
   const prefix = typed !== null && dismissedAt !== value ? (typed[1] ?? '') : null;
   const candidates = useMentionCandidates(workspaceId, channelId, prefix);
-  const options = prefix === null ? [] : (candidates.data ?? []);
+  const options =
+    prefix === null ? [] : [...broadcastCandidates(prefix), ...(candidates.data ?? [])];
   const open = options.length > 0;
   const selected = active.prefix === prefix ? Math.min(active.index, options.length - 1) : 0;
 

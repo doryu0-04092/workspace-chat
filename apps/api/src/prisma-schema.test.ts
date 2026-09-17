@@ -203,7 +203,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('マイグレーションの適用', () => {
-    it('20のモデルの表がすべて作られている', async () => {
+    it('21のモデルの表がすべて作られている', async () => {
       const output = await expectSqlToSucceed(
         `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -220,6 +220,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
           'Dm',
           'DmMessage',
           'DmRead',
+          'HereMentionRecipient',
           'Invitation',
           'Membership',
           'Message',
@@ -274,7 +275,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
          ORDER BY c.table_name;`,
       );
       const types = output.split('\n').filter((line) => line.length > 0);
-      expect(types).toHaveLength(21);
+      expect(types).toHaveLength(22);
       for (const type of types) {
         expect(type).toMatch(/:uuid$/);
       }

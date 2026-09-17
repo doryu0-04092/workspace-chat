@@ -296,6 +296,7 @@ model User {
   reactions           MessageReaction[]
   avatarUploads       AvatarUpload[]
   attachments         Attachment[]
+  hereMentionedIn     HereMentionRecipient[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -764,6 +765,14 @@ model Message {
   /// 削除されていない返信の件数（カウンタ列。一覧で `COUNT` を発行しない。返信の投稿・削除と同じトランザクションで増減する。要件定義書 4.1）。
   replyCount Int @default(0)
 
+  /// 本文に `@channel` があるか（F-21。機能一覧 9.2。投稿・返信・編集で本文から決める）。
+  /// **参加者全員のメンションの件数に数える**（F-24。`unread.ts`）——参加者ごとの行を作らない（参加した時点より後だけを数える条件がそのまま効く）。
+  mentionsChannel Boolean @default(false)
+
+  /// 本文に `@here` があるか（F-21）。**メンションの件数に数えるのは、受け取りを返した利用者だけ**（`HereMentionRecipient`）。
+  /// 編集で本文から消えたら数えない（受け取りの記録は残す）。
+  mentionsHere Boolean @default(false)
+
   channel  Channel          @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   author   User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
   /// 親は論理削除だけで消える（返信は残す。機能一覧 4.2）。チャンネルごと消えるときは、同じ文の中で返信も消えるため NoAction にする。
@@ -774,6 +783,7 @@ model Message {
   reactionCounts MessageReactionCount[]
   /// 投稿に結び付けた添付（F-27）。
   attachments Attachment[]
+  hereRecipients HereMentionRecipient[]
 
   /// 既読位置（F-23）から指される向き。**参照するだけで、このメッセージの側からは読まない。**
   /// Prisma が双方向の関連を要求するために置いている（3本とも `ChannelRead` / `ThreadRead` の側が持ち主である）。
@@ -825,10 +835,8 @@ model MessageMention {
 
   /// 本文に同じ利用者を2回書いても1件。メッセージの対象を引く向きにも効く。
   ///
-  /// **踏むと壊れる: 未読とメンションの集計が、この一意制約に頼っている**（F-23・F-24。機能一覧 10.1・10.2）。
-  /// `unread.ts` の `UNREAD_JOINS` は、この表を `messageId` と `userId` で `LEFT JOIN` している。
-  /// 1組に1行だから `COUNT(m."id")` の値が変わらない。**この制約を外す・別の組に変えると、同じ組の行が2つあるメッセージを
-  /// 未読に2件と数える**——メンションの件数だけでなく、**未読数まで実体より多くなる**。
+  /// 未読とメンションの集計（F-23・F-24。`unread.ts` の `MENTIONS_PARTICIPANT`）は、この表を `EXISTS` で引く（1つの未読の行につき高々1行にするため、
+  /// `LEFT JOIN` しない）。
   @@unique([messageId, userId])
 }
 
@@ -874,6 +882,30 @@ model MessageReactionCount {
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, emoji])
+}
+
+/// `@here` の送った宛先と受け取り（F-21。機能一覧 9.2「タスクをまたぐ在席」）。
+/// **送った宛先ごとに1行**を持ち、受け取りを返した利用者は `receivedAt` を持つ——
+/// **送った宛先の一覧は全行、受け取りの一覧は `receivedAt` のある行**であり、一致しないときも両方が残る（届いていないかもしれない利用者を後から確かめる記録）。
+/// **`@here` の通知（メンションの件数）は、`receivedAt` のある行の利用者にだけ数える**（`unread.ts`）。
+/// **読む API は持たない**（誰が確かめられるかは、作るときにそのチャンネルの参加者の範囲で決める。9.2）。
+model HereMentionRecipient {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @db.Uuid
+
+  /// 送った宛先の利用者（`User.id`）。**送る時点でそのチャンネルの参加者と確かめた利用者だけ**を書く（5.2）。
+  userId String @db.Uuid
+
+  /// 受け取りを返した時刻。期限までに返らなかった宛先は null（受け取らなかったとして扱う）。
+  receivedAt DateTime? @db.Timestamptz(3)
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 1つの `@here` の宛先に同じ利用者は1回。**未読の集計はこの組で引く**（1組に高々1行）。
+  @@unique([messageId, userId])
 }
 
 // ============================================================================
