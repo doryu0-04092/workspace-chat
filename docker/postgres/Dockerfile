@@ -1,4 +1,5 @@
-# PostgreSQL 17 に pg_bigm を足したイメージ。開発環境（compose.yaml）だけが使う。
+# PostgreSQL 17 に pg_bigm を足したイメージ。開発環境（compose.yaml）と、テスト（apps/api/src/testing/postgres.ts・scripts/api-image.test.sh）が使う。
+# 本番（RDS）は使わない（RDS が同梱する pg_bigm を使う）。
 #
 # なぜ自分でビルドするか。
 #   1. 公式の postgres:17 に pg_bigm は入っていない

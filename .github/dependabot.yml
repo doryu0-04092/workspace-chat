@@ -86,9 +86,12 @@ updates:
 #     強さ: **イメージを作るたび。** 片方を外しても、もう片方には届く。
 #     **ただし外すと、CI が確かめた土台と、本番に出すイメージの土台が揃わなくなる**（これが外してはならない理由）
 #
-#   postgres:17-bookworm（db の土台。docker/postgres/Dockerfile の POSTGRES_IMAGE）
+#   postgres:17-bookworm（db とテストの土台。docker/postgres/Dockerfile の POSTGRES_IMAGE）
 #     経路: docker compose build --pull db（README の操作表）
-#     強さ: **人が叩いたときだけ。これが唯一の経路である。**
+#           scripts/api-image.test.sh の docker build --pull
+#           apps/api/src/testing/postgres.ts の docker build --pull（テストの workspace-chat-db:test）
+#     強さ: **開発環境の db（workspace-chat-db:local）に届くのは、人が compose build --pull を叩いたときだけ。**
+#     テストのイメージは npm test か api-image.test.sh を流せば届くが、別の名前のため開発環境の db には入らない。
 #     docker compose up -d --build --wait では取り直されない（README の実測）
 #
 #   valkey/valkey:8-alpine（compose.yaml の redis と、apps/api/src/testing/valkey.ts の VALKEY_IMAGE。**同じタグ**）
@@ -96,11 +99,6 @@ updates:
 #           valkey.ts の PullPolicy.alwaysPull()
 #     強さ: **npm test を流せば届く。** 手元でテストを回さない人には、compose pull だけが経路になる。
 #     **どちらも取り直すのは手元のイメージまでで、動いているコンテナに入るのは次に up -d で作り直したとき**
-#
-#   postgres:17（テストの土台。apps/api/src/testing/postgres.ts の POSTGRES_IMAGE。**db の土台とは別のタグ**）
-#     経路: scripts/api-image.test.sh の docker pull
-#           postgres.ts の PullPolicy.alwaysPull()
-#     強さ: **npm test か api-image.test.sh を流せば届く**
 #
 # **代償**: テストの土台は起動のたびにレジストリへ問い合わせるため npm test が遅くなり、
 # レジストリが不調だとテストごと落ちる（#517 の CI で実際に起きた）。各 docblock にも書いてある。
