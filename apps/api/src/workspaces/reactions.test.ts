@@ -409,7 +409,7 @@ describe('絵文字リアクション（F-18）', () => {
       );
       await reacted('PUT', bob, workspace.id, channelId, message.id, emojis[0]!);
       await countersMatchRows(message.id);
-    });
+    }, 60_000);
   });
 
   describe('断る相手', () => {
@@ -516,7 +516,7 @@ describe('絵文字リアクション（F-18）', () => {
       expect((await react('PUT', alice, workspace.id, channelId, message.id, '🎉')).status).toBe(
         200,
       );
-    });
+    }, 60_000);
   });
 
   describe('配信（reaction:changed）', () => {

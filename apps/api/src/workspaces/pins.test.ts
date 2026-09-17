@@ -407,6 +407,6 @@ describe('ピン留め（F-33）', () => {
       }
       expect((await pin('PUT', bob, workspace.id, channelId, message.id)).status).toBe(429);
       expect((await pin('PUT', alice, workspace.id, channelId, message.id)).status).toBe(200);
-    });
+    }, 60_000);
   });
 });

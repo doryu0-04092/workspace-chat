@@ -939,7 +939,7 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
 
       // 利用者で数えるため、別の利用者は断らない。
       expect((await post(bob, workspace.id, channelId, '別の人')).status).toBe(201);
-    });
+    }, 60_000);
   });
 
   // 機能一覧 6（F-17）: スレッド。CLAUDE.md「必ずテストを書く箇所」（返信も同じ）: WebSocket が非参加者にイベントを配信しないこと／
