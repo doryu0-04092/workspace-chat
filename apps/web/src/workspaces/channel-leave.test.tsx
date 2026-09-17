@@ -1,7 +1,8 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { error, fakeFetch, json } from '../testing/fake-api';
+import { error, fakeFetch, json, USER } from '../testing/fake-api';
 import {
+  BOB,
   CHANNEL_PATH,
   GENERAL,
   MESSAGES,
@@ -17,6 +18,7 @@ import { renderApp } from '../testing/render-app';
 const CHANNELS = `GET /api/workspaces/${WORKSPACE_ID}/channels`;
 const LEAVE = `POST /api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/leave`;
 const MANAGED = `GET /api/workspaces/${WORKSPACE_ID}/managed-channels`;
+const CHANNEL_MEMBERS = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/members`;
 const SECRET = { ...GENERAL, name: 'secret', visibility: 'PRIVATE' };
 
 /** メッセージの一覧は空で返す（返さないと、その読み込みの失敗の alert を、退出の失敗と取り違える）。 */
@@ -104,9 +106,9 @@ describe('チャンネルからの退出（F-10）', () => {
     expect(screen.getByRole('heading', { name: '# general' })).toBeDefined();
   });
 
-  // 管理用の一覧（F-35）の「参加者 N 人」は、抜けた本人の分だけ減る。**開き直したときの取り直しは返さない**——
-  // キャッシュの人数が、取り直しを待つ間に抜ける前のまま描かれないことを見る。
-  it('オーナーが抜けたら、管理用の一覧のそのチャンネルの人数を、取り直しを待たずに1人減らす', async () => {
+  // 管理用の一覧（F-35）の行は「参加者 N 人」と参加者の一覧を並べて出す。**抜けたら両方から本人の分を外す**（片方だけだと同じ行で食い違う。#549 第0巡の 🔴1）。
+  // **開き直したときの取り直しは返さない**——キャッシュが、取り直しを待つ間に抜ける前のまま描かれないことを見る。
+  it('オーナーが抜けたら、管理用の一覧のそのチャンネルの人数と参加者の一覧から、取り直しを待たずに本人を外す', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const managed = {
       id: GENERAL.id,
@@ -120,6 +122,7 @@ describe('チャンネルからの退出（F-10）', () => {
         [`GET /api/workspaces/${WORKSPACE_ID}`]: () => json(200, { ...WORKSPACE, role: 'OWNER' }),
         [CHANNELS]: onceThenNever(() => json(200, [GENERAL])),
         [MANAGED]: onceThenNever(() => json(200, [managed])),
+        [`GET ${CHANNEL_MEMBERS}`]: onceThenNever(() => json(200, [USER, BOB])),
         [LEAVE]: () => new Response(null, { status: 204 }),
       }),
     );
@@ -128,10 +131,19 @@ describe('チャンネルからの退出（F-10）', () => {
     expect(await screen.findByText('参加者 2 人')).toBeDefined();
 
     fireEvent.click(await screen.findByRole('link', { name: '# general' }));
+    // 抜ける前に参加者の一覧を開き、キャッシュに本人を載せる
+    fireEvent.click(await screen.findByRole('button', { name: '参加者を見る' }));
+    expect(
+      await within(await screen.findByRole('list', { name: '参加者' })).findByText('アリス @alice'),
+    ).toBeDefined();
     fireEvent.click(await screen.findByRole('button', { name: 'このチャンネルから抜ける' }));
     await screen.findByRole('button', { name: 'general に参加する' });
     fireEvent.click(await screen.findByRole('button', { name: 'チャンネルを管理する' }));
 
     expect(await screen.findByText('参加者 1 人')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: '参加者を見る' }));
+    const members = within(await screen.findByRole('list', { name: '参加者' }));
+    expect(members.getByText('ボブ @bob')).toBeDefined();
+    expect(members.queryByText('アリス @alice')).toBeNull();
   });
 });
