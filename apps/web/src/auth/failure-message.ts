@@ -28,6 +28,8 @@ export function failureMessage(failure: Failure): string {
       return 'このチャンネルに参加していません。';
     case 'already_channel_member':
       return '既に参加しています。';
+    case 'reaction_limit_reached':
+      return 'このメッセージに付けられる絵文字の種類の上限に達しています。';
     case 'not_message_author':
       return '自分のメッセージだけを編集・削除できます。';
     case 'owner_only':

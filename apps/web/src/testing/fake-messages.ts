@@ -51,6 +51,7 @@ export function message(n: number, overrides: Record<string, unknown> = {}) {
     replyCount: 0,
     replyParticipants: [] as (typeof BOB)[],
     mentions: [] as { userId: string; user: typeof BOB | null }[],
+    reactions: [] as { emoji: string; count: number; users: (typeof BOB)[] }[],
     ...overrides,
   };
 }
