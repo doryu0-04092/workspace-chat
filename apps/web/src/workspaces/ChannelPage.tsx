@@ -8,7 +8,7 @@ import { PostMessageForm } from '../messages/PostMessageForm';
 import { useMessages } from '../messages/queries';
 import { ThreadPanel } from '../messages/ThreadPanel';
 import { useChannelRealtime } from '../realtime/use-channel-realtime';
-import { ChannelMembers } from './MemberLists';
+import { ChannelMembers, InviteToChannel } from './MemberLists';
 import {
   type Channel,
   useChannels,
@@ -52,6 +52,13 @@ export function ChannelPage() {
         チャンネルの一覧へ
       </Link>
       <LeaveChannel key={`leave-${channelId}`} workspaceId={workspaceId} channel={channel} />
+      {channel.visibility === 'PRIVATE' && (
+        <InviteToChannel
+          key={`invite-${channelId}`}
+          workspaceId={workspaceId}
+          channelId={channelId}
+        />
+      )}
       <ChannelMembers
         key={`members-${channelId}`}
         workspaceId={workspaceId}
