@@ -446,6 +446,8 @@ model Membership {
   channelReads ChannelRead[]
   threadReads  ThreadRead[]
   dmReads      DmRead[]
+  /// DM の通知（F-26。#623）。抜けたら連鎖して消える（`Notification` と同じ）。
+  dmNotifications DmNotification[]
 
   /// 通知（F-26）も、この行が消えると消える（ワークスペースから外れた利用者に、そのワークスペースの通知を残さない）。
   notifications Notification[]
@@ -1019,6 +1021,7 @@ model Dm {
   highUser  User        @relation("DmHighUser", fields: [highUserId], references: [id], onDelete: Cascade)
   messages  DmMessage[]
   reads     DmRead[]
+  notifications DmNotification[]
 
   /// 同じ2人の DM は1つ。**「この利用者の DM の一覧」を小さい方の側から引く向き**にも効く（先頭2列）。
   @@unique([workspaceId, lowUserId, highUserId])
@@ -1050,6 +1053,8 @@ model DmMessage {
 
   /// 既読位置から指される向き（`Message.readAsChannelLast` と同じく、参照するだけ）。
   readAsLast DmRead[]
+  /// このメッセージの DM の通知（F-26）。
+  notifications DmNotification[]
 
   /// `DmRead` の既読位置を、同じ DM のメッセージに限る複合外部キーの参照先。
   @@unique([id, dmId])
@@ -1124,6 +1129,42 @@ model Notification {
 
   /// 同じメッセージの同じ種類の通知は1人1件（本文に同じ利用者を2回書いても1件）。
   @@unique([messageId, userId, kind])
+  /// 一覧は利用者ごとに新しい順（`id` の降順）で引く。
+  @@index([userId, id(sort: Desc)])
+}
+
+/// DM の通知（F-26・F-19。機能一覧 10.2・10.3「受け取ったメンション・DM を時系列で一覧表示する」。#623）。
+/// チャンネルの通知（`Notification`）と表を分ける——あちらはチャンネルとメッセージ（`Message`）を参照し、DM は DM と `DmMessage` を参照するため、
+/// 1つの表にすると参照先が空になりうる列と、どちらか一方だけを持つことの検査制約が要る。一覧は2つの表を id（UUIDv7）の新しい順に合わせて返す。
+///
+/// - **行を作るのは DM の投稿と同じトランザクション**（`workspaces/dms.service.ts`）。宛先は相手だけ（書き手本人には作らない）
+/// - 既読は行ごとの `readAt` で持つ。DM の既読位置（`DmRead`）とは別系統である
+/// - **削除済みのメッセージの行は返さない**（行は残す。メッセージは論理削除である）
+/// - ワークスペースから抜けたら、`Membership` から連鎖して消える
+model DmNotification {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// 受け取った利用者（DM の相手）。
+  userId String @db.Uuid
+
+  workspaceId String @db.Uuid
+
+  dmId String @db.Uuid
+
+  messageId String @db.Uuid
+
+  /// 既読にした時刻。未読なら null。**一度入れたら変えない**。
+  readAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  dm         Dm         @relation(fields: [dmId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  /// メッセージは論理削除だけで消える。DM ごと消えるときは同じ文の中で消えるため NoAction にする（`DmRead` と同じ）。
+  message    DmMessage  @relation(fields: [messageId, dmId], references: [id, dmId], onDelete: NoAction)
+
+  /// 同じメッセージの通知は1人1件。
+  @@unique([messageId, userId])
   /// 一覧は利用者ごとに新しい順（`id` の降順）で引く。
   @@index([userId, id(sort: Desc)])
 }

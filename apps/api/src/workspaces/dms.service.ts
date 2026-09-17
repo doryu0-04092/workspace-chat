@@ -38,7 +38,7 @@ type PageQuery = { before?: string; limit?: string | number };
 /** 既読位置を持たないときの下限（`unread.ts` の `AFTER_READ_POSITION` と同じ値）。 */
 const NO_READ_POSITION = '00000000-0000-0000-0000-000000000000';
 
-const DM_MESSAGE_SELECT = {
+export const DM_MESSAGE_SELECT = {
   id: true,
   dmId: true,
   body: true,
@@ -62,7 +62,7 @@ type DmMessageRow = {
  * 退会した書き手は `author: null`（機能一覧 1.5）。**削除済みのメッセージは本文を返さない**（`body: null`・`deleted: true`。機能一覧 4.2）。
  * チャンネルのメッセージ（`messages.service.ts` の `toMessage`）と同じ扱いである。
  */
-function toDmMessage(row: DmMessageRow): DmMessage {
+export function toDmMessage(row: DmMessageRow): DmMessage {
   const deleted = row.deletedAt !== null;
   return {
     id: row.id,
@@ -199,6 +199,15 @@ export class DmsService {
       const row = await tx.dmMessage.create({
         data: { dmId: dm.id, authorId: userId, body: input.body },
         select: DM_MESSAGE_SELECT,
+      });
+      // 相手の DM の通知（F-26。機能一覧 10.3。#623）。書いたのと同じトランザクションで作り、確定しなかった投稿の通知を残さない
+      await tx.dmNotification.create({
+        data: {
+          userId: counterpartOf(dm, userId),
+          workspaceId: membership.workspace.id,
+          dmId: dm.id,
+          messageId: row.id,
+        },
       });
       return { dm, message: toDmMessage(row) };
     });

@@ -1,4 +1,5 @@
 import { broadcastMentionsOf } from '@workspace-chat/shared';
+import type { DmMessage } from '../dms/queries';
 import type { Message } from '../messages/queries';
 
 /**
@@ -33,6 +34,24 @@ export function mentionNotificationOf(
     title: `${message.author?.displayName ?? '削除済みの利用者'} さんからのメンション`,
     body,
     tag: `mention:${message.id}`,
+  };
+}
+
+/**
+ * 届いた DM の通知の中身を返す（F-25。機能一覧 10.2「ブラウザ通知が出るのはメンションと DM」。#623）。自分が書いた DM・削除済みなら null。
+ * DM の配信は当事者の部屋にだけ届くため、宛先の確かめは要らない（api が決める）。
+ */
+export function dmNotificationOf(
+  message: DmMessage,
+  me: { readonly id: string },
+): BrowserNotificationContent | null {
+  if (message.body === null || message.author?.id === me.id) return null;
+  const body =
+    message.body.length > BODY_LIMIT ? `${message.body.slice(0, BODY_LIMIT)}…` : message.body;
+  return {
+    title: `${message.author?.displayName ?? '削除済みの利用者'} さんからの DM`,
+    body,
+    tag: `dm:${message.id}`,
   };
 }
 

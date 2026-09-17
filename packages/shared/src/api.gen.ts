@@ -1706,18 +1706,24 @@ export interface components {
             nextBefore: string | null;
         };
         /**
-         * @description 通知の種類（機能一覧 10.3）。いまはメンションだけ（DM は F-19 で足す）
+         * @description 通知の種類（機能一覧 10.3）。MENTION はチャンネルのメッセージのメンション（個人・@channel・受け取りを返した @here）、 DM は DM で受け取ったメッセージ（#623）
          * @enum {string}
          */
-        NotificationKind: "MENTION";
-        /** @description 受け取った通知（機能一覧 10.3） */
-        Notification: {
+        NotificationKind: "MENTION" | "DM";
+        /** @description 受け取った通知（機能一覧 10.3）。kind で、チャンネルの通知か DM の通知かを見分ける（#623） */
+        Notification: components["schemas"]["ChannelNotification"] | components["schemas"]["DmNotification"];
+        /** @description チャンネルのメッセージのメンションの通知（機能一覧 10.3） */
+        ChannelNotification: {
             /**
              * Format: uuid
              * @description UUIDv7。一覧のカーソル（before）にそのまま使う
              */
             id: string;
-            kind: components["schemas"]["NotificationKind"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "MENTION";
             /**
              * Format: date-time
              * @description 通知を作った時刻（メンションを保存した時刻。編集で足したメンションなら編集の時刻）
@@ -1740,6 +1746,42 @@ export interface components {
             };
             /** @description メンションしたメッセージ（チャンネルの一覧と同じ形。返信なら parentId を持つ） */
             message: components["schemas"]["Message"];
+        };
+        /** @description DM で受け取ったメッセージの通知（機能一覧 10.2・10.3。#623）。宛先は DM の相手だけ（書き手本人には作らない） */
+        DmNotification: {
+            /**
+             * Format: uuid
+             * @description UUIDv7。一覧のカーソル（before）にそのまま使う（チャンネルの通知と同じ並びに混ぜる）
+             */
+            id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "DM";
+            /**
+             * Format: date-time
+             * @description 通知を作った時刻（DM を受け取った時刻）
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 既読にした時刻。未読なら null
+             */
+            readAt: string | null;
+            workspace: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            dm: {
+                /** Format: uuid */
+                id: string;
+                /** @description 相手（書き手）。退会した利用者なら null */
+                counterpart: components["schemas"]["UserSummary"] | null;
+            };
+            /** @description 受け取った DM のメッセージ（DM の一覧と同じ形） */
+            message: components["schemas"]["DmMessage"];
         };
         NotificationPage: {
             /** @description 新しい順 */
