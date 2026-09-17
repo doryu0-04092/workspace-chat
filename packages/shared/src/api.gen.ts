@@ -363,6 +363,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/archived-channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 自分が参加しているアーカイブ済みのチャンネル一覧（F-35）
+         * @description 自分が参加しているアーカイブ済みのチャンネルだけを、一般の一覧と同じ形で返す（参加者は読めるが、一般の一覧からは外れるため。機能一覧 3.2）。 パブリックでも、参加していなければ含めない。オーナーの例外は及ばない。名前の順。所属していなければ、存在の有無を区別せず 404
+         */
+        get: operations["listArchivedChannels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{id}/channels/{channelId}/mention-candidates": {
         parameters: {
             query?: never;
@@ -1807,6 +1830,34 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listArchivedChannels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 自分が参加しているアーカイブ済みのチャンネル */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Channel"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
             500: components["responses"]["InternalServerError"];

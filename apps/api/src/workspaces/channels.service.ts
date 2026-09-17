@@ -11,6 +11,7 @@ import { MANAGED_CHANNEL_SELECT, type ManagedChannel, toManagedChannel } from '.
 import { WorkspacesService } from './workspaces.service';
 
 type CreateOperation = paths['/workspaces/{id}/channels']['post'];
+type ChannelWhere = NonNullable<Parameters<PrismaService['channel']['findMany']>[0]>['where'];
 export type CreateChannelRequest = CreateOperation['requestBody']['content']['application/json'];
 export type Channel = CreateOperation['responses'][201]['content']['application/json'];
 export type UpdateChannelReadRequest =
@@ -90,12 +91,31 @@ export class ChannelsService {
    */
   async list(userId: string, workspaceId: string): Promise<Channel[]> {
     await this.workspaces.membershipOf(userId, workspaceId);
+    return this.channelsWhere(userId, {
+      workspaceId,
+      archivedAt: null,
+      OR: [{ visibility: 'PUBLIC' }, { members: { some: { userId } } }],
+    });
+  }
+
+  /**
+   * 自分が参加しているアーカイブ済みのチャンネル（F-35。機能一覧 3.2「参加者は読める」）。一般の一覧と同じ形で、名前の順。
+   * **参加していることだけを条件にする**——パブリックでも、参加していなければ出さない。**オーナーの例外は及ばない**
+   * （参加していないチャンネルのメッセージは読めないため、ここに出しても開けない。CLAUDE.md 2）。
+   */
+  async archived(userId: string, workspaceId: string): Promise<Channel[]> {
+    await this.workspaces.membershipOf(userId, workspaceId);
+    return this.channelsWhere(userId, {
+      workspaceId,
+      archivedAt: { not: null },
+      members: { some: { userId } },
+    });
+  }
+
+  /** 条件に当たるチャンネルを名前の順に読み、要求した利用者から見た参加・未読を付ける（一般の一覧とアーカイブ済みの一覧）。 */
+  private async channelsWhere(userId: string, where: ChannelWhere): Promise<Channel[]> {
     const rows = await this.prisma.channel.findMany({
-      where: {
-        workspaceId,
-        archivedAt: null,
-        OR: [{ visibility: 'PUBLIC' }, { members: { some: { userId } } }],
-      },
+      where,
       select: {
         id: true,
         name: true,
