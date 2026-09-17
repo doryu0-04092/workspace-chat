@@ -11,6 +11,7 @@ import { SignedInLayout } from './layout/SignedInLayout';
 import { NotificationsPage } from './notifications/NotificationsPage';
 import type { ConnectRealtime } from './realtime/connect';
 import { RealtimeProvider } from './realtime/realtime-context';
+import { SearchPage } from './search/SearchPage';
 import { ProfilePage } from './users/ProfilePage';
 import { SettingsPage } from './users/SettingsPage';
 import { ChannelPage } from './workspaces/ChannelPage';
@@ -69,6 +70,7 @@ export function App({
               <Route path="notifications" element={<NotificationsPage />} />
               <Route path="workspaces" element={<WorkspacesPage />} />
               <Route path="workspaces/:workspaceId" element={<WorkspacePage />} />
+              <Route path="workspaces/:workspaceId/search" element={<SearchPage />} />
               <Route path="workspaces/:workspaceId/channels/:channelId" element={<ChannelPage />} />
             </Route>
           </Route>
