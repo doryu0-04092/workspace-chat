@@ -710,6 +710,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/avatars/cookies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * アバターの配信の署名付き Cookie の発行（F-04）
+         * @description ログインしている利用者に、CloudFront の /avatars/* に有効な署名付き Cookie を発行する（機能一覧 1.3。ワークスペースやチャンネルの参加を問わない）。 Cookie は CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id の3つで、Path=/avatars; HttpOnly; Secure; SameSite=Strict。 期限（expiresIn 秒）より前に取り直す。CloudFront の署名鍵を設定していない環境（手元）では Cookie を発行せず 204 を返す。 本体は送らない
+         */
+        post: operations["issueAvatarCookies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/files/cookies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * チャンネルの添付の配信の署名付き Cookie の発行（F-29）
+         * @description そのチャンネルの参加者に、CloudFront の /files/workspace/{ws}/channel/{ch}/* に限って有効な署名付き Cookie を発行する（機能一覧 11.2）。 Cookie は CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id の3つで、Path=/files; HttpOnly; Secure; SameSite=Strict。 同じ名前・Path の Cookie は上書きされるため、有効なのは最後に発行したチャンネルの分だけである。期限（expiresIn 秒）より前に取り直す。 コードは参加者一覧と同じ2段階: 所属していなければ種別によらず 404、所属していて参加者でなければパブリックは 403 not_a_channel_member・プライベートは 404。オーナーの例外は及ばない。アーカイブ済みのチャンネルも、参加者には発行する（読める。機能一覧 3.2）。 CloudFront の署名鍵を設定していない環境（手元）では、判定を通ったときに Cookie を発行せず 204 を返す。本体は送らない
+         */
+        post: operations["issueChannelFileCookies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invitations": {
         parameters: {
             query?: never;
@@ -830,6 +875,11 @@ export interface components {
             /** @enum {string} */
             tokenType: "Bearer";
             /** @description アクセストークンの有効期間（秒） */
+            expiresIn: number;
+        };
+        /** @description 発行した CloudFront の署名付き Cookie の有効期間 */
+        SignedCookiesResponse: {
+            /** @description 署名付き Cookie の有効期間（秒）。これより前に取り直す */
             expiresIn: number;
         };
         LoginResponse: {
@@ -2600,6 +2650,87 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    issueAvatarCookies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 発行した */
+            200: {
+                headers: {
+                    /** @description CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id（Path=/avatars） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedCookiesResponse"];
+                };
+            };
+            /** @description CloudFront の署名鍵を設定していない環境であり、Cookie を発行しない */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    issueChannelFileCookies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 発行した */
+            200: {
+                headers: {
+                    /** @description CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id（Path=/files） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedCookiesResponse"];
+                };
+            };
+            /** @description CloudFront の署名鍵を設定していない環境であり、Cookie を発行しない */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description そのチャンネルの参加者でない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
             500: components["responses"]["InternalServerError"];
         };
     };
