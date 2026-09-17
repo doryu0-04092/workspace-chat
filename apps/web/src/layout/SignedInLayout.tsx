@@ -49,6 +49,9 @@ export function SignedInLayout() {
             </Link>
           )}
           {session.status === 'signedIn' && <span>{session.user.displayName}</span>}
+          <Link to="/profile" className="underline">
+            プロフィール
+          </Link>
           <Link to="/settings" className="underline">
             設定
           </Link>
