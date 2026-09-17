@@ -278,6 +278,7 @@ model User {
   invitationsSent     Invitation[]     @relation("InvitationInviter")
   messages            Message[]
   mentionedIn         MessageMention[]
+  avatarUploads       AvatarUpload[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -866,5 +867,48 @@ model ThreadRead {
   lastRead   Message    @relation("ThreadReadLast", fields: [lastReadMessageId, channelId], references: [id, channelId], onDelete: NoAction)
 
   @@unique([parentMessageId, userId])
+  @@index([userId])
+}
+
+/// アップロードの段（機能一覧 11.1）。発行 → 確定の途中 → 成功か拒否。**確定は識別子ごとに1回だけ行う**——
+/// 発行の直後の行だけを「確定の途中」へ条件付きで進め、進められた要求だけが S3 を読み書きする。2回目以降は結果の列を返す。
+enum UploadState {
+  ISSUED
+  COMPLETING
+  SUCCEEDED
+  REJECTED
+}
+
+/// アバター画像のアップロード（F-04。機能一覧 1.3・11.1）。発行した署名付き URL 1つに1行。
+///
+/// **キーは列に持たず、この行から組み立てる**——隔離用のキーは `quarantine/avatars/{userId}/{id}/{fileName}`、
+/// 配信用のキーは `avatars/{userId}/{id}/{deliveredFileName}`（`apps/api/src/file-uploads/upload-keys.ts`）。
+/// **確定を求められるのは `userId` の本人だけであり、キーは要求の値ではなくこの行から作る**（11.1）。
+model AvatarUpload {
+  /// アップロードの識別子であり、キーの `{UUID}` でもある（推測できない値。UUIDv7）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  userId String @db.Uuid
+
+  /// 保存名（利用者のファイル名を許可リストで置き換え、隔離用のキーが 1,024 バイトに収まるよう切り詰めたもの。拡張子は付け替える前）。
+  fileName String
+
+  /// 申告した Content-Type（署名付き URL に焼き込んだ値。確定の検証では信用しない）。
+  contentType String
+
+  state UploadState @default(ISSUED)
+
+  /// 確定に成功したときの、拡張子を検証した形式のものに付け替えた保存名。
+  deliveredFileName String?
+
+  /// 確定で断ったときの状態コードと `code`（2回目以降の確定に同じものを返す）。
+  rejectedStatus Int?
+  rejectedCode   String?
+
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
 }

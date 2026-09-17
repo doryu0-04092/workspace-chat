@@ -133,7 +133,7 @@ export interface paths {
         };
         /**
          * 自分のプロフィールの取得（F-04）
-         * @description アバター画像の設定はまだ無く、avatarUrl は null のままである（機能一覧 1.3。11.1 と同じ段で足す）。
+         * @description avatarUrl は、アバター画像のアップロードの確定でサーバーが組み立てた配信 URL のパス（/avatars/{User.id}/{uploadId}/{保存名}）か、 設定していなければ null（機能一覧 1.3。/users/me/avatar/uploads）。
          */
         get: operations["getMyProfile"];
         put?: never;
@@ -170,6 +170,49 @@ export interface paths {
          * @description 送った項目だけを変える（機能一覧 10.1）。**既読位置は動かさない**—— 「含めない」→「含める」に戻すと、過去の未読の返信が未読として現れる（一括で既読扱いにしない）
          */
         patch: operations["updateMySettings"];
+        trace?: never;
+    };
+    "/users/me/avatar/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * アバター画像のアップロード用の署名付き URL の発行（F-04）
+         * @description 自分のアバター画像を上げる署名付き URL を発行する（機能一覧 1.3・11.1）。ブラウザは uploadUrl へ uploadHeaders を付けて本体を PUT し、 終わったら complete で確定する。URL の宛先は隔離用のキー quarantine/avatars/{User.id}/{uploadId}/{保存名} であり、 キーはすべてサーバーが組み立てる（保存名はファイル名の英数字・.・_・- 以外と先頭の . を _ に置き換え、キー全体が 1,024 バイトに収まるよう切り詰めたもの）。 有効期限は 5 分で、Content-Type と If-None-Match: * を署名に含む（同じ URL での上書きは 412 で断られる）。 申告した Content-Type が画像（jpeg / png / gif / webp）でなければ 422 unsupported_file_type、大きさが 10 MB を超えれば 422 file_too_large。 申告は信用せず、確定で中身から検証する。利用者単位で 10 分に 30 回まで
+         */
+        post: operations["createAvatarUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/me/avatar/uploads/{uploadId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * アバター画像のアップロードの確定（F-04）
+         * @description 隔離用のキーに PUT した本体を中身から検証し、検証した版に固定して配信用のキー avatars/{User.id}/{uploadId}/{保存名} へコピーし、 隔離用のキーを削除して、avatarUrl を /avatars/{User.id}/{uploadId}/{保存名} にする（保存名の拡張子は検証した形式のものに付け替える。機能一覧 1.3・11.1）。 検証に通らなければ配信用のキーへ移さず隔離用のキーを削除し、422 を返す——画像でない・中身が形式に合わない（unsupported_file_type）、 10 MB を超える（file_too_large）、本体が PUT されていない（upload_not_received）。 確定は識別子ごとに1回だけ行い、2回目以降はコピーも削除もやり直さず、1回目と同じ状態コードを返す（成功なら、その時点のプロフィール）。 確定の途中にもう1つ確定を求めると 409 upload_in_progress。 本人に払い出されていない識別子は 404（識別子の存在を認めない）。利用者単位で 10 分に 30 回まで
+         */
+        post: operations["completeAvatarUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/workspaces": {
@@ -785,7 +828,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "unsupported_file_type" | "file_too_large" | "upload_not_received" | "upload_in_progress" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -877,6 +920,36 @@ export interface components {
             displayName?: string;
             /** @description 絵文字とテキストの1セットで設定する。null で消す（片方だけの本体は 400） */
             status?: components["schemas"]["Status"] | null;
+        };
+        /** @description アップロードの発行の要求（機能一覧 11.1）。どれも申告であり、形式と大きさは確定で中身から検証する。 キー・パス・URL は指定できない（サーバーが組み立てる） */
+        UploadRequest: {
+            /** @description 元のファイル名（1〜255 文字）。保存名はこれを置き換えて作る */
+            fileName: string;
+            /** @description 申告する Content-Type。許可リスト（packages/shared の UPLOAD_FORMATS）の値でなければ 422 unsupported_file_type。 署名付き URL の PUT には、この値をそのまま Content-Type に付ける */
+            contentType: string;
+            /** @description 申告する大きさ（バイト）。種別の上限を超えれば 422 file_too_large */
+            size: number;
+        };
+        /** @description 発行したアップロード（機能一覧 11.1） */
+        UploadTicket: {
+            /**
+             * Format: uuid
+             * @description アップロードの識別子。確定の要求に使う
+             */
+            uploadId: string;
+            /** @description 本体を PUT する署名付き URL（宛先は隔離用のキー） */
+            uploadUrl: string;
+            /** @description PUT に付けるヘッダー。どちらも署名に含まれ、変えたり外したりすると断られる */
+            uploadHeaders: {
+                "Content-Type": string;
+                /** @enum {string} */
+                "If-None-Match": "*";
+            };
+            /**
+             * Format: date-time
+             * @description 署名付き URL の有効期限（発行から 5 分）。この時刻までに PUT を始める
+             */
+            expiresAt: string;
         };
         HealthResponse: {
             /** @enum {string} */
@@ -1142,6 +1215,8 @@ export interface components {
         ChannelId: string;
         /** @description メッセージの id。形が uuid でなければ 400 */
         MessageId: string;
+        /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+        UploadId: string;
         /** @description 招待の id。形が uuid でなければ 400 */
         InvitationId: string;
         /** @description ワークスペースの id。形が uuid でなければ 400 */
@@ -1473,6 +1548,93 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createAvatarUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadRequest"];
+            };
+        };
+        responses: {
+            /** @description 発行したアップロード */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadTicket"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description 受け付けない形式（unsupported_file_type）か、上限を超える大きさ（file_too_large） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    completeAvatarUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 確定した後のプロフィール */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 同じ識別子の確定が進行中（upload_in_progress） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 検証に通らなかった（unsupported_file_type・file_too_large・upload_not_received） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };
