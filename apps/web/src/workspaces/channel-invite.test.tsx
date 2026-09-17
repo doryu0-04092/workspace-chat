@@ -82,6 +82,46 @@ describe('プライベートチャンネルへの招待（F-08）', () => {
     expect(candidates.queryByText(new RegExp(USER.displayName))).toBeNull();
   });
 
+  it('絞り込みの入力で、ユーザーID か表示名に当たるメンバーだけを、先頭一致を上に並べる（#616）', async () => {
+    const DAVE = {
+      id: '01920000-0000-7000-8000-000000000004',
+      userId: 'dave_car',
+      displayName: 'デイブ',
+    };
+    const ELLE = {
+      id: '01920000-0000-7000-8000-000000000005',
+      userId: 'elle',
+      displayName: 'carさん',
+    };
+    fakeFetch(
+      privateRoutes({
+        [MEMBERS]: () =>
+          json(200, [
+            ...WORKSPACE_MEMBERS,
+            { ...DAVE, role: 'MEMBER' },
+            { ...ELLE, role: 'MEMBER' },
+          ]),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+    const candidates = await openCandidates();
+    expect(candidates.getAllByRole('listitem')).toHaveLength(3);
+
+    fireEvent.change(screen.getByLabelText('名前かユーザーID で絞り込む'), {
+      target: { value: 'CAR' },
+    });
+
+    expect(
+      within(screen.getByRole('list', { name: '招待できるメンバー' }))
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual([
+      expect.stringContaining('キャロル @carol'),
+      expect.stringContaining('carさん @elle'),
+      expect.stringContaining('デイブ @dave_car'),
+    ]);
+  });
+
   it('パブリックチャンネルには招待を出さない（自由に参加できる）', async () => {
     fakeFetch(routes({ [`GET ${MESSAGES}`]: () => page([]) }));
     renderApp(CHANNEL_PATH);

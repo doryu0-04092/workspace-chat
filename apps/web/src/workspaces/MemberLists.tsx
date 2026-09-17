@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
 import { useChannelPresence } from '../realtime/presence';
+import { rankCandidates } from './candidate-rank';
 import {
   useChannelMembers,
   useInviteChannelMember,
@@ -180,12 +181,19 @@ export function InviteToChannel({
   channelId: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
   const members = useWorkspaceMembers(workspaceId, open);
   const participants = useChannelMembers(workspaceId, channelId, open);
   const invite = useInviteChannelMember(workspaceId, channelId);
   const failed = members.error ?? participants.error;
   const joined = new Set(participants.data?.map((participant) => participant.id));
-  const candidates = members.data?.filter((member) => !joined.has(member.id));
+  // 名前かユーザーID の一部で絞り、先頭一致を上に並べる（#616。ワークスペースの招待の候補と同じ並び）
+  const candidates =
+    members.data &&
+    rankCandidates(
+      members.data.filter((member) => !joined.has(member.id)),
+      filter,
+    );
 
   return (
     <section className="mt-4">
@@ -201,6 +209,19 @@ export function InviteToChannel({
         <p role="alert" className="mt-2 text-red-700">
           招待できるメンバーを読み込めませんでした。{errorMessage(failed)}
         </p>
+      )}
+      {open && !failed && (
+        <div className="mt-2 flex flex-col gap-1">
+          <label htmlFor={`channel-invite-filter-${channelId}`} className="text-sm">
+            名前かユーザーID で絞り込む
+          </label>
+          <input
+            id={`channel-invite-filter-${channelId}`}
+            className="rounded border px-2 py-1"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+        </div>
       )}
       {open &&
         !failed &&

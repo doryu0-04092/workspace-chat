@@ -419,6 +419,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/invitation-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 招待の候補（F-08。#616）
+         * @description ワークスペースへ招待できる利用者を、q の文字列から探す（ユーザーID を正確に知らなくても招待できるようにする。 提案・承認済・2026-09-18・依頼側。#616）。オーナーだけが呼べる（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。 対象は退会していない利用者のうち、そのワークスペースのメンバーでなく、未承諾の招待も無い人。 ユーザーID か表示名に q を含む人を、大文字小文字を区別せずに当てる。 並びは、ユーザーID の先頭一致 → 表示名の先頭一致 → 途中の一致の順で、同じ段ではユーザーID の小文字の順。最大10人。 利用者単位で1分に60回まで
+         */
+        get: operations["listInvitationCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{id}/channels": {
         parameters: {
             query?: never;
@@ -2582,6 +2605,47 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listInvitationCandidates: {
+        parameters: {
+            query: {
+                /** @description 探す文字列。1〜50 文字（コードポイント）で、空白だけは不可 */
+                q: string;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 候補（最大10人） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description オーナーでない（owner_only） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };

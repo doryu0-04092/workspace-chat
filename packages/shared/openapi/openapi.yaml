@@ -750,6 +750,57 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/invitation-candidates:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: listInvitationCandidates
+      summary: 招待の候補（F-08。#616）
+      description: >-
+        ワークスペースへ招待できる利用者を、q の文字列から探す（ユーザーID を正確に知らなくても招待できるようにする。
+        提案・承認済・2026-09-18・依頼側。#616）。オーナーだけが呼べる（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。
+        対象は退会していない利用者のうち、そのワークスペースのメンバーでなく、未承諾の招待も無い人。
+        ユーザーID か表示名に q を含む人を、大文字小文字を区別せずに当てる。
+        並びは、ユーザーID の先頭一致 → 表示名の先頭一致 → 途中の一致の順で、同じ段ではユーザーID の小文字の順。最大10人。
+        利用者単位で1分に60回まで
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 探す文字列。1〜50 文字（コードポイント）で、空白だけは不可
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 50
+            pattern: '\S'
+      responses:
+        '200':
+          description: 候補（最大10人）
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10
+                items:
+                  $ref: '#/components/schemas/UserSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: オーナーでない（owner_only）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces/{id}/channels:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
