@@ -95,6 +95,7 @@ export class AttachmentsService {
     const signed = await this.storage.sign(
       `${attachmentQuarantineDirectory(workspaceId, channelId, upload.id)}${fileName}`,
       format.contentType,
+      input.size,
     );
     return {
       uploadId: upload.id,

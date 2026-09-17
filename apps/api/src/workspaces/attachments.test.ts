@@ -51,6 +51,13 @@ type LoggedIn = { authorization: string; id: string };
 // 機能一覧 11.1（F-27・F-28）: 添付のアップロード（発行・確定）と投稿への結び付け。S3 は MinIO で代える（#427）。
 // CLAUDE.md「必ずテストを書く箇所」: 添付ファイルのアップロード用の署名付き URL の発行が、非参加者を拒否すること／
 // オーナーが、参加していないプライベートチャンネルの添付ファイルを取得できないこと（発行もできない）。
+/** 本体を指定の大きさに詰める・切る（署名付き URL は大きさを署名に含むため、同じ URL で送り直すときは申告の大きさに揃える。#611）。 */
+function resized(bytes: Uint8Array, length: number): Uint8Array {
+  const out = new Uint8Array(length);
+  out.set(bytes.subarray(0, length));
+  return out;
+}
+
 describe('チャンネルの添付ファイルのアップロード（F-27・F-28）', () => {
   let postgres: StartedPostgreSqlContainer;
   let valkey: StartedTestContainer;
@@ -295,8 +302,17 @@ describe('チャンネルの添付ファイルのアップロード（F-27・F-2
         const url = new URL(ticket.uploadUrl);
         expect(url.searchParams.get('X-Amz-Expires')).toBe('300');
         expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toEqual(
-          expect.arrayContaining(['content-type', 'host', 'if-none-match']),
+          expect.arrayContaining(['content-length', 'content-type', 'host', 'if-none-match']),
         );
+      }
+    });
+
+    it('申告と違う大きさの本体は、署名付き URL の PUT の時点で断られ、隔離用のキーに書かれない（#611）', async () => {
+      const { alice, workspace, publicId } = await place();
+      for (const bytes of [new Uint8Array(SAMPLES.png.length + 1), SAMPLES.png.subarray(1)]) {
+        const ticket = await issued(alice, workspace.id, publicId);
+        expect((await put(ticket, bytes)).status).toBe(403);
+        expect(await exists(keyOf(ticket))).toBe(false);
       }
     });
 
@@ -607,7 +623,7 @@ describe('チャンネルの添付ファイルのアップロード（F-27・F-2
       },
     );
 
-    it('種別の上限を超える本体は、申告が上限の内でも 422 file_too_large で断る（文書 25 MB）', async () => {
+    it('種別の上限を超える本体が隔離用のキーに届いても（署名の前提が崩れた場合）、確定で 422 file_too_large で断る（文書 25 MB）', async () => {
       const { alice, workspace, publicId } = await place();
       const ticket = await issued(alice, workspace.id, publicId, {
         fileName: 'big.pdf',
@@ -616,7 +632,8 @@ describe('チャンネルの添付ファイルのアップロード（F-27・F-2
       });
       const large = new Uint8Array(25 * MB + 1);
       large.set(SAMPLES.pdf);
-      expect((await put(ticket, large)).status).toBe(200);
+      // 署名付き URL は申告と違う大きさを断るため（#611）、管理の資格情報で直接書いて前提が崩れた場合を作る
+      await admin.send(new PutObjectCommand({ Bucket: bucket, Key: keyOf(ticket), Body: large }));
 
       const res = await complete(alice, workspace.id, publicId, ticket.uploadId);
 
@@ -713,7 +730,7 @@ describe('チャンネルの添付ファイルのアップロード（F-27・F-2
       const first = await complete(alice, workspace.id, publicId, ticket.uploadId);
       expect(first.status).toBe(200);
       const attachment = (await first.json()) as Attachment;
-      expect((await put(ticket, SAMPLES.gif)).status).toBe(200);
+      expect((await put(ticket, resized(SAMPLES.gif, SAMPLES.png.length))).status).toBe(200);
       const sent = recordS3Commands();
 
       const again = await complete(alice, workspace.id, publicId, ticket.uploadId);
