@@ -152,8 +152,10 @@ export type DmMessageDeletedPayload = {
  * DM の未読の `unread:updated` の payload（「利用者 × DM」。F-19・F-23。機能一覧 10.1・5.2）。**その未読の持ち主の利用者の部屋へだけ送る**（相手には送らない）。
  * 送るときに、持ち主がいまもその DM の当事者で、そのワークスペースの退会していないメンバーであることを呼ぶ側が確かめる（5.2）。
  * **`channelId` ではなく `dmId` を持つ**——受け取る側は `dmId` の有無でチャンネルの未読と見分ける。DM はメンションを数えないため `mentions` を持たない。
+ * **`workspaceId` を載せる**——受け取る側は、開いているワークスペースの DM の一覧に無い DM のときだけ一覧を取り直す（別のワークスペースの DM で取り直さない）。
  */
 export type DmUnreadUpdatedPayload = {
+  readonly workspaceId: string;
   readonly dmId: string;
   readonly unread: number;
   readonly sentAt: string;

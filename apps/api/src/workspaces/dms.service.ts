@@ -187,7 +187,7 @@ export class DmsService {
     dmId: string,
     input: PostDmMessageRequest,
   ): Promise<DmMessage> {
-    await this.workspaces.membershipOf(userId, workspaceId);
+    const membership = await this.workspaces.membershipOf(userId, workspaceId);
     const { dm, message } = await this.prisma.$transaction(async (tx) => {
       const dm = await partiesFor(tx, userId, workspaceId, dmId);
       const members = await lockedMembersOf(tx, workspaceId, [dm.lowUserId, dm.highUserId]);
@@ -204,7 +204,7 @@ export class DmsService {
     });
     const payload: DmMessageNewPayload = { message, sentAt: new Date().toISOString() };
     const recipients = await this.deliver(workspaceId, dm, 'message:new', payload);
-    await this.announceUnread(workspaceId, dm.id, recipients, userId);
+    await this.announceUnread(membership.workspace.id, dm.id, recipients, userId);
     return message;
   }
 
@@ -238,7 +238,7 @@ export class DmsService {
 
   /** 削除（論理削除。本文は消さない）。判定の順は編集と同じ。削除で相手の未読が減るため、相手に未読の変化を配る。 */
   async remove(userId: string, workspaceId: string, dmId: string, messageId: string) {
-    await this.workspaces.membershipOf(userId, workspaceId);
+    const membership = await this.workspaces.membershipOf(userId, workspaceId);
     const dm = await this.prisma.$transaction(async (tx) => {
       const dm = await assertAuthored(tx, userId, workspaceId, dmId, messageId);
       const { count } = await tx.dmMessage.updateMany({
@@ -254,7 +254,7 @@ export class DmsService {
       sentAt: new Date().toISOString(),
     };
     const recipients = await this.deliver(workspaceId, dm, 'message:deleted', payload);
-    await this.announceUnread(workspaceId, dm.id, recipients, userId);
+    await this.announceUnread(membership.workspace.id, dm.id, recipients, userId);
   }
 
   /**
@@ -285,7 +285,7 @@ export class DmsService {
       lastReadMessageId: message.id,
     });
     // 資格の確認は上の所属と当事者の確認で済んでいる
-    await this.announceUnread(workspaceId, dm.id, [userId]);
+    await this.announceUnread(membership.workspace.id, dm.id, [userId]);
   }
 
   /**
@@ -316,6 +316,7 @@ export class DmsService {
   /**
    * `unread:updated` を、宛先ごとにその人の未読数で1回ずつ送る（F-23。5.2）。**`recipients` は資格を確かめた利用者だけを渡す**。
    * 書いた本人（`writerId`）には送らない——自分の投稿・自分の削除では自分の未読は変わらない。
+   * **`workspaceId` は DB の値（`membershipOf` が返す id）を渡す**——payload に載せ、画面が開いているワークスペースの一覧と比べるため（パスの値は大文字でも通る）。
    */
   private async announceUnread(
     workspaceId: string,
@@ -328,7 +329,12 @@ export class DmsService {
       if (userId === writerId) continue;
       const [dm] = await this.dmsOf(userId, workspaceId, dmId);
       if (!dm) continue;
-      const payload: DmUnreadUpdatedPayload = { dmId: dm.id, unread: dm.unread, sentAt };
+      const payload: DmUnreadUpdatedPayload = {
+        workspaceId,
+        dmId: dm.id,
+        unread: dm.unread,
+        sentAt,
+      };
       this.emitter.toUsers([userId], 'unread:updated', payload);
     }
   }

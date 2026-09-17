@@ -636,7 +636,8 @@ describe('ダイレクトメッセージ（F-19）', () => {
     });
 
     // 5.2: unread:updated は、その未読の持ち主の利用者の部屋へだけ送る（DM の未読でも、相手には送らない）。
-    it('投稿すると相手にだけ unread:updated（dmId と未読数）が届き、書いた本人と当事者でない接続には届かない。既読を進めると本人にだけ届く', async () => {
+    // payload にワークスペースの id を載せる——画面は開いているワークスペースの DM の一覧にだけ当て、知らない DM のときだけ一覧を取り直す（別のワークスペースの DM で取り直さない）。
+    it('投稿すると相手にだけ unread:updated（ワークスペースと DM の id と未読数）が届き、書いた本人と当事者でない接続には届かない。既読を進めると本人にだけ届く', async () => {
       const { alice, bob, carol, workspace, dm } = await dmOfAliceAndBob();
       const aliceSocket = await open(alice);
       const bobSocket = await open(bob);
@@ -648,6 +649,7 @@ describe('ダイレクトメッセージ（F-19）', () => {
       const message = await posted(alice, workspace.id, dm.id, '未読になる');
 
       const payload: DmUnreadUpdatedPayload = {
+        workspaceId: workspace.id,
         dmId: dm.id,
         unread: 1,
         sentAt: expect.any(String) as unknown as string,
