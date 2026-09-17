@@ -333,6 +333,40 @@ describe('管理用の一覧を変える、ほかの操作', () => {
     expect(count(generalMembers)).toBe(1);
   });
 
+  // 参加したチャンネル**自身**の参加者の一覧は、管理用の一覧の同じ行に人数と並ぶので、取り直す（#569 第0巡の 🔴1）。
+  it('参加したら、開いてある参加したチャンネル自身の参加者の一覧を取り直し、人数と揃える', async () => {
+    const random = {
+      ...GENERAL,
+      id: '01920000-0000-7000-8000-0000000000c2',
+      name: 'random',
+      joined: false,
+    };
+    const managedRandom = { ...MANAGED_GENERAL, id: random.id, name: 'random', memberCount: 1 };
+    const randomMembers = `GET ${CHANNELS}/${random.id}/members`;
+    fakeFetch(
+      routes({
+        ...AS_OWNER,
+        [`GET ${CHANNELS}`]: () => json(200, [GENERAL, random]),
+        [`GET ${MANAGED}`]: [
+          () => json(200, [MANAGED_GENERAL, managedRandom]),
+          () => json(200, [MANAGED_GENERAL, { ...managedRandom, memberCount: 2 }]),
+        ],
+        [randomMembers]: [() => json(200, [BOB]), () => json(200, [USER, BOB])],
+        [`POST ${CHANNELS}/${random.id}/join`]: () => new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+    const list = await openManaged();
+    const row = within(rowOf(list, /random/));
+    fireEvent.click(row.getByRole('button', { name: '参加者を見る' }));
+    await row.findByText(`${BOB.displayName} @${BOB.userId}`);
+
+    fireEvent.click(screen.getByRole('button', { name: 'random に参加する' }));
+
+    await waitFor(() => expect(rowOf(list, /random/).textContent).toContain('参加者 2 人'));
+    expect(await row.findByText(`${USER.displayName} @${USER.userId}`)).toBeDefined();
+  });
+
   it('チャンネルを作っても、開いてある別のチャンネルの参加者の一覧は読み直さない', async () => {
     const created = {
       ...MANAGED_GENERAL,

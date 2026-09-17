@@ -481,10 +481,15 @@ export function useJoinChannel(workspaceId: string) {
       ),
     // 管理用の一覧（F-35）の人数も変わる。どのように増えるかは取り直さないと決まらない（退会済みを数えない等は api が持つ）。
     // **一般の一覧の取り直しは `exact` で当てる**——鍵の前方にはメッセージ・返信・参加者の一覧のキャッシュも入っている
-    onSuccess: () =>
+    // **参加したチャンネル自身の参加者の一覧も取り直す**——管理用の一覧の同じ行に人数と並べて出しており、人数だけ変わると食い違う（#569 第0巡の 🔴1）
+    onSuccess: (_, channelId) =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true }),
         queryClient.invalidateQueries({ queryKey: managedChannelsKey(workspaceId), exact: true }),
+        queryClient.invalidateQueries({
+          queryKey: channelMembersKey(workspaceId, channelId),
+          exact: true,
+        }),
       ]),
   });
 }
