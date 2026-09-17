@@ -105,6 +105,22 @@ describe('アーカイブ済みのチャンネルを読む（F-35）', () => {
     expect(thread.queryByRole('button', { name: /編集|削除|返信を送信する/ })).toBeNull();
   });
 
+  // アーカイブ済みのチャンネルには人を増やせない（機能一覧 3.2。api は 409 channel_archived で断る）ので、招待の操作を出さない。退出は出す。
+  it('アーカイブ済みのプライベートチャンネルには、招待の操作を出さず、退出の操作は出す', async () => {
+    fakeFetch(
+      routes({
+        [CHANNELS]: () => json(200, []),
+        [ARCHIVED]: () => json(200, [{ ...ARCHIVED_GENERAL, visibility: 'PRIVATE' }]),
+        [`GET ${MESSAGES}`]: () => page([]),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+
+    expect(await screen.findByRole('button', { name: 'このチャンネルから抜ける' })).toBeDefined();
+    await pause();
+    expect(screen.queryByRole('button', { name: 'メンバーを招待する' })).toBeNull();
+  });
+
   it('一般の一覧にもアーカイブ済みの一覧にも無いチャンネルは、見つからないと出す', async () => {
     fakeFetch(
       routes({

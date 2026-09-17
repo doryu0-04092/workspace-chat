@@ -61,7 +61,8 @@ export function ChannelPage() {
         </p>
       )}
       <LeaveChannel key={`leave-${channelId}`} workspaceId={workspaceId} channel={channel} />
-      {channel.visibility === 'PRIVATE' && (
+      {/* アーカイブ済みのチャンネルには人を増やせない（機能一覧 3.2。api も 409 で断る） */}
+      {current && channel.visibility === 'PRIVATE' && (
         <InviteToChannel
           key={`invite-${channelId}`}
           workspaceId={workspaceId}
