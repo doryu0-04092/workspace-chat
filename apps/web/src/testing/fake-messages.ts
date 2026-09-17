@@ -73,6 +73,10 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
     [`GET /api/workspaces/${WORKSPACE_ID}/channels`]: () => json(200, [GENERAL]),
     [`GET ${SETTINGS}`]: () => json(200, { threadUnreadIncluded: true }),
     [`PUT ${READ}`]: () => new Response(null, { status: 204 }),
+    // 配信の署名付き Cookie（F-04・F-29）。既定は署名鍵を設定していない api と同じ 204（取り直さない）
+    'POST /api/avatars/cookies': () => new Response(null, { status: 204 }),
+    [`POST /api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/files/cookies`]: () =>
+      new Response(null, { status: 204 }),
     ...extra,
   };
 }

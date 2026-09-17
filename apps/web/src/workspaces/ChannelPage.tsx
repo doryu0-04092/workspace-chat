@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { errorMessage } from '../api/client';
 import { failureMessage } from '../auth/failure-message';
+import { useChannelFileCookies } from '../delivery/signed-cookies';
 import { MessageChannelProvider } from '../messages/message-channel';
 import { MessageList } from '../messages/MessageList';
 import { PostMessageForm } from '../messages/PostMessageForm';
@@ -149,6 +150,8 @@ function ChannelMessages({
   readOnly: boolean;
 }) {
   const rejected = useChannelRealtime(workspaceId, channelId);
+  // 添付の配信の Cookie は、参加しているチャンネルを開いている間だけ取り直す（機能一覧 11.2）
+  useChannelFileCookies(workspaceId, channelId);
   const [unreadFrom] = useState(lastReadMessageId);
   useAdvanceRead(workspaceId, channelId);
   const [searchParams, setSearchParams] = useSearchParams();
