@@ -24,6 +24,12 @@ export const NOT_MESSAGE_AUTHOR: ErrorResponse = {
   message: '自分のメッセージだけを編集・削除できます',
 };
 
+/** そのチャンネルのピン留めが上限に達している（409。F-33。機能一覧 13.2。上限は pins.service.ts の `PIN_LIMIT`）。 */
+export const PIN_LIMIT_REACHED: ErrorResponse = {
+  code: 'pin_limit_reached',
+  message: 'このチャンネルにピン留めできる件数の上限に達しています',
+};
+
 /** 既にそのチャンネルの参加者である（409。参加・招待。一意索引 `ChannelMember_channelId_userId_key`）。 */
 export const ALREADY_CHANNEL_MEMBER: ErrorResponse = {
   code: 'already_channel_member',
