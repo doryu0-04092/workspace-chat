@@ -22,6 +22,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Git Bash（MSYS）は "/" で始まる引数を Windows のパスに書き換えるため、パラメータ名が壊れて put-parameter が断られる。
+# パラメータ名の接頭辞だけを書き換えから外す（MSYS_NO_PATHCONV で全体を止めると、openssl が一時ファイルのパスを読めなくなる）。
+export MSYS2_ARG_CONV_EXCL="/workspace-chat"
+
 name="${1:-signing-1}"
 parameter="/workspace-chat/CLOUDFRONT_PRIVATE_KEY"
 region="ap-northeast-1"
