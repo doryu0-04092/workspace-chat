@@ -77,10 +77,12 @@ export class UploadStorage {
   ) {}
 
   /**
-   * 隔離用のキーへの PUT の署名付き URL（有効期限 5 分）。**`Content-Type` と `If-None-Match: *` を署名に含める**——
-   * 前者は申告の固定（4.3 のアップロードの行）、後者は同じ発行のキーへの上書きの拒否（S3 の条件付き書き込み。11.1）。
+   * 隔離用のキーへの PUT の署名付き URL（有効期限 5 分）。**`Content-Type`・`If-None-Match: *`・`Content-Length` を署名に含める**——
+   * `Content-Type` は申告の固定（4.3 のアップロードの行）、`If-None-Match` は同じ発行のキーへの上書きの拒否（S3 の条件付き書き込み。11.1）、
+   * `Content-Length` は申告の大きさの固定（違う大きさの本体は署名が合わず PUT の時点で断られる。#611）。
+   * ブラウザは `Content-Length` を本体から自動で付けるため、`headers` には載せない（載せられない）。
    */
-  async sign(quarantineKey: string, contentType: string): Promise<SignedUpload> {
+  async sign(quarantineKey: string, contentType: string, size: number): Promise<SignedUpload> {
     const signingDate = new Date();
     const url = await getSignedUrl(
       this.signer,
@@ -88,13 +90,14 @@ export class UploadStorage {
         Bucket: this.config.s3Bucket,
         Key: quarantineKey,
         ContentType: contentType,
+        ContentLength: size,
         IfNoneMatch: '*',
       }),
       {
         expiresIn: UPLOAD_URL_TTL_SECONDS,
         signingDate,
         // 既定では署名に入らないヘッダーを明示して署名に含める（含めないと、PUT で変えても外しても通る）
-        signableHeaders: new Set(['content-type', 'if-none-match']),
+        signableHeaders: new Set(['content-length', 'content-type', 'if-none-match']),
       },
     );
     return {
