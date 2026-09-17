@@ -66,3 +66,22 @@ export function resolveS3ForcePathStyle(raw: string | undefined): boolean {
     `S3_FORCE_PATH_STYLE の値が不正です（true か false を指定してください）: ${JSON.stringify(raw)}`,
   );
 }
+
+/**
+ * アップロード用の署名付き URL に署名するロール（環境変数 `S3_UPLOAD_ROLE_ARN`。秘密ではない）。**任意。**
+ * 設定されていれば、api が `sts:AssumeRole` で引き受けた一時的な資格情報で署名する（#427。uploads/upload-signer.ts）——
+ * **署名付き URL への PUT は署名したプリンシパルとして認証されるため、`quarantine/` にだけ書けるロールで署名する**（技術スタックの添付ファイルの行）。
+ * 未設定なら S3 のクライアントの既定の資格情報で署名する（手元・テスト。手元では署名者と確定の主体を分けない）。
+ *
+ * **踏むと壊れる: 本番で設定し損ねると、確定の主体（api のタスクロール）で署名することになり、ブラウザからの PUT が配信用のキーにも通る権限で認証される。**
+ * そのため空文字を未設定に倒さず、IAM のロールの ARN の形でなければ起動時に落とす。
+ */
+export function resolveS3UploadRoleArn(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  if (!/^arn:aws(?:-[a-z]+)*:iam::\d{12}:role\/[\w+=,.@/-]+$/.test(raw)) {
+    throw new Error(
+      `S3_UPLOAD_ROLE_ARN の値が不正です（arn:aws:iam::<アカウント ID 12 桁>:role/<ロール名> の形で指定してください）: ${JSON.stringify(raw)}`,
+    );
+  }
+  return raw;
+}

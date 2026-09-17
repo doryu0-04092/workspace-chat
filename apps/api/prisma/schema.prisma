@@ -294,6 +294,8 @@ model User {
   dmsAsHigh           Dm[]             @relation("DmHighUser")
   dmMessages          DmMessage[]
   reactions           MessageReaction[]
+  avatarUploads       AvatarUpload[]
+  attachments         Attachment[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -639,6 +641,8 @@ model Channel {
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   members   ChannelMember[]
   messages  Message[]
+  /// 添付ファイルのアップロード（F-27）。チャンネルを消せば行も消える（S3 のオブジェクトは残る）。
+  attachments Attachment[]
   /// 既読位置（F-23）。チャンネルを消せば既読位置も消える。
   reads     ChannelRead[]
 
@@ -768,6 +772,8 @@ model Message {
   mentions MessageMention[]
   reactions      MessageReaction[]
   reactionCounts MessageReactionCount[]
+  /// 投稿に結び付けた添付（F-27）。
+  attachments Attachment[]
 
   /// 既読位置（F-23）から指される向き。**参照するだけで、このメッセージの側からは読まない。**
   /// Prisma が双方向の関連を要求するために置いている（3本とも `ChannelRead` / `ThreadRead` の側が持ち主である）。
@@ -1117,4 +1123,100 @@ model MessagePin {
 
   /// **チャンネルのピン留めの一覧はこの向きで引く**（`channelId = ?` を新しい順）。
   @@index([channelId, id])
+}
+
+/// アップロードの段（機能一覧 11.1）。発行 → 確定の途中 → 成功か拒否。**確定は識別子ごとに1回だけ行う**——
+/// 発行の直後の行だけを「確定の途中」へ条件付きで進め、進められた要求だけが S3 を読み書きする。2回目以降は結果の列を返す。
+enum UploadState {
+  ISSUED
+  COMPLETING
+  SUCCEEDED
+  REJECTED
+}
+
+/// アバター画像のアップロード（F-04。機能一覧 1.3・11.1）。発行した署名付き URL 1つに1行。
+///
+/// **キーは列に持たず、この行から組み立てる**——隔離用のキーは `quarantine/avatars/{userId}/{id}/{fileName}`、
+/// 配信用のキーは `avatars/{userId}/{id}/{deliveredFileName}`（`apps/api/src/file-uploads/upload-keys.ts`）。
+/// **確定を求められるのは `userId` の本人だけであり、キーは要求の値ではなくこの行から作る**（11.1）。
+model AvatarUpload {
+  /// アップロードの識別子であり、キーの `{UUID}` でもある（推測できない値。UUIDv7）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  userId String @db.Uuid
+
+  /// 保存名（利用者のファイル名を許可リストで置き換え、隔離用のキーが 1,024 バイトに収まるよう切り詰めたもの。拡張子は付け替える前）。
+  fileName String
+
+  /// 申告した Content-Type（署名付き URL に焼き込んだ値。確定の検証では信用しない）。
+  contentType String
+
+  state UploadState @default(ISSUED)
+
+  /// 確定に成功したときの、拡張子を検証した形式のものに付け替えた保存名。
+  deliveredFileName String?
+
+  /// 確定で断ったときの状態コードと `code`（2回目以降の確定に同じものを返す）。
+  rejectedStatus Int?
+  rejectedCode   String?
+
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// チャンネルの添付ファイルのアップロード（F-27・F-28。機能一覧 11.1）。発行した署名付き URL 1つに1行。
+///
+/// **キーは列に持たず、この行から組み立てる**——隔離用のキーは `quarantine/workspace/{workspaceId}/channel/{channelId}/{id}/{fileName}`、
+/// 配信用のキーは `workspace/{workspaceId}/channel/{channelId}/{id}/{deliveredFileName}`（`apps/api/src/file-uploads/upload-keys.ts`）。
+/// **確定を求められるのは `uploaderId` の本人だけであり、キーとやり直す参加者判定の対象チャンネルは要求の値ではなくこの行から作る**（11.1。#211）。
+/// **DM の添付にこの行とキーの構造を流用しない**（11.1 の冒頭。#239）。
+model Attachment {
+  /// アップロードの識別子であり、キーの `{UUID}` でもある（推測できない値。UUIDv7）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// 参加者判定を通したチャンネルとそのワークスペース（複合外部キーで、別のワークスペースのチャンネルを指せない）。
+  workspaceId String @db.Uuid
+  channelId   String @db.Uuid
+
+  uploaderId String @db.Uuid
+
+  /// 利用者が付けた元のファイル名（表示用。保存名には使わない。11.1）。
+  originalName String
+
+  /// 保存名（許可リストで置き換え、隔離用のキーが 1,024 バイトに収まるよう切り詰めたもの。拡張子は付け替える前）。
+  fileName String
+
+  /// 申告した Content-Type（署名付き URL に焼き込んだ値。確定の検証では信用しない）。
+  contentType String
+
+  state UploadState @default(ISSUED)
+
+  /// 確定に成功したときの、検証した形式（共有の許可リストの id）・拡張子を付け替えた保存名・大きさ（バイト）。
+  formatId          String?
+  deliveredFileName String?
+  size              Int?
+
+  /// 確定で断ったときの状態コードと `code`（2回目以降の確定に同じものを返す）。
+  rejectedStatus Int?
+  rejectedCode   String?
+
+  /// 結び付けた投稿。**確定に成功した、まだどの投稿にも付いていない、本人が上げたものだけを、同じチャンネルの投稿に付ける**（書く側が確かめる）。
+  /// 投稿は同じチャンネルのものだけ（複合外部キー）。
+  messageId String? @db.Uuid
+
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+
+  channel  Channel  @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  uploader User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  message  Message? @relation(fields: [messageId, channelId], references: [id, channelId], onDelete: NoAction)
+
+  @@index([uploaderId])
+  @@index([channelId])
+  /// 一覧のメッセージに載せる添付を、メッセージの id でまとめて引く。
+  @@index([messageId])
 }

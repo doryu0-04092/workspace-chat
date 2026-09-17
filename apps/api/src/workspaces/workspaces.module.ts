@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
+import { UploadsModule } from '../file-uploads/uploads.module';
 import { RateLimitModule } from '../rate-limit/rate-limit.module';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { AttachmentsController } from './attachments.controller';
+import { AttachmentsService } from './attachments.service';
 import { ChannelArchiveController } from './channel-archive.controller';
 import { ChannelArchiveService } from './channel-archive.service';
 import { ChannelMembershipController } from './channel-membership.controller';
@@ -29,9 +32,10 @@ import { WorkspacesService } from './workspaces.service';
  * チャンネルの部屋への入室要求（ChannelRoomsGateway）もここで受ける（入室の判定が所属とチャンネルの参加を見るため）。
  * 招待の通知とメッセージの投稿・返信・編集・削除の配信に RealtimeEmitter、参加資格を失った接続を部屋から外すのに RealtimeRooms、
  * 入室要求とメッセージの投稿・返信・編集・削除の上限に RateLimitModule（保存先と MessageWriteRateLimitGuard）を使う。
+ * 添付ファイルのアップロード（F-27・F-28）の S3 の段に UploadsModule を使う（発行と確定の上限も RateLimitModule の UserRateLimitGuard）。
  */
 @Module({
-  imports: [RealtimeModule, RateLimitModule],
+  imports: [RealtimeModule, RateLimitModule, UploadsModule],
   controllers: [
     WorkspacesController,
     InvitationsController,
@@ -43,6 +47,7 @@ import { WorkspacesService } from './workspaces.service';
     DmsController,
     SearchController,
     ReactionsController,
+    AttachmentsController,
   ],
   providers: [
     WorkspacesService,
@@ -57,6 +62,7 @@ import { WorkspacesService } from './workspaces.service';
     DmsService,
     SearchService,
     ReactionsService,
+    AttachmentsService,
   ],
 })
 export class WorkspacesModule {}

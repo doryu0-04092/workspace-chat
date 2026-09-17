@@ -56,6 +56,14 @@ export function failureMessage(failure: Failure): string {
       return 'ワークスペースのオーナーは、アカウントを削除できません。オーナーの権限を他の人に渡す機能が無いためです。';
     case 'not_found':
       return '見つかりません。一覧を開き直してください。';
+    case 'unsupported_file_type':
+      return 'この形式のファイルは上げられません。受け付けている形式を確かめてください。';
+    case 'file_too_large':
+      return 'ファイルが大きすぎます。画像は 10 MB、動画は 100 MB、文書と zip は 25 MB までです。';
+    case 'upload_not_received':
+      return 'ファイルが届きませんでした。もう一度ファイルを選んでください。';
+    case 'upload_in_progress':
+      return 'アップロードを確定している途中です。しばらく待ってから画面を開き直してください。';
     default:
       return 'うまくいきませんでした。時間をおいて、やり直してください。';
   }

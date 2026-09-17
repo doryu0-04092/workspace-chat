@@ -1,8 +1,8 @@
 import { type FormEvent, useState } from 'react';
 import { errorMessage } from '../api/client';
-import { type Profile, useMyProfile, useUpdateProfile } from './queries';
+import { type Profile, useMyProfile, useUpdateProfile, useUploadAvatar } from './queries';
 
-/** 自分のプロフィールの画面（F-04。機能一覧 1.3）。表示名とステータスを変える。ユーザーID は変えられず、アバター画像は api にまだ無い。 */
+/** 自分のプロフィールの画面（F-04。機能一覧 1.3）。アバター画像・表示名・ステータスを変える。ユーザーID は変えられない。 */
 export function ProfilePage() {
   const profile = useMyProfile();
 
@@ -14,8 +14,63 @@ export function ProfilePage() {
           プロフィールを読み込めませんでした。{errorMessage(profile.error)}
         </p>
       )}
+      {profile.data && <AvatarField profile={profile.data} />}
       {profile.data && <ProfileForm profile={profile.data} />}
     </main>
+  );
+}
+
+/** アバター画像を送る先で受け付ける形式（api の許可リストの画像。受け付けるかを決めるのは api の確定の検証である）。 */
+const AVATAR_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp';
+
+/**
+ * アバター画像。**ファイルを選んだらすぐに上げる**（発行 → PUT → 確定。表示名とステータスの「保存する」とは別に送る——
+ * 上げ終わるまでに確定まで済ませないと、隔離用のキーに置いたまま残るため）。通ったら画像は読み直さずに変わる。
+ */
+function AvatarField({ profile }: { profile: Profile }) {
+  const upload = useUploadAvatar();
+
+  return (
+    <div className="mt-6 flex items-center gap-4">
+      {profile.avatarUrl ? (
+        <img
+          src={profile.avatarUrl}
+          alt="現在のアバター画像"
+          className="h-16 w-16 rounded-full border object-cover"
+        />
+      ) : (
+        <div aria-hidden="true" className="h-16 w-16 rounded-full border bg-slate-100" />
+      )}
+      <div className="flex flex-col gap-1">
+        <label htmlFor="profile-avatar">アバター画像</label>
+        <input
+          id="profile-avatar"
+          type="file"
+          accept={AVATAR_ACCEPT}
+          aria-describedby="profile-avatar-hint"
+          disabled={upload.isPending}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            // 同じファイルを選び直しても change が起きるよう、選んだものを入力欄から外す
+            event.target.value = '';
+            if (file) upload.mutate(file);
+          }}
+        />
+        <span id="profile-avatar-hint" className="text-xs text-slate-600">
+          jpeg・png・gif・webp の画像（10 MB まで）。選ぶとすぐに変わります
+        </span>
+        {upload.isPending && (
+          <p role="status" className="text-slate-700">
+            アップロードしています…
+          </p>
+        )}
+        {upload.isError && (
+          <p role="alert" className="text-red-700">
+            アバター画像を変えられませんでした。{errorMessage(upload.error)}
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 

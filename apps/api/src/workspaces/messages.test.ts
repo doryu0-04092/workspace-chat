@@ -254,6 +254,7 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         replyParticipants: [],
         mentions: [],
         reactions: [],
+        attachments: [],
       });
       expect(Number.isNaN(Date.parse(message.createdAt))).toBe(false);
       expect(await prisma.message.count({ where: { channelId } })).toBe(1);
@@ -1102,6 +1103,7 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
         replyParticipants: [],
         mentions: [],
         reactions: [],
+        attachments: [],
       });
       const { messages } = await page(alice, workspace.id, channelId);
       expect(messages).toEqual([{ ...parent, replyCount: 1, replyParticipants: [summaryOf(bob)] }]);

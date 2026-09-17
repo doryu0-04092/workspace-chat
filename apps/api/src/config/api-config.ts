@@ -10,6 +10,7 @@ import {
   resolveS3Endpoint,
   resolveS3ForcePathStyle,
   resolveS3Region,
+  resolveS3UploadRoleArn,
 } from '../storage/s3-config';
 import { resolveDatabaseUrl } from './database-url';
 import { isHttpOrigin } from './http-origin';
@@ -33,6 +34,7 @@ export interface ApiConfig {
   readonly s3Region: string;
   readonly s3Endpoint: string | undefined;
   readonly s3ForcePathStyle: boolean;
+  readonly s3UploadRoleArn: string | undefined;
 }
 
 /** ApiConfig を注入するトークン。 */
@@ -148,6 +150,7 @@ export const API_SETTINGS: ApiSettings = {
     resolve: resolveS3ForcePathStyle,
     secret: false,
   },
+  s3UploadRoleArn: { env: 'S3_UPLOAD_ROLE_ARN', resolve: resolveS3UploadRoleArn, secret: false },
 };
 
 /**

@@ -1,9 +1,13 @@
-import { type FormEvent, useId, useState } from 'react';
+import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import { errorMessage } from '../api/client';
+import { type AttachmentDraft, useAttachmentDrafts } from './attachment-drafts';
 import { MentionInput } from './MentionInput';
 import { usePostMessage } from './queries';
 
-/** チャンネルへの投稿（F-11）。 */
+/**
+ * チャンネルへの投稿（F-11）。添付ファイル（F-27）を付けられる——選んだらすぐに上げ、確定したものの識別子を本文と一緒に送る。
+ * **上げている間は送信できない**（確定していない添付を付けて送らない）。上げられなかったものは送信に含めない。
+ */
 export function PostMessageForm({
   workspaceId,
   channelId,
@@ -12,16 +16,94 @@ export function PostMessageForm({
   channelId: string;
 }) {
   const post = usePostMessage(workspaceId, channelId);
+  const attachments = useAttachmentDrafts(workspaceId, channelId);
   return (
     <MessageForm
-      submit={post.mutate}
-      pending={post.isPending}
+      submit={(body, options) =>
+        post.mutate(
+          { body, attachmentIds: attachments.readyIds },
+          {
+            onSuccess: () => {
+              attachments.clear();
+              options.onSuccess();
+            },
+          },
+        )
+      }
+      pending={post.isPending || attachments.uploading}
       error={post.error}
       workspaceId={workspaceId}
       channelId={channelId}
       label="メッセージ"
       submitLabel="送信する"
+      extra={
+        <AttachmentField
+          drafts={attachments.drafts}
+          full={attachments.full}
+          onChoose={attachments.add}
+          onRemove={attachments.remove}
+        />
+      }
     />
+  );
+}
+
+/** 添付するファイルを選ぶ欄と、上げている・上げたファイルの一覧。 */
+function AttachmentField({
+  drafts,
+  full,
+  onChoose,
+  onRemove,
+}: {
+  drafts: readonly AttachmentDraft[];
+  full: boolean;
+  onChoose: (files: File[]) => void;
+  onRemove: (key: number) => void;
+}) {
+  const id = useId();
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2 text-sm">
+        <label htmlFor={id}>ファイルを添付</label>
+        <input
+          id={id}
+          type="file"
+          multiple
+          disabled={full}
+          onChange={(event) => {
+            const files = [...(event.target.files ?? [])];
+            // 同じファイルを選び直しても change が起きるよう、選んだものを入力欄から外す
+            event.target.value = '';
+            onChoose(files);
+          }}
+        />
+      </div>
+      {drafts.length > 0 && (
+        <ul aria-label="添付するファイル" className="flex flex-col gap-1 text-sm">
+          {drafts.map((draft) => (
+            <li key={draft.key} className="flex flex-wrap items-baseline gap-2">
+              <span>{draft.fileName}</span>
+              {draft.status === 'uploading' && (
+                <span className="text-slate-500">アップロード中…</span>
+              )}
+              {draft.status === 'failed' && (
+                <span role="alert" className="text-red-700">
+                  上げられませんでした。{errorMessage(draft.error)}
+                </span>
+              )}
+              <button
+                type="button"
+                className="text-slate-600 underline"
+                aria-label={`${draft.fileName} を取り除く`}
+                onClick={() => onRemove(draft.key)}
+              >
+                取り除く
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -52,6 +134,7 @@ export function MessageForm({
   clearOnSuccess = true,
   onSubmitted,
   onCancel,
+  extra,
   className = 'mt-4 flex flex-col gap-2',
 }: {
   submit: (body: string, options: { onSuccess: () => void }) => void;
@@ -66,6 +149,8 @@ export function MessageForm({
   clearOnSuccess?: boolean;
   onSubmitted?: () => void;
   onCancel?: () => void;
+  /** 入力欄の下に置く欄（投稿の添付） */
+  extra?: ReactNode;
   className?: string;
 }) {
   // 投稿・スレッドの返信・編集のフォームが同じ画面に並ぶため、入力欄の id を固定しない
@@ -104,6 +189,7 @@ export function MessageForm({
           onChange={setBody}
         />
       )}
+      {extra}
       {error !== null && (
         <p role="alert" className="text-red-700">
           {errorMessage(error)}

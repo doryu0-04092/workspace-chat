@@ -1,8 +1,9 @@
 import type { components } from '@workspace-chat/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { requestJson } from '../api/client';
+import { requestJson, segment } from '../api/client';
 import { useSessionStore } from '../auth/session-context';
 import type { SessionStore } from '../auth/session-store';
+import { uploadFile } from '../file-uploads/upload-file';
 
 type Schemas = components['schemas'];
 export type UserSettings = Schemas['UserSettings'];
@@ -69,6 +70,31 @@ export function useDeleteAccount() {
     onMutate: () => ({ userId: signedInUserId(store) }),
     onSuccess: (_, __, sent) => {
       if (sent.userId !== null) store.endDeletedAccount(sent.userId);
+    },
+  });
+}
+
+const AVATAR_UPLOADS_PATH = '/api/users/me/avatar/uploads';
+
+/**
+ * アバター画像を上げる（F-04。機能一覧 1.3）: 発行 → 署名付き URL への PUT → 確定。通ったら、確定の応答（プロフィール）で読み込んだプロフィールを置き換える
+ * （プロフィールの画面と画面の枠が同じ読み込みを使うため、どちらも読み直さずに変わる）。**画像だけを送る。**
+ *
+ * **踏むと壊れる: 応答の利用者が、いまログインしている利用者でなければ何も書かない**（`useUpdateProfile` と同じ理由。#558 第0巡の 🔴1）。
+ */
+export function useUploadAvatar() {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) =>
+      uploadFile<Profile>(store, file, {
+        issuePath: AVATAR_UPLOADS_PATH,
+        completePath: (uploadId) => `${AVATAR_UPLOADS_PATH}/${segment(uploadId)}/complete`,
+        kinds: ['image'],
+      }),
+    onSuccess: (profile) => {
+      if (signedInUserId(store) !== profile.id) return;
+      queryClient.setQueryData<Profile>(profileKey, profile);
     },
   });
 }

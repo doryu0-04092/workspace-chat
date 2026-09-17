@@ -76,6 +76,7 @@ const VALID_ENV = {
   S3_REGION: 'ap-northeast-1',
   S3_ENDPOINT: 'http://127.0.0.1:9000',
   S3_FORCE_PATH_STYLE: 'true',
+  S3_UPLOAD_ROLE_ARN: 'arn:aws:iam::123456789012:role/workspace-chat-upload-signer',
 };
 
 describe('起動の設定（resolveApiConfig）', () => {
@@ -92,6 +93,7 @@ describe('起動の設定（resolveApiConfig）', () => {
       s3Region: VALID_ENV.S3_REGION,
       s3Endpoint: VALID_ENV.S3_ENDPOINT,
       s3ForcePathStyle: true,
+      s3UploadRoleArn: VALID_ENV.S3_UPLOAD_ROLE_ARN,
     });
   });
 
@@ -102,6 +104,7 @@ describe('起動の設定（resolveApiConfig）', () => {
       REGISTRATION_ENABLED: undefined,
       S3_ENDPOINT: undefined,
       S3_FORCE_PATH_STYLE: undefined,
+      S3_UPLOAD_ROLE_ARN: undefined,
     };
     const config = resolveApiConfig(env);
     expect(config).toMatchObject({
@@ -110,6 +113,7 @@ describe('起動の設定（resolveApiConfig）', () => {
       s3ForcePathStyle: false,
     });
     expect(config.s3Endpoint).toBeUndefined();
+    expect(config.s3UploadRoleArn).toBeUndefined();
   });
 
   // 1つ直して起動し直すたびに次の不正が見つかる形だと、デプロイを設定の数だけ繰り返すことになる。
@@ -119,6 +123,7 @@ describe('起動の設定（resolveApiConfig）', () => {
       REGISTRATION_ENABLED: 'no',
       S3_ENDPOINT: '127.0.0.1:9000',
       S3_FORCE_PATH_STYLE: 'yes',
+      S3_UPLOAD_ROLE_ARN: '',
     };
     let message = '';
     try {
