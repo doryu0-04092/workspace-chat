@@ -29,7 +29,7 @@ export const REPLY_LABELS: Labels = {
 };
 
 /** 一覧に並べるメッセージ（チャンネルの `Message` と DM の `DmMessage` の共通部分）。 */
-type ListedMessage = { id: string; createdAt: string };
+type ListedMessage = { id: string; createdAt: string; author: { id: string } | null };
 
 /** 新しい順のページを遡って読む問い合わせ（チャンネルの `useMessages`・`useReplies` と DM の `useDmMessages`）。 */
 type Pages<M> = UseInfiniteQueryResult<InfiniteData<{ messages: M[]; nextBefore: string | null }>>;
@@ -87,6 +87,8 @@ export function PagedMessages<M extends ListedMessage>({
   lastReadMessageId?: string | null;
   joinedAt?: string | null;
 }) {
+  const session = useSession();
+  const me = session.status === 'signedIn' ? session.user.id : null;
   if (!query.data) {
     return query.isError ? (
       <p role="alert" className="text-red-700">
@@ -109,7 +111,7 @@ export function PagedMessages<M extends ListedMessage>({
   // **既読位置をまだ持たないチャンネルでは、参加した時点より後のうち最も古い1件の下に出す**（10.1・openapi の Channel.lastReadMessageId）。
   // **未読数から位置を数えてはならない**——自分の投稿と削除済みは未読に数えないが、一覧には並ぶため必ずずれる。
   // 参加していないチャンネルはどちらも null になり、線は出ない（そもそも開けない）
-  const oldestUnreadId = firstUnreadId(items, lastReadMessageId, joinedAt);
+  const oldestUnreadId = firstUnreadId(items, lastReadMessageId, joinedAt, me);
 
   return (
     <LoadedList
@@ -168,17 +170,21 @@ function LoadedList<M extends ListedMessage>({
  * - 既読位置があれば、**その id より後**のうち最も古い1件（id は UUIDv7 で、文字の並びが時刻の順になる）
  * - 既読位置がまだ無ければ、**参加した時刻より後**のうち最も古い1件（参加する前の履歴は未読にしない。機能一覧 10.1）
  * - どちらも無ければ出さない（参加していないチャンネル）
+ * - **自分の投稿は飛ばす**——未読に数えないため（機能一覧 10.1）、自分の投稿の下に線を出すと、読むものが無いのに未読があるように見える。
+ *   既読位置より後が自分の投稿だけなら出さない
  */
 function firstUnreadId(
   items: readonly ListedMessage[],
   lastReadMessageId: string | null,
   joinedAt: string | null,
+  me: string | null,
 ): string | null {
+  const others = [...items].reverse().filter((message) => message.author?.id !== me);
   if (lastReadMessageId !== null) {
-    return [...items].reverse().find((message) => message.id > lastReadMessageId)?.id ?? null;
+    return others.find((message) => message.id > lastReadMessageId)?.id ?? null;
   }
   if (joinedAt === null) return null;
-  return [...items].reverse().find((message) => message.createdAt >= joinedAt)?.id ?? null;
+  return others.find((message) => message.createdAt >= joinedAt)?.id ?? null;
 }
 
 /**
