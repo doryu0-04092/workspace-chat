@@ -17,6 +17,11 @@ import {
   toWorkspace,
 } from './workspaces.service';
 
+/** 招待の候補の上限（#616。実装時に決めた値）。**踏むと壊れる: 変えるなら openapi.yaml の `listInvitationCandidates` の maxItems も同じ値にする。** */
+export const INVITATION_CANDIDATE_LIMIT = 10;
+
+type UserSummary = ReturnType<typeof toUserSummary>;
+
 type InviteOperation = paths['/workspaces/{id}/invitations']['post'];
 export type CreateInvitationRequest = InviteOperation['requestBody']['content']['application/json'];
 export type Invitation = InviteOperation['responses'][201]['content']['application/json'];
@@ -88,6 +93,43 @@ export class InvitationsService {
       invitee: toUserSummary(created.invitee),
       createdAt: created.createdAt.toISOString(),
     };
+  }
+
+  /**
+   * 招待の候補（#616。提案・承認済・2026-09-18・依頼側）。**オーナーだけ**（判定は `invite` と同じ `ownerMembershipOf`）。
+   * - 対象は退会していない利用者のうち、そのワークスペースのメンバーでなく、未承諾の招待も無い人（招待しても 409 になる人を出さない）
+   * - ユーザーID か表示名に q を含む人を、大文字小文字によらず当てる。**`LIKE` を使わない**（`_` と `%` を利用者が書けるため。`strpos` で位置を見る）
+   * - 並びは、ユーザーID の先頭一致 → 表示名の先頭一致 → 途中の一致の順、同じ段ではユーザーID の小文字の順。最大 `INVITATION_CANDIDATE_LIMIT` 人
+   * - **踏むと壊れる: 生の SQL は schema.prisma の列名の写し（`@map`）を通らない**——`User.loginId` の列は `"userId"` である
+   *
+   * 代償: オーナーは、登録している利用者のユーザーID と表示名を一部の文字から調べられる（ワークスペースは誰でも作れるため、実質すべての利用者）。
+   * 依頼側の判断で受け入れる。返すのは要約（id・ユーザーID・表示名）だけで、件数と回数に上限を置く。
+   */
+  async candidates(ownerId: string, workspaceId: string, q: string): Promise<UserSummary[]> {
+    await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
+    const rows = await this.prisma.$queryRaw<
+      { id: string; loginId: string; displayName: string }[]
+    >`
+      SELECT u."id", u."userId" AS "loginId", u."displayName"
+      FROM "User" u
+      WHERE u."deletedAt" IS NULL
+        AND (strpos(lower(u."userId"), lower(${q})) > 0 OR strpos(lower(u."displayName"), lower(${q})) > 0)
+        AND NOT EXISTS (
+          SELECT 1 FROM "Membership" m WHERE m."workspaceId" = ${workspaceId}::uuid AND m."userId" = u."id"
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM "Invitation" i WHERE i."workspaceId" = ${workspaceId}::uuid AND i."inviteeId" = u."id"
+        )
+      ORDER BY
+        CASE
+          WHEN starts_with(lower(u."userId"), lower(${q})) THEN 0
+          WHEN starts_with(lower(u."displayName"), lower(${q})) THEN 1
+          ELSE 2
+        END,
+        lower(u."userId")
+      LIMIT ${INVITATION_CANDIDATE_LIMIT}
+    `;
+    return rows.map(toUserSummary);
   }
 
   /** 自分宛ての未承諾の招待。届いた順（同時刻は id〔UUIDv7〕の順）。 */
