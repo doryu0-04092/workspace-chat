@@ -206,3 +206,28 @@ export function usePostReply(workspaceId: string, channelId: string, parentId: s
     repliesPath(workspaceId, channelId, parentId),
   );
 }
+
+/**
+ * スレッドの既読位置を進める（F-23。REST の仕様の updateThreadRead）。**親は呼ぶたびに渡す**——開いているスレッドを切り替えても、
+ * 送る先を読み込んだ返信の親と揃える。戻さないのは api が持つ不変条件で、進めた後の未読数は `unread:updated` で届く。
+ */
+export function useUpdateThreadRead(workspaceId: string, channelId: string) {
+  const store = useSessionStore();
+  return useMutation({
+    mutationFn: ({
+      parentId,
+      lastReadMessageId,
+    }: {
+      parentId: string;
+      lastReadMessageId: string;
+    }) =>
+      requestJson<void>(
+        store,
+        `${messagesPath(workspaceId, channelId)}/${segment(parentId)}/read`,
+        {
+          method: 'PUT',
+          body: { lastReadMessageId } satisfies Schemas['UpdateChannelReadRequest'],
+        },
+      ),
+  });
+}
