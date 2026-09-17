@@ -34,6 +34,7 @@ export function PostMessageForm({
         )
       }
       pending={post.isPending || attachments.uploading}
+      allowEmptyBody={attachments.readyIds.length > 0}
       error={post.error}
       workspaceId={workspaceId}
       channelId={channelId}
@@ -116,7 +117,7 @@ function AttachmentField({
  *
  * - **Enter では送信しない**——送信は送信のボタンで行い、Enter は、補完の一覧を開いている間は候補の差し込み、
  *   それ以外は改行である（改行は本文の改行として描画する。機能一覧 4.3・9.1）
- * - **空・空白だけではボタンを押せない**（api も 400 で断る。機能一覧 4.1）
+ * - **空・空白だけではボタンを押せない**（api も 400 で断る。機能一覧 4.1）。**`allowEmptyBody` のときだけ空で送れる**（確定した添付がある投稿。画像だけの投稿。#614）
  * - **失敗したら理由を出し、入力を残す**
  * - 入力欄はメンションを補完する（F-20。`MentionInput`。候補はそのチャンネルの参加者）。**`channelId` を渡さなければ補完しない**
  *   （DM。F-19。DM のメンションは解決しないため、補完の候補も出さない）
@@ -140,6 +141,7 @@ export function MessageForm({
   extra,
   onBodyChange,
   className = 'mt-4 flex flex-col gap-2',
+  allowEmptyBody = false,
 }: {
   submit: (body: string, options: { onSuccess: () => void }) => void;
   pending: boolean;
@@ -157,6 +159,8 @@ export function MessageForm({
   extra?: ReactNode;
   onBodyChange?: (body: string) => void;
   className?: string;
+  /** 本文が空でも送れるか（投稿で、確定した添付があるとき。#614） */
+  allowEmptyBody?: boolean;
 }) {
   // 投稿・スレッドの返信・編集のフォームが同じ画面に並ぶため、入力欄の id を固定しない
   const id = useId();
@@ -207,7 +211,7 @@ export function MessageForm({
       <div className="flex gap-2">
         <button
           className="rounded bg-slate-800 px-3 py-2 text-white disabled:opacity-50"
-          disabled={pending || body.trim() === ''}
+          disabled={pending || (body.trim() === '' && !allowEmptyBody)}
         >
           {submitLabel}
         </button>

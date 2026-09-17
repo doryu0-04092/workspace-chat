@@ -631,7 +631,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
     });
   });
 
-  // 機能一覧 4.1: 本文は 1〜4000 文字で、空白だけではない。仕様の検証（openapi）を通らない経路でも DB が止める。
+  // 機能一覧 4.1: 本文は 4000 文字まで。仕様の検証（openapi）を通らない経路でも DB が止める。
+  // **空・空白だけは DB では止めない**——添付が1件以上ある投稿は本文が空でもよく（画像だけの投稿。#614）、添付の有無は
+  // 同じ行の検査制約では見られない。空・空白だけを断るのは仕様（CreateMessageRequest の if/else）の役目である。
   describe('メッセージの本文', () => {
     async function insertMessage(body: string): Promise<{ exitCode: number; output: string }> {
       const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
@@ -641,18 +643,17 @@ describe('Prisma のスキーマとマイグレーション', () => {
       );
     }
 
-    it.each([
-      ['空', `''`],
-      ['空白だけ', `E' \\n\\t'`],
-      ['4001 文字', `repeat('あ', 4001)`],
-    ])('%s の本文は入れられない', async (_name, body) => {
-      const { exitCode, output } = await insertMessage(body);
-      expect(exitCode).not.toBe(0);
-      expect(output).toContain('Message_body_check');
-    });
+    it.each([['4001 文字', `repeat('あ', 4001)`]])(
+      '%s の本文は入れられない',
+      async (_name, body) => {
+        const { exitCode, output } = await insertMessage(body);
+        expect(exitCode).not.toBe(0);
+        expect(output).toContain('Message_body_check');
+      },
+    );
 
-    it('1 文字と 4000 文字の本文は入れられる', async () => {
-      for (const body of [`'あ'`, `repeat('あ', 4000)`]) {
+    it('空・空白だけ・1 文字・4000 文字の本文は入れられる（空・空白だけは添付だけの投稿のため。#614）', async () => {
+      for (const body of [`''`, `E' \\n\\t'`, `'あ'`, `repeat('あ', 4000)`]) {
         const { exitCode, output } = await insertMessage(body);
         expect(exitCode, output).toBe(0);
       }

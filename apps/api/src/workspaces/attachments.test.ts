@@ -861,6 +861,30 @@ describe('チャンネルの添付ファイルのアップロード（F-27・F-2
       ).toBeNull();
     });
 
+    it('添付が 1 件以上あれば、本文が空・空白だけでも投稿できる（画像だけの投稿。#614）', async () => {
+      const { alice, workspace, publicId } = await place();
+      for (const body of ['', '   ']) {
+        const attachment = await uploaded(alice, workspace.id, publicId);
+        const res = await postMessage(alice, workspace.id, publicId, {
+          body,
+          attachmentIds: [attachment.id],
+        });
+        expect(res.status).toBe(201);
+        const posted = (await res.json()) as Message;
+        expect(posted.body).toBe(body);
+        expect(posted.attachments.map((a) => a.id)).toEqual([attachment.id]);
+      }
+    });
+
+    it('添付が無ければ、本文が空・空白だけの投稿は従来どおり 400 validation_failed（#614）', async () => {
+      const { alice, workspace, publicId } = await place();
+      for (const request of [{ body: '' }, { body: '   ' }, { body: '', attachmentIds: [] }]) {
+        const res = await postMessage(alice, workspace.id, publicId, request);
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as ErrorResponse).code).toBe('validation_failed');
+      }
+    });
+
     it('11 件以上の添付は 400', async () => {
       const { alice, workspace, publicId } = await place();
       const res = await postMessage(alice, workspace.id, publicId, {
