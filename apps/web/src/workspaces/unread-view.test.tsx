@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeFetch, json } from '../testing/fake-api';
 import {
@@ -10,7 +10,9 @@ import {
   page,
   READ,
   routes,
+  SENT_AT,
   SETTINGS,
+  type TestMessage,
   WORKSPACE_ID,
 } from '../testing/fake-messages';
 import { renderApp } from '../testing/render-app';
@@ -345,6 +347,133 @@ describe('未読の画面（F-23）', () => {
       // 一覧が再描画されても、位置が変わらないうちは送り直さない
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(read).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // **返信の未読はスレッドの既読位置で決まる**（機能一覧 10.1）。既定の設定は「含める」なので、
+  // スレッドを開いて読んでも位置を進めなければ、返信の未読はいつまでも消えない。#546。
+  describe('スレッドの既読の更新', () => {
+    function reply(n: number, parent: TestMessage, overrides: Record<string, unknown> = {}) {
+      return message(n, { parentId: parent.id, body: `返信 ${n}`, ...overrides });
+    }
+    const repliesOf = (parent: TestMessage) => `${MESSAGES}/${parent.id}/replies`;
+    const threadReadOf = (parent: TestMessage) => `${MESSAGES}/${parent.id}/read`;
+    const sentId = (handler: ReturnType<typeof vi.fn<Handler>>, index: number) =>
+      (JSON.parse(String(handler.mock.calls[index]?.[0]?.body)) as { lastReadMessageId: string })
+        .lastReadMessageId;
+
+    it('スレッドを開いて返信を読み込んだら、いちばん新しい返信の id でスレッドの既読位置を進める', async () => {
+      const parent = message(1, { replyCount: 2 });
+      const newer = reply(3, parent);
+      const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
+      fakeFetch(
+        routes({
+          [`GET ${MESSAGES}`]: () => page([parent]),
+          [`GET ${repliesOf(parent)}`]: () => page([newer, reply(2, parent)]),
+          [`PUT ${threadReadOf(parent)}`]: read,
+        }),
+      );
+
+      renderApp(`${CHANNEL_PATH}?thread=${parent.id}`);
+
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      expect(sentId(read, 0)).toBe(newer.id);
+    });
+
+    it('いちばん新しい返信が削除済みなら、その1つ前の返信の id で進める（api が断る id を送らない）', async () => {
+      const parent = message(1, { replyCount: 2 });
+      const kept = reply(2, parent);
+      const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
+      fakeFetch(
+        routes({
+          [`GET ${MESSAGES}`]: () => page([parent]),
+          [`GET ${repliesOf(parent)}`]: () =>
+            page([reply(3, parent, { body: null, deleted: true }), kept]),
+          [`PUT ${threadReadOf(parent)}`]: read,
+        }),
+      );
+
+      renderApp(`${CHANNEL_PATH}?thread=${parent.id}`);
+
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      expect(sentId(read, 0)).toBe(kept.id);
+    });
+
+    it('返信がすべて削除済みなら、スレッドの既読を進めない', async () => {
+      const parent = message(1, { replyCount: 1 });
+      const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
+      fakeFetch(
+        routes({
+          [`GET ${MESSAGES}`]: () => page([parent]),
+          [`GET ${repliesOf(parent)}`]: () =>
+            page([reply(2, parent, { body: null, deleted: true })]),
+          [`PUT ${threadReadOf(parent)}`]: read,
+        }),
+      );
+
+      renderApp(`${CHANNEL_PATH}?thread=${parent.id}`);
+
+      const thread = within(await screen.findByRole('region', { name: 'スレッド' }));
+      await thread.findByText('このメッセージは削除されました');
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      expect(read).not.toHaveBeenCalled();
+    });
+
+    it('同じ位置を繰り返し送らず、開いている間に届いた返信まで進める', async () => {
+      const parent = message(1, { replyCount: 1 });
+      const first = reply(2, parent);
+      const arrived = reply(3, parent);
+      const read = vi.fn<Handler>(() => new Response(null, { status: 204 }));
+      fakeFetch(
+        routes({
+          [`GET ${MESSAGES}`]: () => page([parent]),
+          [`GET ${repliesOf(parent)}`]: () => page([first]),
+          [`PUT ${threadReadOf(parent)}`]: read,
+        }),
+      );
+
+      const { sockets } = renderApp(`${CHANNEL_PATH}?thread=${parent.id}`);
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      expect(read).toHaveBeenCalledTimes(1);
+
+      act(() => sockets.at(-1)?.deliver('message:new', { message: arrived, sentAt: SENT_AT }));
+
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+      expect(sentId(read, 1)).toBe(arrived.id);
+    });
+
+    it('別のスレッドに切り替えたら、切り替えた先の親のスレッドの既読位置を進める', async () => {
+      const first = message(1, { replyCount: 1 });
+      const second = message(5, { replyCount: 1 });
+      const firstRead = vi.fn<Handler>(() => new Response(null, { status: 204 }));
+      const secondRead = vi.fn<Handler>(() => new Response(null, { status: 204 }));
+      fakeFetch(
+        routes({
+          [`GET ${MESSAGES}`]: () => page([second, first]),
+          [`GET ${repliesOf(first)}`]: () => page([reply(2, first)]),
+          [`GET ${repliesOf(second)}`]: () => page([reply(6, second)]),
+          [`PUT ${threadReadOf(first)}`]: firstRead,
+          [`PUT ${threadReadOf(second)}`]: secondRead,
+        }),
+      );
+
+      renderApp(CHANNEL_PATH);
+      const list = within(await screen.findByRole('region', { name: 'メッセージの一覧' }));
+      const openFrom = async (body: string) =>
+        fireEvent.click(
+          within((await list.findByText(body)).closest('article')!).getByRole('button', {
+            name: '1件の返信',
+          }),
+        );
+
+      await openFrom('メッセージ 1');
+      await waitFor(() => expect(firstRead).toHaveBeenCalledTimes(1));
+      await openFrom('メッセージ 5');
+
+      await waitFor(() => expect(secondRead).toHaveBeenCalledTimes(1));
+      expect(sentId(secondRead, 0)).toBe(reply(6, second).id);
+      expect(firstRead).toHaveBeenCalledTimes(1);
     });
   });
 

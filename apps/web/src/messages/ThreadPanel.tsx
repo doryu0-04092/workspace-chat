@@ -1,6 +1,13 @@
+import { useEffect } from 'react';
 import { MessageItem, PagedMessages, REPLY_LABELS } from './MessageList';
 import { MessageForm } from './PostMessageForm';
-import { useLoadedMessage, usePostReply, useReplies } from './queries';
+import {
+  type Message,
+  useLoadedMessage,
+  usePostReply,
+  useReplies,
+  useUpdateThreadRead,
+} from './queries';
 
 /**
  * スレッド（F-17。機能一覧 6）。親と返信を上が古い順に並べ、返信を送る。
@@ -20,6 +27,7 @@ export function ThreadPanel({
   const parent = useLoadedMessage(workspaceId, channelId, parentId);
   const replies = useReplies(workspaceId, channelId, parentId);
   const post = usePostReply(workspaceId, channelId, parentId);
+  useAdvanceThreadRead(workspaceId, channelId, parentId, replies.data?.pages[0]?.messages);
 
   return (
     <section aria-label="スレッド" className="mt-4 rounded border p-2">
@@ -42,4 +50,24 @@ export function ThreadPanel({
       />
     </section>
   );
+}
+
+/**
+ * 読み込んである最新の返信までスレッドの既読位置を進める（F-23。機能一覧 10.1）。返信の未読はこの位置で決まり、チャンネルの既読位置では減らない。
+ * **削除されていない返信だけを送る**——api は削除済みの id を 404 で断り、最後の返信が消されただけで既読が進まなくなる。
+ * **同じ位置は送り直さない**——効果の依存が位置そのものであり、変わらないうちは走らない（上限は 1分 120 回）。
+ */
+function useAdvanceThreadRead(
+  workspaceId: string,
+  channelId: string,
+  parentId: string,
+  newestPage: Message[] | undefined,
+) {
+  const { mutate: advance } = useUpdateThreadRead(workspaceId, channelId);
+  // 最新のページは新しい順で、その先頭の削除されていない返信が、送れる中でいちばん新しい
+  const newestId = newestPage?.find((m) => !m.deleted)?.id ?? null;
+
+  useEffect(() => {
+    if (newestId !== null) advance({ parentId, lastReadMessageId: newestId });
+  }, [parentId, newestId, advance]);
 }
