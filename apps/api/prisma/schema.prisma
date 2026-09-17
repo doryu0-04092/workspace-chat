@@ -4,12 +4,12 @@
 // リアクション・添付・検索は別のイシューで扱う。
 //
 // ============================================================================
-// このファイルを直す人へ: **Prisma の記法で書けない制約が6つある**
+// このファイルを直す人へ: **Prisma の記法で書けない制約が8つある**
 // ============================================================================
 //
 // 部分一意索引（`WHERE` 付き）・式に対する索引（`lower(...)`）・検査制約（CHECK）は
 // Prisma のスキーマ言語に無い。
-// **マイグレーションの SQL に直接書いてある。** 具体的には次の6つ。
+// **マイグレーションの SQL に直接書いてある。** 具体的には次の8つ。
 //
 //   1. `User_userId_lower_key`                 … ユーザーID の一意性は大文字小文字を区別しない
 //   2. `Membership_single_owner_per_workspace` … 1ワークスペースにオーナーは1人
@@ -17,12 +17,14 @@
 //   4. `Channel_archive_naming_check`          … アーカイブと採番と改名が不可分
 //   5. `Message_body_check`                    … 本文は 1〜4000 文字で、空白だけではない
 //   6. `Message_replyCount_check`              … 返信件数は負にならない
+//   7. `Dm_participants_check`                 … DM の当事者は小さい User.id が先で、自分自身ではない
+//   8. `DmMessage_body_check`                  … DM の本文も 1〜4000 文字で、空白だけではない
 //
-// **このファイルだけを見ても、この6つは見えない。** モデルを増減させるときは
-// `prisma/migrations/` の SQL も併せて読むこと。6つとも
+// **このファイルだけを見ても、この8つは見えない。** モデルを増減させるときは
+// `prisma/migrations/` の SQL も併せて読むこと。8つとも
 // `apps/api/src/prisma-schema.test.ts` が実際の PostgreSQL に対して検証している。
 //
-// 代償: 上の6つは `prisma migrate dev` の自動生成では復元されない。
+// 代償: 上の8つは `prisma migrate dev` の自動生成では復元されない。
 // スキーマを作り直すときは手で書き足す必要がある。
 // 採らなかった側（制約をアプリ側の実装だけで守る）の代償は、
 // **片方だけ実行された状態を DB が受け入れてしまう**ことである。
@@ -278,6 +280,10 @@ model User {
   invitationsSent     Invitation[]     @relation("InvitationInviter")
   messages            Message[]
   mentionedIn         MessageMention[]
+  /// DM の当事者（F-19。`Dm` は User.id の小さい方と大きい方の2本で持つ）と、DM に書いたメッセージ。
+  dmsAsLow            Dm[]             @relation("DmLowUser")
+  dmsAsHigh           Dm[]             @relation("DmHighUser")
+  dmMessages          DmMessage[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -372,6 +378,7 @@ model Workspace {
   memberships Membership[]
   channels    Channel[]
   invitations Invitation[]
+  dms         Dm[]
 
   /// ワークスペース名に一意制約を置かない。**誰でも作成できる**（要件定義書 3.5.1）以上、
   /// 名前を取り合う設計にすると、先に作った人が名前を占有する。
@@ -425,6 +432,7 @@ model Membership {
   /// **抜けた利用者の既読位置が残ると、復帰したときに抜けていた間の投稿が既読になる**ためである（機能一覧 10.1）。
   channelReads ChannelRead[]
   threadReads  ThreadRead[]
+  dmReads      DmRead[]
 
   /// 同じ利用者が同じワークスペースに二重に参加しないこと。
   /// この索引は「そのワークスペースの参加者一覧」の取得にも効き、
@@ -866,5 +874,102 @@ model ThreadRead {
   lastRead   Message    @relation("ThreadReadLast", fields: [lastReadMessageId, channelId], references: [id, channelId], onDelete: NoAction)
 
   @@unique([parentMessageId, userId])
+  @@index([userId])
+}
+
+// ============================================================================
+// ダイレクトメッセージ（F-19。機能一覧 8）
+// ============================================================================
+
+/// 同じワークスペースの2人の DM（F-19。機能一覧 8）。**1対1のみ**（グループ DM は対象外。要件定義書 3.4）。
+///
+/// **DM はチャンネルではない**（機能一覧 5.2）。`Channel` / `Message` の行にしない——チャンネルの参加者判定・未読の集計・
+/// 部屋の関門は `ChannelMember` を根拠にしており、DM を混ぜると、その判定が DM に流れ込む（8「チャンネルの判定を DM に流用しない」と同じ理由）。
+/// **代償: リアクション（F-18）・検索（F-30）など、DM にも当てる機能は、この3つの表の側にも当て方を持つことになる。**
+///
+/// **同じ2人の DM は1つだけ**（8「同じ相手との DM は1つに集約される」）。当事者を **User.id の小さい方（`lowUserId`）と
+/// 大きい方（`highUserId`）の順**で持ち、`(workspaceId, lowUserId, highUserId)` の一意索引で止める。
+/// 順を逆にした行・自分自身との行は検査制約 `Dm_participants_check`（マイグレーションに置く）が止める——
+/// 順を縛らないと、同じ2人の行が逆の順でもう1つ入り、一意索引をすり抜ける。
+///
+/// **当事者を `Membership` ではなく `User` で参照する。** 参照先を `Membership` にすると、キック・退出で DM とメッセージが連鎖して消え、
+/// 「過去のメッセージは残る」（機能一覧 1.5・2.2）が DM で破れる。**その代わり、いまメンバーかは DB が縛らない**——
+/// 読み書きと配信のたびに、アプリが `Membership` と `User.deletedAt` を確かめる（5.2 の DM の箇条。`apps/api/src/workspaces/dms.service.ts`）。
+model Dm {
+  id          String @id @default(uuid(7)) @db.Uuid
+  workspaceId String @db.Uuid
+
+  /// 当事者のうち User.id の小さい方と大きい方（`Dm_participants_check`）。
+  lowUserId  String @db.Uuid
+  highUserId String @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lowUser   User        @relation("DmLowUser", fields: [lowUserId], references: [id], onDelete: Cascade)
+  highUser  User        @relation("DmHighUser", fields: [highUserId], references: [id], onDelete: Cascade)
+  messages  DmMessage[]
+  reads     DmRead[]
+
+  /// 同じ2人の DM は1つ。**「この利用者の DM の一覧」を小さい方の側から引く向き**にも効く（先頭2列）。
+  @@unique([workspaceId, lowUserId, highUserId])
+  /// `DmRead` の複合外部キー `(dmId, workspaceId)` の参照先（`Channel` の `@@unique([id, workspaceId])` と同じ理由）。
+  @@unique([id, workspaceId])
+  /// 「この利用者の DM の一覧」を大きい方の側から引く向き。
+  @@index([workspaceId, highUserId])
+}
+
+/// DM のメッセージ（F-19。機能一覧 8）。**編集・論理削除の扱いはチャンネルのメッセージと同じ**（機能一覧 4.2。本文は削除しても残す）。
+///
+/// **書き手が当事者であることは DB では縛らない**（当事者は2列のどちらかで、外部キー1本で表せない）。書くのは `dms.service.ts` の投稿だけである。
+model DmMessage {
+  id   String @id @default(uuid(7)) @db.Uuid
+  dmId String @db.Uuid
+
+  /// 書き手。**退会しても行は残る**（機能一覧 1.5）。
+  authorId String @db.Uuid
+
+  /// 1〜4000 文字で、空白だけではない（検査制約 `DmMessage_body_check`。マイグレーションに置く）。
+  body String
+
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  editedAt  DateTime? @db.Timestamptz(3)
+  deletedAt DateTime? @db.Timestamptz(3)
+
+  dm     Dm   @relation(fields: [dmId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /// 既読位置から指される向き（`Message.readAsChannelLast` と同じく、参照するだけ）。
+  readAsLast DmRead[]
+
+  /// `DmRead` の既読位置を、同じ DM のメッセージに限る複合外部キーの参照先。
+  @@unique([id, dmId])
+  /// 一覧（新しい順・`before` より古いもの）と、未読の集計（`dmId = ?` と `id > 既読位置`）の両方をこの向きで引く。
+  @@index([dmId, id(sort: Desc)])
+}
+
+/// DM の既読位置（「利用者 × DM」。F-23。機能一覧 10.1）。**考え方は `ChannelRead` と同じ**——位置はメッセージの id で持ち、戻さない。
+///
+/// **参照先は `Membership` である。** ワークスペースからのキック・退出・退会（`Membership` の削除）で連鎖して消える。
+/// 残すと、戻ったときに抜けていた間の位置が返る（`ChannelRead` の説明と同じ）。DM にはチャンネル単位の抜け方が無いため、アプリが消す経路は無い。
+///
+/// **行が無い利用者の未読は、そのワークスペースに参加した時点（`Membership.joinedAt`）より後だけを数える**（抜けて戻った利用者に、抜ける前の履歴を未読にしない）。
+model DmRead {
+  id          String @id @default(uuid(7)) @db.Uuid
+  dmId        String @db.Uuid
+  workspaceId String @db.Uuid
+  userId      String @db.Uuid
+
+  /// 最後に読んだメッセージの id。**戻さない**（10.1）。
+  lastReadMessageId String @db.Uuid
+
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  dm         Dm         @relation(fields: [dmId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  /// DM ごと消えるときは同じ文の中で消えるため NoAction にする（`ChannelRead.lastRead` と同じ理由）。
+  lastRead   DmMessage  @relation(fields: [lastReadMessageId, dmId], references: [id, dmId], onDelete: NoAction)
+
+  @@unique([dmId, userId])
   @@index([userId])
 }
