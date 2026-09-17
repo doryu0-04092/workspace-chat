@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { type ApiConfig, ApiConfigModule } from './config/api-config';
 import { HealthController } from './health.controller';
 import { ErrorResponseFilter } from './error-response';
+import { NotificationsModule } from './notifications/notifications.module';
 import { OpenApiValidationMiddleware } from './openapi-validation';
 import { PrismaModule } from './prisma.service';
 import { RealtimeModule } from './realtime/realtime.module';
@@ -42,6 +43,7 @@ export class AppModule implements NestModule {
         AuthModule,
         UsersModule,
         WorkspacesModule,
+        NotificationsModule,
         RealtimeModule,
       ],
     };
