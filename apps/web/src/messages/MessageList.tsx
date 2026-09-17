@@ -241,6 +241,7 @@ export function MessageItem({
   const [editing, setEditing] = useState(false);
   const ownScope =
     scope !== null &&
+    !scope.readOnly &&
     session.status === 'signedIn' &&
     message.body !== null &&
     message.author?.id === session.user.id
@@ -268,7 +269,13 @@ export function MessageItem({
       {ownScope && !editing && (
         <MessageActions scope={ownScope} message={message} onEdit={() => setEditing(true)} />
       )}
-      {onOpenThread && <ThreadSummary message={message} onOpen={() => onOpenThread(message)} />}
+      {onOpenThread && (
+        <ThreadSummary
+          message={message}
+          canReply={scope?.readOnly !== true}
+          onOpen={() => onOpenThread(message)}
+        />
+      )}
     </article>
   );
 }
@@ -277,7 +284,16 @@ export function MessageItem({
  * スレッドの入口（機能一覧 6）。返信があれば件数と返信した人の表示名、無ければ「返信する」を出す。
  * 削除済みで返信の無いメッセージには出さない（削除済みの親には返信できない）。
  */
-function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => void }) {
+function ThreadSummary({
+  message,
+  canReply,
+  onOpen,
+}: {
+  message: Message;
+  /** 返信できるか（アーカイブ済みのチャンネルでは、返信の無いメッセージに「返信する」を出さない） */
+  canReply: boolean;
+  onOpen: () => void;
+}) {
   if (message.replyCount > 0) {
     return (
       <div className="mt-1 flex items-baseline gap-2 text-sm">
@@ -292,7 +308,7 @@ function ThreadSummary({ message, onOpen }: { message: Message; onOpen: () => vo
       </div>
     );
   }
-  if (message.body === null) return null;
+  if (message.body === null || !canReply) return null;
   return (
     <button type="button" className="mt-1 text-sm text-slate-600 underline" onClick={onOpen}>
       返信する

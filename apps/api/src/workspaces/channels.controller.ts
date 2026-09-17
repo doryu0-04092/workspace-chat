@@ -55,6 +55,14 @@ export class ChannelsController {
     return this.channels.list(user.id, workspaceId);
   }
 
+  @Get('archived-channels')
+  archived(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+  ): Promise<Channel[]> {
+    return this.channels.archived(user.id, workspaceId);
+  }
+
   @Get('managed-channels')
   managed(
     @CurrentUser() user: AuthenticatedUser,

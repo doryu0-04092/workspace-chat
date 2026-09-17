@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { MessageItem, PagedMessages, REPLY_LABELS } from './MessageList';
+import { useMessageChannel } from './message-channel';
 import { MessageForm } from './PostMessageForm';
 import {
   type Message,
@@ -27,6 +28,7 @@ export function ThreadPanel({
   const parent = useLoadedMessage(workspaceId, channelId, parentId);
   const replies = useReplies(workspaceId, channelId, parentId);
   const post = usePostReply(workspaceId, channelId, parentId);
+  const readOnly = useMessageChannel()?.readOnly === true;
   useAdvanceThreadRead(workspaceId, channelId, parentId, replies.data?.pages[0]?.messages);
 
   return (
@@ -40,7 +42,7 @@ export function ThreadPanel({
       {parent && <MessageItem message={parent} />}
       <PagedMessages pages={replies} labels={REPLY_LABELS} />
       {/* 削除済みと分かった親には返信のフォームを出さない（api が断る）。**親が読み込まれていなければ出す**——削除済みかは分からず、消すと読み込んだページより古い親に返信できなくなる */}
-      {parent?.body !== null && (
+      {!readOnly && parent?.body !== null && (
         <MessageForm
           submit={post.mutate}
           pending={post.isPending}

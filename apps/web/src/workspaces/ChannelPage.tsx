@@ -11,6 +11,7 @@ import { useChannelRealtime } from '../realtime/use-channel-realtime';
 import { ChannelMembers, InviteToChannel } from './MemberLists';
 import {
   type Channel,
+  useArchivedChannels,
   useChannels,
   useLeaveChannel,
   useUpdateChannelRead,
@@ -26,9 +27,12 @@ export function ChannelPage() {
   const channels = useChannels(workspaceId);
   // オーナーかどうか（参加者の一覧で「チャンネルから外す」を出すため。F-09。判定は api）
   const workspace = useWorkspace(workspaceId);
-  const channel = channels.data?.find((c) => c.id === channelId && c.joined);
+  const current = channels.data?.find((c) => c.id === channelId && c.joined);
+  // **一般の一覧に無ければ、自分が参加しているアーカイブ済みのチャンネルから探す**（参加者は読める。機能一覧 3.2）
+  const archived = useArchivedChannels(workspaceId, channels.isSuccess && !current);
+  const channel = current ?? archived.data?.find((c) => c.id === channelId);
 
-  if (channels.isPending) {
+  if (channels.isPending || (channels.isSuccess && !current && archived.isPending)) {
     return (
       <p role="status" className="p-6 text-slate-600">
         読み込み中…
@@ -51,8 +55,14 @@ export function ChannelPage() {
       <Link to={`/workspaces/${workspaceId}`} className="text-sm underline">
         チャンネルの一覧へ
       </Link>
+      {!current && (
+        <p className="mt-2 rounded bg-slate-100 px-3 py-2 text-sm">
+          アーカイブ済みのチャンネルです。読むことだけができます（投稿・返信・編集・削除はできません）。
+        </p>
+      )}
       <LeaveChannel key={`leave-${channelId}`} workspaceId={workspaceId} channel={channel} />
-      {channel.visibility === 'PRIVATE' && (
+      {/* アーカイブ済みのチャンネルには人を増やせない（機能一覧 3.2。api も 409 で断る） */}
+      {current && channel.visibility === 'PRIVATE' && (
         <InviteToChannel
           key={`invite-${channelId}`}
           workspaceId={workspaceId}
@@ -71,6 +81,7 @@ export function ChannelPage() {
         channelId={channelId}
         lastReadMessageId={channel.lastReadMessageId ?? null}
         joinedAt={channel.joinedAt ?? null}
+        readOnly={!current}
       />
     </main>
   );
@@ -128,11 +139,14 @@ function ChannelMessages({
   channelId,
   lastReadMessageId,
   joinedAt,
+  readOnly,
 }: {
   workspaceId: string;
   channelId: string;
   lastReadMessageId: string | null;
   joinedAt: string | null;
+  /** アーカイブ済み（読むだけ。投稿・返信・編集・削除の操作を出さない。機能一覧 3.2） */
+  readOnly: boolean;
 }) {
   const rejected = useChannelRealtime(workspaceId, channelId);
   const [unreadFrom] = useState(lastReadMessageId);
@@ -149,7 +163,7 @@ function ChannelMessages({
 
   return (
     // 一覧とスレッドの自分のメッセージに、編集・削除を出すため（F-13）
-    <MessageChannelProvider workspaceId={workspaceId} channelId={channelId}>
+    <MessageChannelProvider workspaceId={workspaceId} channelId={channelId} readOnly={readOnly}>
       {rejected && (
         <p role="alert" className="mt-4 text-red-700">
           リアルタイムの反映を始められませんでした。{failureMessage(rejected)}
@@ -166,7 +180,7 @@ function ChannelMessages({
               joinedAt={joinedAt}
             />
           </section>
-          <PostMessageForm workspaceId={workspaceId} channelId={channelId} />
+          {!readOnly && <PostMessageForm workspaceId={workspaceId} channelId={channelId} />}
         </div>
         {threadId && (
           <ThreadPanel

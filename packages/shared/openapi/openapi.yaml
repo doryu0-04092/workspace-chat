@@ -669,6 +669,34 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/archived-channels:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: listArchivedChannels
+      summary: 自分が参加しているアーカイブ済みのチャンネル一覧（F-35）
+      description: >-
+        自分が参加しているアーカイブ済みのチャンネルだけを、一般の一覧と同じ形で返す（参加者は読めるが、一般の一覧からは外れるため。機能一覧 3.2）。
+        パブリックでも、参加していなければ含めない。オーナーの例外は及ばない。名前の順。所属していなければ、存在の有無を区別せず 404
+      responses:
+        '200':
+          description: 自分が参加しているアーカイブ済みのチャンネル
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Channel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces/{id}/channels/{channelId}/mention-candidates:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
