@@ -75,10 +75,11 @@ describe('起動時の復元と行き先', () => {
     expect(screen.queryByRole('heading', { name: 'ログイン' })).toBeNull();
   });
 
-  it('ログインの状態を確かめられなくても、利用者が自分で開いたログインの画面・登録の画面は塞がない', async () => {
+  it('ログインの状態を確かめられなくても、利用者が自分で開いたログインの画面・登録の画面・再設定の画面は塞がない', async () => {
     for (const [path, heading] of [
       ['/login', 'ログイン'],
       ['/register', '新規登録'],
+      ['/recovery', 'パスワードの再設定'],
     ] as const) {
       fakeFetch({
         'POST /api/auth/refresh': () => error(429, 'too_many_requests', { 'Retry-After': '600' }),

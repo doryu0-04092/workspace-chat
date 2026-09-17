@@ -479,11 +479,17 @@ export function useJoinChannel(workspaceId: string) {
           method: 'POST',
         },
       ),
-    // 管理用の一覧（F-35）の人数も変わる。どのように増えるかは取り直さないと決まらない（退会済みを数えない等は api が持つ）
-    onSuccess: () =>
+    // 管理用の一覧（F-35）の人数も変わる。どのように増えるかは取り直さないと決まらない（退会済みを数えない等は api が持つ）。
+    // **一般の一覧の取り直しは `exact` で当てる**——鍵の前方にはメッセージ・返信・参加者の一覧のキャッシュも入っている
+    // **参加したチャンネル自身の参加者の一覧も取り直す**——管理用の一覧の同じ行に人数と並べて出しており、人数だけ変わると食い違う（#569 第0巡の 🔴1）
+    onSuccess: (_, channelId) =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true }),
         queryClient.invalidateQueries({ queryKey: managedChannelsKey(workspaceId), exact: true }),
+        queryClient.invalidateQueries({
+          queryKey: channelMembersKey(workspaceId, channelId),
+          exact: true,
+        }),
       ]),
   });
 }
@@ -528,10 +534,11 @@ export function useCreateChannel(workspaceId: string) {
         method: 'POST',
         body,
       }),
-    // 管理用の一覧（F-35）にも行が増える。並び（名前の順）と人数は api が持つので、足すのではなく取り直す
+    // 管理用の一覧（F-35）にも行が増える。並び（名前の順）と人数は api が持つので、足すのではなく取り直す。
+    // **一般の一覧の取り直しは `exact` で当てる**（参加と同じ理由）
     onSuccess: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true }),
         queryClient.invalidateQueries({ queryKey: managedChannelsKey(workspaceId), exact: true }),
       ]),
   });

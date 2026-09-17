@@ -6,6 +6,7 @@ import {
   CHANNEL_PATH,
   GENERAL,
   MESSAGES,
+  message,
   page,
   routes,
   WORKSPACE,
@@ -145,5 +146,35 @@ describe('チャンネルからの退出（F-10）', () => {
     const members = within(await screen.findByRole('list', { name: '参加者' }));
     expect(members.getByText('ボブ @bob')).toBeDefined();
     expect(members.queryByText('アリス @alice')).toBeNull();
+  });
+
+  // 抜けている間はそのチャンネルの配信が届かない。**参加し直して開いたら、メッセージを読み直す**（抜けていた間の投稿を出す）。
+  // 参加の取り直しは一般の一覧に `exact` で当てるため（#553）、読み直すのはチャンネルを開いたときである。
+  it('抜けてから参加し直して開くと、メッセージを読み直し、抜けていた間の投稿を出す', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    let joined = true;
+    const { count } = fakeFetch(
+      routes({
+        [CHANNELS]: () => json(200, [{ ...GENERAL, joined }]),
+        [`GET ${MESSAGES}`]: [() => page([message(1)]), () => page([message(2), message(1)])],
+        [LEAVE]: () => {
+          joined = false;
+          return new Response(null, { status: 204 });
+        },
+        [`POST /api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/join`]: () => {
+          joined = true;
+          return new Response(null, { status: 204 });
+        },
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+    expect(await screen.findByText('メッセージ 1')).toBeDefined();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'このチャンネルから抜ける' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'general に参加する' }));
+    fireEvent.click(await screen.findByRole('link', { name: '# general' }));
+
+    expect(await screen.findByText('メッセージ 2')).toBeDefined();
+    expect(count(`GET ${MESSAGES}`)).toBe(2);
   });
 });
