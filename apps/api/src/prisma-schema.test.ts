@@ -203,7 +203,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('マイグレーションの適用', () => {
-    it('12のモデルの表がすべて作られている', async () => {
+    it('21のモデルの表がすべて作られている', async () => {
       const output = await expectSqlToSucceed(
         `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -212,13 +212,22 @@ describe('Prisma のスキーマとマイグレーション', () => {
       const tables = output.split('\n').filter((line) => line.length > 0);
       expect(tables).toEqual(
         expect.arrayContaining([
+          'Attachment',
+          'AvatarUpload',
           'Channel',
           'ChannelMember',
           'ChannelRead',
+          'Dm',
+          'DmMessage',
+          'DmRead',
+          'HereMentionRecipient',
           'Invitation',
           'Membership',
           'Message',
           'MessageMention',
+          'MessageReaction',
+          'MessageReactionCount',
+          'MessagePin',
           'RecoveryCode',
           'RefreshToken',
           'ThreadRead',
@@ -239,7 +248,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **この検査は検査制約・部分一意索引・式に対する索引（`lower(...)`）を見ない。**
       // Prisma がそれらをスキーマとして扱わないためである
       // （検査制約を消して確かめた。`User_userId_lower_key` を足しても差分は出ない）。
-      // **手書きした制約は6つあり、その6つは下の各テストが個別に見ている。**
+      // **手書きした制約は9つあり、その9つは下の各テストが個別に見ている。**
       // ここが通ったからといって、マイグレーションの手書き部分まで
       // 守られているわけではない。列挙は `schema.prisma` の冒頭と揃えてある。
       expect(() =>
@@ -266,7 +275,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
          ORDER BY c.table_name;`,
       );
       const types = output.split('\n').filter((line) => line.length > 0);
-      expect(types).toHaveLength(13);
+      expect(types).toHaveLength(22);
       for (const type of types) {
         expect(type).toMatch(/:uuid$/);
       }
@@ -648,6 +657,83 @@ describe('Prisma のスキーマとマイグレーション', () => {
     });
   });
 
+  // 機能一覧 8（F-19）: 同じ相手との DM は1つに集約される。当事者は User.id の小さい方と大きい方の順で持ち、
+  // 一意索引と検査制約 `Dm_participants_check` の2つで「同じ2人の DM が2行できない」を DB が止める。
+  describe('ダイレクトメッセージ', () => {
+    /** 同じワークスペースのメンバー2人を作り、User.id の小さい方と大きい方の順で返す。 */
+    async function twoMembers(): Promise<{ workspaceId: string; low: string; high: string }> {
+      const { workspaceId, userId } = await createWorkspaceWithMember();
+      const other = randomUUID();
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${other}', 'u-${other.slice(0, 8)}', '検査用', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${workspaceId}', '${other}', 'MEMBER');
+      `);
+      const [low, high] = [userId, other].sort();
+      return { workspaceId, low: low ?? '', high: high ?? '' };
+    }
+
+    function insertDm(workspaceId: string, low: string, high: string, id = randomUUID()) {
+      return `INSERT INTO "Dm" ("id", "workspaceId", "lowUserId", "highUserId")
+              VALUES ('${id}', '${workspaceId}', '${low}', '${high}');`;
+    }
+
+    it('同じワークスペースの同じ2人の DM は2つ作れない', async () => {
+      const { workspaceId, low, high } = await twoMembers();
+      await expectSqlToSucceed(insertDm(workspaceId, low, high));
+      const output = await expectSqlToFail(insertDm(workspaceId, low, high));
+      expect(output).toContain('Dm_workspaceId_lowUserId_highUserId_key');
+    });
+
+    it('当事者を逆の順で入れた行（同じ2人の2つ目になりうる）と、自分自身との行は入れられない', async () => {
+      const { workspaceId, low, high } = await twoMembers();
+      expect(await expectSqlToFail(insertDm(workspaceId, high, low))).toContain(
+        'Dm_participants_check',
+      );
+      expect(await expectSqlToFail(insertDm(workspaceId, low, low))).toContain(
+        'Dm_participants_check',
+      );
+    });
+
+    it.each([
+      ['空', `''`],
+      ['空白だけ', `E' \\n\\t'`],
+      ['4001 文字', `repeat('あ', 4001)`],
+    ])('%s の本文の DM のメッセージは入れられない', async (_name, body) => {
+      const { workspaceId, low, high } = await twoMembers();
+      const dmId = randomUUID();
+      const output = await expectSqlToFail(`
+        ${insertDm(workspaceId, low, high, dmId)}
+        INSERT INTO "DmMessage" ("id", "dmId", "authorId", "body")
+          VALUES ('${randomUUID()}', '${dmId}', '${low}', ${body});
+      `);
+      expect(output).toContain('DmMessage_body_check');
+    });
+
+    // DM のメッセージは、キック・退出・退会の後も残す（機能一覧 1.5・2.2「過去のメッセージは残る」）。
+    // 既読位置は ChannelRead と同じく Membership を参照し、抜けたら連鎖して消える（戻ったときに抜けていた間を既読にしない。10.1）。
+    it('ワークスペースから抜けると、その人の DM の既読位置は消えるが、DM とメッセージは残る', async () => {
+      const { workspaceId, low, high } = await twoMembers();
+      const dmId = randomUUID();
+      const messageId = randomUUID();
+      await expectSqlToSucceed(`
+        ${insertDm(workspaceId, low, high, dmId)}
+        INSERT INTO "DmMessage" ("id", "dmId", "authorId", "body")
+          VALUES ('${messageId}', '${dmId}', '${low}', 'あ');
+        INSERT INTO "DmRead" ("id", "dmId", "workspaceId", "userId", "lastReadMessageId")
+          VALUES ('${randomUUID()}', '${dmId}', '${workspaceId}', '${high}', '${messageId}');
+        DELETE FROM "Membership" WHERE "workspaceId" = '${workspaceId}' AND "userId" = '${high}';
+      `);
+      const output = await expectSqlToSucceed(`
+        SELECT (SELECT count(*) FROM "DmRead" WHERE "dmId" = '${dmId}') || ':' ||
+               (SELECT count(*) FROM "Dm" WHERE "id" = '${dmId}') || ':' ||
+               (SELECT count(*) FROM "DmMessage" WHERE "dmId" = '${dmId}');
+      `);
+      expect(output).toBe('0:1:1');
+    });
+  });
+
   // 機能一覧 6: 返信件数はカウンタ列で、負にならない。アプリの増減を誤っても DB が止める。
   describe('メッセージの返信件数', () => {
     async function insertMessage(
@@ -668,6 +754,31 @@ describe('Prisma のスキーマとマイグレーション', () => {
 
     it('返信件数 0 は入れられる', async () => {
       const { exitCode, output } = await insertMessage(0);
+      expect(exitCode, output).toBe(0);
+    });
+  });
+
+  // 機能一覧 7: リアクションの件数はカウンタ列で、1 以上（0 になった絵文字の行は消す）。アプリの増減を誤っても DB が止める。
+  describe('リアクションの件数', () => {
+    async function insertCount(count: number): Promise<{ exitCode: number; output: string }> {
+      const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
+      const messageId = randomUUID();
+      return psql(
+        `INSERT INTO "Message" ("id", "channelId", "workspaceId", "authorId", "body")
+           VALUES ('${messageId}', '${channelId}', '${workspaceId}', '${userId}', 'あ');
+         INSERT INTO "MessageReactionCount" ("id", "messageId", "emoji", "count")
+           VALUES ('${randomUUID()}', '${messageId}', '👍', ${count});`,
+      );
+    }
+
+    it.each([0, -1])('件数 %i は入れられない', async (count) => {
+      const { exitCode, output } = await insertCount(count);
+      expect(exitCode).not.toBe(0);
+      expect(output).toContain('MessageReactionCount_count_check');
+    });
+
+    it('件数 1 は入れられる', async () => {
+      const { exitCode, output } = await insertCount(1);
       expect(exitCode, output).toBe(0);
     });
   });

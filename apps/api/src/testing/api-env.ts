@@ -28,7 +28,10 @@ type ApiEnvName =
   | 'S3_BUCKET'
   | 'S3_REGION'
   | 'S3_ENDPOINT'
-  | 'S3_FORCE_PATH_STYLE';
+  | 'S3_FORCE_PATH_STYLE'
+  | 'S3_UPLOAD_ROLE_ARN'
+  | 'CLOUDFRONT_KEY_PAIR_ID'
+  | 'CLOUDFRONT_PRIVATE_KEY';
 
 /**
  * 起動の設定（config/api-config.ts）の環境変数を、既定のテスト用の値に `overrides` を重ねて差し替える。
@@ -50,6 +53,10 @@ export function stubApiEnv(overrides: Partial<Record<ApiEnvName, string | undefi
     S3_REGION: 'ap-northeast-1',
     S3_ENDPOINT: UNREACHABLE_S3_ENDPOINT,
     S3_FORCE_PATH_STYLE: 'true',
+    S3_UPLOAD_ROLE_ARN: undefined,
+    // 既定では CloudFront の署名付き Cookie を発行しない（手元と同じ）。
+    CLOUDFRONT_KEY_PAIR_ID: undefined,
+    CLOUDFRONT_PRIVATE_KEY: undefined,
     ...overrides,
   };
   for (const [name, value] of Object.entries(env)) {

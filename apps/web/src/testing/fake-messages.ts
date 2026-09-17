@@ -36,6 +36,8 @@ export const MESSAGES = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/
 export const READ = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/read`;
 /** 利用者ごとの設定（F-23）。 */
 export const SETTINGS = '/api/users/me/settings';
+/** チャンネルのピン留めの一覧（F-33。機能一覧 13.2）。 */
+export const PINS = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/pins`;
 
 /** `n` 番目のメッセージ（REST の Message と同じ形）。id は `n` から作り、作った時刻は `n` 分目にする。 */
 export function message(n: number, overrides: Record<string, unknown> = {}) {
@@ -51,6 +53,15 @@ export function message(n: number, overrides: Record<string, unknown> = {}) {
     replyCount: 0,
     replyParticipants: [] as (typeof BOB)[],
     mentions: [] as { userId: string; user: typeof BOB | null }[],
+    reactions: [] as { emoji: string; count: number; users: (typeof BOB)[] }[],
+    attachments: [] as {
+      id: string;
+      fileName: string;
+      contentType: string;
+      kind: 'image' | 'video' | 'document' | 'archive';
+      size: number;
+      url: string;
+    }[],
     ...overrides,
   };
 }
@@ -71,8 +82,16 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
     'GET /api/invitations': () => json(200, []),
     [`GET /api/workspaces/${WORKSPACE_ID}`]: () => json(200, WORKSPACE),
     [`GET /api/workspaces/${WORKSPACE_ID}/channels`]: () => json(200, [GENERAL]),
+    // ワークスペースの画面が、自分の DM の一覧を読む（F-19。#574）
+    [`GET /api/workspaces/${WORKSPACE_ID}/dms`]: () => json(200, []),
     [`GET ${SETTINGS}`]: () => json(200, { threadUnreadIncluded: true }),
     [`PUT ${READ}`]: () => new Response(null, { status: 204 }),
+    // チャンネルの画面が、ピン留め済みの印を出すためにピン留めの一覧を読む（F-33）
+    [`GET ${PINS}`]: () => json(200, { pins: [] }),
+    // 配信の署名付き Cookie（F-04・F-29）。既定は署名鍵を設定していない api と同じ 204（取り直さない）
+    'POST /api/avatars/cookies': () => new Response(null, { status: 204 }),
+    [`POST /api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/files/cookies`]: () =>
+      new Response(null, { status: 204 }),
     ...extra,
   };
 }

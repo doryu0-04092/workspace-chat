@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError, errorMessage } from '../api/client';
+import { DmList } from '../dms/DmList';
 import { useUnreadRealtime } from '../realtime/use-unread-realtime';
 import { SearchForm } from '../search/SearchForm';
 import { ManagedChannels } from './ManagedChannels';
@@ -98,6 +99,8 @@ export function WorkspacePage() {
           {errorMessage(join.error)}
         </p>
       )}
+      {/* 自分が当事者の DM と、DM を始める（F-19）。未読はチャンネルと同じく太字と件数で出す（10.1） */}
+      {workspace.data && <DmList workspaceId={workspaceId} />}
       <ArchivedChannels workspaceId={workspaceId} />
       {workspace.data?.role === 'OWNER' && <CreateChannelForm workspaceId={workspaceId} />}
       {workspace.data?.role === 'OWNER' && <InviteForm workspaceId={workspaceId} />}

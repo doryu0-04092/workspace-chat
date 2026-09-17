@@ -1,5 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
-import type { MessageNewPayload, RealtimeEventName } from '@workspace-chat/shared';
+import type {
+  DmMessageNewPayload,
+  MessageNewPayload,
+  RealtimeEventName,
+} from '@workspace-chat/shared';
 import { useEffect, useRef } from 'react';
 import { type Location, useLocation, useNavigate } from 'react-router';
 import { useSession } from '../auth/session-context';
@@ -48,7 +52,10 @@ export function useMentionRealtime() {
 
   useEffect(() => {
     if (userId === null) return;
-    const onNew = ({ message }: MessageNewPayload) => {
+    const onNew = (payload: MessageNewPayload | DmMessageNewPayload) => {
+      // **DM の `message:new` は同じイベント名で届く**（`dmId` を持ち、`mentions` を持たない）。メンションの通知として扱わない
+      if ('dmId' in payload.message) return;
+      const { message } = payload;
       const content = mentionNotificationOf(message, { id: userId });
       if (content === null) return;
       void queryClient.invalidateQueries({ queryKey: notificationsKey });

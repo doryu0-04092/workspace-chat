@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
+import { useChannelPresence } from '../realtime/presence';
 import {
   useChannelMembers,
   useInviteChannelMember,
@@ -96,6 +97,7 @@ export function WorkspaceMembers({
  * **一覧は「参加者を見る」を押したときにだけ読む。「チャンネルから外す」はオーナーにだけ、自分以外に出す**
  * （自分が抜けるのは、チャンネルの画面の「このチャンネルから抜ける」で行う）。
  * **外すのは送る前に確かめる。**
+ * **在席（F-22）は「在席中」と文字で出す**（色や記号だけで伝えない。機能一覧 9.2）。在席は部屋の側の経路が書いた値であり、一覧の API は返さない。
  */
 export function ChannelMembers({
   workspaceId,
@@ -108,6 +110,7 @@ export function ChannelMembers({
 }) {
   const [open, setOpen] = useState(false);
   const members = useChannelMembers(workspaceId, channelId, open);
+  const present = useChannelPresence(workspaceId, channelId);
   const kick = useKickChannelMember(workspaceId, channelId);
   const me = useSignedInUserId();
 
@@ -136,6 +139,11 @@ export function ChannelMembers({
           {members.data.map((member) => (
             <li key={member.id} className="flex flex-wrap items-center gap-2">
               <span>{`${member.displayName} @${member.userId}`}</span>
+              {present.has(member.id) && (
+                <span className="text-sm text-emerald-700">
+                  <span aria-hidden="true">● </span>在席中
+                </span>
+              )}
               {isOwner && member.id !== me && (
                 <button
                   type="button"

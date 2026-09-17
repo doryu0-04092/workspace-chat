@@ -1,6 +1,10 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { resolveRegistrationEnabled } from '../auth/registration-enabled';
 import {
+  resolveCloudFrontKeyPairId,
+  resolveCloudFrontPrivateKey,
+} from '../delivery/cloudfront-config';
+import {
   resolveApiTaskCount,
   resolveRedisUrl,
   resolveTrustProxyHops,
@@ -10,6 +14,7 @@ import {
   resolveS3Endpoint,
   resolveS3ForcePathStyle,
   resolveS3Region,
+  resolveS3UploadRoleArn,
 } from '../storage/s3-config';
 import { resolveDatabaseUrl } from './database-url';
 import { isHttpOrigin } from './http-origin';
@@ -33,6 +38,9 @@ export interface ApiConfig {
   readonly s3Region: string;
   readonly s3Endpoint: string | undefined;
   readonly s3ForcePathStyle: boolean;
+  readonly s3UploadRoleArn: string | undefined;
+  readonly cloudfrontKeyPairId: string | undefined;
+  readonly cloudfrontPrivateKey: string | undefined;
 }
 
 /** ApiConfig を注入するトークン。 */
@@ -148,7 +156,29 @@ export const API_SETTINGS: ApiSettings = {
     resolve: resolveS3ForcePathStyle,
     secret: false,
   },
+  s3UploadRoleArn: { env: 'S3_UPLOAD_ROLE_ARN', resolve: resolveS3UploadRoleArn, secret: false },
+  cloudfrontKeyPairId: {
+    env: 'CLOUDFRONT_KEY_PAIR_ID',
+    resolve: resolveCloudFrontKeyPairId,
+    secret: false,
+  },
+  // 踏むと壊れる: 本番の値は Terraform の外（scripts/cloudfront-signing-key.sh）で Parameter Store に置く（#427）。
+  // Terraform は値を読まず、名前から ARN を組み立てて渡す（api-config-infra.test.ts の externalParameters）。
+  cloudfrontPrivateKey: {
+    env: 'CLOUDFRONT_PRIVATE_KEY',
+    resolve: resolveCloudFrontPrivateKey,
+    secret: true,
+    hint: 'PEM の RSA 秘密鍵を渡す',
+  },
 };
+
+/**
+ * 揃えて設定する設定の組（片方だけでは使えない）。**名前だけを知らせ、値を載せない**（秘密を含む組がある）。
+ * CloudFront の署名付き Cookie は、キーペア ID と秘密鍵の両方が要る——キーペア ID だけなら発行のたびに落ち、秘密鍵だけなら黙って発行しない。
+ */
+const PAIRED_SETTINGS: readonly (readonly [keyof ApiConfig, keyof ApiConfig])[] = [
+  ['cloudfrontKeyPairId', 'cloudfrontPrivateKey'],
+];
 
 /**
  * 環境変数から ApiConfig を組み立てる。**不正な設定が複数あれば、すべてを1つの例外で知らせる**
@@ -176,6 +206,21 @@ export function resolveApiConfig(
             ? error.message
             : String(error),
       );
+    }
+  }
+  for (const [first, second] of PAIRED_SETTINGS) {
+    const a = settings[first].env;
+    const b = settings[second].env;
+    const directions: readonly (readonly [string, string])[] = [
+      [a, b],
+      [b, a],
+    ];
+    for (const [given, absent] of directions) {
+      if (env[given] !== undefined && env[absent] === undefined) {
+        problems.push(
+          `${absent} が設定されていません（${given} を設定したときは、${absent} も揃えて渡す）`,
+        );
+      }
     }
   }
   if (problems.length > 0) {

@@ -17,11 +17,17 @@ export function messagesKey(workspaceId: string, channelId: string) {
   return ['workspaces', workspaceId, 'channels', channelId, 'messages'] as const;
 }
 
+/**
+ * メッセージのページ（チャンネルの `MessagePages` と DM の `DmMessagePages`）。下の3つの更新は、どちらの一覧にも同じ規則で当てる
+ * （DM の一覧で別に持つと、同じ id を2行にしない等の規則が片方だけ変わる）。
+ */
+type Pages<M> = InfiniteData<{ messages: M[]; nextBefore: string | null }, string | null>;
+
 /** 最新のページの先頭（画面の最後）に足す。同じ id が既にあれば足さない（投稿の応答と配信のどちらが先に届いても1行にする）。 */
-export function addMessage(
-  data: MessagePages | undefined,
-  message: Message,
-): MessagePages | undefined {
+export function addMessage<M extends { id: string }>(
+  data: Pages<M> | undefined,
+  message: M,
+): Pages<M> | undefined {
   const [newest, ...older] = data?.pages ?? [];
   if (!data || !newest) return data;
   if (data.pages.some((page) => page.messages.some((m) => m.id === message.id))) return data;
@@ -32,25 +38,36 @@ export function addMessage(
 }
 
 /** 同じ id のメッセージを置き換える（編集。機能一覧 4.2）。 */
-export function replaceMessage(
-  data: MessagePages | undefined,
-  message: Message,
-): MessagePages | undefined {
+export function replaceMessage<M extends { id: string }>(
+  data: Pages<M> | undefined,
+  message: M,
+): Pages<M> | undefined {
   return mapMessages(data, (m) => (m.id === message.id ? message : m));
 }
 
 /** 削除済みにする（本文を持たない。機能一覧 4.2）。 */
-export function markDeleted(
-  data: MessagePages | undefined,
+export function markDeleted<M extends { id: string; body: string | null; deleted: boolean }>(
+  data: Pages<M> | undefined,
   messageId: string,
-): MessagePages | undefined {
+): Pages<M> | undefined {
   return mapMessages(data, (m) => (m.id === messageId ? { ...m, body: null, deleted: true } : m));
 }
 
-function mapMessages(
+/**
+ * 1つのメッセージのリアクションを置き換える（F-18。機能一覧 7）。付け外しの応答と `reaction:changed` の両方がこれで当てる——
+ * どちらもそのメッセージのリアクションの全体を持ち、要求と配信で当て方を分けない。
+ */
+export function replaceReactions(
   data: MessagePages | undefined,
-  change: (message: Message) => Message,
+  { messageId, reactions }: Pick<Schemas['MessageReactions'], 'messageId' | 'reactions'>,
 ): MessagePages | undefined {
+  return mapMessages(data, (m) => (m.id === messageId ? { ...m, reactions } : m));
+}
+
+function mapMessages<M>(
+  data: Pages<M> | undefined,
+  change: (message: M) => M,
+): Pages<M> | undefined {
   if (!data) return data;
   return {
     ...data,
@@ -136,24 +153,28 @@ export function useReplies(workspaceId: string, channelId: string, parentId: str
   );
 }
 
-/** 本文を送り、応答のメッセージを最新のページの先頭に足す。一覧は読み直さない。 */
-function usePost(key: readonly unknown[], path: string) {
+/** 本文を送り、応答のメッセージを最新のページの先頭に足す。一覧は読み直さない。`toRequest` は送る本体を作る。 */
+function usePost<T>(key: readonly unknown[], path: string, toRequest: (input: T) => object) {
   const store = useSessionStore();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: string) =>
-      requestJson<Message>(store, path, {
-        method: 'POST',
-        body: { body } satisfies Schemas['PostMessageRequest'],
-      }),
+    mutationFn: (input: T) =>
+      requestJson<Message>(store, path, { method: 'POST', body: toRequest(input) }),
     onSuccess: (message) =>
       queryClient.setQueryData<MessagePages>(key, (data) => addMessage(data, message)),
   });
 }
 
-/** 投稿する（REST の仕様の postMessage）。 */
+/** 投稿する（REST の仕様の postMessage）。添付（F-27）が無ければ `attachmentIds` を送らない。 */
 export function usePostMessage(workspaceId: string, channelId: string) {
-  return usePost(messagesKey(workspaceId, channelId), messagesPath(workspaceId, channelId));
+  return usePost(
+    messagesKey(workspaceId, channelId),
+    messagesPath(workspaceId, channelId),
+    ({ body, attachmentIds }: { body: string; attachmentIds: readonly string[] }) =>
+      (attachmentIds.length === 0
+        ? { body }
+        : { body, attachmentIds: [...attachmentIds] }) satisfies Schemas['CreateMessageRequest'],
+  );
 }
 
 /**
@@ -204,6 +225,7 @@ export function usePostReply(workspaceId: string, channelId: string, parentId: s
   return usePost(
     repliesKey(workspaceId, channelId, parentId),
     repliesPath(workspaceId, channelId, parentId),
+    (body: string) => ({ body }) satisfies Schemas['PostMessageRequest'],
   );
 }
 

@@ -28,8 +28,18 @@ export function failureMessage(failure: Failure): string {
       return 'このチャンネルに参加していません。';
     case 'already_channel_member':
       return '既に参加しています。';
+    case 'reaction_limit_reached':
+      return 'このメッセージに付けられる絵文字の種類の上限に達しています。';
     case 'not_message_author':
       return '自分のメッセージだけを編集・削除できます。';
+    case 'dm_with_self':
+      return '自分自身とは DM を始められません。';
+    case 'dm_counterpart_not_found':
+      return 'その利用者はこのワークスペースのメンバーではありません。一覧を開き直してください。';
+    case 'dm_counterpart_unavailable':
+      return '相手がこのワークスペースのメンバーではなくなったため、送信できません。';
+    case 'pin_limit_reached':
+      return 'このチャンネルにピン留めできる件数の上限に達しています。';
     case 'owner_only':
       return 'この操作は、ワークスペースのオーナーだけが行えます。';
     case 'already_invited':
@@ -46,6 +56,14 @@ export function failureMessage(failure: Failure): string {
       return 'ワークスペースのオーナーは、アカウントを削除できません。オーナーの権限を他の人に渡す機能が無いためです。';
     case 'not_found':
       return '見つかりません。一覧を開き直してください。';
+    case 'unsupported_file_type':
+      return 'この形式のファイルは上げられません。受け付けている形式を確かめてください。';
+    case 'file_too_large':
+      return 'ファイルが大きすぎます。画像は 10 MB、動画は 100 MB、文書と zip は 25 MB までです。';
+    case 'upload_not_received':
+      return 'ファイルが届きませんでした。もう一度ファイルを選んでください。';
+    case 'upload_in_progress':
+      return 'アップロードを確定している途中です。しばらく待ってから画面を開き直してください。';
     default:
       return 'うまくいきませんでした。時間をおいて、やり直してください。';
   }

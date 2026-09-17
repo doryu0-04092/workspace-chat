@@ -3,8 +3,10 @@ import { Link, Outlet } from 'react-router';
 import { failureMessage } from '../auth/failure-message';
 import { useSession, useSessionStore } from '../auth/session-context';
 import { useMentionRealtime } from '../notifications/use-mention-realtime';
+import { useAvatarCookies } from '../delivery/signed-cookies';
 import { useRealtime } from '../realtime/realtime-context';
 import { useInvitationRealtime } from '../realtime/use-invitation-realtime';
+import { useMyProfile } from '../users/queries';
 import { useMyInvitations } from '../workspaces/queries';
 
 /**
@@ -19,6 +21,8 @@ export function SignedInLayout() {
   useInvitationRealtime();
   // 自分へのメンションのブラウザ通知と、通知の一覧の読み直し（F-25・F-26）。どの画面にいても受ける
   useMentionRealtime();
+  // アバターの配信の Cookie は、ログインしている間ずっと取り直す（機能一覧 1.3。どの画面にもアバターが出る）
+  useAvatarCookies();
   const pendingInvitations = invitations.data?.length ?? 0;
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -51,6 +55,7 @@ export function SignedInLayout() {
               {`招待 ${pendingInvitations} 件`}
             </Link>
           )}
+          {session.status === 'signedIn' && <HeaderAvatar />}
           {session.status === 'signedIn' && <span>{session.user.displayName}</span>}
           <Link to="/profile" className="underline">
             プロフィール
@@ -84,4 +89,15 @@ export function SignedInLayout() {
       <Outlet />
     </div>
   );
+}
+
+/**
+ * 画面の枠のアバター画像（F-04。機能一覧 1.3）。プロフィールの画面と同じ読み込みを使い、上げ直したら読み直さずに変わる。
+ * **表示名の横の飾りであり、代わりの文を持たない**（同じ内容を表示名が読み上げる）。無い・読めないときは何も出さない。
+ */
+function HeaderAvatar() {
+  const profile = useMyProfile();
+  const url = profile.data?.avatarUrl;
+  if (!url) return null;
+  return <img src={url} alt="" className="h-7 w-7 rounded-full border object-cover" />;
 }

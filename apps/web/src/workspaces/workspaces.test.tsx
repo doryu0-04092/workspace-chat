@@ -138,6 +138,7 @@ describe('ワークスペースの画面', () => {
       ...session,
       [`GET /api/workspaces/${workspace.id}`]: () => json(200, workspace),
       [`GET /api/workspaces/${workspace.id}/channels`]: () => json(200, [GENERAL, RANDOM, SECRET]),
+      [`GET /api/workspaces/${workspace.id}/dms`]: () => json(200, []),
       ...extra,
     };
   }

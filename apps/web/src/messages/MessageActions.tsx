@@ -52,10 +52,34 @@ export function MessageActions({
   onEdit: () => void;
 }) {
   const remove = useDeleteMessage(scope.workspaceId, scope.channelId);
+  return (
+    <MessageActionButtons
+      onEdit={onEdit}
+      onDelete={() => remove.mutate(message.id)}
+      pending={remove.isPending}
+      error={remove.isError ? remove.error : null}
+    />
+  );
+}
 
+/**
+ * 「編集する」「削除する」のボタンと、削除を断られた理由（チャンネル・DM で共通。F-13・F-19）。
+ * **削除は送る前に確かめる**——この確かめはここだけに置く（一覧ごとに持つと片方だけが確かめずに送る）。
+ */
+export function MessageActionButtons({
+  onEdit,
+  onDelete,
+  pending,
+  error,
+}: {
+  onEdit: () => void;
+  onDelete: () => void;
+  pending: boolean;
+  error: Error | null;
+}) {
   function confirmAndDelete() {
     if (!window.confirm('このメッセージを削除しますか？ 削除すると元に戻せません。')) return;
-    remove.mutate(message.id);
+    onDelete();
   }
 
   return (
@@ -67,15 +91,15 @@ export function MessageActions({
         <button
           type="button"
           className="text-red-700 underline disabled:opacity-50"
-          disabled={remove.isPending}
+          disabled={pending}
           onClick={confirmAndDelete}
         >
           削除する
         </button>
       </div>
-      {remove.isError && (
+      {error !== null && (
         <p role="alert" className="text-red-700">
-          {errorMessage(remove.error)}
+          {errorMessage(error)}
         </p>
       )}
     </div>

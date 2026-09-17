@@ -4,6 +4,7 @@ import {
   resolveS3Endpoint,
   resolveS3ForcePathStyle,
   resolveS3Region,
+  resolveS3UploadRoleArn,
 } from './s3-config';
 
 describe('S3 の設定', () => {
@@ -82,6 +83,32 @@ describe('S3 の設定', () => {
     // 切り替えるつもりで書いた `TRUE` や `1` を黙って false に倒さない。
     it.each(['', 'TRUE', '1', 'yes'])('%j は起動時に落とす', (raw) => {
       expect(() => resolveS3ForcePathStyle(raw)).toThrow(/S3_FORCE_PATH_STYLE/);
+    });
+  });
+
+  // アップロード用の署名付き URL の署名者のロール（#427）。本番だけで設定し、手元とテストは既定の資格情報で署名する。
+  describe('S3_UPLOAD_ROLE_ARN（署名付き URL の署名者のロール）', () => {
+    it('設定していなければ、ロールを引き受けない（undefined）', () => {
+      expect(resolveS3UploadRoleArn(undefined)).toBeUndefined();
+    });
+    it.each([
+      'arn:aws:iam::123456789012:role/workspace-chat-upload-signer',
+      'arn:aws:iam::123456789012:role/path/to/name_with+=,.@-',
+      'arn:aws-us-gov:iam::123456789012:role/signer',
+    ])('%j を使う', (raw) => {
+      expect(resolveS3UploadRoleArn(raw)).toBe(raw);
+    });
+    // 空文字を「設定していない」に倒さない（本番で渡し損ねた値が、タスクロールそのもので署名する形として黙って動く）。
+    it.each([
+      '',
+      'workspace-chat-upload-signer',
+      'arn:aws:iam::123456789012:user/signer',
+      'arn:aws:iam::12345678901:role/signer',
+      'arn:aws:sts::123456789012:assumed-role/signer/session',
+      'arn:aws:iam::123456789012:role/',
+      ' arn:aws:iam::123456789012:role/signer',
+    ])('%j は起動時に落とす', (raw) => {
+      expect(() => resolveS3UploadRoleArn(raw)).toThrow(/S3_UPLOAD_ROLE_ARN/);
     });
   });
 });

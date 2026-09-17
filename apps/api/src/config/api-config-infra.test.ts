@@ -250,16 +250,43 @@ const secretEnvs = Object.values(API_SETTINGS)
   .map((setting) => setting.env)
   .sort();
 
+/**
+ * **Terraform の外（AWS CLI）で値を置くパラメータ**（#427）。Terraform は値を作らず読まず、`locals` の名前（`<local>_name`）から
+ * ARN（`<local>_arn`）を組み立てて、タスク定義の secrets と実行ロールの ssm:GetParameters に渡すだけにする。
+ * 値を置く手順は `script` にある。**ここに無いパラメータは、Terraform が ephemeral の乱数から write-only 引数で値を作る**（下の検査）。
+ * 足すときは、この表と、値を置く手順の両方に足す。
+ */
+const externalParameters = [
+  {
+    env: 'CLOUDFRONT_PRIVATE_KEY',
+    local: 'cloudfront_private_key_parameter',
+    script: 'scripts/cloudfront-signing-key.sh',
+  },
+] as const;
+
+/**
+ * パラメータの ARN を指す式を、`aws_ssm_parameter.<名前>`（Terraform が値を作る）か `local.<名前>`（外で置く。`_arn` を除いた名前）に読む。
+ * それ以外の書き方は undefined（黙って外さない）。
+ */
+function parameterSourceOf(expression: string | undefined): string | undefined {
+  if (expression === undefined) return undefined;
+  const managed = /^aws_ssm_parameter\.(\w+)\.arn$/.exec(expression)?.[1];
+  if (managed !== undefined) return `aws_ssm_parameter.${managed}`;
+  const external = /^local\.(\w+)_arn$/.exec(expression)?.[1];
+  return external === undefined ? undefined : `local.${external}`;
+}
+
 const taskDefinitions = blocksOf('resource', 'aws_ecs_task_definition');
 const secrets = taskDefinitions.flatMap(({ name: task, body }) =>
-  itemsOf(body, 'secrets').map((item) => ({
-    task,
-    item,
-    env: stringAttribute(item, 'name'),
-    parameter: new RegExp(`${attribute('valueFrom')}\\s*aws_ssm_parameter\\.(\\w+)\\.arn\\b`).exec(
+  itemsOf(body, 'secrets').map((item) => {
+    const valueFrom = item.startsWith('{') ? hclOf(item).valueFrom : undefined;
+    return {
+      task,
       item,
-    )?.[1],
-  })),
+      env: stringAttribute(item, 'name'),
+      parameter: parameterSourceOf(typeof valueFrom === 'string' ? valueFrom : undefined),
+    };
+  }),
 );
 const environment = taskDefinitions.flatMap(({ name: task, body }) =>
   itemsOf(body, 'environment').map((item) => ({ task, item, env: stringAttribute(item, 'name') })),
@@ -267,7 +294,14 @@ const environment = taskDefinitions.flatMap(({ name: task, body }) =>
 const executionResources = itemsOf(
   block('data', 'aws_iam_policy_document', 'task_execution_parameters'),
   'resources',
-).map((item) => ({ item, parameter: /^aws_ssm_parameter\.(\w+)\.arn$/.exec(item)?.[1] }));
+).map((item) => ({ item, parameter: parameterSourceOf(item) }));
+
+/** `locals` に書いた `<name> = <式>` の式（ちょうど1つでなければ、その数を示して落ちる）。 */
+function localValue(name: string): string {
+  const found = [...terraform.matchAll(new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'gm'))];
+  if (found.length !== 1) throw new Error(`locals の ${name} が ${found.length} 個ある`);
+  return found[0]?.[1] ?? '';
+}
 
 const envsOf = (task: string) =>
   secrets
@@ -420,6 +454,52 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     );
   });
 
+  // 外で置くパラメータを「Terraform が値を作るパラメータ」の検査から外すだけにすると、どの secrets でも locals の式で書けば
+  // 値の作り方の検査を黙って通り抜けられる。外で置くものを表で名指しし、その形を1つに固定する。
+  it('Terraform の外で値を置くパラメータは表のものだけで、名前から ARN を組み立て、Terraform はそのパラメータを作らない', () => {
+    expect(
+      secrets
+        .filter(({ parameter }) => parameter?.startsWith('local.'))
+        .map(({ env, parameter }) => `${env} ← ${parameter}`)
+        .sort(),
+    ).toEqual(externalParameters.map(({ env, local }) => `${env} ← local.${local}`).sort());
+    const managedNames = blocksOf('resource', 'aws_ssm_parameter').map(({ body }) =>
+      stringAttribute(body, 'name'),
+    );
+    for (const { env, local } of externalParameters) {
+      const name = `/workspace-chat/${env}`;
+      expect(localValue(`${local}_name`), env).toBe(`"${name}"`);
+      expect(localValue(`${local}_arn`), env).toBe(
+        `"arn:aws:ssm:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:parameter\${local.${local}_name}"`,
+      );
+      expect(managedNames, env).not.toContain(name);
+    }
+  });
+
+  // 外で置くパラメータの「暗号化パラメータ（SecureString）である」は Terraform に現れない。置く手順のスクリプトで固定する。
+  // 既定の鍵（aws/ssm）で暗号化する——実行ロールに kms:Decrypt を足していないため、別の鍵を指すとタスクが起動しない。
+  it.each(externalParameters.map((parameter) => [parameter.env, parameter] as const))(
+    '外で置く %s は、手順のスクリプトが同じ名前の SecureString として既定の鍵で置く',
+    (env, { script }) => {
+      const text = readFileSync(join(__dirname, '..', '..', '..', '..', script), 'utf8');
+      expect(text).toContain(`"/workspace-chat/${env}"`);
+      expect(text).toMatch(/aws ssm put-parameter\b/);
+      expect(text).toMatch(/--type SecureString\b/);
+      expect(text).not.toMatch(/--key-id\b/);
+    },
+  );
+
+  // 秘密鍵と、api に渡すキーペア ID（delivery.tf の cloudfront_signing_key_name の公開鍵）が対でないと、発行した Cookie がすべて署名の検査に落ちる。
+  it('鍵の対を作るスクリプトの既定の鍵の名前は、api が署名に使う鍵の名前と同じである', () => {
+    const text = readFileSync(
+      join(__dirname, '..', '..', '..', '..', 'scripts', 'cloudfront-signing-key.sh'),
+      'utf8',
+    );
+    const defaultName = /^name="\$\{1:-([a-z0-9-]+)\}"$/m.exec(text)?.[1];
+    expect(defaultName).toBeDefined();
+    expect(localValue('cloudfront_signing_key_name')).toBe(`"${defaultName}"`);
+  });
+
   // 秘密のパラメータを誰がどの操作で読めるかは、付いているポリシーの操作と、そのロールを引き受けられる相手の両方で決まる。
   // 操作やキーを1つずつ数える・禁じる形では、ワイルドカード（ssm:*）・信頼する相手・次のキーで同じことが起きるため、
   // IAM の面（aws_iam_ で始まるブロックと、policy・assume_role_policy を持つブロック）の全体を、この表とちょうど同じかで照合する。
@@ -497,6 +577,105 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
         bucket: 'aws_s3_bucket.web.id',
         policy: 'data.aws_iam_policy_document.web_bucket.json',
       },
+      // api のタスクロール: アップロードの確定の主体（機能一覧 11.1・1.3。技術スタックの添付ファイルの行）と、署名者のロールの引き受け（#427）。
+      'resource.aws_iam_role.api_task': {
+        name: '"workspace-chat-api-task"',
+        assume_role_policy: 'data.aws_iam_policy_document.ecs_tasks_assume.json',
+      },
+      'data.aws_iam_policy_document.api_task_storage': {
+        statement: [
+          {
+            actions: ['"s3:GetObject"', '"s3:GetObjectVersion"', '"s3:DeleteObject"'],
+            resources: [
+              '"${aws_s3_bucket.attachments.arn}/quarantine/avatars/*"',
+              '"${aws_s3_bucket.attachments.arn}/quarantine/workspace/*"',
+            ],
+          },
+          {
+            actions: ['"s3:PutObject"'],
+            resources: [
+              '"${aws_s3_bucket.attachments.arn}/avatars/*"',
+              '"${aws_s3_bucket.attachments.arn}/workspace/*"',
+            ],
+          },
+          {
+            actions: ['"sts:AssumeRole"'],
+            resources: ['aws_iam_role.upload_signer.arn'],
+          },
+        ],
+      },
+      'resource.aws_iam_role_policy.api_task_storage': {
+        name: '"storage"',
+        role: 'aws_iam_role.api_task.id',
+        policy: 'data.aws_iam_policy_document.api_task_storage.json',
+      },
+      // アップロード用の署名付き URL の署名者: quarantine/ にだけ書ける。引き受けられるのは api のタスクロールだけ。
+      'data.aws_iam_policy_document.upload_signer_assume': {
+        statement: [
+          {
+            actions: ['"sts:AssumeRole"'],
+            principals: [{ type: '"AWS"', identifiers: ['aws_iam_role.api_task.arn'] }],
+          },
+        ],
+      },
+      'resource.aws_iam_role.upload_signer': {
+        name: '"workspace-chat-upload-signer"',
+        assume_role_policy: 'data.aws_iam_policy_document.upload_signer_assume.json',
+      },
+      'data.aws_iam_policy_document.upload_signer': {
+        statement: [
+          {
+            actions: ['"s3:PutObject"'],
+            resources: ['"${aws_s3_bucket.attachments.arn}/quarantine/*"'],
+          },
+        ],
+      },
+      'resource.aws_iam_role_policy.upload_signer': {
+        name: '"quarantine-put"',
+        role: 'aws_iam_role.upload_signer.id',
+        policy: 'data.aws_iam_policy_document.upload_signer.json',
+      },
+      // 添付のバケット: CloudFront（このディストリビューション）は配信用の接頭辞だけを読める。配信用の接頭辞へ書けるのは api のタスクロールだけ。
+      // **「CloudFront の OAC からのみ」に閉じない**（閉じると、ブラウザから quarantine/ への署名付き PUT が通らない。#427）。
+      'data.aws_iam_policy_document.attachments_bucket': {
+        statement: [
+          {
+            actions: ['"s3:GetObject"'],
+            resources: [
+              '"${aws_s3_bucket.attachments.arn}/avatars/*"',
+              '"${aws_s3_bucket.attachments.arn}/workspace/*"',
+            ],
+            principals: [{ type: '"Service"', identifiers: ['"cloudfront.amazonaws.com"'] }],
+            condition: [
+              {
+                test: '"StringEquals"',
+                variable: '"AWS:SourceArn"',
+                values: ['aws_cloudfront_distribution.main.arn'],
+              },
+            ],
+          },
+          {
+            effect: '"Deny"',
+            actions: ['"s3:PutObject"'],
+            resources: [
+              '"${aws_s3_bucket.attachments.arn}/avatars/*"',
+              '"${aws_s3_bucket.attachments.arn}/workspace/*"',
+            ],
+            principals: [{ type: '"*"', identifiers: ['"*"'] }],
+            condition: [
+              {
+                test: '"ArnNotEquals"',
+                variable: '"aws:PrincipalArn"',
+                values: ['aws_iam_role.api_task.arn'],
+              },
+            ],
+          },
+        ],
+      },
+      'resource.aws_s3_bucket_policy.attachments': {
+        bucket: 'aws_s3_bucket.attachments.id',
+        policy: 'data.aws_iam_policy_document.attachments_bucket.json',
+      },
     };
     const blocks = (['resource', 'data'] as const).flatMap((kind) =>
       blocksOf(kind, '\\w+').map(({ type, name, body }) => ({
@@ -517,6 +696,18 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     expect(countOf(terraform, new RegExp(attribute('(?:assume_role_)?policy'), 'g'))).toBe(
       surface.flatMap(({ hcl }) => Object.keys(hcl)).filter((key) => policyKey.test(key)).length,
     );
+  });
+
+  // タスクロールの資格情報はコンテナに渡る。api のタスクに運用者の入口（ECS Exec）の権限を、マイグレーションのタスク（運用者が入る先）に
+  // 添付のバケットの権限と署名者のロールの引き受けを渡さない（要件定義書 4.2 手順 5 の「踏むと壊れる」）。
+  it('タスクロールは、api が api_task、マイグレーションが migrate_task である', () => {
+    const taskRoles = Object.fromEntries(
+      taskDefinitions.map(({ name, body }) => [name, hclOfBlock(body).task_role_arn]),
+    );
+    expect(taskRoles).toEqual({
+      api: 'aws_iam_role.api_task.arn',
+      migrate: 'aws_iam_role.migrate_task.arn',
+    });
   });
 
   // 実行ロールを execution_role_arn のほか（task_role_arn など）から指すと、その先のコンテナが実行ロールの権限でパラメータを読める。
@@ -548,7 +739,9 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     const parameters = resources.filter(({ type }) => type === 'aws_ssm_parameter');
     expect(countOf(terraform, /"aws_ssm_parameter"/g)).toBe(parameters.length);
     // パラメータのキーは許可したものだけ（value・insecure_value で平文を渡させない。読めない行も `?` として外に出る）。
-    expect(parameters.length).toBeGreaterThanOrEqual(secretEnvs.length);
+    // 外で置くパラメータ（externalParameters）は Terraform が作らないため、下限から除く。
+    const managedSecretCount = secretEnvs.length - externalParameters.length;
+    expect(parameters.length).toBeGreaterThanOrEqual(managedSecretCount);
     expect(
       parameters
         .map(({ at, hcl }) => `${at}: ${Object.keys(hcl).sort().join(', ')}`)
@@ -571,7 +764,7 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     // write-only 引数の値は ephemeral の random_password から作る（リテラルの秘密をファイルに書かない）。書き方を問わずに数えた *_wo と数が合う。
     const writeOnly = entries.filter(({ key }) => key.endsWith('_wo'));
     expect(writeOnly.length).toBe(countOf(terraform, new RegExp(attribute('\\w+_wo'), 'g')));
-    expect(writeOnly.length).toBeGreaterThanOrEqual(secretEnvs.length);
+    expect(writeOnly.length).toBeGreaterThanOrEqual(managedSecretCount);
     expect(
       writeOnly
         .filter(({ value }) => !value.includes('ephemeral.random_password.'))
@@ -580,11 +773,15 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
   });
 
   // 名前ごとに最初の1件だけを見ると、2つ目のタスク定義の同じ名前の要素が照合されない。secrets の要素すべてを照合する。
-  it.each(secrets.map(({ task, env, parameter }) => [task, env ?? '', parameter ?? ''] as const))(
+  it.each(
+    secrets
+      .filter(({ parameter }) => !parameter?.startsWith('local.'))
+      .map(({ task, env, parameter }) => [task, env ?? '', parameter ?? ''] as const),
+  )(
     '%s の %s を渡すパラメータ（%s）は、その名前で終わる暗号化パラメータ（SecureString）である',
     (_task, env, parameter) => {
-      expect(parameter).not.toBe('');
-      const body = block('resource', 'aws_ssm_parameter', parameter);
+      expect(parameter).toMatch(/^aws_ssm_parameter\.\w+$/);
+      const body = block('resource', 'aws_ssm_parameter', parameter.split('.')[1] ?? '');
       expect(stringAttribute(body, 'name')).toMatch(new RegExp(`/${env}$`));
       const type = new RegExp(`${attribute('type')}\\s*(\\S+)`).exec(body)?.[1];
       const resolved =

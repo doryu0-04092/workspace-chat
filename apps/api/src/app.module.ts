@@ -7,6 +7,7 @@ import {
 import { APP_FILTER } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
 import { type ApiConfig, ApiConfigModule } from './config/api-config';
+import { DeliveryModule } from './delivery/delivery.module';
 import { HealthController } from './health.controller';
 import { ErrorResponseFilter } from './error-response';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -45,6 +46,7 @@ export class AppModule implements NestModule {
         WorkspacesModule,
         NotificationsModule,
         RealtimeModule,
+        DeliveryModule,
       ],
     };
   }

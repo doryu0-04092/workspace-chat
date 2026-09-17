@@ -3,11 +3,13 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   type MessageDeletedPayload,
   type MessageNewPayload,
   type MessageUpdatedPayload,
+  broadcastMentionsOf,
   mentionedLoginIds,
   type paths,
 } from '@workspace-chat/shared';
@@ -16,10 +18,14 @@ import {
   removeMentionNotifications,
 } from '../notifications/mention-notifications';
 import { PrismaService } from '../prisma.service';
+import { ATTACHMENT_UNAVAILABLE } from '../file-uploads/upload-errors';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
+import { ATTACHMENT_SELECT, type Attachment, toAttachment } from './attachment-view';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
+import { type Reaction, reactionsOf } from './reactions';
+import { HereMentions, participantIds } from './here-mentions';
 import { advanceReadPosition, announceUnreadTo, announceUnreadToMembers } from './unread';
 import { WorkspacesService } from './workspaces.service';
 
@@ -29,6 +35,12 @@ export type Message = MessagesPath['post']['responses'][201]['content']['applica
 export type MessagePage = MessagesPath['get']['responses'][200]['content']['application/json'];
 
 type PageQuery = { before?: string; limit?: string | number };
+
+/** 行を応答のメッセージにするときに読む表（参加者・メンションの対象・リアクション）。 */
+type MessageReadDb = Pick<
+  PrismaService,
+  '$queryRaw' | 'messageMention' | 'messageReaction' | 'messageReactionCount' | 'attachment'
+>;
 
 /** 親に載せる返信の参加者の上限（機能一覧 6。実装時に決めた値）。 */
 const REPLY_PARTICIPANT_LIMIT = 3;
@@ -126,6 +138,56 @@ async function replaceMentions(
   });
 }
 
+/**
+ * 投稿に添付を結び付ける（機能一覧 11.1）。**本人が上げ、そのチャンネルで確定に成功し、まだどの投稿にも付いていないものだけ**を条件付きで結び付け、
+ * **1つでも当たらなければ 422 `attachment_unavailable` で投稿ごと取り消す**（同じトランザクションで投げる）。どれがなぜ当たらなかったかは返さない。
+ * 条件付きの更新で行を掴むため、同じ添付を同時に2つの投稿に付けても、片方だけが通る。
+ */
+async function attachTo(
+  tx: Pick<PrismaService, 'attachment'>,
+  {
+    messageId,
+    attachmentIds,
+    ...owner
+  }: {
+    messageId: string;
+    uploaderId: string;
+    workspaceId: string;
+    channelId: string;
+    attachmentIds: string[];
+  },
+): Promise<void> {
+  if (attachmentIds.length === 0) return;
+  const { count } = await tx.attachment.updateMany({
+    where: { id: { in: attachmentIds }, ...owner, state: 'SUCCEEDED', messageId: null },
+    data: { messageId },
+  });
+  if (count !== attachmentIds.length) {
+    throw new UnprocessableEntityException(ATTACHMENT_UNAVAILABLE);
+  }
+}
+
+/**
+ * 本文の一斉メンション（F-21。機能一覧 9.2）を、メッセージの行に持たせる列の値にする（投稿・返信・編集で本文から決める）。
+ */
+function broadcastColumnsOf(body: string): { mentionsChannel: boolean; mentionsHere: boolean } {
+  const broadcast = broadcastMentionsOf(body);
+  return { mentionsChannel: broadcast.has('channel'), mentionsHere: broadcast.has('here') };
+}
+
+/**
+ * `@channel` の宛先に加える利用者（F-21。機能一覧 5.2・9.2）。**トランザクションの中で**、在席を見ずに
+ * そのチャンネルの参加者全員（退会していない。書いた本人を除く）を引く。`@here` の宛先は確定の後に決める（`HereMentions.targetsOf`）。
+ */
+function channelMentionTargets(
+  tx: Pick<PrismaService, '$queryRaw'>,
+  { channelId, authorId, body }: { channelId: string; authorId: string; body: string },
+): Promise<string[]> {
+  return broadcastColumnsOf(body).mentionsChannel
+    ? participantIds(tx, channelId, { except: authorId })
+    : Promise.resolve([]);
+}
+
 export const MESSAGE_SELECT = {
   id: true,
   channelId: true,
@@ -158,6 +220,8 @@ function toMessage(
   row: MessageRow,
   replyParticipants: UserSummary[],
   mentions: MentionTarget[],
+  reactions: Reaction[],
+  attachments: Attachment[],
 ): Message {
   const deleted = row.deletedAt !== null;
   return {
@@ -172,6 +236,8 @@ function toMessage(
     replyCount: row.replyCount,
     replyParticipants,
     mentions,
+    reactions,
+    attachments,
   };
 }
 
@@ -221,6 +287,28 @@ async function participantsOf(
 type MentionTarget = Message['mentions'][number];
 
 /**
+ * 投稿に付けた添付（機能一覧 11.1）を、渡したメッセージの分まとめて1回で引く（上げた順＝識別子の順）。
+ * **要求する側の条件を持たない**——呼ぶ側が読んでよいと決めたメッセージだけを渡す（`mentionsOf` と同じ）。
+ */
+async function attachmentsOf(
+  db: Pick<PrismaService, 'attachment'>,
+  messageIds: string[],
+): Promise<Map<string, Attachment[]>> {
+  const attachments = new Map<string, Attachment[]>();
+  if (messageIds.length === 0) return attachments;
+  const rows = await db.attachment.findMany({
+    where: { messageId: { in: messageIds }, state: 'SUCCEEDED' },
+    orderBy: { id: 'asc' },
+    select: { ...ATTACHMENT_SELECT, messageId: true },
+  });
+  for (const { messageId, ...row } of rows) {
+    if (messageId === null) continue;
+    attachments.set(messageId, [...(attachments.get(messageId) ?? []), toAttachment(row)]);
+  }
+  return attachments;
+}
+
+/**
  * 表示時の参照先解決（機能一覧 9.1 の経路2。参照実装は prisma-schema.test.ts の `mentionDisplayTarget`）。
  * 渡したメッセージの保存した対象の `User` を、**まとめて1回で引く**（メッセージごとに引かない）。
  * **`ChannelMember` を条件にしない**（対象がいま参加しているかを問わない）。退会した対象は `user: null`（削除済みの利用者。1.5）。並びは本文に最初に現れた順。
@@ -257,13 +345,10 @@ async function mentionsOf(
 
 /**
  * 行を応答のメッセージにする。返信のある本体のメッセージにだけ参加者を、本文に `@` のある削除されていないメッセージにだけメンションの対象を、引いて載せる
- * （**削除済みのメッセージは、本文を返さないのと同じく、誰を指したかも返さない**。機能一覧 9.1）。
- * **トランザクションの中でも呼ぶため、2つの問い合わせは順に出す**（同じ接続で並べない）。
+ * （**削除済みのメッセージは、本文を返さないのと同じく、誰を指したかも、リアクションも返さない**。機能一覧 9.1・7）。
+ * **トランザクションの中でも呼ぶため、問い合わせは順に出す**（同じ接続で並べない）。
  */
-export async function toMessages(
-  db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
-  rows: MessageRow[],
-): Promise<Message[]> {
+export async function toMessages(db: MessageReadDb, rows: MessageRow[]): Promise<Message[]> {
   const participants = await participantsOf(
     db,
     rows.filter((row) => row.parentId === null && row.replyCount > 0),
@@ -272,8 +357,23 @@ export async function toMessages(
     db,
     rows.filter((row) => row.deletedAt === null && mentionedLoginIds(row.body).length > 0),
   );
+  const reactions = await reactionsOf(
+    db,
+    rows.filter((row) => row.deletedAt === null).map(({ id }) => id),
+  );
+  // 削除済みのメッセージは、本文を返さないのと同じく添付も返さない（機能一覧 4.2）
+  const attachments = await attachmentsOf(
+    db,
+    rows.filter((row) => row.deletedAt === null).map((row) => row.id),
+  );
   return rows.map((row) =>
-    toMessage(row, participants.get(row.id) ?? [], mentions.get(row.id) ?? []),
+    toMessage(
+      row,
+      participants.get(row.id) ?? [],
+      mentions.get(row.id) ?? [],
+      reactions.get(row.id) ?? [],
+      attachments.get(row.id) ?? [],
+    ),
   );
 }
 
@@ -321,7 +421,7 @@ async function assertEditableMessage(
  * 既定値（50）と範囲（1〜100）は仕様の `limit` が持ち、openapi-validation.ts が要求に入れてから届く。
  */
 async function pageOf(
-  db: Pick<PrismaService, 'message' | '$queryRaw' | 'messageMention'>,
+  db: MessageReadDb & Pick<PrismaService, 'message'>,
   where: { channelId: string; parentId: string | null },
   query: PageQuery,
 ): Promise<MessagePage> {
@@ -338,10 +438,7 @@ async function pageOf(
 }
 
 /** 1件の行を応答のメッセージにする（`toMessages` と同じく、返信のある本体のメッセージには参加者を載せる）。 */
-async function messageOf(
-  db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
-  row: MessageRow,
-): Promise<Message> {
+async function messageOf(db: MessageReadDb, row: MessageRow): Promise<Message> {
   const [message] = await toMessages(db, [row]);
   if (!message) throw new Error('1件の行から応答のメッセージを作れなかった');
   return message;
@@ -361,6 +458,9 @@ async function messageOf(
  * - **本文の `@ユーザーID` は、投稿・返信と同じトランザクションで経路1 で解決して保存する**（機能一覧 9.1。`saveMentions`）。
  *   **編集では、本文にユーザーID が残っている対象を解決し直さずに残し**（抜けた・退会した対象も残る）、本文から消えた対象だけを外して新しい `@` を足す（`replaceMentions`）。
  *   投稿と返信の `message:new` は、解決した対象の利用者の部屋をチャンネルの部屋に加えて1回で送る（5.2）——**対象はトランザクションの中で参加者と確かめた利用者だけ**
+ * - **本文の `@channel` / `@here`（F-21。機能一覧 9.2）も、同じ `message:new` の宛先に利用者の部屋を加えて1回で送る**。
+ *   `@channel` はトランザクションの中で参加者全員を、`@here` は確定の後に在席の一覧を取り直した結果の参加者を加える（書いた本人は加えない）。
+ *   `@here` の宛先には、配った後に受け取りを確かめて記録する（`HereMentions.confirm`。応答を待たせない）。**編集では配らない**（個人メンションと同じ。9.1）
  */
 @Injectable()
 export class MessagesService {
@@ -368,6 +468,7 @@ export class MessagesService {
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspacesService,
     private readonly emitter: RealtimeEmitter,
+    private readonly here: HereMentions,
   ) {}
 
   async post(
@@ -382,7 +483,13 @@ export class MessagesService {
       assertChannelParticipant(channel);
       if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
       const row = await tx.message.create({
-        data: { channelId, workspaceId, authorId: userId, body: input.body },
+        data: {
+          channelId,
+          workspaceId,
+          authorId: userId,
+          body: input.body,
+          ...broadcastColumnsOf(input.body),
+        },
         select: MESSAGE_SELECT,
       });
       const mentioned = await saveMentions(tx, {
@@ -392,12 +499,47 @@ export class MessagesService {
         channelId,
         body: input.body,
       });
-      return { message: await messageOf(tx, row), mentioned };
+      await attachTo(tx, {
+        messageId: row.id,
+        uploaderId: userId,
+        workspaceId,
+        channelId,
+        attachmentIds: input.attachmentIds ?? [],
+      });
+      const everyone = await channelMentionTargets(tx, {
+        channelId,
+        authorId: userId,
+        body: input.body,
+      });
+      return { message: await messageOf(tx, row), mentioned: [...mentioned, ...everyone] };
     });
-    const payload: MessageNewPayload = { message, sentAt: new Date().toISOString() };
-    this.emitter.toChannelAndUsers(channelId, mentioned, 'message:new', payload);
+    await this.announceNew(channelId, userId, message, input.body, mentioned);
     await this.announceUnread(channelId, userId);
     return message;
+  }
+
+  /**
+   * `message:new` を、チャンネルの部屋に宛先の利用者の部屋を加えて1回で送る（機能一覧 5.2）。本文に `@here` があれば、
+   * 在席の一覧を取り直した結果の参加者を宛先に加え、配った後に受け取りを確かめて記録する（待たない。F-21）。
+   */
+  private async announceNew(
+    channelId: string,
+    authorId: string,
+    message: Message,
+    body: string,
+    mentioned: readonly string[],
+  ): Promise<void> {
+    const here = broadcastColumnsOf(body).mentionsHere
+      ? await this.here.targetsOf(channelId, authorId)
+      : [];
+    const payload: MessageNewPayload = { message, sentAt: new Date().toISOString() };
+    this.emitter.toChannelAndUsers(
+      channelId,
+      [...new Set([...mentioned, ...here])],
+      'message:new',
+      payload,
+    );
+    if (here.length > 0) void this.here.confirm(channelId, message.id, here);
   }
 
   /**
@@ -442,16 +584,26 @@ export class MessagesService {
       if (count !== 1) throw new NotFoundException();
       if (channel.archived) throw new ConflictException(CHANNEL_ARCHIVED);
       const created = await tx.message.create({
-        data: { channelId, workspaceId, authorId: userId, parentId, body: input.body },
+        data: {
+          channelId,
+          workspaceId,
+          authorId: userId,
+          parentId,
+          body: input.body,
+          ...broadcastColumnsOf(input.body),
+        },
         select: MESSAGE_SELECT,
       });
-      const mentioned = await saveMentions(tx, {
-        messageId: created.id,
-        workspaceId,
-        viewerId: userId,
-        channelId,
-        body: input.body,
-      });
+      const mentioned = [
+        ...(await saveMentions(tx, {
+          messageId: created.id,
+          workspaceId,
+          viewerId: userId,
+          channelId,
+          body: input.body,
+        })),
+        ...(await channelMentionTargets(tx, { channelId, authorId: userId, body: input.body })),
+      ];
       const counted = await tx.message.findUniqueOrThrow({
         where: { id: parentId },
         select: MESSAGE_SELECT,
@@ -462,10 +614,8 @@ export class MessagesService {
         mentioned,
       };
     });
-    const sentAt = new Date().toISOString();
-    const created: MessageNewPayload = { message: reply, sentAt };
-    const counted: MessageUpdatedPayload = { message: parent, sentAt };
-    this.emitter.toChannelAndUsers(channelId, mentioned, 'message:new', created);
+    await this.announceNew(channelId, userId, reply, input.body, mentioned);
+    const counted: MessageUpdatedPayload = { message: parent, sentAt: new Date().toISOString() };
     this.emitter.toChannel(channelId, 'message:updated', counted);
     await this.announceUnread(channelId, userId);
     return reply;
@@ -548,7 +698,7 @@ export class MessagesService {
       await assertEditableMessage(tx, userId, workspaceId, channelId, messageId);
       const { count } = await tx.message.updateMany({
         where: { id: messageId, channelId, deletedAt: null },
-        data: { body: input.body, editedAt: new Date() },
+        data: { body: input.body, editedAt: new Date(), ...broadcastColumnsOf(input.body) },
       });
       if (count !== 1) throw new NotFoundException();
       // メンションの対象は、編集後の本文に合わせる（本文に残した対象は消さない）。**編集では対象の部屋へ配らない**（機能一覧 9.1 の実装時に決めた値）

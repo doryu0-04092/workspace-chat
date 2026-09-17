@@ -133,7 +133,7 @@ export interface paths {
         };
         /**
          * 自分のプロフィールの取得（F-04）
-         * @description アバター画像の設定はまだ無く、avatarUrl は null のままである（機能一覧 1.3。11.1 と同じ段で足す）。
+         * @description avatarUrl は、アバター画像のアップロードの確定でサーバーが組み立てた配信 URL のパス（/avatars/{User.id}/{uploadId}/{保存名}）か、 設定していなければ null（機能一覧 1.3。/users/me/avatar/uploads）。
          */
         get: operations["getMyProfile"];
         put?: never;
@@ -229,6 +229,49 @@ export interface paths {
          * @description 本人だけ（アクセストークンの利用者を削除する。他人を指す手段を持たない）。パスワードの再入力で本人であることを確かめる。 パスワードが違えば 403 password_mismatch、ワークスペースのオーナーなら 403 owner_cannot_delete_account（理由のメッセージを返す）。 論理削除であり、同一トランザクションで未使用のリカバリーコードを使用済みにし、所属（Membership。チャンネル参加は連鎖して消える）を消し、 リフレッシュトークンをすべて失効させる。その利用者の WebSocket 接続を切り、refresh_token の Cookie を消す（機能一覧 1.5）。 ユーザーID ごとに、パスワードを連続して誤った回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える）
          */
         post: operations["deleteMyAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/me/avatar/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * アバター画像のアップロード用の署名付き URL の発行（F-04）
+         * @description 自分のアバター画像を上げる署名付き URL を発行する（機能一覧 1.3・11.1）。ブラウザは uploadUrl へ uploadHeaders を付けて本体を PUT し、 終わったら complete で確定する。URL の宛先は隔離用のキー quarantine/avatars/{User.id}/{uploadId}/{保存名} であり、 キーはすべてサーバーが組み立てる（保存名はファイル名の英数字・.・_・- 以外と先頭の . を _ に置き換え、キー全体が 1,024 バイトに収まるよう切り詰めたもの）。 有効期限は 5 分で、Content-Type と If-None-Match: * を署名に含む（同じ URL での上書きは 412 で断られる）。 申告した Content-Type が画像（jpeg / png / gif / webp）でなければ 422 unsupported_file_type、大きさが 10 MB を超えれば 422 file_too_large。 申告は信用せず、確定で中身から検証する。利用者単位で 10 分に 30 回まで
+         */
+        post: operations["createAvatarUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/me/avatar/uploads/{uploadId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * アバター画像のアップロードの確定（F-04）
+         * @description 隔離用のキーに PUT した本体を中身から検証し、検証した版に固定して配信用のキー avatars/{User.id}/{uploadId}/{保存名} へコピーし、 隔離用のキーを削除して、avatarUrl を /avatars/{User.id}/{uploadId}/{保存名} にする（保存名の拡張子は検証した形式のものに付け替える。機能一覧 1.3・11.1）。 検証に通らなければ配信用のキーへ移さず隔離用のキーを削除し、422 を返す——画像でない・中身が形式に合わない（unsupported_file_type）、 10 MB を超える（file_too_large）、本体が PUT されていない（upload_not_received）。 確定は識別子ごとに1回だけ行い、2回目以降はコピーも削除もやり直さず、1回目と同じ状態コードを返す（成功なら、その時点のプロフィール）。 確定の途中にもう1つ確定を求めると 409 upload_in_progress。 本人に払い出されていない識別子は 404（識別子の存在を認めない）。利用者単位で 10 分に 30 回まで
+         */
+        post: operations["completeAvatarUpload"];
         delete?: never;
         options?: never;
         head?: never;
@@ -705,6 +748,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/channels/{channelId}/pins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * チャンネルのピン留めの一覧（F-33）
+         * @description ピン留めしたメッセージを、ピン留めした新しい順にすべて返す（1つのチャンネルに最大 100 件。機能一覧 13.2）。 削除済みのメッセージは返さない。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、 パブリックは 403 not_a_channel_member・プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。 アーカイブ済みでも参加者は読める（機能一覧 3.2）。ピン留めの変化は配信しない（要件定義書 4.1 の配信の対象イベントに無い）
+         */
+        get: operations["listPins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/messages/{messageId}/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * メッセージをピン留めする（F-33）
+         * @description 既にピン留めしていれば何も変えず、最初にピン留めした人と時刻を 200 で返す。スレッドの返信もピン留めできる。 判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→ そのチャンネルに無い・削除済みのメッセージは 404 → アーカイブ済みのチャンネルは 409 channel_archived → そのチャンネルのピン留め（削除済みのメッセージを除く）が 100 件に達していれば 409 pin_limit_reached（実装時に決めた値）。 配信しない（要件定義書 4.1 の配信の対象イベントに無い）。利用者ごとに1分 60 回まで（外すのとは別枠。実装時に決めた値）
+         */
+        put: operations["pinMessage"];
+        post?: never;
+        /**
+         * メッセージのピン留めを外す（F-33）
+         * @description そのチャンネルの参加者なら、ピン留めした本人でなくても外せる（付けられる人と外せる人を揃える。機能一覧 13.2 の「判断が必要な点」の決定）。 ピン留めしていなければ何も変えずに 204 を返す。判定の順はピン留めと同じ（件数の上限を除く）。 配信しない。利用者ごとに1分 60 回まで（ピン留めとは別枠。実装時に決めた値）
+         */
+        delete: operations["unpinMessage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{id}/channels/{channelId}/messages": {
         parameters: {
             query?: never;
@@ -725,7 +824,7 @@ export interface paths {
         put?: never;
         /**
          * チャンネルへのメッセージの投稿（F-11）
-         * @description 参加者だけが投稿できる。コードは一覧と同じ2段階（所属していなければ 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・ プライベートは 404。オーナーでも参加していなければ同じ）。アーカイブ済みのチャンネルには投稿できない（409 channel_archived。機能一覧 3.2）。 本文は 1〜4000 文字（コードポイント）で、空白だけは不可（機能一覧 4.1）。 作ったメッセージを message:new としてチャンネルの部屋へ配る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で配る（機能一覧 5.2・9.1）。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
+         * @description 参加者だけが投稿できる。コードは一覧と同じ2段階（所属していなければ 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・ プライベートは 404。オーナーでも参加していなければ同じ）。アーカイブ済みのチャンネルには投稿できない（409 channel_archived。機能一覧 3.2）。 本文は 1〜4000 文字（コードポイント）で、空白だけは不可（機能一覧 4.1）。 作ったメッセージを message:new としてチャンネルの部屋へ配る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で配る（機能一覧 5.2・9.1）。 attachmentIds で確定した添付を付けられる（自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけ。そうでなければ 422 attachment_unavailable で投稿しない。機能一覧 11.1）。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
          */
         post: operations["postMessage"];
         delete?: never;
@@ -790,6 +889,248 @@ export interface paths {
          * @description 判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→ そのチャンネルに無い・削除済みのメッセージと、返信（返信に返信はできない。1階層のみ）は 404 → アーカイブ済みのチャンネルは 409 channel_archived。 本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。親の返信件数（replyCount）を同じトランザクションで1つ増やす（要件定義書 4.1）。 作った返信を message:new として、返信件数が増えた親を message:updated として、チャンネルの部屋へ配る（機能一覧 5.2・6）。返信の本文のメンションの対象がいれば、返信の message:new はその利用者の部屋も加えて1回で配る（機能一覧 9.1）。 投稿・編集・削除と同じ枠で数える（利用者単位で1分に60回。機能一覧 4.1・4.2）
          */
         post: operations["postReply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/dms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 自分が当事者の DM の一覧（F-19・F-23）
+         * @description そのワークスペースで、要求した利用者が当事者の DM だけを返す（機能一覧 8）。所属していなければ 404。 新しいメッセージのある順（メッセージの無い DM は始めた順の位置に並ぶ）。 相手がキック・退出・退会した DM も返す（過去のメッセージは残る。機能一覧 1.5・2.2）——相手が退会していれば counterpart は null、 いまメンバーでなければ writable は false（投稿できない）
+         */
+        get: operations["listDms"];
+        put?: never;
+        /**
+         * DM を始める・開く（F-19）
+         * @description 相手（User.id）との DM を返す。まだ無ければ作る。同じ相手との DM は1つに集約され、既にあればそれを返す（機能一覧 8）。 相手は同じワークスペースの、退会していないメンバーに限る（そうでなければ 422 dm_counterpart_not_found）。 自分自身とは始められない（422 dm_with_self）。所属していなければ 404
+         */
+        post: operations["startDm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/dms/{dmId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * DM のメッセージの一覧（F-19）
+         * @description 新しい順。before・limit・nextBefore の扱いはチャンネルの一覧と同じ（機能一覧 4.1）。 当事者だけが取得できる。所属していなければ 404、当事者でない DM・無い DM・別のワークスペースの DM も 404（存在の有無を区別しない。機能一覧 8）。 相手がいまメンバーでなくても、当事者は過去のメッセージを読める（機能一覧 1.5・2.2）。 退会した書き手のメッセージは author を null にする（機能一覧 1.5）
+         */
+        get: operations["listDmMessages"];
+        put?: never;
+        /**
+         * DM へのメッセージの投稿（F-19）
+         * @description 当事者だけが投稿できる（所属していない・当事者でない・無い DM は 404）。 相手がいまそのワークスペースの退会していないメンバーでなければ 409 dm_counterpart_unavailable（機能一覧 8「相手は同一ワークスペースのメンバーに限る」）。 本文の形はチャンネルの投稿と同じ（1〜4000 文字・空白だけは不可）。 作ったメッセージを message:new として、当事者2人のうち、いまそのワークスペースの退会していないメンバーである利用者の部屋へ1回で配る（機能一覧 5.2 の DM の箇条）。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（チャンネルのメッセージの書き込みと同じ枠。機能一覧 4.1）
+         */
+        post: operations["postDmMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/dms/{dmId}/messages/{messageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * DM のメッセージの削除（F-19・F-13）
+         * @description 論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、 以後の応答と配信では返さない（body: null・deleted: true）。message:deleted（本文を載せない）を投稿と同じ宛先へ配る。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（機能一覧 4.1・4.2）
+         */
+        delete: operations["deleteDmMessage"];
+        options?: never;
+        head?: never;
+        /**
+         * DM のメッセージの編集（F-19・F-13）
+         * @description 自分のメッセージだけを編集できる。判定の順: 所属していなければ 404 → 当事者でない・無い DM は 404 → その DM に無い・削除済みのメッセージは 404 → 作者でなければ 403 not_message_author。 相手がいまメンバーでなくても、自分のメッセージは編集できる。本文の形は投稿と同じ。 編集したメッセージを message:updated として、投稿と同じ宛先へ配る（機能一覧 5.2 の DM の箇条）。 投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（機能一覧 4.1・4.2）
+         */
+        patch: operations["editDmMessage"];
+        trace?: never;
+    };
+    "/workspaces/{id}/dms/{dmId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * DM の既読位置の更新（F-23）
+         * @description 読んだ位置（その DM のメッセージの id）を渡して既読位置を進める（「利用者 × DM」の既読位置。機能一覧 10.1）。 既読位置は戻さない——渡した id が既に読んだ位置より古ければ、何も変えずに 204 を返す。 所属していない・当事者でない・無い DM は 404。その DM に無いメッセージ・削除済みのメッセージの id も 404。 進めた後の未読数を unread:updated として本人の部屋へだけ配る（機能一覧 5.2）。 利用者ごとに1分 120 回まで（チャンネル・スレッドの既読の更新とは別の枠。機能一覧 10.1）
+         */
+        put: operations["updateDmRead"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/messages/{messageId}/reactions/{emoji}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+                /** @description リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。 絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる */
+                emoji: components["parameters"]["Emoji"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * メッセージにリアクションを付ける（F-18）
+         * @description 同じ絵文字を二重に付けない——既に付けていれば何も変えずに 200 を返す（機能一覧 7）。 判定の順: 絵文字1つでなければ 400 validation_failed → 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・ プライベートは 404（オーナーでも同じ）→ そのチャンネルに無い・削除済みのメッセージは 404 → アーカイブ済みのチャンネルは 409 channel_archived → そのメッセージに付いている絵文字が 50 種類に達していて、新しい絵文字なら 409 reaction_limit_reached（実装時に決めた値）。 スレッドの返信にも付けられる。件数はカウンタ列に持ち、付けるのと同じトランザクションで増やす（要件定義書 4.1）。 変わったら、そのメッセージのリアクションを reaction:changed としてチャンネルの部屋へ配る（機能一覧 5.2）。 利用者ごとに1分 60 回まで（外すのとは別枠。実装時に決めた値）
+         */
+        put: operations["addReaction"];
+        post?: never;
+        /**
+         * メッセージから自分のリアクションを外す（F-18）
+         * @description 自分が付けたものだけを外す。付けていなければ何も変えずに 200 を返す。判定の順は付けるのと同じ（種類の上限を除く）。 件数は外すのと同じトランザクションで減らし、0 になった絵文字は返さない。 変わったら、そのメッセージのリアクションを reaction:changed としてチャンネルの部屋へ配る（機能一覧 5.2）。 利用者ごとに1分 60 回まで（付けるのとは別枠。実装時に決めた値）
+         */
+        delete: operations["removeReaction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/attachments/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 添付ファイルのアップロード用の署名付き URL の発行（F-27・F-28）
+         * @description チャンネルの添付を上げる署名付き URL を発行する（機能一覧 11.1）。参加者だけが発行できる。コードは2段階: 所属していなければ種別によらず 404。 所属していて参加していなければ、パブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも参加していなければ同じ）。 URL の宛先は隔離用のキー quarantine/workspace/{id}/channel/{channelId}/{uploadId}/{保存名} であり、キーはすべてサーバーが組み立てる （保存名はファイル名の英数字・.・_・- 以外と先頭の . を _ に置き換え、キー全体が 1,024 バイトに収まるよう切り詰めたもの）。 有効期限は 5 分で、Content-Type と If-None-Match: * を署名に含む。 申告した Content-Type が許可リスト（画像 jpeg / png / gif / webp、動画 mp4 / webm、文書 pdf / txt / csv / md / docx / xlsx / pptx、圧縮 zip）に無ければ 422 unsupported_file_type、種別の上限（画像 10 MB・動画 100 MB・文書と圧縮 25 MB）を超えれば 422 file_too_large。 申告は信用せず、確定で中身から検証する。利用者単位で 10 分に 30 回まで
+         */
+        post: operations["createAttachmentUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/attachments/uploads/{uploadId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 添付ファイルのアップロードの確定（F-27・F-28）
+         * @description 本人に払い出され、このワークスペースとチャンネルで発行した識別子だけを確定できる（そうでなければ 404。識別子の存在を認めず、確定の権利も使わない）。 キーとやり直す参加者判定の対象チャンネルは、発行のときにサーバーが保持した値から組み立てる（機能一覧 11.1）。 確定の時点で参加者判定をやり直し、落ちたら発行と同じ2段階のコード（404 / 403 not_a_channel_member）を返して隔離用のキーを削除する。 通れば中身から形式を検証し、検証した版に固定して配信用のキー workspace/{id}/channel/{channelId}/{uploadId}/{保存名} へコピーし、隔離用のキーを削除する （保存名の拡張子は検証した形式のものに付け替え、配信の Content-Type と Content-Disposition は検証した形式から決める）。 検証に通らなければ配信用のキーへ移さず隔離用のキーを削除し、422 を返す——許可リストに無い・中身が形式に合わない（unsupported_file_type）、 種別の上限を超える（file_too_large）、本体が PUT されていない（upload_not_received）。 確定は識別子ごとに1回だけ行い、2回目以降はコピーも削除もやり直さず、1回目と同じ結果を返す（参加者判定に落ちたときも同じ。やり直すには発行からやり直す）。 確定の途中にもう1つ確定を求めると 409 upload_in_progress。確定した添付は、投稿（postMessage）の attachmentIds で投稿に付ける。 利用者単位で 10 分に 30 回まで
+         */
+        post: operations["completeAttachmentUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/avatars/cookies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * アバターの配信の署名付き Cookie の発行（F-04）
+         * @description ログインしている利用者に、CloudFront の /avatars/* に有効な署名付き Cookie を発行する（機能一覧 1.3。ワークスペースやチャンネルの参加を問わない）。 Cookie は CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id の3つで、Path=/avatars; HttpOnly; Secure; SameSite=Strict。 期限（expiresIn 秒）より前に取り直す。CloudFront の署名鍵を設定していない環境（手元）では Cookie を発行せず 204 を返す。 本体は送らない
+         */
+        post: operations["issueAvatarCookies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/channels/{channelId}/files/cookies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * チャンネルの添付の配信の署名付き Cookie の発行（F-29）
+         * @description そのチャンネルの参加者に、CloudFront の /files/workspace/{ws}/channel/{ch}/* に限って有効な署名付き Cookie を発行する（機能一覧 11.2）。 Cookie は CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id の3つで、Path=/files; HttpOnly; Secure; SameSite=Strict。 同じ名前・Path の Cookie は上書きされるため、有効なのは最後に発行したチャンネルの分だけである。期限（expiresIn 秒）より前に取り直す。 コードは参加者一覧と同じ2段階: 所属していなければ種別によらず 404、所属していて参加者でなければパブリックは 403 not_a_channel_member・プライベートは 404。オーナーの例外は及ばない。アーカイブ済みのチャンネルも、参加者には発行する（読める。機能一覧 3.2）。 CloudFront の署名鍵を設定していない環境（手元）では、判定を通ったときに Cookie を発行せず 204 を返す。本体は送らない
+         */
+        post: operations["issueChannelFileCookies"];
         delete?: never;
         options?: never;
         head?: never;
@@ -871,7 +1212,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "password_mismatch" | "owner_cannot_delete_account" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "password_mismatch" | "owner_cannot_delete_account" | "pin_limit_reached" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "dm_with_self" | "dm_counterpart_not_found" | "dm_counterpart_unavailable" | "reaction_limit_reached" | "unsupported_file_type" | "file_too_large" | "upload_not_received" | "upload_in_progress" | "attachment_unavailable" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -916,6 +1257,11 @@ export interface components {
             /** @enum {string} */
             tokenType: "Bearer";
             /** @description アクセストークンの有効期間（秒） */
+            expiresIn: number;
+        };
+        /** @description 発行した CloudFront の署名付き Cookie の有効期間 */
+        SignedCookiesResponse: {
+            /** @description 署名付き Cookie の有効期間（秒）。これより前に取り直す */
             expiresIn: number;
         };
         LoginResponse: {
@@ -968,6 +1314,36 @@ export interface components {
             /** @description 絵文字とテキストの1セットで設定する。null で消す（片方だけの本体は 400） */
             status?: components["schemas"]["Status"] | null;
         };
+        /** @description アップロードの発行の要求（機能一覧 11.1）。どれも申告であり、形式と大きさは確定で中身から検証する。 キー・パス・URL は指定できない（サーバーが組み立てる） */
+        UploadRequest: {
+            /** @description 元のファイル名（1〜255 文字）。保存名はこれを置き換えて作る */
+            fileName: string;
+            /** @description 申告する Content-Type。許可リスト（packages/shared の UPLOAD_FORMATS）の値でなければ 422 unsupported_file_type。 署名付き URL の PUT には、この値をそのまま Content-Type に付ける */
+            contentType: string;
+            /** @description 申告する大きさ（バイト）。種別の上限を超えれば 422 file_too_large */
+            size: number;
+        };
+        /** @description 発行したアップロード（機能一覧 11.1） */
+        UploadTicket: {
+            /**
+             * Format: uuid
+             * @description アップロードの識別子。確定の要求に使う
+             */
+            uploadId: string;
+            /** @description 本体を PUT する署名付き URL（宛先は隔離用のキー） */
+            uploadUrl: string;
+            /** @description PUT に付けるヘッダー。どちらも署名に含まれ、変えたり外したりすると断られる */
+            uploadHeaders: {
+                "Content-Type": string;
+                /** @enum {string} */
+                "If-None-Match": "*";
+            };
+            /**
+             * Format: date-time
+             * @description 署名付き URL の有効期限（発行から 5 分）。この時刻までに PUT を始める
+             */
+            expiresAt: string;
+        };
         HealthResponse: {
             /** @enum {string} */
             status: "ok";
@@ -1015,6 +1391,34 @@ export interface components {
             name: string;
             visibility: components["schemas"]["ChannelVisibility"];
         };
+        /** @description チャンネルへの投稿の本体（機能一覧 4.1）。本文は PostMessageRequest と同じ形で、確定した添付を最大 10 件付けられる */
+        CreateMessageRequest: {
+            /** @description 1〜4000 文字（文字数はコードポイントで数える）。空白だけは不可（機能一覧 4.1） */
+            body: string;
+            /** @description 付ける添付の識別子（確定の応答の id）。自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけを付けられる （1つでも当たらなければ 422 attachment_unavailable で、投稿しない）。並びは上げた順になる */
+            attachmentIds?: string[];
+        };
+        /** @description 添付ファイル（機能一覧 11.1・11.2） */
+        Attachment: {
+            /**
+             * Format: uuid
+             * @description アップロードの識別子
+             */
+            id: string;
+            /** @description 利用者が付けた元のファイル名（表示用。保存名とは違う） */
+            fileName: string;
+            /** @description 配信の Content-Type（検証した形式からサーバーが決めた値。テキスト系は text/plain; charset=utf-8） */
+            contentType: string;
+            /**
+             * @description 種別（画像は表示し、動画は
+             * @enum {string}
+             */
+            kind: "image" | "video" | "document" | "archive";
+            /** @description 大きさ（バイト） */
+            size: number;
+            /** @description 配信 URL のパス（/files/workspace/{workspaceId}/channel/{channelId}/{id}/{保存名}）。CloudFront の署名付き Cookie で取得する（機能一覧 11.2） */
+            url: string;
+        };
         PostMessageRequest: {
             /** @description 1〜4000 文字（文字数はコードポイントで数える）。空白だけは不可（機能一覧 4.1） */
             body: string;
@@ -1052,6 +1456,28 @@ export interface components {
             deleted: boolean;
             /** @description 本文のメンションの対象（機能一覧 9.1）。投稿・返信のときに、そのチャンネルの参加者で退会していない利用者へ解決できた `@ユーザーID` を保存し、本文に最初に現れた順に1人1件で載せる。編集では、本文にユーザーID が残っている対象は解決し直さずに残す （チャンネルを抜けた・退会した対象も残り、退会した対象は user が null）。本文から消えた対象は外し、新しく書いた `@` は投稿と同じく解決して足す。 削除済みのメッセージは空 */
             mentions: components["schemas"]["MessageMention"][];
+            /** @description リアクション（機能一覧 7）。絵文字ごとに1件で、その絵文字を初めて付けた順。削除済みのメッセージは空 （本文を返さないのと同じく返さない。付けた記録は DB に残る） */
+            reactions: components["schemas"]["Reaction"][];
+            /** @description 投稿に付けた添付（上げた順）。削除済みのメッセージは空（本文を返さないのと同じく返さない。機能一覧 4.2） */
+            attachments: components["schemas"]["Attachment"][];
+        };
+        /** @description 1つの絵文字のリアクション（機能一覧 7） */
+        Reaction: {
+            /** @description 絵文字1つ */
+            emoji: string;
+            /** @description 付けた人数（カウンタ列。一覧で COUNT を発行しない。要件定義書 4.1）。退会した利用者の分も数える */
+            count: number;
+            /** @description 付けた人（「誰が付けたか」をホバーで出す。機能一覧 7）。付けた順。退会した利用者は含めない （そのため count より少ないことがある） */
+            users: components["schemas"]["UserSummary"][];
+        };
+        /** @description 1つのメッセージのリアクション（付け外しの応答。reaction:changed の payload も同じ項目に送信時刻を足す） */
+        MessageReactions: {
+            /** Format: uuid */
+            channelId: string;
+            /** Format: uuid */
+            messageId: string;
+            /** @description Message.reactions と同じ */
+            reactions: components["schemas"]["Reaction"][];
         };
         /** @description メンションの対象（表示時の参照先。機能一覧 9.1 の経路2。対象がいまそのチャンネルの参加者かは問わない） */
         MessageMention: {
@@ -1106,6 +1532,21 @@ export interface components {
             /** @description 要求した利用者がこのチャンネルに参加しているか（メッセージのチャンネルは常に true） */
             joined: boolean;
         };
+        /** @description ピン留めしたメッセージ（機能一覧 13.2） */
+        PinnedMessage: {
+            message: components["schemas"]["Message"];
+            /** @description ピン留めした人。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            pinnedBy: components["schemas"]["UserSummary"] | null;
+            /**
+             * Format: date-time
+             * @description ピン留めした時刻
+             */
+            pinnedAt: string;
+        };
+        PinList: {
+            /** @description ピン留めした新しい順 */
+            pins: components["schemas"]["PinnedMessage"][];
+        };
         /** @description 一般の一覧（参加者向け）のチャンネル */
         Channel: {
             /** Format: uuid */
@@ -1121,7 +1562,7 @@ export interface components {
             joinedAt: string | null;
             /** @description 要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。 既読位置をまだ持たない利用者は、参加した時点より後だけを数える。参加していないパブリックチャンネルは常に 0 */
             unread: number;
-            /** @description 要求した利用者のメンションの件数（F-24。機能一覧 10.2）。**未読のうち、要求した利用者をメンションしているもの**を数える ——`unread` と同じ条件で数えるため、常に `unread` 以下であり、既読を進めると一緒に減る。 `@here` / `@channel` は数えない（保存していない）。参加していないチャンネルは常に 0 */
+            /** @description 要求した利用者のメンションの件数（F-24。機能一覧 10.2）。**未読のうち、要求した利用者をメンションしているもの**を数える ——`unread` と同じ条件で数えるため、常に `unread` 以下であり、既読を進めると一緒に減る。 `@channel` は参加者全員に、`@here` は受け取りを返した利用者にだけ数える（F-21。機能一覧 9.2）。参加していないチャンネルは常に 0 */
             mentions: number;
             /**
              * Format: uuid
@@ -1173,6 +1614,73 @@ export interface components {
             invitedBy: components["schemas"]["UserSummary"];
             /** Format: date-time */
             createdAt: string;
+        };
+        StartDmRequest: {
+            /**
+             * Format: uuid
+             * @description 相手の User.id（ワークスペースの参加者一覧が返す id。ユーザーID ではない）
+             */
+            userId: string;
+        };
+        UpdateDmReadRequest: {
+            /**
+             * Format: uuid
+             * @description 読んだ位置（その DM のメッセージの id。F-23。機能一覧 10.1）。 既読位置は戻さないため、いま持っている位置より古い id を渡しても既読位置は変わらない
+             */
+            lastReadMessageId: string;
+        };
+        /** @description 自分が当事者の DM（機能一覧 8・10.1） */
+        Dm: {
+            /** Format: uuid */
+            id: string;
+            /** @description 相手。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            counterpart: components["schemas"]["UserSummary"] | null;
+            /** @description 相手がいまこのワークスペースの退会していないメンバーか。false なら投稿できない（409 dm_counterpart_unavailable。機能一覧 8）。 過去のメッセージは読める */
+            writable: boolean;
+            /**
+             * Format: date-time
+             * @description 要求した利用者がこのワークスペースに参加した時刻（F-23。機能一覧 10.1）。既読位置をまだ持たないとき、 未読はこの時刻より後のメッセージだけを数え、「ここから未読」の区切り線もこの時刻より後の最初のメッセージの上に出す
+             */
+            joinedAt: string;
+            /** @description 要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。 既読位置をまだ持たない利用者は、joinedAt より後だけを数える */
+            unread: number;
+            /**
+             * Format: uuid
+             * @description 要求した利用者の既読位置（F-23。機能一覧 10.1）。「ここから未読」の区切り線を、この次のメッセージの上に出す。 まだ既読位置を持たなければ null。未読数から線の位置を数えてはならない
+             */
+            lastReadMessageId: string | null;
+        };
+        /** @description DM のメッセージ（機能一覧 8・4.2） */
+        DmMessage: {
+            /**
+             * Format: uuid
+             * @description UUIDv7。一覧のカーソル（before）にそのまま使う
+             */
+            id: string;
+            /** Format: uuid */
+            dmId: string;
+            /** @description 書き手。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            author: components["schemas"]["UserSummary"] | null;
+            /** @description 本文。削除済みなら null（本文は DB に残るが返さない。機能一覧 4.2） */
+            body: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 最後に編集した時刻。編集していなければ null（機能一覧 4.2）
+             */
+            editedAt: string | null;
+            /** @description 削除済みか（機能一覧 4.2） */
+            deleted: boolean;
+        };
+        DmMessagePage: {
+            /** @description 新しい順 */
+            messages: components["schemas"]["DmMessage"][];
+            /**
+             * Format: uuid
+             * @description 続きを取るときに before に渡す id。続きが無ければ null
+             */
+            nextBefore: string | null;
         };
         /**
          * @description 通知の種類（機能一覧 10.3）。いまはメンションだけ（DM は F-19 で足す）
@@ -1314,6 +1822,12 @@ export interface components {
         ChannelId: string;
         /** @description メッセージの id。形が uuid でなければ 400 */
         MessageId: string;
+        /** @description DM の id。形が uuid でなければ 400 */
+        DmId: string;
+        /** @description リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。 絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる */
+        Emoji: string;
+        /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+        UploadId: string;
         /** @description 招待の id。形が uuid でなければ 400 */
         InvitationId: string;
         /** @description 通知の id。形が uuid でなければ 400 */
@@ -1738,6 +2252,93 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createAvatarUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadRequest"];
+            };
+        };
+        responses: {
+            /** @description 発行したアップロード */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadTicket"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description 受け付けない形式（unsupported_file_type）か、上限を超える大きさ（file_too_large） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    completeAvatarUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 確定した後のプロフィール */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 同じ識別子の確定が進行中（upload_in_progress） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 検証に通らなかった（unsupported_file_type・file_too_large・upload_not_received） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
@@ -2602,6 +3203,145 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
+    listPins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ピン留めしたメッセージ（ピン留めした新しい順） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    pinMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ピン留めしたメッセージ */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinnedMessage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived）か、ピン留めの件数の上限（pin_limit_reached） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    unpinMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 外した（ピン留めしていなかった場合も 204） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
     listMessages: {
         parameters: {
             query?: {
@@ -2660,7 +3400,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PostMessageRequest"];
+                "application/json": components["schemas"]["CreateMessageRequest"];
             };
         };
         responses: {
@@ -2697,6 +3437,15 @@ export interface operations {
             };
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            /** @description 付けられない添付がある（attachment_unavailable） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
@@ -2907,6 +3656,583 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listDms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description DM（新しいメッセージのある順） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dm"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    startDm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartDmRequest"];
+            };
+        };
+        responses: {
+            /** @description 相手との DM（作ったもの、または既にあったもの） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dm"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description 相手がこのワークスペースの退会していないメンバーでない（dm_counterpart_not_found）か、自分自身（dm_with_self） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listDmMessages: {
+        parameters: {
+            query?: {
+                /** @description これより古いメッセージを返す（メッセージの id）。形が uuid でなければ 400 */
+                before?: string;
+                /** @description 返す件数の上限。1〜100、既定は 50（チャンネルの一覧と同じ。機能一覧 4.1） */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description メッセージ（新しい順）と、続きを取るための before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmMessagePage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    postDmMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description 作ったメッセージ */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmMessage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 相手がいまこのワークスペースの退会していないメンバーでない（dm_counterpart_unavailable） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteDmMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 削除した */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 自分のメッセージではない（not_message_author） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    editDmMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostMessageRequest"];
+            };
+        };
+        responses: {
+            /** @description 編集したメッセージ（editedAt を持つ） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DmMessage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 自分のメッセージではない（not_message_author） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateDmRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDmReadRequest"];
+            };
+        };
+        responses: {
+            /** @description 既読位置を進めた（進まなかった場合も 204） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    addReaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+                /** @description リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。 絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる */
+                emoji: components["parameters"]["Emoji"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 付けた後の、そのメッセージのリアクション */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageReactions"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived）か、絵文字の種類の上限（reaction_limit_reached） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    removeReaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+                /** @description リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。 絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる */
+                emoji: components["parameters"]["Emoji"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 外した後の、そのメッセージのリアクション */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageReactions"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createAttachmentUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadRequest"];
+            };
+        };
+        responses: {
+            /** @description 発行したアップロード */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadTicket"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description 受け付けない形式（unsupported_file_type）か、上限を超える大きさ（file_too_large） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    completeAttachmentUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 確定した添付 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attachment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 同じ識別子の確定が進行中（upload_in_progress） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 検証に通らなかった（unsupported_file_type・file_too_large・upload_not_received） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    issueAvatarCookies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 発行した */
+            200: {
+                headers: {
+                    /** @description CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id（Path=/avatars） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedCookiesResponse"];
+                };
+            };
+            /** @description CloudFront の署名鍵を設定していない環境であり、Cookie を発行しない */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    issueChannelFileCookies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 発行した */
+            200: {
+                headers: {
+                    /** @description CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id（Path=/files） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedCookiesResponse"];
+                };
+            };
+            /** @description CloudFront の署名鍵を設定していない環境であり、Cookie を発行しない */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description そのチャンネルの参加者でない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
             500: components["responses"]["InternalServerError"];
         };
     };

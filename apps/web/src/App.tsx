@@ -6,6 +6,7 @@ import { RecoveryPage } from './auth/RecoveryPage';
 import { RegisterPage } from './auth/RegisterPage';
 import { GuestOnly, RequireSignedIn } from './auth/route-guards';
 import { SessionProvider } from './auth/session-context';
+import { DmPage } from './dms/DmPage';
 import type { SessionStore } from './auth/session-store';
 import { SignedInLayout } from './layout/SignedInLayout';
 import { NotificationsPage } from './notifications/NotificationsPage';
@@ -72,6 +73,7 @@ export function App({
               <Route path="workspaces/:workspaceId" element={<WorkspacePage />} />
               <Route path="workspaces/:workspaceId/search" element={<SearchPage />} />
               <Route path="workspaces/:workspaceId/channels/:channelId" element={<ChannelPage />} />
+              <Route path="workspaces/:workspaceId/dms/:dmId" element={<DmPage />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/workspaces" replace />} />

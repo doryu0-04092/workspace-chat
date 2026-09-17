@@ -26,6 +26,9 @@ describe('createApp の設定の検証', () => {
     ['S3_REGION', ''],
     ['S3_ENDPOINT', 'http://127.0.0.1:9000/'],
     ['S3_FORCE_PATH_STYLE', 'yes'],
+    ['S3_UPLOAD_ROLE_ARN', ''],
+    ['CLOUDFRONT_KEY_PAIR_ID', 'lowercase'],
+    ['CLOUDFRONT_PRIVATE_KEY', 'not-a-key'],
   ];
 
   it('不正な値の表は、起動の設定のすべてを持つ', () => {
