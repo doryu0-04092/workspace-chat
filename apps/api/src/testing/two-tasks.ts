@@ -7,12 +7,18 @@ import type { Socket } from 'socket.io-client';
 import type { StartedTestContainer } from 'testcontainers';
 import { expect, vi } from 'vitest';
 import { createApp } from '../app-setup';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { hashSecret } from '../auth/secret-hash';
 import { PrismaService } from '../prisma.service';
 import { stubApiEnv } from './api-env';
 import { startMigratedPostgres } from './postgres';
 import { connectRealtime } from './realtime-client';
 import { startValkey } from './valkey';
+
+/** タスク間の経路が繋がるのを待つ上限（#618。手元でも CI でも数ミリ秒で繋がる。繋がらなければ検査を始めない）。 */
+const CROSS_TASK_LINK_TIMEOUT_MS = 20_000;
+/** 1回の試しで答えを待つ時間（#618）。 */
+const CROSS_TASK_LINK_ATTEMPT_MS = 1_000;
 
 /**
  * タスクを2つに見立てた api（同じ PostgreSQL と Valkey を使う）と、利用者・ワークスペース・チャンネルを用意する部品。
@@ -75,6 +81,10 @@ export async function startTwoTasks(
   const second = await createApp({ logger });
   const firstBase = await listen(first);
   const secondBase = await listen(second);
+  // **踏むと壊れる: 検査を始める前に、タスク間の経路が繋がるのを待つ。** アダプタ（Valkey）の購読は接続の後に済むため、
+  // 待たずに始めると、最初のうちに送った在席の通知・部屋から外す処理・@here の宛先の問い合わせが相手に届かず、
+  // そのファイルの検査がまとめて落ちる（#618。CI で在席の検査が同じ組み合わせで落ちていた）。
+  await waitForCrossTaskLink(first, second);
   const prisma = first.get(PrismaService);
   const opened: Socket[] = [];
   let sequence = 0;
@@ -176,4 +186,33 @@ export async function startTwoTasks(
       vi.unstubAllEnvs();
     },
   };
+}
+
+/**
+ * タスク間の経路（Socket.IO のアダプタ）が繋がるまで待つ（#618）。片方から `serverSideEmit` を送り、もう片方が答えるまで試す。
+ * **答えが返ることだけを見る**——購読が済んでいなければ、送っても誰も答えない。
+ */
+async function waitForCrossTaskLink(
+  first: INestApplication,
+  second: INestApplication,
+): Promise<void> {
+  const event = 'two-tasks-link' as never;
+  const firstServer = first.get(RealtimeGateway).server;
+  second.get(RealtimeGateway).server.on(event, ((ack: (value: string) => void) => {
+    ack('second');
+  }) as never);
+  const deadline = Date.now() + CROSS_TASK_LINK_TIMEOUT_MS;
+  for (;;) {
+    const answered = await new Promise<string[]>((resolve) => {
+      const timer = setTimeout(() => resolve([]), CROSS_TASK_LINK_ATTEMPT_MS);
+      firstServer.serverSideEmit(event, ((error: unknown, responses: string[]) => {
+        clearTimeout(timer);
+        resolve(error ? [] : responses);
+      }) as never);
+    });
+    if (answered.length > 0) return;
+    if (Date.now() > deadline) {
+      throw new Error('タスク間の経路が繋がらないまま、検査を始めようとした（#618）');
+    }
+  }
 }
