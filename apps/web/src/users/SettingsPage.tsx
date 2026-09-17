@@ -1,4 +1,5 @@
 import { errorMessage } from '../api/client';
+import { BrowserNotificationSetting } from '../notifications/BrowserNotificationSetting';
 import { useUpdateUserSettings, useUserSettings } from './queries';
 
 /** 利用者ごとの設定の画面（F-23。機能一覧 10.1）。**プロフィールとは別の画面である**。 */
@@ -30,6 +31,7 @@ export function SettingsPage() {
           設定を変えられませんでした。{errorMessage(update.error)}
         </p>
       )}
+      <BrowserNotificationSetting />
     </main>
   );
 }
