@@ -1,9 +1,10 @@
 import { type FormEvent, useId, useState } from 'react';
 import { errorMessage } from '../api/client';
+import { useTypingNotifier } from '../realtime/use-typing';
 import { MentionInput } from './MentionInput';
 import { usePostMessage } from './queries';
 
-/** チャンネルへの投稿（F-11）。 */
+/** チャンネルへの投稿（F-11）。入力中の知らせ（F-34）を送る。 */
 export function PostMessageForm({
   workspaceId,
   channelId,
@@ -12,8 +13,10 @@ export function PostMessageForm({
   channelId: string;
 }) {
   const post = usePostMessage(workspaceId, channelId);
+  const notifyTyping = useTypingNotifier(channelId);
   return (
     <MessageForm
+      onBodyChange={notifyTyping}
       submit={post.mutate}
       pending={post.isPending}
       error={post.error}
@@ -36,7 +39,7 @@ export function PostMessageForm({
  * - 入力欄はメンションを補完する（F-20。`MentionInput`。候補はそのチャンネルの参加者）
  *
  * 通ったら、既定では入力を空にする（投稿・返信）。`onSubmitted` を渡すと通った後に呼ぶ（編集は欄を閉じる）。
- * `onCancel` を渡すと「取り消す」を出す。
+ * `onCancel` を渡すと「取り消す」を出す。`onBodyChange` を渡すと、本文が変わるたび（通って空にしたときを含む）にいまの本文を渡す。
  */
 export function MessageForm({
   submit,
@@ -51,6 +54,7 @@ export function MessageForm({
   clearOnSuccess = true,
   onSubmitted,
   onCancel,
+  onBodyChange,
   className = 'mt-4 flex flex-col gap-2',
 }: {
   submit: (body: string, options: { onSuccess: () => void }) => void;
@@ -65,11 +69,16 @@ export function MessageForm({
   clearOnSuccess?: boolean;
   onSubmitted?: () => void;
   onCancel?: () => void;
+  onBodyChange?: (body: string) => void;
   className?: string;
 }) {
   // 投稿・スレッドの返信・編集のフォームが同じ画面に並ぶため、入力欄の id を固定しない
   const id = useId();
-  const [body, setBody] = useState(initialBody);
+  const [body, setBodyState] = useState(initialBody);
+  const setBody = (value: string) => {
+    setBodyState(value);
+    onBodyChange?.(value);
+  };
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
