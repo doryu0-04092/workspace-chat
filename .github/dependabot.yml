@@ -102,6 +102,13 @@ updates:
 #           postgres.ts の PullPolicy.alwaysPull()
 #     強さ: **npm test か api-image.test.sh を流せば届く**
 #
+#   quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z（compose.yaml の minio と、apps/api/src/testing/minio.ts の MINIO_IMAGE。**同じタグ**）
+#     経路: docker compose pull minio
+#           minio.ts の PullPolicy.alwaysPull()
+#     強さ: **npm test を流せば届く。** 手元でテストを回さない人には、compose pull だけが経路になる。
+#     **ただし、このタグは版を名前に含むため、取り直しても同じ版のままである。** Docker Hub の minio/minio は取れず（2026-09-17 に 404）、
+#     quay.io にもこの後の `.hotfix.` の付かない版は無い（同日に確かめた）。手元とテストの代わりの S3 であり、本番には入らない
+#
 # **代償**: テストの土台は起動のたびにレジストリへ問い合わせるため npm test が遅くなり、
 # レジストリが不調だとテストごと落ちる（#517 の CI で実際に起きた）。各 docblock にも書いてある。
 #
