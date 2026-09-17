@@ -406,6 +406,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 検索（F-30・F-31）
+         * @description 1回の要求で、種別ごとのセクション（メッセージ・チャンネル・ユーザー）を返す（機能一覧 12.1）。 q は空白で区切った語と、絞り込み演算子 `from:@ユーザーID`・`in:#チャンネル名` からなる。語はすべてを含むものに当たる（大文字小文字を区別する。 チャンネルとユーザーは区別しない）。演算子はメッセージだけを絞り、同じ演算子を2回書いたら後のものを使う。 メッセージは、要求した利用者が参加しているチャンネルの、削除されていないもの（返信を含む。アーカイブ済みのチャンネルのものを含む）だけを、新しい順に最大20件返す。 オーナーの例外は及ばない（参加していないプライベートチャンネルのメッセージは返さない。機能一覧 3.1）。 `from:` は退会した利用者も指せる（過去のメッセージは残る。機能一覧 1.5）。 チャンネルは、パブリックでアーカイブされていないものと、参加しているもの（アーカイブ済みを含む）を名前の順に最大20件。 ユーザーは、そのワークスペースのメンバーで退会していない利用者を、ユーザーID か表示名で当て、ユーザーID の小文字の順に最大20人。 所属していなければ、存在の有無を区別せず 404。`in:` のチャンネルはコードが2段階で決まる: 無いチャンネル・参加していないプライベートは 404、 参加していないパブリックは 403 not_a_channel_member。利用者単位で1分に60回まで
+         */
+        get: operations["search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{id}/channels/{channelId}/mention-candidates": {
         parameters: {
             query?: never;
@@ -1002,6 +1025,43 @@ export interface components {
              * @description 続きを取るときに before に渡す id。続きが無ければ null
              */
             nextBefore: string | null;
+        };
+        /** @description 検索の結果（機能一覧 12.1）。種別ごとのセクションを持つ。DM（F-19）とファイル（F-27）のセクションは、それぞれの実装で足す */
+        SearchResult: {
+            /** @description 新しい順。最大20件 */
+            messages: components["schemas"]["SearchMessage"][];
+            /** @description 名前の順。最大20件 */
+            channels: components["schemas"]["SearchChannel"][];
+            /** @description ユーザーID の小文字の順。最大20人 */
+            users: components["schemas"]["UserSummary"][];
+        };
+        /** @description 検索に当たったメッセージ。本文は削除されていないものだけが当たるため、常にある */
+        SearchMessage: {
+            /** Format: uuid */
+            id: string;
+            channel: components["schemas"]["SearchChannel"];
+            /**
+             * Format: uuid
+             * @description スレッドの返信なら親の id。チャンネルの本体のメッセージなら null（機能一覧 6）
+             */
+            parentId: string | null;
+            /** @description 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            author: components["schemas"]["UserSummary"] | null;
+            body: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            editedAt: string | null;
+        };
+        /** @description 検索に当たったチャンネルと、メッセージが属するチャンネル */
+        SearchChannel: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            visibility: components["schemas"]["ChannelVisibility"];
+            archived: boolean;
+            /** @description 要求した利用者がこのチャンネルに参加しているか（メッセージのチャンネルは常に true） */
+            joined: boolean;
         };
         /** @description 一般の一覧（参加者向け）のチャンネル */
         Channel: {
@@ -1922,6 +1982,47 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    search: {
+        parameters: {
+            query: {
+                /** @description 検索の文字列。1〜200 文字（コードポイント）で、空白だけは不可 */
+                q: string;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 種別ごとの結果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `in:` のパブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };
