@@ -115,6 +115,16 @@ export type MessageDeletedPayload = {
 };
 
 /**
+ * `reaction:changed` の payload（F-18。機能一覧 7・5.2）。チャンネルの部屋へ送る。
+ * **付け外しの後の、そのメッセージのリアクションの全体**（REST の MessageReactions と同じ項目）を載せる——差分にしないのは、
+ * 受け取る側が自分の付けたかどうかを `users` から決められ、届いた順が前後しても次の配信で揃うためである。
+ * **閲覧者ごとの値（自分が付けたか）は載せない**（部屋の全員に同じ payload を送る）。`sentAt` はサーバーが送った時刻（ISO 8601）。
+ */
+export type ReactionChangedPayload = components['schemas']['MessageReactions'] & {
+  readonly sentAt: string;
+};
+
+/**
  * `unread:updated` の payload（F-23。機能一覧 10.1・5.2）。**その未読の持ち主の利用者の部屋へだけ送る**——
  * チャンネルの部屋へは配らない（未読数はその人のものであり、他の参加者に配ると人数分の未読が全員に届く）。
  * 送るときに、持ち主がいまもそのチャンネルの参加者であることを呼ぶ側が確かめる（5.2）。

@@ -53,6 +53,17 @@ export function markDeleted<M extends { id: string; body: string | null; deleted
   return mapMessages(data, (m) => (m.id === messageId ? { ...m, body: null, deleted: true } : m));
 }
 
+/**
+ * 1つのメッセージのリアクションを置き換える（F-18。機能一覧 7）。付け外しの応答と `reaction:changed` の両方がこれで当てる——
+ * どちらもそのメッセージのリアクションの全体を持ち、要求と配信で当て方を分けない。
+ */
+export function replaceReactions(
+  data: MessagePages | undefined,
+  { messageId, reactions }: Pick<Schemas['MessageReactions'], 'messageId' | 'reactions'>,
+): MessagePages | undefined {
+  return mapMessages(data, (m) => (m.id === messageId ? { ...m, reactions } : m));
+}
+
 function mapMessages<M>(
   data: Pages<M> | undefined,
   change: (message: M) => M,

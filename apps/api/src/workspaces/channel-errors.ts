@@ -56,3 +56,9 @@ export const CHANNEL_INVITEE_NOT_FOUND: ErrorResponse = {
   code: 'invitee_not_found',
   message: 'その利用者はこのワークスペースのメンバーではありません',
 };
+
+/** そのメッセージに付いている絵文字の種類が上限に達していて、新しい絵文字を付けようとした（409。F-18。機能一覧 7。上限は reactions.ts の `REACTION_KINDS_LIMIT`）。 */
+export const REACTION_LIMIT_REACHED: ErrorResponse = {
+  code: 'reaction_limit_reached',
+  message: 'このメッセージに付けられる絵文字の種類の上限に達しています',
+};

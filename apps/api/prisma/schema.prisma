@@ -1,15 +1,15 @@
 // Prisma のスキーマ。
 //
 // このファイルが定義するのは **認証・ワークスペース・チャンネルの土台と、チャンネルのメッセージとスレッドとメンションの対象と、本文の検索の索引**である。
-// リアクション・添付は別のイシューで扱う。
+// 添付は別のイシューで扱う。
 //
 // ============================================================================
-// このファイルを直す人へ: **Prisma の記法で書けない制約が8つある**
+// このファイルを直す人へ: **Prisma の記法で書けない制約が9つある**
 // ============================================================================
 //
 // 部分一意索引（`WHERE` 付き）・式に対する索引（`lower(...)`）・検査制約（CHECK）は
 // Prisma のスキーマ言語に無い。
-// **マイグレーションの SQL に直接書いてある。** 具体的には次の8つ。
+// **マイグレーションの SQL に直接書いてある。** 具体的には次の9つ。
 //
 //   1. `User_userId_lower_key`                 … ユーザーID の一意性は大文字小文字を区別しない
 //   2. `Membership_single_owner_per_workspace` … 1ワークスペースにオーナーは1人
@@ -19,12 +19,13 @@
 //   6. `Message_replyCount_check`              … 返信件数は負にならない
 //   7. `Dm_participants_check`                 … DM の当事者は小さい User.id が先で、自分自身ではない
 //   8. `DmMessage_body_check`                  … DM の本文も 1〜4000 文字で、空白だけではない
+//   9. `MessageReactionCount_count_check`      … リアクションの件数は 1 以上（0 になった絵文字の行は消す）
 //
-// **このファイルだけを見ても、この8つは見えない。** モデルを増減させるときは
-// `prisma/migrations/` の SQL も併せて読むこと。8つとも
+// **このファイルだけを見ても、この9つは見えない。** モデルを増減させるときは
+// `prisma/migrations/` の SQL も併せて読むこと。9つとも
 // `apps/api/src/prisma-schema.test.ts` が実際の PostgreSQL に対して検証している。
 //
-// 代償: 上の8つは `prisma migrate dev` の自動生成では復元されない。
+// 代償: 上の9つは `prisma migrate dev` の自動生成では復元されない。
 // スキーマを作り直すときは手で書き足す必要がある。
 // 採らなかった側（制約をアプリ側の実装だけで守る）の代償は、
 // **片方だけ実行された状態を DB が受け入れてしまう**ことである。
@@ -290,6 +291,7 @@ model User {
   dmsAsLow            Dm[]             @relation("DmLowUser")
   dmsAsHigh           Dm[]             @relation("DmHighUser")
   dmMessages          DmMessage[]
+  reactions           MessageReaction[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -762,6 +764,8 @@ model Message {
   parent   Message?         @relation("Thread", fields: [parentId, channelId], references: [id, channelId], onDelete: NoAction)
   replies  Message[]        @relation("Thread")
   mentions MessageMention[]
+  reactions      MessageReaction[]
+  reactionCounts MessageReactionCount[]
 
   /// 既読位置（F-23）から指される向き。**参照するだけで、このメッセージの側からは読まない。**
   /// Prisma が双方向の関連を要求するために置いている（3本とも `ChannelRead` / `ThreadRead` の側が持ち主である）。
@@ -815,6 +819,50 @@ model MessageMention {
   /// 1組に1行だから `COUNT(m."id")` の値が変わらない。**この制約を外す・別の組に変えると、同じ組の行が2つあるメッセージを
   /// 未読に2件と数える**——メンションの件数だけでなく、**未読数まで実体より多くなる**。
   @@unique([messageId, userId])
+}
+
+/// リアクション（F-18。機能一覧 7）。**誰がどの絵文字を付けたか**の1件。件数は `MessageReactionCount` に持つ。
+/// 絵文字は Unicode の RGI_Emoji に当たる列1つ（アプリ側で確かめる。`User.statusEmoji` と同じ理由で列の長さでは縛らない）。
+/// **削除済みのメッセージの行も消さない**（削除は論理削除。応答で返さないだけである）。
+model MessageReaction {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。付けた順にも使う。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @db.Uuid
+
+  /// 付けた利用者（`User.id`）。**`ChannelMember` を参照しない**——参照すると、チャンネルを抜けたときに行だけが連鎖で消え、
+  /// カウンタ列（`MessageReactionCount.count`）と食い違う。
+  userId String @db.Uuid
+
+  emoji String
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  /// 利用者は論理削除で行が残る（機能一覧 1.5）。
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// **同じ人が同じ絵文字を二重に付けられない**（機能一覧 7）。メッセージの行を引く向きにも効く。
+  @@unique([messageId, userId, emoji])
+}
+
+/// リアクションの件数（カウンタ列。F-18。要件定義書 4.1「リアクション数はカウンタ列として保持し、本体の更新と同一トランザクションで増減させる」）。
+/// **一覧で `COUNT` を発行しない**ためにある。メッセージと絵文字の組で1行。**件数は 1 以上**で、0 になったら行を消す
+/// （検査制約 `MessageReactionCount_count_check`。マイグレーションに置く）。
+///
+/// **踏むと壊れる: `MessageReaction` の行を足す・消す経路は、同じトランザクションでここを増減させる**（`reactions.service.ts`）。
+/// 増減はメッセージの行を `FOR UPDATE` で掴んでから行う——同じメッセージの付け外しを直列にし、件数の読み書きと種類の上限の判定を食い違わせない。
+model MessageReactionCount {
+  /// UUIDv7 の代理キー。**その絵文字を初めて付けた順**（応答の並び）にも使う。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @db.Uuid
+
+  emoji String
+
+  count Int
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, emoji])
 }
 
 // ============================================================================

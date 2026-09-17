@@ -908,6 +908,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/channels/{channelId}/messages/{messageId}/reactions/{emoji}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+                /** @description リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。 絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる */
+                emoji: components["parameters"]["Emoji"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * メッセージにリアクションを付ける（F-18）
+         * @description 同じ絵文字を二重に付けない——既に付けていれば何も変えずに 200 を返す（機能一覧 7）。 判定の順: 絵文字1つでなければ 400 validation_failed → 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・ プライベートは 404（オーナーでも同じ）→ そのチャンネルに無い・削除済みのメッセージは 404 → アーカイブ済みのチャンネルは 409 channel_archived → そのメッセージに付いている絵文字が 50 種類に達していて、新しい絵文字なら 409 reaction_limit_reached（実装時に決めた値）。 スレッドの返信にも付けられる。件数はカウンタ列に持ち、付けるのと同じトランザクションで増やす（要件定義書 4.1）。 変わったら、そのメッセージのリアクションを reaction:changed としてチャンネルの部屋へ配る（機能一覧 5.2）。 利用者ごとに1分 60 回まで（外すのとは別枠。実装時に決めた値）
+         */
+        put: operations["addReaction"];
+        post?: never;
+        /**
+         * メッセージから自分のリアクションを外す（F-18）
+         * @description 自分が付けたものだけを外す。付けていなければ何も変えずに 200 を返す。判定の順は付けるのと同じ（種類の上限を除く）。 件数は外すのと同じトランザクションで減らし、0 になった絵文字は返さない。 変わったら、そのメッセージのリアクションを reaction:changed としてチャンネルの部屋へ配る（機能一覧 5.2）。 利用者ごとに1分 60 回まで（付けるのとは別枠。実装時に決めた値）
+         */
+        delete: operations["removeReaction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invitations": {
         parameters: {
             query?: never;
@@ -983,7 +1016,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "password_mismatch" | "owner_cannot_delete_account" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "dm_with_self" | "dm_counterpart_not_found" | "dm_counterpart_unavailable" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "password_mismatch" | "owner_cannot_delete_account" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "dm_with_self" | "dm_counterpart_not_found" | "dm_counterpart_unavailable" | "reaction_limit_reached" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -1164,6 +1197,26 @@ export interface components {
             deleted: boolean;
             /** @description 本文のメンションの対象（機能一覧 9.1）。投稿・返信のときに、そのチャンネルの参加者で退会していない利用者へ解決できた `@ユーザーID` を保存し、本文に最初に現れた順に1人1件で載せる。編集では、本文にユーザーID が残っている対象は解決し直さずに残す （チャンネルを抜けた・退会した対象も残り、退会した対象は user が null）。本文から消えた対象は外し、新しく書いた `@` は投稿と同じく解決して足す。 削除済みのメッセージは空 */
             mentions: components["schemas"]["MessageMention"][];
+            /** @description リアクション（機能一覧 7）。絵文字ごとに1件で、その絵文字を初めて付けた順。削除済みのメッセージは空 （本文を返さないのと同じく返さない。付けた記録は DB に残る） */
+            reactions: components["schemas"]["Reaction"][];
+        };
+        /** @description 1つの絵文字のリアクション（機能一覧 7） */
+        Reaction: {
+            /** @description 絵文字1つ */
+            emoji: string;
+            /** @description 付けた人数（カウンタ列。一覧で COUNT を発行しない。要件定義書 4.1）。退会した利用者の分も数える */
+            count: number;
+            /** @description 付けた人（「誰が付けたか」をホバーで出す。機能一覧 7）。付けた順。退会した利用者は含めない （そのため count より少ないことがある） */
+            users: components["schemas"]["UserSummary"][];
+        };
+        /** @description 1つのメッセージのリアクション（付け外しの応答。reaction:changed の payload も同じ項目に送信時刻を足す） */
+        MessageReactions: {
+            /** Format: uuid */
+            channelId: string;
+            /** Format: uuid */
+            messageId: string;
+            /** @description Message.reactions と同じ */
+            reactions: components["schemas"]["Reaction"][];
         };
         /** @description メンションの対象（表示時の参照先。機能一覧 9.1 の経路2。対象がいまそのチャンネルの参加者かは問わない） */
         MessageMention: {
@@ -1495,6 +1548,8 @@ export interface components {
         MessageId: string;
         /** @description DM の id。形が uuid でなければ 400 */
         DmId: string;
+        /** @description リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。 絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる */
+        Emoji: string;
         /** @description 招待の id。形が uuid でなければ 400 */
         InvitationId: string;
         /** @description 通知の id。形が uuid でなければ 400 */
@@ -3362,6 +3417,112 @@ export interface operations {
             405: components["responses"]["MethodNotAllowed"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    addReaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+                /** @description リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。 絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる */
+                emoji: components["parameters"]["Emoji"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 付けた後の、そのメッセージのリアクション */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageReactions"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived）か、絵文字の種類の上限（reaction_limit_reached） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    removeReaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description チャンネルの id。形が uuid でなければ 400 */
+                channelId: components["parameters"]["ChannelId"];
+                /** @description メッセージの id。形が uuid でなければ 400 */
+                messageId: components["parameters"]["MessageId"];
+                /** @description リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。 絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる */
+                emoji: components["parameters"]["Emoji"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 外した後の、そのメッセージのリアクション */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageReactions"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description アーカイブ済みのチャンネル（channel_archived） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };

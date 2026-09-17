@@ -5,6 +5,7 @@ import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
 import { EditMessageForm, MessageActions } from './MessageActions';
 import { MessageBody } from './MessageBody';
+import { MessageReactions } from './MessageReactions';
 import { useMessageChannel } from './message-channel';
 import { type Message, useMessages } from './queries';
 
@@ -267,6 +268,7 @@ export function MessageItem({
         ) : null
       }
     >
+      <MessageReactions message={message} />
       {ownScope && !editing && (
         <MessageActions scope={ownScope} message={message} onEdit={() => setEditing(true)} />
       )}

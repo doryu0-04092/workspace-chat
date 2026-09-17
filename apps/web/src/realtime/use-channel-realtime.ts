@@ -6,6 +6,7 @@ import {
   type MessageNewPayload,
   type MessageUpdatedPayload,
   REALTIME_REQUESTS,
+  type ReactionChangedPayload,
   type RealtimeEventName,
 } from '@workspace-chat/shared';
 import { useEffect, useState } from 'react';
@@ -18,12 +19,14 @@ import {
   type MessagePages,
   messagesKey,
   replaceMessage,
+  replaceReactions,
 } from '../messages/queries';
 import { useRealtime } from './realtime-context';
 
 const MESSAGE_NEW = 'message:new' satisfies RealtimeEventName;
 const MESSAGE_UPDATED = 'message:updated' satisfies RealtimeEventName;
 const MESSAGE_DELETED = 'message:deleted' satisfies RealtimeEventName;
+const REACTION_CHANGED = 'reaction:changed' satisfies RealtimeEventName;
 
 /** 入室要求が上限（429）で断られたとき、送り直すまで待つ時間。api の入室の上限の窓（1分）と同じ。 */
 export const ENTER_RETRY_DELAY_MS = 60_000;
@@ -37,6 +40,7 @@ export const ENTER_RETRY_DELAY_MS = 60_000;
  * - チャンネルを離れたら、繋がっていれば退室要求を送る（9.2）
  * - `message:new` / `message:updated` / `message:deleted` を、このチャンネルの一覧と、読み込んであるスレッドの返信のキャッシュに反映する
  *   （技術スタックの「データ取得」。機能一覧 6）。`message:new` は同じ id を2行にしない（自分の投稿は、投稿の応答と配信の両方で届く）
+ * - `reaction:changed` を、削除と同じく、このチャンネルの一覧と読み込んであるスレッドの返信のキャッシュのすべてに当てる（F-18。配信は親を持たない）
  */
 export function useChannelRealtime(workspaceId: string, channelId: string): Failure | null {
   const { socket } = useRealtime();
@@ -92,10 +96,19 @@ export function useChannelRealtime(workspaceId: string, channelId: string): Fail
       }
     };
 
+    const onReaction = (payload: ReactionChangedPayload) => {
+      if (payload.channelId === channelId) {
+        queryClient.setQueriesData<MessagePages>({ queryKey: key }, (data) =>
+          replaceReactions(data, payload),
+        );
+      }
+    };
+
     socket.on('connect', enter);
     socket.on(MESSAGE_NEW, onNew);
     socket.on(MESSAGE_UPDATED, onUpdated);
     socket.on(MESSAGE_DELETED, onDeleted);
+    socket.on(REACTION_CHANGED, onReaction);
     if (socket.connected) enter();
     return () => {
       active = false;
@@ -104,6 +117,7 @@ export function useChannelRealtime(workspaceId: string, channelId: string): Fail
       socket.off(MESSAGE_NEW, onNew);
       socket.off(MESSAGE_UPDATED, onUpdated);
       socket.off(MESSAGE_DELETED, onDeleted);
+      socket.off(REACTION_CHANGED, onReaction);
       if (socket.connected) socket.emit(REALTIME_REQUESTS.channelExit, room);
     };
   }, [socket, queryClient, workspaceId, channelId]);

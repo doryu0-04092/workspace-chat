@@ -17,6 +17,8 @@ import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
 import { SearchController } from './search.controller';
 import { SearchService } from './search.service';
+import { ReactionsController } from './reactions.controller';
+import { ReactionsService } from './reactions.service';
 import { WorkspacesController } from './workspaces.controller';
 import { WorkspacesService } from './workspaces.service';
 
@@ -37,6 +39,7 @@ import { WorkspacesService } from './workspaces.service';
     MessagesController,
     DmsController,
     SearchController,
+    ReactionsController,
   ],
   providers: [
     WorkspacesService,
@@ -49,6 +52,7 @@ import { WorkspacesService } from './workspaces.service';
     MessagesService,
     DmsService,
     SearchService,
+    ReactionsService,
   ],
 })
 export class WorkspacesModule {}

@@ -20,6 +20,7 @@ import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
+import { type Reaction, reactionsOf } from './reactions';
 import { advanceReadPosition, announceUnreadTo, announceUnreadToMembers } from './unread';
 import { WorkspacesService } from './workspaces.service';
 
@@ -29,6 +30,12 @@ export type Message = MessagesPath['post']['responses'][201]['content']['applica
 export type MessagePage = MessagesPath['get']['responses'][200]['content']['application/json'];
 
 type PageQuery = { before?: string; limit?: string | number };
+
+/** 行を応答のメッセージにするときに読む表（参加者・メンションの対象・リアクション）。 */
+type MessageReadDb = Pick<
+  PrismaService,
+  '$queryRaw' | 'messageMention' | 'messageReaction' | 'messageReactionCount'
+>;
 
 /** 親に載せる返信の参加者の上限（機能一覧 6。実装時に決めた値）。 */
 const REPLY_PARTICIPANT_LIMIT = 3;
@@ -158,6 +165,7 @@ function toMessage(
   row: MessageRow,
   replyParticipants: UserSummary[],
   mentions: MentionTarget[],
+  reactions: Reaction[],
 ): Message {
   const deleted = row.deletedAt !== null;
   return {
@@ -172,6 +180,7 @@ function toMessage(
     replyCount: row.replyCount,
     replyParticipants,
     mentions,
+    reactions,
   };
 }
 
@@ -257,13 +266,10 @@ async function mentionsOf(
 
 /**
  * 行を応答のメッセージにする。返信のある本体のメッセージにだけ参加者を、本文に `@` のある削除されていないメッセージにだけメンションの対象を、引いて載せる
- * （**削除済みのメッセージは、本文を返さないのと同じく、誰を指したかも返さない**。機能一覧 9.1）。
- * **トランザクションの中でも呼ぶため、2つの問い合わせは順に出す**（同じ接続で並べない）。
+ * （**削除済みのメッセージは、本文を返さないのと同じく、誰を指したかも、リアクションも返さない**。機能一覧 9.1・7）。
+ * **トランザクションの中でも呼ぶため、問い合わせは順に出す**（同じ接続で並べない）。
  */
-export async function toMessages(
-  db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
-  rows: MessageRow[],
-): Promise<Message[]> {
+export async function toMessages(db: MessageReadDb, rows: MessageRow[]): Promise<Message[]> {
   const participants = await participantsOf(
     db,
     rows.filter((row) => row.parentId === null && row.replyCount > 0),
@@ -272,8 +278,17 @@ export async function toMessages(
     db,
     rows.filter((row) => row.deletedAt === null && mentionedLoginIds(row.body).length > 0),
   );
+  const reactions = await reactionsOf(
+    db,
+    rows.filter((row) => row.deletedAt === null).map(({ id }) => id),
+  );
   return rows.map((row) =>
-    toMessage(row, participants.get(row.id) ?? [], mentions.get(row.id) ?? []),
+    toMessage(
+      row,
+      participants.get(row.id) ?? [],
+      mentions.get(row.id) ?? [],
+      reactions.get(row.id) ?? [],
+    ),
   );
 }
 
@@ -321,7 +336,7 @@ async function assertEditableMessage(
  * 既定値（50）と範囲（1〜100）は仕様の `limit` が持ち、openapi-validation.ts が要求に入れてから届く。
  */
 async function pageOf(
-  db: Pick<PrismaService, 'message' | '$queryRaw' | 'messageMention'>,
+  db: MessageReadDb & Pick<PrismaService, 'message'>,
   where: { channelId: string; parentId: string | null },
   query: PageQuery,
 ): Promise<MessagePage> {
@@ -338,10 +353,7 @@ async function pageOf(
 }
 
 /** 1件の行を応答のメッセージにする（`toMessages` と同じく、返信のある本体のメッセージには参加者を載せる）。 */
-async function messageOf(
-  db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
-  row: MessageRow,
-): Promise<Message> {
+async function messageOf(db: MessageReadDb, row: MessageRow): Promise<Message> {
   const [message] = await toMessages(db, [row]);
   if (!message) throw new Error('1件の行から応答のメッセージを作れなかった');
   return message;
