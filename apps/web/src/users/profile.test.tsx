@@ -142,3 +142,131 @@ describe('プロフィールの編集（F-04）', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('読み込めませんでした');
   });
 });
+
+// **応答を待つ間にログインが替わったら、前の利用者の応答を、いまのログインの読み込みの記憶に当てない**（#558 第0巡の 🔴1）。
+// 読み込みの鍵は利用者を含まない（App.tsx の「踏むと壊れる」）ため、当てると次の利用者の画面に前の利用者の値が出る。
+describe('保存の応答を待つ間にログインが替わったとき', () => {
+  const BOB_PROFILE = {
+    id: '01920000-0000-7000-8000-000000000002',
+    userId: 'bob',
+    displayName: 'ボブ',
+    avatarUrl: null,
+    status: null,
+  };
+
+  /** 呼ぶまで返らない応答。`resolve` で後から返す。 */
+  function deferred() {
+    let resolve: (response: Response) => void = () => {};
+    const promise = new Promise<Response>((done) => {
+      resolve = done;
+    });
+    return { handler: () => promise, resolve };
+  }
+
+  /** トークンで利用者を分け、ボブの2回目からの読み込みは返さない（取り直しを待つ間に、記憶の値が描かれるかを見る）。 */
+  function meByToken() {
+    let bobReads = 0;
+    return (init: RequestInit) => {
+      if (new Headers(init.headers).get('Authorization') === 'Bearer t1') {
+        return json(200, WITH_STATUS);
+      }
+      bobReads += 1;
+      return bobReads === 1 ? json(200, BOB_PROFILE) : new Promise<Response>(() => {});
+    };
+  }
+
+  async function switchToBob(store: {
+    logout: () => Promise<unknown>;
+    login: (u: string, p: string) => Promise<unknown>;
+  }) {
+    await act(async () => {
+      await store.logout();
+    });
+    await act(async () => {
+      await store.login('bob', 'password-1');
+    });
+  }
+
+  const bobRoutes = {
+    'POST /api/auth/logout': () => new Response(null, { status: 204 }),
+    'POST /api/auth/login': () =>
+      json(200, {
+        accessToken: 't2',
+        tokenType: 'Bearer',
+        expiresIn: 900,
+        user: { id: BOB_PROFILE.id, userId: 'bob', displayName: 'ボブ' },
+      }),
+  };
+
+  it('プロフィールの保存の応答が後から届いても、次の利用者のプロフィールと画面の枠の表示名を書き換えない', async () => {
+    const save = deferred();
+    fakeFetch({
+      ...signedIn({
+        'GET /api/users/me': meByToken() as unknown as Handler,
+        'PATCH /api/users/me': save.handler as unknown as Handler,
+        'GET /api/users/me/settings': () => json(200, { threadUnreadIncluded: true }),
+      }),
+      ...bobRoutes,
+    });
+    const { store } = renderApp('/profile');
+    await openProfile();
+    fireEvent.click(screen.getByRole('button', { name: '保存する' }));
+
+    await switchToBob(store);
+    fireEvent.click(await screen.findByRole('link', { name: 'プロフィール' }));
+    await screen.findByDisplayValue('ボブ');
+
+    await act(async () => {
+      save.resolve(json(200, { ...WITH_STATUS, displayName: 'ありす' }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    // 画面を移って戻る（ボブの取り直しは返さないので、記憶の値が描かれる）
+    fireEvent.click(screen.getByRole('link', { name: '設定' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'プロフィール' }));
+
+    expect(await screen.findByDisplayValue('ボブ')).toBeDefined();
+    expect(screen.queryByDisplayValue('ありす')).toBeNull();
+    expect(within(screen.getByRole('banner')).getByText('ボブ')).toBeDefined();
+  });
+
+  it('設定の保存の応答が後から届いても、次の利用者の設定を書き換えない', async () => {
+    const save = deferred();
+    let bobSettingsReads = 0;
+    fakeFetch({
+      ...signedIn({
+        'GET /api/users/me': meByToken() as unknown as Handler,
+        'GET /api/users/me/settings': ((init: RequestInit) => {
+          if (new Headers(init.headers).get('Authorization') === 'Bearer t1') {
+            return json(200, { threadUnreadIncluded: true });
+          }
+          bobSettingsReads += 1;
+          return bobSettingsReads === 1
+            ? json(200, { threadUnreadIncluded: true })
+            : new Promise<Response>(() => {});
+        }) as unknown as Handler,
+        'PATCH /api/users/me/settings': save.handler as unknown as Handler,
+      }),
+      ...bobRoutes,
+    });
+    const { store } = renderApp('/settings');
+    const name = 'スレッドの未読をチャンネルの未読に含める';
+    fireEvent.click(await screen.findByRole('checkbox', { name }));
+
+    await switchToBob(store);
+    fireEvent.click(await screen.findByRole('link', { name: '設定' }));
+    expect(((await screen.findByRole('checkbox', { name })) as HTMLInputElement).checked).toBe(
+      true,
+    );
+
+    await act(async () => {
+      save.resolve(json(200, { threadUnreadIncluded: false }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    fireEvent.click(screen.getByRole('link', { name: 'プロフィール' }));
+    fireEvent.click(await screen.findByRole('link', { name: '設定' }));
+
+    expect(((await screen.findByRole('checkbox', { name })) as HTMLInputElement).checked).toBe(
+      true,
+    );
+  });
+});
