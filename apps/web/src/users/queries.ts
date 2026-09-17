@@ -54,6 +54,25 @@ export function useUpdateProfile() {
   });
 }
 
+/**
+ * 自分のアカウントを削除する（F-36。REST の仕様の deleteMyAccount）。削除できたら、ログインしていない状態にする
+ * （読み込みの記憶は App.tsx がログインの状態の切り替えで捨てる）。
+ *
+ * **踏むと壊れる: 送った時点の利用者がいまもログインしているときだけ切り替える**（応答は利用者の id を持たないため、送った時点で控える。
+ * 待つ間に別の利用者がログインしていたら、その利用者をログアウトさせない。プロフィールの保存と同じ理由）。
+ */
+export function useDeleteAccount() {
+  const store = useSessionStore();
+  return useMutation({
+    mutationFn: (body: Schemas['DeleteAccountRequest']) =>
+      requestJson<void>(store, '/api/users/me/delete', { method: 'POST', body }),
+    onMutate: () => ({ userId: signedInUserId(store) }),
+    onSuccess: (_, __, sent) => {
+      if (sent.userId !== null) store.endDeletedAccount(sent.userId);
+    },
+  });
+}
+
 const SETTINGS_PATH = '/api/users/me/settings';
 
 /** 利用者ごとの設定（F-23。REST の仕様の getMySettings）。**プロフィールとは別の経路である**（機能一覧 10.1）。 */

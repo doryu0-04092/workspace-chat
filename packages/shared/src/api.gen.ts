@@ -172,6 +172,26 @@ export interface paths {
         patch: operations["updateMySettings"];
         trace?: never;
     };
+    "/users/me/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 自分のアカウントの削除（退会。F-36）
+         * @description 本人だけ（アクセストークンの利用者を削除する。他人を指す手段を持たない）。パスワードの再入力で本人であることを確かめる。 パスワードが違えば 403 password_mismatch、ワークスペースのオーナーなら 403 owner_cannot_delete_account（理由のメッセージを返す）。 論理削除であり、同一トランザクションで未使用のリカバリーコードを使用済みにし、所属（Membership。チャンネル参加は連鎖して消える）を消し、 リフレッシュトークンをすべて失効させる。その利用者の WebSocket 接続を切り、refresh_token の Cookie を消す（機能一覧 1.5）。 ユーザーID ごとに、パスワードを連続して誤った回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える）
+         */
+        post: operations["deleteMyAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces": {
         parameters: {
             query?: never;
@@ -378,6 +398,29 @@ export interface paths {
          * @description 自分が参加しているアーカイブ済みのチャンネルだけを、一般の一覧と同じ形で返す（参加者は読めるが、一般の一覧からは外れるため。機能一覧 3.2）。 パブリックでも、参加していなければ含めない。オーナーの例外は及ばない。名前の順。所属していなければ、存在の有無を区別せず 404
          */
         get: operations["listArchivedChannels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 検索（F-30・F-31）
+         * @description 1回の要求で、種別ごとのセクション（メッセージ・チャンネル・ユーザー）を返す（機能一覧 12.1）。 q は空白で区切った語と、絞り込み演算子 `from:@ユーザーID`・`in:#チャンネル名` からなる。語はすべてを含むものに当たる（大文字小文字を区別する。 チャンネルとユーザーは区別しない）。演算子はメッセージだけを絞り、同じ演算子を2回書いたら後のものを使う。 メッセージは、要求した利用者が参加しているチャンネルの、削除されていないもの（返信を含む。アーカイブ済みのチャンネルのものを含む）だけを、新しい順に最大20件返す。 オーナーの例外は及ばない（参加していないプライベートチャンネルのメッセージは返さない。機能一覧 3.1）。 `from:` は退会した利用者も指せる（過去のメッセージは残る。機能一覧 1.5）。 チャンネルは、パブリックでアーカイブされていないものと、参加しているもの（アーカイブ済みを含む）を名前の順に最大20件。 ユーザーは、そのワークスペースのメンバーで退会していない利用者を、ユーザーID か表示名で当て、ユーザーID の小文字の順に最大20人。 所属していなければ、存在の有無を区別せず 404。`in:` のチャンネルはコードが2段階で決まる: 無いチャンネル・参加していないプライベートは 404、 参加していないパブリックは 403 not_a_channel_member。利用者単位で1分に60回まで
+         */
+        get: operations["search"];
         put?: never;
         post?: never;
         delete?: never;
@@ -785,7 +828,7 @@ export interface components {
              * @description エラーの種類。api が返す値はこの列挙だけであり、api と web は生成した型で同じ列挙を使う （綴りを誤ると型検査で落ちる）
              * @enum {string}
              */
-            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "request_rejected" | "internal_error";
+            code: "validation_failed" | "invalid_body" | "not_found" | "method_not_allowed" | "payload_too_large" | "unsupported_media_type" | "too_many_requests" | "user_id_taken" | "registration_disabled" | "invalid_credentials" | "authentication_required" | "invalid_token" | "csrf_rejected" | "owner_only" | "invitee_not_found" | "already_invited" | "already_member" | "owner_cannot_leave" | "password_mismatch" | "owner_cannot_delete_account" | "channel_name_taken" | "not_a_channel_member" | "already_channel_member" | "channel_archived" | "channel_not_private" | "channel_not_archived" | "not_message_author" | "request_rejected" | "internal_error";
             message: string;
             /** @description 入力の検証で落ちた箇所。送られた値は含めない */
             errors?: {
@@ -851,6 +894,10 @@ export interface components {
         UserSettings: {
             /** @description スレッド内の未読を、チャンネルの未読に含めるか（既定は含める）。 切り替えても既読位置は動かさないため、「含めない」→「含める」で過去の未読の返信が未読として現れる（機能一覧 10.1） */
             threadUnreadIncluded: boolean;
+        };
+        DeleteAccountRequest: {
+            /** @description 今のパスワード。1〜128文字（LoginRequest の password と同じ） */
+            password: string;
         };
         UpdateUserSettingsRequest: {
             /** @description 送った項目だけを変える（機能一覧 10.1） */
@@ -978,6 +1025,43 @@ export interface components {
              * @description 続きを取るときに before に渡す id。続きが無ければ null
              */
             nextBefore: string | null;
+        };
+        /** @description 検索の結果（機能一覧 12.1）。種別ごとのセクションを持つ。DM（F-19）とファイル（F-27）のセクションは、それぞれの実装で足す */
+        SearchResult: {
+            /** @description 新しい順。最大20件 */
+            messages: components["schemas"]["SearchMessage"][];
+            /** @description 名前の順。最大20件 */
+            channels: components["schemas"]["SearchChannel"][];
+            /** @description ユーザーID の小文字の順。最大20人 */
+            users: components["schemas"]["UserSummary"][];
+        };
+        /** @description 検索に当たったメッセージ。本文は削除されていないものだけが当たるため、常にある */
+        SearchMessage: {
+            /** Format: uuid */
+            id: string;
+            channel: components["schemas"]["SearchChannel"];
+            /**
+             * Format: uuid
+             * @description スレッドの返信なら親の id。チャンネルの本体のメッセージなら null（機能一覧 6）
+             */
+            parentId: string | null;
+            /** @description 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5） */
+            author: components["schemas"]["UserSummary"] | null;
+            body: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            editedAt: string | null;
+        };
+        /** @description 検索に当たったチャンネルと、メッセージが属するチャンネル */
+        SearchChannel: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            visibility: components["schemas"]["ChannelVisibility"];
+            archived: boolean;
+            /** @description 要求した利用者がこのチャンネルに参加しているか（メッセージのチャンネルは常に true） */
+            joined: boolean;
         };
         /** @description 一般の一覧（参加者向け）のチャンネル */
         Channel: {
@@ -1476,6 +1560,44 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
+    deleteMyAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description 削除した（Cookie を消す） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description パスワードが違う（password_mismatch）か、ワークスペースのオーナーである（owner_cannot_delete_account） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
     listMyWorkspaces: {
         parameters: {
             query?: never;
@@ -1860,6 +1982,47 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    search: {
+        parameters: {
+            query: {
+                /** @description 検索の文字列。1〜200 文字（コードポイント）で、空白だけは不可 */
+                q: string;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 種別ごとの結果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description `in:` のパブリックチャンネルに参加していない（not_a_channel_member） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };

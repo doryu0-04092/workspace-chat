@@ -321,6 +321,17 @@ export function createSessionStore(
     renew,
 
     /**
+     * アカウントを削除した後、ログインしていない状態にする（F-36。機能一覧 1.5）。ログアウトの api は呼ばない——
+     * 削除の応答が Cookie を消し、リフレッシュトークンは api が失効させてある。
+     * **削除した利用者がいまログインしているときだけ切り替える**——応答を待つ間にログアウトして別の利用者がログインしていたら、その利用者をログアウトさせない。
+     */
+    endDeletedAccount(userId: string): void {
+      const current = state.getState();
+      if (current.status !== 'signedIn' || current.user.id !== userId) return;
+      changeLogin({ status: 'signedOut' });
+    },
+
+    /**
      * 自分のプロフィールを変えた後、表示に使う利用者の情報を差し替える（F-04）。ログインは替えない（世代を進めない）。
      * **ログインしている利用者と同じ id のときだけ差し替える**——応答を待つ間にログアウトして別の利用者がログインしていたら、前の利用者の情報を入れない。
      */
