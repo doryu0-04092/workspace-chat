@@ -10,10 +10,13 @@
 # （.dockerignore が .env を文脈から外す）。scripts/api-image.test.sh が、実際に作って動かして確かめる。
 #
 # RDS の CA のバンドル（apps/api/certs/rds-global-bundle.pem → /app/certs/rds-global-bundle.pem。技術スタックの「DB への接続の暗号化」。#424）は、
-# AWS が配る https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem をそのまま置いたもの
-# （2026-09-15 に取得。Last-Modified: Thu, 24 Jul 2025 21:38:09 GMT。sha256 e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3）。
+# AWS が配る https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem の証明書を、並びだけ変えて置いたもの
+# （2026-09-15 に取得。Last-Modified: Thu, 24 Jul 2025 21:38:09 GMT。取得したままのファイルの sha256 は e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3）。
+# 踏むと壊れる: **東京の `Amazon RDS ap-northeast-1 Root CA RSA2048 G1` を先頭に置く**（infra/production/database.tf の db_ca_cert_identifier と対）。
+# Prisma の CLI（マイグレーション）は、渡した PEM の先頭の証明書しか信頼の起点にしない（#600 で確かめた）。取得したままの並び（先頭は sa-east-1）では、
+# 本番のマイグレーションが certificate verify failed で RDS に繋がらない。api の pg と psql はバンドルの全部を読むので、並びに左右されない。
 # 公開の証明書であり秘密ではない。ビルドのたびに取りに行かないのは、AWS が中身を足すたびに同じ Dockerfile から違うイメージができるためである。
-# 入れ替えるときは同じ URL から取り直して置き換え、scripts/api-image.test.sh の 8 を通す。
+# 入れ替えるときは同じ URL から取り直して置き換え、東京の RSA2048 G1 のルートを先頭に移してから、scripts/api-image.test.sh の 8 を通す。
 # 踏むと壊れる: 本番の DATABASE_URL の sslrootcert がこのパスを指す。パスを変えると、api もマイグレーションも RDS に繋がらない。
 
 # glibc の土台にする。argon2 はビルド済みのネイティブモジュールを使い、Alpine（musl）では入れ方が変わる。
