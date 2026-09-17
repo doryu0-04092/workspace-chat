@@ -10,6 +10,7 @@ export type StorageProxy = {
  * （技術スタックの CloudFront の行）。手元には CloudFront が無いため、dev サーバーが MinIO（path style）へ中継する。
  *
  * - `/avatars/*` はパスを剥がさずに `/{バケット}/avatars/...` へ（キーが `avatars/` で始まる。要件定義書 4.3）
+ * - `/files/*` は `/files` を剥がして `/{バケット}/...` へ（本番は CloudFront の viewer-request の関数が剥がす。キーは `workspace/` で始まる）
  *
  * **手元の MinIO は、この接頭辞だけを匿名で読めるようにしている**（compose.yaml の minio。署名付き Cookie の代わり）。
  * 中継はパスを書き換えるだけで、読めるキーの範囲を決めるのは MinIO の匿名の読み取りの範囲である（`quarantine/` は読めない）。
@@ -25,5 +26,10 @@ export function storageProxies({
   if (!endpoint || !bucket) return {};
   return {
     '/avatars': { target: endpoint, changeOrigin: true, rewrite: (path) => `/${bucket}${path}` },
+    '/files': {
+      target: endpoint,
+      changeOrigin: true,
+      rewrite: (path) => `/${bucket}${path.slice('/files'.length)}`,
+    },
   };
 }

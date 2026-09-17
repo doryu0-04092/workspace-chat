@@ -14,7 +14,7 @@ function localStorageProxies() {
   const { S3_ENDPOINT, S3_BUCKET } = process.env;
   if (S3_ENDPOINT === undefined || S3_BUCKET === undefined) {
     console.warn(
-      'S3_ENDPOINT と S3_BUCKET が無いため、/avatars を MinIO へ中継しない（アバターの画像は表示されない）',
+      'S3_ENDPOINT と S3_BUCKET が無いため、/avatars と /files を MinIO へ中継しない（アバターと添付の画像は表示されない）',
     );
     return {};
   }
@@ -51,7 +51,7 @@ export default defineConfig({
         // WebSocket のハンドシェイクも同じ前置きに載るため、ws を有効にする。
         ws: true,
       },
-      // 配信 URL のパス（本番は CloudFront の `/avatars/*`）。手元では MinIO へ中継する。
+      // 配信 URL のパス（本番は CloudFront の `/avatars/*` と `/files/*`）。手元では MinIO へ中継する。
       ...localStorageProxies(),
     },
   },
