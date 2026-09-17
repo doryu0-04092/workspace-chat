@@ -181,6 +181,13 @@ function ChannelMessages({
       <PinnedMessages />
       <div className={threadId ? 'md:grid md:grid-cols-2 md:gap-4' : undefined}>
         <div>
+          {/* 入力欄は一覧の上に置く（最新も上に来るため、下までスクロールしない。#608） */}
+          {!readOnly && (
+            <>
+              <PostMessageForm workspaceId={workspaceId} channelId={channelId} />
+              <TypingIndicator channelId={channelId} />
+            </>
+          )}
           <section aria-label="メッセージの一覧" className="mt-4">
             <MessageList
               workspaceId={workspaceId}
@@ -190,12 +197,6 @@ function ChannelMessages({
               joinedAt={joinedAt}
             />
           </section>
-          {!readOnly && (
-            <>
-              <TypingIndicator channelId={channelId} />
-              <PostMessageForm workspaceId={workspaceId} channelId={channelId} />
-            </>
-          )}
         </div>
         {threadId && (
           <ThreadPanel

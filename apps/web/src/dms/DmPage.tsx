@@ -74,17 +74,7 @@ function DmMessages({ workspaceId, dm }: { workspaceId: string; dm: Dm }) {
 
   return (
     <>
-      <section aria-label="メッセージの一覧" className="mt-4">
-        <PagedMessages
-          pages={messages}
-          labels={DM_LABELS}
-          renderMessage={(message) => (
-            <DmMessageItem workspaceId={workspaceId} dmId={dm.id} message={message} />
-          )}
-          lastReadMessageId={unreadFrom}
-          joinedAt={dm.joinedAt}
-        />
-      </section>
+      {/* 入力欄は一覧の上に置く（最新も上に来るため、下までスクロールしない。#608） */}
       {dm.writable ? (
         <MessageForm
           submit={post.mutate}
@@ -99,6 +89,17 @@ function DmMessages({ workspaceId, dm }: { workspaceId: string; dm: Dm }) {
           相手がこのワークスペースのメンバーではなくなったため、送信できません。
         </p>
       )}
+      <section aria-label="メッセージの一覧" className="mt-4">
+        <PagedMessages
+          pages={messages}
+          labels={DM_LABELS}
+          renderMessage={(message) => (
+            <DmMessageItem workspaceId={workspaceId} dmId={dm.id} message={message} />
+          )}
+          lastReadMessageId={unreadFrom}
+          joinedAt={dm.joinedAt}
+        />
+      </section>
     </>
   );
 }
