@@ -53,6 +53,24 @@ export function useChannels(workspaceId: string) {
   });
 }
 
+function archivedChannelsKey(workspaceId: string) {
+  return ['workspaces', workspaceId, 'archived-channels'] as const;
+}
+
+/**
+ * 自分が参加しているアーカイブ済みのチャンネル（F-35。REST の仕様の listArchivedChannels。機能一覧 3.2「参加者は読める」）。
+ * **`enabled` が false の間は読まない**（一覧を開いたとき・一般の一覧に無いチャンネルを開いたときにだけ読む）。
+ */
+export function useArchivedChannels(workspaceId: string, enabled: boolean) {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: archivedChannelsKey(workspaceId),
+    queryFn: () =>
+      requestJson<Channel[]>(store, `/api/workspaces/${segment(workspaceId)}/archived-channels`),
+    enabled,
+  });
+}
+
 export function useCreateWorkspace() {
   const store = useSessionStore();
   const queryClient = useQueryClient();
@@ -193,7 +211,11 @@ export function useArchiveChannel(workspaceId: string) {
       queryClient.setQueryData<Channel[]>(keys.channels(workspaceId), (channels) =>
         channels?.filter((current) => current.id !== channel.id),
       );
-      return queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
+      // アーカイブ済みの一覧（参加していれば載る）は、未読の値を画面で決められないため取り直す
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: archivedChannelsKey(workspaceId), exact: true }),
+      ]);
     },
   });
 }
@@ -216,6 +238,10 @@ export function useRestoreChannel(workspaceId: string) {
     onSuccess: (channel) => {
       queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
         replaceManaged(channels, channel),
+      );
+      // **アーカイブ済みの一覧からは、取り直しを待たずに外す**（#533 第0巡の 🔴1）
+      queryClient.setQueryData<Channel[]>(archivedChannelsKey(workspaceId), (channels) =>
+        channels?.filter((current) => current.id !== channel.id),
       );
       return queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
     },
