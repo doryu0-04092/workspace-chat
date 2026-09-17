@@ -7,6 +7,7 @@ type Schemas = components['schemas'];
 export type Workspace = Schemas['Workspace'];
 export type Channel = Schemas['Channel'];
 export type WorkspaceMember = Schemas['WorkspaceMember'];
+export type ManagedChannel = Schemas['ManagedChannel'];
 export type UserSummary = Schemas['UserSummary'];
 export type MyInvitation = Schemas['MyInvitation'];
 export type Invitation = Schemas['Invitation'];
@@ -137,6 +138,90 @@ export function useLeaveWorkspace(workspaceId: string) {
   });
 }
 
+function managedChannelsKey(workspaceId: string) {
+  return ['workspaces', workspaceId, 'managed-channels'] as const;
+}
+
+/**
+ * オーナーの管理用のチャンネル一覧（REST の仕様の listManagedChannels。F-35・機能一覧 3.1）。
+ * 参加していないプライベートとアーカイブ済みも含み、項目は id・名前・種別・参加者数・アーカイブ済みかだけ。
+ * **`enabled` が false の間は読まない**（「チャンネルを管理する」を押したときにだけ読む）。
+ */
+export function useManagedChannels(workspaceId: string, enabled: boolean) {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: managedChannelsKey(workspaceId),
+    queryFn: () =>
+      requestJson<ManagedChannel[]>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/managed-channels`,
+      ),
+    enabled,
+  });
+}
+
+/** 管理用の一覧の、同じ id の項目を置き換える。 */
+function replaceManaged(
+  channels: ManagedChannel[] | undefined,
+  channel: ManagedChannel,
+): ManagedChannel[] | undefined {
+  return channels?.map((current) => (current.id === channel.id ? channel : current));
+}
+
+/**
+ * チャンネルをアーカイブする（F-35。オーナーだけ。判定は api）。
+ *
+ * **踏むと壊れる: 通ったら、一般のチャンネル一覧からその場で外す。取り直しの印を付けるだけにしない。**
+ * アーカイブ済みは一般の一覧から外れる（機能一覧 3.2）。印を付けるだけだと、取り直しが返るまでアーカイブしたチャンネルが一覧に残る
+ * （#533 第0巡の 🔴1 と同じ型）。管理用の一覧の項目は応答で置き換える（アーカイブで名前に番号が付く。general → general-1）。
+ * **一般の一覧の取り直しは `exact` で当てる**——鍵の前方にはメッセージと参加者の一覧のキャッシュも入っている。
+ */
+export function useArchiveChannel(workspaceId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (channelId: string) =>
+      requestJson<ManagedChannel>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/archive`,
+        { method: 'POST' },
+      ),
+    onSuccess: (channel) => {
+      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+        replaceManaged(channels, channel),
+      );
+      queryClient.setQueryData<Channel[]>(keys.channels(workspaceId), (channels) =>
+        channels?.filter((current) => current.id !== channel.id),
+      );
+      return queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
+    },
+  });
+}
+
+/**
+ * チャンネルを復元する（F-35。オーナーだけ。名前と番号は外れない）。
+ * 通ったら管理用の一覧の項目を応答で置き換え、一般のチャンネル一覧を取り直す——一般の一覧に戻るか（パブリックか・参加しているか）と
+ * 未読の値は画面では決められないため、足すのではなく読み直す。
+ */
+export function useRestoreChannel(workspaceId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (channelId: string) =>
+      requestJson<ManagedChannel>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/restore`,
+        { method: 'POST' },
+      ),
+    onSuccess: (channel) => {
+      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+        replaceManaged(channels, channel),
+      );
+      return queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
+    },
+  });
+}
+
 function membersKey(workspaceId: string) {
   return ['workspaces', workspaceId, 'members'] as const;
 }
@@ -195,6 +280,12 @@ export function useKickWorkspaceMember(workspaceId: string) {
         { predicate: ({ queryKey }) => isChannelMembersKeyOf(workspaceId, queryKey) },
         (members) => members?.filter((member) => member.id !== memberId),
       );
+      // 管理用の一覧の人数（F-35）は、外した相手がどのチャンネルに居たかを画面が知らないため、その場では直せない。
+      // **取り直す**——開いていれば即座に返り、閉じていれば次に開いたとき読む。鍵の前方には一般の一覧が入らないが、`exact` で揃える
+      return queryClient.invalidateQueries({
+        queryKey: managedChannelsKey(workspaceId),
+        exact: true,
+      });
     },
   });
 }
@@ -226,11 +317,20 @@ export function useKickChannelMember(workspaceId: string, channelId: string) {
         `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/members/${segment(memberId)}`,
         { method: 'DELETE' },
       ),
-    onSuccess: (_, memberId) =>
+    onSuccess: (_, memberId) => {
       queryClient.setQueryData<UserSummary[]>(
         channelMembersKey(workspaceId, channelId),
         (members) => members?.filter((member) => member.id !== memberId),
-      ),
+      );
+      // **管理用の一覧のそのチャンネルの人数も、その場で1つ減らす**（F-35。同じ行に参加者の一覧と並べて出しており、食い違ったまま残さない）
+      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+        channels?.map((channel) =>
+          channel.id === channelId
+            ? { ...channel, memberCount: Math.max(0, channel.memberCount - 1) }
+            : channel,
+        ),
+      );
+    },
   });
 }
 
@@ -246,7 +346,12 @@ export function useJoinChannel(workspaceId: string) {
           method: 'POST',
         },
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+    // 管理用の一覧（F-35）の人数も変わる。どのように増えるかは取り直さないと決まらない（退会済みを数えない等は api が持つ）
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: managedChannelsKey(workspaceId), exact: true }),
+      ]),
   });
 }
 
@@ -290,6 +395,11 @@ export function useCreateChannel(workspaceId: string) {
         method: 'POST',
         body,
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+    // 管理用の一覧（F-35）にも行が増える。並び（名前の順）と人数は api が持つので、足すのではなく取り直す
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId) }),
+        queryClient.invalidateQueries({ queryKey: managedChannelsKey(workspaceId), exact: true }),
+      ]),
   });
 }

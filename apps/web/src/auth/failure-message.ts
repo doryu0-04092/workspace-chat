@@ -20,6 +20,8 @@ export function failureMessage(failure: Failure): string {
       return '入力の形が正しくありません。各項目の条件を確かめてください。';
     case 'channel_name_taken':
       return 'このワークスペースには同じ名前のチャンネルがあります。別の名前を選んでください。';
+    case 'channel_not_archived':
+      return 'アーカイブされていないチャンネルです。一覧を開き直してください。';
     case 'channel_archived':
       return 'アーカイブ済みのチャンネルです。';
     case 'not_a_channel_member':
