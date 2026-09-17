@@ -60,10 +60,11 @@ locals {
 
   # サーバー側でも SSL でない接続を断る（技術スタックの「DB への接続の暗号化」）。RDS for PostgreSQL 15 以降の既定は 1 だが、
   # カスタムのパラメータグループに付け替えても外れないよう明示する。
-  # 踏むと壊れる: 下の parameter の apply_method は "pending-reboot" のままにする。値が既定と同じため、AWS から読み戻す
+  # 踏むと壊れる: db_force_ssl_apply は "pending-reboot" のままにする。値が既定と同じため、AWS から読み戻す
   # apply_method は pending-reboot になり、"immediate"（プロバイダーの既定）にすると plan に毎回変更が出る（#602）。
   # 値を既定と違うものに変えるときは、その apply で効かせるか再起動まで待つかを決め直す。
-  db_force_ssl = "1"
+  db_force_ssl       = "1"
+  db_force_ssl_apply = "pending-reboot"
 
   # 自動バックアップは取らない（保持期間 0 日）。決定・2026-09-17・依頼側（#598）: スクール課題の検証用の一時的な本番であり、
   # アカウントの無料プランでは保持期間 7 日を設定できない（RDS の作成が FreeTierRestrictionError で断られた）。
@@ -111,7 +112,7 @@ resource "aws_db_parameter_group" "main" {
   parameter {
     name         = "rds.force_ssl"
     value        = local.db_force_ssl
-    apply_method = "pending-reboot"
+    apply_method = local.db_force_ssl_apply
   }
 }
 
