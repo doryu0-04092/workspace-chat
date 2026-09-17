@@ -39,17 +39,3 @@ export async function addMentionNotifications(
     skipDuplicates: true,
   });
 }
-
-/**
- * 編集で本文から外したメンションの対象の通知を消す（F-26）。**メンションの対象を外すのと同じトランザクションで呼ぶ**。
- * 外した対象の通知を残すと、開いてもメンションの無いメッセージへ案内することになる。
- */
-export async function removeMentionNotifications(
-  tx: NotificationWriter,
-  { messageId, userIds }: { messageId: string; userIds: readonly string[] },
-): Promise<void> {
-  if (userIds.length === 0) return;
-  await tx.notification.deleteMany({
-    where: { messageId, userId: { in: [...userIds] }, kind: 'MENTION' },
-  });
-}
