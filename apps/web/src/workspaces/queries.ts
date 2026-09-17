@@ -53,6 +53,24 @@ export function useChannels(workspaceId: string) {
   });
 }
 
+function archivedChannelsKey(workspaceId: string) {
+  return ['workspaces', workspaceId, 'archived-channels'] as const;
+}
+
+/**
+ * 自分が参加しているアーカイブ済みのチャンネル（F-35。REST の仕様の listArchivedChannels。機能一覧 3.2「参加者は読める」）。
+ * **`enabled` が false の間は読まない**（一覧を開いたとき・一般の一覧に無いチャンネルを開いたときにだけ読む）。
+ */
+export function useArchivedChannels(workspaceId: string, enabled: boolean) {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: archivedChannelsKey(workspaceId),
+    queryFn: () =>
+      requestJson<Channel[]>(store, `/api/workspaces/${segment(workspaceId)}/archived-channels`),
+    enabled,
+  });
+}
+
 export function useCreateWorkspace() {
   const store = useSessionStore();
   const queryClient = useQueryClient();
@@ -195,6 +213,25 @@ function removeFromChannel(
   );
 }
 
+/** チャンネルに1人加わったこと（招待）を、`removeFromChannel` と同じ2つに、取り直しを待たずに当てる。 */
+function addToChannel(
+  queryClient: QueryClient,
+  workspaceId: string,
+  channelId: string,
+  member: UserSummary,
+): void {
+  queryClient.setQueryData<UserSummary[]>(channelMembersKey(workspaceId, channelId), (members) =>
+    members && !members.some((current) => current.id === member.id)
+      ? [...members, member]
+      : members,
+  );
+  queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+    channels?.map((channel) =>
+      channel.id === channelId ? { ...channel, memberCount: channel.memberCount + 1 } : channel,
+    ),
+  );
+}
+
 /**
  * チャンネルをアーカイブする（F-35。オーナーだけ。判定は api）。
  *
@@ -220,7 +257,11 @@ export function useArchiveChannel(workspaceId: string) {
       queryClient.setQueryData<Channel[]>(keys.channels(workspaceId), (channels) =>
         channels?.filter((current) => current.id !== channel.id),
       );
-      return queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
+      // アーカイブ済みの一覧（参加していれば載る）は、未読の値を画面で決められないため取り直す
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true }),
+        queryClient.invalidateQueries({ queryKey: archivedChannelsKey(workspaceId), exact: true }),
+      ]);
     },
   });
 }
@@ -243,6 +284,10 @@ export function useRestoreChannel(workspaceId: string) {
     onSuccess: (channel) => {
       queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
         replaceManaged(channels, channel),
+      );
+      // **アーカイブ済みの一覧からは、取り直しを待たずに外す**（#533 第0巡の 🔴1）
+      queryClient.setQueryData<Channel[]>(archivedChannelsKey(workspaceId), (channels) =>
+        channels?.filter((current) => current.id !== channel.id),
       );
       return queryClient.invalidateQueries({ queryKey: keys.channels(workspaceId), exact: true });
     },
@@ -285,7 +330,8 @@ function isChannelMembersKeyOf(workspaceId: string, queryKey: readonly unknown[]
 /**
  * ワークスペースからキックする（F-09。オーナーだけ。判定は api）。
  *
- * **踏むと壊れる: 通ったら、メンバーの一覧と、読み込んである全てのチャンネルの参加者の一覧から、その相手をその場で外す。**
+ * **踏むと壊れる: 通ったら、メンバーの一覧と、読み込んである全てのチャンネルの参加者の一覧から、その相手をその場で外す**
+ * （外したチャンネルの管理用の一覧の人数も、`removeFromChannel` で同じ処理の中で減らす）。
  * キックされた利用者は所属していた全チャンネルから外れる（機能一覧 2.2）。取り直しの印を付けるだけにすると、
  * 次に参加者の一覧を開いたとき、**取り直しが返るまでキャッシュの一覧（キックした相手を含む）が描かれる**（#533 第0巡の 🔴1 と同じ型。#540 第0巡）。
  */
@@ -303,11 +349,15 @@ export function useKickWorkspaceMember(workspaceId: string) {
       queryClient.setQueryData<WorkspaceMember[]>(membersKey(workspaceId), (members) =>
         members?.filter((member) => member.id !== memberId),
       );
-      queryClient.setQueriesData<UserSummary[]>(
-        { predicate: ({ queryKey }) => isChannelMembersKeyOf(workspaceId, queryKey) },
-        (members) => members?.filter((member) => member.id !== memberId),
-      );
-      // 管理用の一覧の人数（F-35）は、外した相手がどのチャンネルに居たかを画面が知らないため、その場では直せない。
+      const loaded = queryClient.getQueriesData<UserSummary[]>({
+        predicate: ({ queryKey }) => isChannelMembersKeyOf(workspaceId, queryKey),
+      });
+      for (const [queryKey, members] of loaded) {
+        if (members?.some((member) => member.id === memberId)) {
+          removeFromChannel(queryClient, workspaceId, queryKey[3] as string, memberId);
+        }
+      }
+      // 参加者の一覧を読み込んでいないチャンネルは、相手が居たかを画面が知らないため、管理用の一覧（F-35）の人数をその場では直せない。
       // **取り直す**——開いていれば即座に返り、閉じていれば次に開いたとき読む。鍵の前方には一般の一覧が入らないが、`exact` で揃える
       return queryClient.invalidateQueries({
         queryKey: managedChannelsKey(workspaceId),
@@ -371,6 +421,10 @@ export function useLeaveChannel(workspaceId: string, channelId: string) {
           return [{ ...channel, joined: false }];
         }),
       );
+      // アーカイブ済みのチャンネルからも抜けられる（機能一覧 3.2）。アーカイブ済みの一覧からも、取り直しを待たずに外す
+      queryClient.setQueryData<Channel[]>(archivedChannelsKey(workspaceId), (channels) =>
+        channels?.filter((channel) => channel.id !== channelId),
+      );
       const session = store.getState();
       if (session.status === 'signedIn') {
         removeFromChannel(queryClient, workspaceId, channelId, session.user.id);
@@ -400,21 +454,11 @@ export function useInviteChannelMember(workspaceId: string, channelId: string) {
         },
       ),
     onSuccess: (_, member) => {
-      const summary: UserSummary = {
+      addToChannel(queryClient, workspaceId, channelId, {
         id: member.id,
         userId: member.userId,
         displayName: member.displayName,
-      };
-      queryClient.setQueryData<UserSummary[]>(
-        channelMembersKey(workspaceId, channelId),
-        (members) =>
-          members && !members.some((m) => m.id === member.id) ? [...members, summary] : members,
-      );
-      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
-        channels?.map((channel) =>
-          channel.id === channelId ? { ...channel, memberCount: channel.memberCount + 1 } : channel,
-        ),
-      );
+      });
       void queryClient.invalidateQueries({
         queryKey: channelMembersKey(workspaceId, channelId),
         exact: true,

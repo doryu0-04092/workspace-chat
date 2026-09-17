@@ -27,6 +27,17 @@ const INVITATION = {
   },
   createdAt: '2026-09-16T00:00:00.000Z',
 };
+const PHOTO_CLUB = {
+  id: '01920000-0000-7000-8000-0000000000b2',
+  name: '写真部',
+  createdAt: '2026-09-14T00:00:00.000Z',
+  role: 'MEMBER',
+};
+const PHOTO = {
+  ...INVITATION,
+  id: '01920000-0000-7000-8000-0000000000e2',
+  workspace: { id: PHOTO_CLUB.id, name: PHOTO_CLUB.name },
+};
 
 const INVITATIONS = 'GET /api/invitations';
 const session = {
@@ -187,6 +198,48 @@ describe('届いた招待の承諾と辞退（F-38）', () => {
     expect((await screen.findByRole('alert')).textContent).toContain(
       '既にこのワークスペースのメンバーです',
     );
+  });
+
+  // **出す理由は、直前の操作のものだけにする**——承諾と辞退の失敗を合わせて出すため（#534）。
+  it('承諾が断られた後に別の招待の辞退が通ったら、承諾の理由を残さない', async () => {
+    fakeFetch({
+      ...session,
+      [INVITATIONS]: [() => json(200, [INVITATION, PHOTO]), () => json(200, [INVITATION])],
+      'GET /api/workspaces': () => json(200, []),
+      [`POST /api/invitations/${INVITATION.id}/accept`]: () => error(409, 'already_member'),
+      [`POST /api/invitations/${PHOTO.id}/decline`]: () => new Response(null, { status: 204 }),
+    });
+    renderApp('/workspaces');
+    const list = await screen.findByRole('list', { name: '届いた招待' });
+
+    fireEvent.click(screen.getByRole('button', { name: '読書会 への招待を承諾する' }));
+    expect(await screen.findByText(/既にこのワークスペースのメンバーです/)).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: '写真部 への招待を辞退する' }));
+
+    await waitFor(() => expect(list.textContent).not.toContain('写真部'));
+    expect(screen.queryByText(/既にこのワークスペースのメンバーです/)).toBeNull();
+  });
+
+  it('辞退が断られた後に別の招待の承諾が通ったら、辞退の理由を残さない', async () => {
+    fakeFetch({
+      ...session,
+      [INVITATIONS]: [() => json(200, [INVITATION, PHOTO]), () => json(200, [INVITATION])],
+      'GET /api/workspaces': [() => json(200, []), () => json(200, [PHOTO_CLUB])],
+      [`POST /api/invitations/${INVITATION.id}/decline`]: () => error(404, 'not_found'),
+      [`POST /api/invitations/${PHOTO.id}/accept`]: () => json(200, PHOTO_CLUB),
+    });
+    renderApp('/workspaces');
+    const list = await screen.findByRole('list', { name: '届いた招待' });
+
+    fireEvent.click(screen.getByRole('button', { name: '読書会 への招待を辞退する' }));
+    expect(await screen.findByText(/見つかりません/)).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: '写真部 への招待を承諾する' }));
+
+    await waitFor(() => expect(list.textContent).not.toContain('写真部'));
+    expect(await screen.findByRole('link', { name: '写真部' })).toBeDefined();
+    expect(screen.queryByText(/見つかりません/)).toBeNull();
   });
 });
 
