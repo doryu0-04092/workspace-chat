@@ -40,7 +40,11 @@ export function ThreadPanel({
         </button>
       </div>
       {parent && <MessageItem message={parent} />}
-      <PagedMessages pages={replies} labels={REPLY_LABELS} />
+      <PagedMessages
+        pages={replies}
+        labels={REPLY_LABELS}
+        renderMessage={(message) => <MessageItem message={message} />}
+      />
       {/* 削除済みと分かった親には返信のフォームを出さない（api が断る）。**親が読み込まれていなければ出す**——削除済みかは分からず、消すと読み込んだページより古い親に返信できなくなる */}
       {!readOnly && parent?.body !== null && (
         <MessageForm

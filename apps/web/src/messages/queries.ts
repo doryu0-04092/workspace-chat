@@ -17,11 +17,17 @@ export function messagesKey(workspaceId: string, channelId: string) {
   return ['workspaces', workspaceId, 'channels', channelId, 'messages'] as const;
 }
 
+/**
+ * メッセージのページ（チャンネルの `MessagePages` と DM の `DmMessagePages`）。下の3つの更新は、どちらの一覧にも同じ規則で当てる
+ * （DM の一覧で別に持つと、同じ id を2行にしない等の規則が片方だけ変わる）。
+ */
+type Pages<M> = InfiniteData<{ messages: M[]; nextBefore: string | null }, string | null>;
+
 /** 最新のページの先頭（画面の最後）に足す。同じ id が既にあれば足さない（投稿の応答と配信のどちらが先に届いても1行にする）。 */
-export function addMessage(
-  data: MessagePages | undefined,
-  message: Message,
-): MessagePages | undefined {
+export function addMessage<M extends { id: string }>(
+  data: Pages<M> | undefined,
+  message: M,
+): Pages<M> | undefined {
   const [newest, ...older] = data?.pages ?? [];
   if (!data || !newest) return data;
   if (data.pages.some((page) => page.messages.some((m) => m.id === message.id))) return data;
@@ -32,25 +38,25 @@ export function addMessage(
 }
 
 /** 同じ id のメッセージを置き換える（編集。機能一覧 4.2）。 */
-export function replaceMessage(
-  data: MessagePages | undefined,
-  message: Message,
-): MessagePages | undefined {
+export function replaceMessage<M extends { id: string }>(
+  data: Pages<M> | undefined,
+  message: M,
+): Pages<M> | undefined {
   return mapMessages(data, (m) => (m.id === message.id ? message : m));
 }
 
 /** 削除済みにする（本文を持たない。機能一覧 4.2）。 */
-export function markDeleted(
-  data: MessagePages | undefined,
+export function markDeleted<M extends { id: string; body: string | null; deleted: boolean }>(
+  data: Pages<M> | undefined,
   messageId: string,
-): MessagePages | undefined {
+): Pages<M> | undefined {
   return mapMessages(data, (m) => (m.id === messageId ? { ...m, body: null, deleted: true } : m));
 }
 
-function mapMessages(
-  data: MessagePages | undefined,
-  change: (message: Message) => Message,
-): MessagePages | undefined {
+function mapMessages<M>(
+  data: Pages<M> | undefined,
+  change: (message: M) => M,
+): Pages<M> | undefined {
   if (!data) return data;
   return {
     ...data,

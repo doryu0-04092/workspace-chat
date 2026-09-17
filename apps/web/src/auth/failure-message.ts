@@ -30,6 +30,12 @@ export function failureMessage(failure: Failure): string {
       return '既に参加しています。';
     case 'not_message_author':
       return '自分のメッセージだけを編集・削除できます。';
+    case 'dm_with_self':
+      return '自分自身とは DM を始められません。';
+    case 'dm_counterpart_not_found':
+      return 'その利用者はこのワークスペースのメンバーではありません。一覧を開き直してください。';
+    case 'dm_counterpart_unavailable':
+      return '相手がこのワークスペースのメンバーではなくなったため、送信できません。';
     case 'owner_only':
       return 'この操作は、ワークスペースのオーナーだけが行えます。';
     case 'already_invited':

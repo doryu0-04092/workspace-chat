@@ -71,6 +71,8 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
     'GET /api/invitations': () => json(200, []),
     [`GET /api/workspaces/${WORKSPACE_ID}`]: () => json(200, WORKSPACE),
     [`GET /api/workspaces/${WORKSPACE_ID}/channels`]: () => json(200, [GENERAL]),
+    // ワークスペースの画面が、自分の DM の一覧を読む（F-19。#574）
+    [`GET /api/workspaces/${WORKSPACE_ID}/dms`]: () => json(200, []),
     [`GET ${SETTINGS}`]: () => json(200, { threadUnreadIncluded: true }),
     [`PUT ${READ}`]: () => new Response(null, { status: 204 }),
     ...extra,

@@ -250,6 +250,7 @@ describe('ワークスペースへの招待（F-08）', () => {
       [INVITATIONS]: () => json(200, []),
       [`GET /api/workspaces/${workspace.id}`]: () => json(200, workspace),
       [`GET /api/workspaces/${workspace.id}/channels`]: () => json(200, []),
+      [`GET /api/workspaces/${workspace.id}/dms`]: () => json(200, []),
     };
   }
 
@@ -372,6 +373,7 @@ describe('ワークスペースからの退出（F-38）', () => {
       [INVITATIONS]: () => json(200, []),
       [`GET /api/workspaces/${OWNED.id}`]: () => json(200, OWNED),
       [`GET /api/workspaces/${OWNED.id}/channels`]: () => json(200, []),
+      [`GET /api/workspaces/${OWNED.id}/dms`]: () => json(200, []),
       [`POST /api/workspaces/${OWNED.id}/leave`]: () => error(403, 'owner_cannot_leave'),
     });
     renderApp(`/workspaces/${OWNED.id}`);

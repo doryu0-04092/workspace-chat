@@ -33,7 +33,8 @@ export function PostMessageForm({
  *   それ以外は改行である（改行は本文の改行として描画する。機能一覧 4.3・9.1）
  * - **空・空白だけではボタンを押せない**（api も 400 で断る。機能一覧 4.1）
  * - **失敗したら理由を出し、入力を残す**
- * - 入力欄はメンションを補完する（F-20。`MentionInput`。候補はそのチャンネルの参加者）
+ * - 入力欄はメンションを補完する（F-20。`MentionInput`。候補はそのチャンネルの参加者）。**`channelId` を渡さなければ補完しない**
+ *   （DM。F-19。DM のメンションは解決しないため、補完の候補も出さない）
  *
  * 通ったら、既定では入力を空にする（投稿・返信）。`onSubmitted` を渡すと通った後に呼ぶ（編集は欄を閉じる）。
  * `onCancel` を渡すと「取り消す」を出す。
@@ -57,7 +58,7 @@ export function MessageForm({
   pending: boolean;
   error: Error | null;
   workspaceId: string;
-  channelId: string;
+  channelId?: string;
   label: string;
   submitLabel: string;
   initialBody?: string;
@@ -86,13 +87,23 @@ export function MessageForm({
       <label htmlFor={id} className={hideLabel ? 'sr-only' : undefined}>
         {label}
       </label>
-      <MentionInput
-        id={id}
-        workspaceId={workspaceId}
-        channelId={channelId}
-        value={body}
-        onChange={setBody}
-      />
+      {channelId === undefined ? (
+        <textarea
+          id={id}
+          className="w-full rounded border px-2 py-1"
+          rows={3}
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+        />
+      ) : (
+        <MentionInput
+          id={id}
+          workspaceId={workspaceId}
+          channelId={channelId}
+          value={body}
+          onChange={setBody}
+        />
+      )}
       {error !== null && (
         <p role="alert" className="text-red-700">
           {errorMessage(error)}

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
@@ -33,7 +34,11 @@ export const REPLY_LABELS: Labels = {
   loadOlder: '古い返信を読み込む',
 };
 
-type Pages = ReturnType<typeof useMessages>;
+/** 一覧に並べるメッセージ（チャンネルの `Message` と DM の `DmMessage` の共通部分）。 */
+type ListedMessage = { id: string; createdAt: string };
+
+/** 新しい順のページを遡って読む問い合わせ（チャンネルの `useMessages`・`useReplies` と DM の `useDmMessages`）。 */
+type Pages<M> = UseInfiniteQueryResult<InfiniteData<{ messages: M[]; nextBefore: string | null }>>;
 
 type ListContext = {
   labels: Labels;
@@ -62,24 +67,28 @@ export function MessageList({
     <PagedMessages
       pages={messages}
       labels={CHANNEL_LABELS}
-      onOpenThread={onOpenThread}
+      renderMessage={(message) => <MessageItem message={message} onOpenThread={onOpenThread} />}
       lastReadMessageId={lastReadMessageId}
       joinedAt={joinedAt}
     />
   );
 }
 
-/** 新しい順のページを、上が古く下が新しい一覧にする。古いものは先頭のボタンで遡って読む。 */
-export function PagedMessages({
+/**
+ * 新しい順のページを、上が古く下が新しい一覧にする。古いものは先頭のボタンで遡って読む。
+ * 1件の描き方は `renderMessage` で渡す（チャンネル・スレッドは `MessageItem`、DM は DM の1件。F-19）——
+ * **遡って読んだときに位置を動かさないことと「ここから未読」の線の位置は、どの一覧でもここだけが持つ**。
+ */
+export function PagedMessages<M extends ListedMessage>({
   pages: query,
   labels,
-  onOpenThread,
+  renderMessage,
   lastReadMessageId = null,
   joinedAt = null,
 }: {
-  pages: Pages;
+  pages: Pages<M>;
   labels: Labels;
-  onOpenThread?: (message: Message) => void;
+  renderMessage: (message: M) => ReactNode;
   lastReadMessageId?: string | null;
   joinedAt?: string | null;
 }) {
@@ -112,7 +121,7 @@ export function PagedMessages({
     <LoadedList
       items={items}
       firstItemIndex={FIRST_INDEX - olderCount}
-      onOpenThread={onOpenThread}
+      renderMessage={renderMessage}
       unreadFromId={unreadFromId}
       context={{
         labels,
@@ -126,16 +135,16 @@ export function PagedMessages({
 }
 
 /** 読み込めた一覧。開いたときは最新（いちばん下）を見せる。 */
-function LoadedList({
+function LoadedList<M extends ListedMessage>({
   items,
   firstItemIndex,
-  onOpenThread,
+  renderMessage,
   unreadFromId,
   context,
 }: {
-  items: Message[];
+  items: M[];
   firstItemIndex: number;
-  onOpenThread?: (message: Message) => void;
+  renderMessage: (message: M) => ReactNode;
   unreadFromId: string | null;
   context: ListContext;
 }) {
@@ -146,7 +155,7 @@ function LoadedList({
   }, []);
 
   return (
-    <Virtuoso<Message, ListContext>
+    <Virtuoso<M, ListContext>
       ref={list}
       className="h-[60vh]"
       data={items}
@@ -158,7 +167,7 @@ function LoadedList({
       itemContent={(_, message) => (
         <>
           {message.id === unreadFromId && <UnreadDivider />}
-          <MessageItem message={message} onOpenThread={onOpenThread} />
+          {renderMessage(message)}
         </>
       )}
     />
@@ -173,7 +182,7 @@ function LoadedList({
  * - どちらも無ければ出さない（参加していないチャンネル）
  */
 function firstUnreadId(
-  items: Message[],
+  items: readonly ListedMessage[],
   lastReadMessageId: string | null,
   joinedAt: string | null,
 ): string | null {
@@ -249,6 +258,51 @@ export function MessageItem({
       : null;
 
   return (
+    <MessageShell
+      message={message}
+      mentions={message.mentions}
+      editor={
+        ownScope && editing ? (
+          <EditMessageForm scope={ownScope} message={message} onDone={() => setEditing(false)} />
+        ) : null
+      }
+    >
+      {ownScope && !editing && (
+        <MessageActions scope={ownScope} message={message} onEdit={() => setEditing(true)} />
+      )}
+      {onOpenThread && (
+        <ThreadSummary
+          message={message}
+          canReply={scope?.readOnly !== true}
+          onOpen={() => onOpenThread(message)}
+        />
+      )}
+    </MessageShell>
+  );
+}
+
+/**
+ * 1件のメッセージの枠（チャンネル・スレッド・DM で共通。F-19）。**退会した書き手は「削除済みの利用者」（機能一覧 1.5）、
+ * 削除済みは本文を置き換え、削除済みには「（編集済み）」を出さない（4.2）——この出し方はここだけに置く**（一覧ごとに持つと片方だけが変わる）。
+ * `editor` を渡すと、本文の代わりに出す（編集中）。`children` は本文の下に置く（操作・スレッドの入口）。
+ */
+export function MessageShell({
+  message,
+  mentions,
+  editor = null,
+  children,
+}: {
+  message: {
+    author: { displayName: string } | null;
+    createdAt: string;
+    editedAt: string | null;
+    body: string | null;
+  };
+  mentions?: Message['mentions'];
+  editor?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
     <article className="px-2 py-2">
       <header className="flex items-baseline gap-2 text-sm">
         <span className="font-bold">{message.author?.displayName ?? '削除済みの利用者'}</span>
@@ -261,21 +315,12 @@ export function MessageItem({
       </header>
       {message.body === null ? (
         <p className="text-slate-500">このメッセージは削除されました</p>
-      ) : ownScope && editing ? (
-        <EditMessageForm scope={ownScope} message={message} onDone={() => setEditing(false)} />
+      ) : editor !== null ? (
+        editor
       ) : (
-        <MessageBody body={message.body} mentions={message.mentions} />
+        <MessageBody body={message.body} mentions={mentions} />
       )}
-      {ownScope && !editing && (
-        <MessageActions scope={ownScope} message={message} onEdit={() => setEditing(true)} />
-      )}
-      {onOpenThread && (
-        <ThreadSummary
-          message={message}
-          canReply={scope?.readOnly !== true}
-          onOpen={() => onOpenThread(message)}
-        />
-      )}
+      {children}
     </article>
   );
 }
