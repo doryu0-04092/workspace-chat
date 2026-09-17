@@ -344,6 +344,84 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
     });
   });
 
+  // 機能一覧 3.2（F-35）: アーカイブ後も参加者は読める。一般の一覧から外れるため、参加者がその id を知る経路を別に持つ。#552。
+  describe('アーカイブ済みの一覧（参加者）', () => {
+    it('自分が参加しているアーカイブ済みだけを、一般の一覧と同じ形で名前の順に返す', async () => {
+      const owner = await login();
+      const member = await login();
+      const workspace = await workspaceWith(owner, member);
+      await channelRow(workspace.id, 'current', 'PUBLIC', [member]);
+      const zulu = await channelRow(workspace.id, 'zulu', 'PRIVATE', [member], true);
+      const alpha = await channelRow(workspace.id, 'alpha', 'PUBLIC', [member], true);
+      // 参加していないアーカイブ済み（パブリックでも出さない）
+      await channelRow(workspace.id, 'others', 'PUBLIC', [owner], true);
+      await channelRow(workspace.id, 'hidden', 'PRIVATE', [owner], true);
+
+      const res = await request(
+        'GET',
+        `/workspaces/${workspace.id}/archived-channels`,
+        member.authorization,
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()) as Channel[]).toEqual([
+        {
+          id: alpha,
+          name: 'alpha-1',
+          visibility: 'PUBLIC',
+          joined: true,
+          joinedAt: expect.any(String) as string,
+          unread: 0,
+          mentions: 0,
+          lastReadMessageId: null,
+        },
+        {
+          id: zulu,
+          name: 'zulu-1',
+          visibility: 'PRIVATE',
+          joined: true,
+          joinedAt: expect.any(String) as string,
+          unread: 0,
+          mentions: 0,
+          lastReadMessageId: null,
+        },
+      ]);
+    });
+
+    // CLAUDE.md 2: オーナーの例外は管理用の一覧と参加者一覧だけ。参加していないチャンネルのメッセージは読めないので、ここにも出さない。
+    it('オーナーにも、参加していないアーカイブ済みのチャンネルは出さない', async () => {
+      const owner = await login();
+      const member = await login();
+      const workspace = await workspaceWith(owner, member);
+      await channelRow(workspace.id, 'public-old', 'PUBLIC', [member], true);
+      await channelRow(workspace.id, 'private-old', 'PRIVATE', [member], true);
+
+      const res = await request(
+        'GET',
+        `/workspaces/${workspace.id}/archived-channels`,
+        owner.authorization,
+      );
+      expect(res.status).toBe(200);
+      expect((await res.json()) as Channel[]).toEqual([]);
+    });
+
+    it('所属していないワークスペースは、存在の有無によらず 404', async () => {
+      const owner = await login();
+      const outsider = await login();
+      const workspace = await workspaceWith(owner);
+      await channelRow(workspace.id, 'old', 'PUBLIC', [owner], true);
+
+      for (const workspaceId of [workspace.id, MISSING_ID]) {
+        const res = await request(
+          'GET',
+          `/workspaces/${workspaceId}/archived-channels`,
+          outsider.authorization,
+        );
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual(NOT_FOUND);
+      }
+    });
+  });
+
   describe('オーナーの管理用の一覧', () => {
     // 機能一覧 3.1「オーナーには、管理のためのチャンネル一覧を返す」: id・名前・種別・参加者数・アーカイブ済みか。アーカイブ済みも含める。
     it('オーナーには、参加していないプライベートとアーカイブ済みも含めて、id・名前・種別・参加者数（退会者を除く）・アーカイブ済みかだけを返す', async () => {
