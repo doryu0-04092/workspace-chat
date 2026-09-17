@@ -5,6 +5,7 @@ import { useSession } from '../auth/session-context';
 import { EditMessageForm, MessageActions } from './MessageActions';
 import { MessageBody } from './MessageBody';
 import { useMessageChannel } from './message-channel';
+import { PinControls } from './PinnedMessages';
 import { type Message, useMessages } from './queries';
 
 /**
@@ -258,6 +259,7 @@ export function MessageItem({
         {message.editedAt !== null && message.body !== null && (
           <span className="text-slate-500">（編集済み）</span>
         )}
+        <PinControls message={message} />
       </header>
       {message.body === null ? (
         <p className="text-slate-500">このメッセージは削除されました</p>

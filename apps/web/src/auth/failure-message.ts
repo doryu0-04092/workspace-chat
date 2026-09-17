@@ -30,6 +30,8 @@ export function failureMessage(failure: Failure): string {
       return '既に参加しています。';
     case 'not_message_author':
       return '自分のメッセージだけを編集・削除できます。';
+    case 'pin_limit_reached':
+      return 'このチャンネルにピン留めできる件数の上限に達しています。';
     case 'owner_only':
       return 'この操作は、ワークスペースのオーナーだけが行えます。';
     case 'already_invited':

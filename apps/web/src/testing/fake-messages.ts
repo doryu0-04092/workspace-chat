@@ -36,6 +36,8 @@ export const MESSAGES = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/
 export const READ = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/read`;
 /** 利用者ごとの設定（F-23）。 */
 export const SETTINGS = '/api/users/me/settings';
+/** チャンネルのピン留めの一覧（F-33。機能一覧 13.2）。 */
+export const PINS = `/api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/pins`;
 
 /** `n` 番目のメッセージ（REST の Message と同じ形）。id は `n` から作り、作った時刻は `n` 分目にする。 */
 export function message(n: number, overrides: Record<string, unknown> = {}) {
@@ -73,6 +75,8 @@ export function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
     [`GET /api/workspaces/${WORKSPACE_ID}/channels`]: () => json(200, [GENERAL]),
     [`GET ${SETTINGS}`]: () => json(200, { threadUnreadIncluded: true }),
     [`PUT ${READ}`]: () => new Response(null, { status: 204 }),
+    // チャンネルの画面が、ピン留め済みの印を出すためにピン留めの一覧を読む（F-33）
+    [`GET ${PINS}`]: () => json(200, { pins: [] }),
     ...extra,
   };
 }

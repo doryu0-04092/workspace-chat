@@ -4,6 +4,7 @@ import { errorMessage } from '../api/client';
 import { failureMessage } from '../auth/failure-message';
 import { MessageChannelProvider } from '../messages/message-channel';
 import { MessageList } from '../messages/MessageList';
+import { PinnedMessages } from '../messages/PinnedMessages';
 import { PostMessageForm } from '../messages/PostMessageForm';
 import { useMessages } from '../messages/queries';
 import { ThreadPanel } from '../messages/ThreadPanel';
@@ -169,6 +170,8 @@ function ChannelMessages({
           リアルタイムの反映を始められませんでした。{failureMessage(rejected)}
         </p>
       )}
+      {/* チャンネルのピン留めの一覧（F-33）。付け外しの操作は、アーカイブ済みでないときだけ出す */}
+      <PinnedMessages />
       <div className={threadId ? 'md:grid md:grid-cols-2 md:gap-4' : undefined}>
         <div>
           <section aria-label="メッセージの一覧" className="mt-4">
