@@ -62,10 +62,13 @@ locals {
   # カスタムのパラメータグループに付け替えても外れないよう明示する。動的パラメータで、再起動なしで効く。
   db_force_ssl = "1"
 
-  # 自動バックアップ（要件定義書 4.2「バックアップ」の、保持期間と取得時間帯）。時刻は UTC。
-  # 保持期間は 7 日（その間の任意の時点へ復元できる）。取得は日本時間の 03:00〜03:30、メンテナンスは月曜の日本時間 04:00〜04:30
-  # （プロバイダーの文書「Must not overlap with `maintenance_window`.」）。決定・2026-09-15・作業側（依頼側の委任による。#452）。
-  db_backup_retention_period = 7
+  # 自動バックアップは取らない（保持期間 0 日）。決定・2026-09-17・依頼側（#598）: スクール課題の検証用の一時的な本番であり、
+  # アカウントの無料プランでは保持期間 7 日を設定できない（RDS の作成が FreeTierRestrictionError で断られた）。
+  # 代償: 任意の時点への復元はできない。誤ってデータを消したら戻せない。
+  # 保持期間が 0 のときは取得時間帯を渡さない（取得しないため意味を持たない）。時刻は UTC。
+  # 取得を戻すときの時間帯は日本時間の 03:00〜03:30、メンテナンスは月曜の日本時間 04:00〜04:30
+  # （プロバイダーの文書「Must not overlap with `maintenance_window`.」）。
+  db_backup_retention_period = 0
   db_backup_window           = "18:00-18:30"
   db_maintenance_window      = "sun:19:00-sun:19:30"
 
@@ -136,7 +139,7 @@ resource "aws_db_instance" "main" {
   password_wo_version = local.db_password_version
 
   backup_retention_period = local.db_backup_retention_period
-  backup_window           = local.db_backup_window
+  backup_window           = local.db_backup_retention_period > 0 ? local.db_backup_window : null
   maintenance_window      = local.db_maintenance_window
   apply_immediately       = local.db_apply_immediately
   skip_final_snapshot     = local.db_skip_final_snapshot
