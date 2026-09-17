@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fakeFetch, headerOf, json, PROFILE, token, USER } from '../testing/fake-api';
+import { fakeFetch, headerOf, json, loggedIn, PROFILE, token, USER } from '../testing/fake-api';
 import { createSessionStore, type RefreshLocks } from './session-store';
 
 afterEach(() => {
@@ -594,5 +594,39 @@ describe('トークンを付けた要求', () => {
 
     expect([a.status, b.status]).toEqual([200, 200]);
     expect(count('POST /api/auth/refresh')).toBe(1);
+  });
+});
+
+// 機能一覧 1.3（F-04）: プロフィールを変えたら、画面の枠の表示名に使う情報を差し替える。#551。
+describe('利用者の情報の差し替え', () => {
+  async function signedInStore() {
+    fakeFetch({ 'POST /api/auth/login': () => loggedIn('t1') });
+    const store = createSessionStore();
+    await store.login('alice', 'password-1');
+    return store;
+  }
+
+  it('ログインしている利用者と同じ id なら差し替え、トークンは変えない', async () => {
+    const store = await signedInStore();
+
+    store.updateUser({ ...USER, displayName: 'ありす' });
+
+    expect(store.getState()).toEqual({
+      status: 'signedIn',
+      accessToken: 't1',
+      user: { ...USER, displayName: 'ありす' },
+    });
+  });
+
+  it('別の利用者の情報では差し替えない（待つ間にログインが替わっていたとき）', async () => {
+    const store = await signedInStore();
+
+    store.updateUser({
+      id: '01920000-0000-7000-8000-000000000002',
+      userId: 'bob',
+      displayName: 'ボブ',
+    });
+
+    expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't1', user: USER });
   });
 });
