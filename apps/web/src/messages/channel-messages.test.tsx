@@ -146,6 +146,15 @@ describe('チャンネルのメッセージの表示', () => {
     expect(screen.getByText('メッセージ 2')).toBeDefined();
   });
 
+  it('一覧のスクロールの枠は、高さをインラインの style で持つ（クラスの高さは react-virtuoso のインラインの height: 100% に負けて 0 になる。#606）', async () => {
+    fakeFetch(routes({ [`GET ${MESSAGES}`]: () => page([message(1)]) }));
+    renderApp(CHANNEL_PATH);
+
+    await screen.findByText('メッセージ 1');
+    const scroller = screen.getByTestId('virtuoso-scroller');
+    expect(scroller.style.height).toBe('60vh');
+  });
+
   it('メッセージが無ければ、無いことを出す', async () => {
     fakeFetch(routes({ [`GET ${MESSAGES}`]: () => page([]) }));
     renderApp(CHANNEL_PATH);

@@ -160,7 +160,9 @@ function LoadedList<M extends ListedMessage>({
   return (
     <Virtuoso<M, ListContext>
       ref={list}
-      className="h-[60vh]"
+      // 踏むと壊れる: 高さは className ではなく style で渡す。react-virtuoso は枠に height: 100% をインラインで付け、クラスの高さに勝つ
+      // （親の高さは自動のため 0 になり、一覧が見えない。#606）
+      style={{ height: '60vh' }}
       data={items}
       firstItemIndex={firstItemIndex}
       computeItemKey={(_, message) => message.id}
