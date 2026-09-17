@@ -1,4 +1,7 @@
 @import 'tailwindcss';
+/* コードブロックの色付け（F-32。機能一覧 13.1）。class は MessageBody の sanitize のスキーマが色付けの字句の形だけを通す。
+   **踏むと壊れる: `@import` はほかの規則より前に置く**（後ろに置いた `@import` は CSS として無視される） */
+@import 'highlight.js/styles/github.css';
 
 /* 本文のメンション（F-20。機能一覧 9.1）。class は MessageBody の sanitize のスキーマが `mention` だけを通す */
 .mention {

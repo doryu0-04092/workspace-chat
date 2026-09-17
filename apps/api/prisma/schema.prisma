@@ -73,6 +73,11 @@ enum ChannelVisibility {
   PRIVATE
 }
 
+/// 通知の種類（F-26。機能一覧 10.3）。**いまはメンションだけ**。DM（F-19）の通知はここに足す。
+enum NotificationKind {
+  MENTION
+}
+
 // ============================================================================
 // 利用者
 // ============================================================================
@@ -435,6 +440,9 @@ model Membership {
   threadReads  ThreadRead[]
   dmReads      DmRead[]
 
+  /// 通知（F-26）も、この行が消えると消える（ワークスペースから外れた利用者に、そのワークスペースの通知を残さない）。
+  notifications Notification[]
+
   /// 同じ利用者が同じワークスペースに二重に参加しないこと。
   /// この索引は「そのワークスペースの参加者一覧」の取得にも効き、
   /// `ChannelMember` の複合外部キーの参照先にもなる。
@@ -630,6 +638,9 @@ model Channel {
   /// 既読位置（F-23）。チャンネルを消せば既読位置も消える。
   reads     ChannelRead[]
 
+  /// 通知（F-26）。チャンネルを消せば通知も消える。
+  notifications Notification[]
+
   /// ワークスペース内で名前は一意。**ワークスペースをまたげば同じ名前を使える。**
   /// 一意制約の範囲が広すぎないことは、テストが別ワークスペースへの作成で確かめている。
   ///
@@ -757,6 +768,9 @@ model Message {
   readAsChannelLast ChannelRead[]
   readAsThreadParent ThreadRead[] @relation("ThreadReadParent")
   readAsThreadLast   ThreadRead[] @relation("ThreadReadLast")
+
+  /// 通知（F-26）から指される向き。`Notification` の側が持ち主である。
+  notifications Notification[]
 
   /// 返信の親を、同じチャンネルのメッセージに限る複合外部キーの参照先。
   @@unique([id, channelId])
@@ -976,4 +990,49 @@ model DmRead {
 
   @@unique([dmId, userId])
   @@index([userId])
+}
+
+// ============================================================================
+// 通知（F-26。機能一覧 10.3）
+// ============================================================================
+
+/// 受け取った通知（F-26。機能一覧 10.3）。**オフライン中に受けたメンションを、次にログインしたときに一覧で確かめるために残す**（要件定義書 3.5.2「通知の永続化」）。
+///
+/// - **行を作るのはメンションの対象を保存するのと同じトランザクション**（`notifications/mention-notifications.ts`）。書き手本人には作らない
+/// - **編集で本文から外した対象の行は消し、足した対象の行は作る**（`MessageMention` に揃える）。本文に残した対象の行は既読のまま残す
+/// - **既読は行ごとの `readAt` で持つ**。チャンネルの既読位置（F-23）とは別系統である
+///
+/// **踏むと壊れる: 一覧と既読化は、いまそのチャンネルの参加者である行だけを返す**（`ChannelMember` との結合。CLAUDE.md 2）。
+/// **チャンネル単位のキック・退出では、この行は消えない**（`ChannelMember` だけが消える）——参加の条件を外すと、
+/// 抜けたプライベートチャンネルの本文が通知の一覧から読める。
+/// **削除済みのメッセージの行も返さない**（行は残す。メッセージは論理削除である）。
+model Notification {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// 受け取った利用者。
+  userId String @db.Uuid
+
+  workspaceId String @db.Uuid
+
+  /// メッセージが属するチャンネル。`Message` の複合一意 `(id, channelId)` を参照するために持つ。
+  channelId String @db.Uuid
+
+  messageId String @db.Uuid
+
+  kind NotificationKind
+
+  /// 既読にした時刻。未読なら null。**一度入れたら変えない**（2回目の既読化で時刻を進めない）。
+  readAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  channel    Channel    @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  /// メッセージは論理削除だけで消える。チャンネルごと消えるときは同じ文の中で消えるため NoAction にする（`ChannelRead` と同じ）。
+  message    Message    @relation(fields: [messageId, channelId], references: [id, channelId], onDelete: NoAction)
+
+  /// 同じメッセージの同じ種類の通知は1人1件（本文に同じ利用者を2回書いても1件）。
+  @@unique([messageId, userId, kind])
+  /// 一覧は利用者ごとに新しい順（`id` の降順）で引く。
+  @@index([userId, id(sort: Desc)])
 }

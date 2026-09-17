@@ -9,6 +9,7 @@ import { SessionProvider } from './auth/session-context';
 import { DmPage } from './dms/DmPage';
 import type { SessionStore } from './auth/session-store';
 import { SignedInLayout } from './layout/SignedInLayout';
+import { NotificationsPage } from './notifications/NotificationsPage';
 import type { ConnectRealtime } from './realtime/connect';
 import { RealtimeProvider } from './realtime/realtime-context';
 import { SearchPage } from './search/SearchPage';
@@ -67,6 +68,7 @@ export function App({
             >
               <Route path="profile" element={<ProfilePage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="notifications" element={<NotificationsPage />} />
               <Route path="workspaces" element={<WorkspacesPage />} />
               <Route path="workspaces/:workspaceId" element={<WorkspacePage />} />
               <Route path="workspaces/:workspaceId/search" element={<SearchPage />} />

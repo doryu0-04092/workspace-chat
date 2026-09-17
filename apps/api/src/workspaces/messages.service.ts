@@ -11,6 +11,10 @@ import {
   mentionedLoginIds,
   type paths,
 } from '@workspace-chat/shared';
+import {
+  addMentionNotifications,
+  removeMentionNotifications,
+} from '../notifications/mention-notifications';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
@@ -57,16 +61,25 @@ async function mentionTargetsOf(
  * **保存するのは経路1 が返した値だけ**（表示時の参照先は、ここで確定させたものに限る。機能一覧 9.1）。
  */
 async function saveMentions(
-  tx: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
+  tx: Pick<PrismaService, '$queryRaw' | 'messageMention' | 'notification'>,
   {
     messageId,
+    workspaceId,
     ...target
-  }: { messageId: string; viewerId: string; channelId: string; body: string },
+  }: { messageId: string; workspaceId: string; viewerId: string; channelId: string; body: string },
 ): Promise<string[]> {
   const userIds = await mentionTargetsOf(tx, target);
   if (userIds.length > 0) {
     await tx.messageMention.createMany({ data: userIds.map((userId) => ({ messageId, userId })) });
   }
+  // 通知（F-26）は、保存した対象と同じトランザクションで作る（書き手本人には作らない）
+  await addMentionNotifications(tx, {
+    messageId,
+    channelId: target.channelId,
+    workspaceId,
+    authorId: target.viewerId,
+    userIds,
+  });
   return userIds;
 }
 
@@ -77,11 +90,12 @@ async function saveMentions(
  * 本文から消えた対象だけを外し、まだ保存していない `@` は経路1 で解決して足す（足すのは経路1 が返した対象だけ）。
  */
 async function replaceMentions(
-  tx: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
+  tx: Pick<PrismaService, '$queryRaw' | 'messageMention' | 'notification'>,
   {
     messageId,
+    workspaceId,
     ...target
-  }: { messageId: string; viewerId: string; channelId: string; body: string },
+  }: { messageId: string; workspaceId: string; viewerId: string; channelId: string; body: string },
 ): Promise<void> {
   const loginIds = new Set(mentionedLoginIds(target.body));
   const saved = await tx.messageMention.findMany({
@@ -101,9 +115,18 @@ async function replaceMentions(
   if (added.length > 0) {
     await tx.messageMention.createMany({ data: added.map((userId) => ({ messageId, userId })) });
   }
+  // 通知（F-26）も対象に揃える: 外した対象の通知は消し、足した対象には作る。本文に残した対象の通知は既読のまま残す
+  await removeMentionNotifications(tx, { messageId, userIds: removed.map(({ userId }) => userId) });
+  await addMentionNotifications(tx, {
+    messageId,
+    channelId: target.channelId,
+    workspaceId,
+    authorId: target.viewerId,
+    userIds: added,
+  });
 }
 
-const MESSAGE_SELECT = {
+export const MESSAGE_SELECT = {
   id: true,
   channelId: true,
   parentId: true,
@@ -237,7 +260,7 @@ async function mentionsOf(
  * （**削除済みのメッセージは、本文を返さないのと同じく、誰を指したかも返さない**。機能一覧 9.1）。
  * **トランザクションの中でも呼ぶため、2つの問い合わせは順に出す**（同じ接続で並べない）。
  */
-async function toMessages(
+export async function toMessages(
   db: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
   rows: MessageRow[],
 ): Promise<Message[]> {
@@ -364,6 +387,7 @@ export class MessagesService {
       });
       const mentioned = await saveMentions(tx, {
         messageId: row.id,
+        workspaceId,
         viewerId: userId,
         channelId,
         body: input.body,
@@ -423,6 +447,7 @@ export class MessagesService {
       });
       const mentioned = await saveMentions(tx, {
         messageId: created.id,
+        workspaceId,
         viewerId: userId,
         channelId,
         body: input.body,
@@ -527,7 +552,13 @@ export class MessagesService {
       });
       if (count !== 1) throw new NotFoundException();
       // メンションの対象は、編集後の本文に合わせる（本文に残した対象は消さない）。**編集では対象の部屋へ配らない**（機能一覧 9.1 の実装時に決めた値）
-      await replaceMentions(tx, { messageId, viewerId: userId, channelId, body: input.body });
+      await replaceMentions(tx, {
+        messageId,
+        workspaceId,
+        viewerId: userId,
+        channelId,
+        body: input.body,
+      });
       const row = await tx.message.findUniqueOrThrow({
         where: { id: messageId },
         select: MESSAGE_SELECT,

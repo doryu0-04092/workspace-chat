@@ -269,7 +269,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
          ORDER BY c.table_name;`,
       );
       const types = output.split('\n').filter((line) => line.length > 0);
-      expect(types).toHaveLength(15);
+      expect(types).toHaveLength(16);
       for (const type of types) {
         expect(type).toMatch(/:uuid$/);
       }

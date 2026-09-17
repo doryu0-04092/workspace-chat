@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Outlet } from 'react-router';
 import { failureMessage } from '../auth/failure-message';
 import { useSession, useSessionStore } from '../auth/session-context';
+import { useMentionRealtime } from '../notifications/use-mention-realtime';
 import { useRealtime } from '../realtime/realtime-context';
 import { useInvitationRealtime } from '../realtime/use-invitation-realtime';
 import { useMyInvitations } from '../workspaces/queries';
@@ -16,6 +17,8 @@ export function SignedInLayout() {
   const { refused } = useRealtime();
   const invitations = useMyInvitations();
   useInvitationRealtime();
+  // 自分へのメンションのブラウザ通知と、通知の一覧の読み直し（F-25・F-26）。どの画面にいても受ける
+  useMentionRealtime();
   const pendingInvitations = invitations.data?.length ?? 0;
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -51,6 +54,9 @@ export function SignedInLayout() {
           {session.status === 'signedIn' && <span>{session.user.displayName}</span>}
           <Link to="/profile" className="underline">
             プロフィール
+          </Link>
+          <Link to="/notifications" className="underline">
+            通知
           </Link>
           <Link to="/settings" className="underline">
             設定

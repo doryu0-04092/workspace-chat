@@ -172,6 +172,49 @@ export interface paths {
         patch: operations["updateMySettings"];
         trace?: never;
     };
+    "/users/me/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自分の通知の一覧（F-26）
+         * @description 受け取ったメンションの通知を、新しい順に返す（機能一覧 10.3）。接続していない間に受けたものも残る。 before（通知の id）を渡すと、それより古いものを返す（カーソルページネーション）。続きがあれば nextBefore に次の before を、無ければ null を返す。 **本人の通知だけを返し、いまそのチャンネルの参加者である通知だけを返す**——抜けた・外されたチャンネルと、 ワークスペースから外れた後のそのワークスペースの通知は出さない（CLAUDE.md 2）。削除済みのメッセージの通知も出さない。 書き手本人には通知を作らない。編集で本文からメンションを外すと通知は消え、編集で足すと通知が作られる
+         */
+        get: operations["listMyNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/me/notifications/{notificationId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 通知の id。形が uuid でなければ 400 */
+                notificationId: components["parameters"]["NotificationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 通知の既読化（F-26）
+         * @description 通知を既読にする（機能一覧 10.3）。既に既読なら、最初に既読にした時刻を変えずに 204 を返す。 **他の利用者の通知・いまそのチャンネルの参加者でない通知・削除済みのメッセージの通知・存在しない通知は、区別せず 404**（存在を認めない。CLAUDE.md 2）
+         */
+        put: operations["markNotificationRead"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/users/me/delete": {
         parameters: {
             query?: never;
@@ -1310,6 +1353,51 @@ export interface components {
              */
             nextBefore: string | null;
         };
+        /**
+         * @description 通知の種類（機能一覧 10.3）。いまはメンションだけ（DM は F-19 で足す）
+         * @enum {string}
+         */
+        NotificationKind: "MENTION";
+        /** @description 受け取った通知（機能一覧 10.3） */
+        Notification: {
+            /**
+             * Format: uuid
+             * @description UUIDv7。一覧のカーソル（before）にそのまま使う
+             */
+            id: string;
+            kind: components["schemas"]["NotificationKind"];
+            /**
+             * Format: date-time
+             * @description 通知を作った時刻（メンションを保存した時刻。編集で足したメンションなら編集の時刻）
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 既読にした時刻。未読なら null
+             */
+            readAt: string | null;
+            workspace: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            channel: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            /** @description メンションしたメッセージ（チャンネルの一覧と同じ形。返信なら parentId を持つ） */
+            message: components["schemas"]["Message"];
+        };
+        NotificationPage: {
+            /** @description 新しい順 */
+            notifications: components["schemas"]["Notification"][];
+            /**
+             * Format: uuid
+             * @description 続きを取るときに before に渡す id。続きが無ければ null
+             */
+            nextBefore: string | null;
+        };
     };
     responses: {
         /** @description Authorization ヘッダーが無い、または Bearer 方式でない（authentication_required）か、 Bearer 方式で資格情報が無い・壊れている・期限切れ・利用者が退会済み（invalid_token。どれに当たったかは区別しない。機能一覧 1.4）。 アクセストークンはリフレッシュ（/auth/refresh）で取り直す。仕様の形の検証（400）はトークンの確認より先に行う（仕様で書けない検証は後に行う） */
@@ -1409,6 +1497,8 @@ export interface components {
         DmId: string;
         /** @description 招待の id。形が uuid でなければ 400 */
         InvitationId: string;
+        /** @description 通知の id。形が uuid でなければ 400 */
+        NotificationId: string;
         /** @description ワークスペースの id。形が uuid でなければ 400 */
         WorkspaceId: string;
         /** @description Cookie を使う要求であることを示す独自のヘッダー。ブラウザは独自のヘッダーを付けた別の origin からの要求に プリフライトを求めるため、フォームや画像の読み込みからは送れない（要件定義書 4.3） */
@@ -1739,6 +1829,60 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    listMyNotifications: {
+        parameters: {
+            query?: {
+                /** @description これより古い通知を返す（通知の id）。形が uuid でなければ 400 */
+                before?: string;
+                /** @description 返す件数の上限。1〜100、既定は 50（実装時に決めた値。メッセージの一覧と揃える） */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 通知（新しい順）と、続きを取るための before */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            405: components["responses"]["MethodNotAllowed"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    markNotificationRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 通知の id。形が uuid でなければ 400 */
+                notificationId: components["parameters"]["NotificationId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 既読にした（既に既読だった場合も 204） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
         };
     };
     deleteMyAccount: {
