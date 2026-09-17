@@ -3,6 +3,7 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
 import { EditMessageForm, MessageActions } from './MessageActions';
+import { MessageAttachments } from './MessageAttachments';
 import { MessageBody } from './MessageBody';
 import { useMessageChannel } from './message-channel';
 import { type Message, useMessages } from './queries';
@@ -266,6 +267,8 @@ export function MessageItem({
       ) : (
         <MessageBody body={message.body} mentions={message.mentions} />
       )}
+      {/* 削除済みのメッセージは添付も出さない（api も返さない。機能一覧 4.2） */}
+      {message.body !== null && <MessageAttachments attachments={message.attachments} />}
       {ownScope && !editing && (
         <MessageActions scope={ownScope} message={message} onEdit={() => setEditing(true)} />
       )}

@@ -136,24 +136,28 @@ export function useReplies(workspaceId: string, channelId: string, parentId: str
   );
 }
 
-/** 本文を送り、応答のメッセージを最新のページの先頭に足す。一覧は読み直さない。 */
-function usePost(key: readonly unknown[], path: string) {
+/** 本文を送り、応答のメッセージを最新のページの先頭に足す。一覧は読み直さない。`toRequest` は送る本体を作る。 */
+function usePost<T>(key: readonly unknown[], path: string, toRequest: (input: T) => object) {
   const store = useSessionStore();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: string) =>
-      requestJson<Message>(store, path, {
-        method: 'POST',
-        body: { body } satisfies Schemas['PostMessageRequest'],
-      }),
+    mutationFn: (input: T) =>
+      requestJson<Message>(store, path, { method: 'POST', body: toRequest(input) }),
     onSuccess: (message) =>
       queryClient.setQueryData<MessagePages>(key, (data) => addMessage(data, message)),
   });
 }
 
-/** 投稿する（REST の仕様の postMessage）。 */
+/** 投稿する（REST の仕様の postMessage）。添付（F-27）が無ければ `attachmentIds` を送らない。 */
 export function usePostMessage(workspaceId: string, channelId: string) {
-  return usePost(messagesKey(workspaceId, channelId), messagesPath(workspaceId, channelId));
+  return usePost(
+    messagesKey(workspaceId, channelId),
+    messagesPath(workspaceId, channelId),
+    ({ body, attachmentIds }: { body: string; attachmentIds: readonly string[] }) =>
+      (attachmentIds.length === 0
+        ? { body }
+        : { body, attachmentIds: [...attachmentIds] }) satisfies Schemas['CreateMessageRequest'],
+  );
 }
 
 /**
@@ -204,6 +208,7 @@ export function usePostReply(workspaceId: string, channelId: string, parentId: s
   return usePost(
     repliesKey(workspaceId, channelId, parentId),
     repliesPath(workspaceId, channelId, parentId),
+    (body: string) => ({ body }) satisfies Schemas['PostMessageRequest'],
   );
 }
 

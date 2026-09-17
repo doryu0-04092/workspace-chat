@@ -51,6 +51,14 @@ export function message(n: number, overrides: Record<string, unknown> = {}) {
     replyCount: 0,
     replyParticipants: [] as (typeof BOB)[],
     mentions: [] as { userId: string; user: typeof BOB | null }[],
+    attachments: [] as {
+      id: string;
+      fileName: string;
+      contentType: string;
+      kind: 'image' | 'video' | 'document' | 'archive';
+      size: number;
+      url: string;
+    }[],
     ...overrides,
   };
 }
