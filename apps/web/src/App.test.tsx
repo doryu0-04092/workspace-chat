@@ -44,8 +44,8 @@ describe('起動時の復元と行き先', () => {
     expect(await screen.findByRole('heading', { name: 'ログイン' })).toBeDefined();
   });
 
-  it('ログインしている利用者がログインの画面・登録の画面・知らない URL を開くと、ワークスペースの画面へ移る', async () => {
-    for (const path of ['/login', '/register', '/', '/nope']) {
+  it('ログインしている利用者がログインの画面・登録の画面・再設定の画面・知らない URL を開くと、ワークスペースの画面へ移る', async () => {
+    for (const path of ['/login', '/register', '/recovery', '/', '/nope']) {
       fakeFetch(signedIn);
       const { unmount } = renderApp(path);
       expect(await screen.findByText('アリス'), path).toBeDefined();
@@ -238,6 +238,87 @@ describe('登録の画面', () => {
 
     expect((await screen.findByRole('alert')).textContent).toContain(
       '新規登録を受け付けていません',
+    );
+  });
+});
+
+// 機能一覧 1.1（F-37）: リカバリーコードによるパスワードの再設定の画面。#550。
+describe('パスワードの再設定の画面', () => {
+  const NEW_CODE = 'ZYXW-VTSR-QPNM-KJHG';
+
+  async function submitRecovery(routes: Parameters<typeof fakeFetch>[0]) {
+    const fetch = fakeFetch({ ...signedOut, ...routes });
+    renderAt('/recovery');
+    await screen.findByRole('heading', { name: 'パスワードの再設定' });
+    type('ユーザーID', 'alice');
+    type('リカバリーコード', RECOVERY_CODE);
+    type('新しいパスワード', 'password-2');
+    fireEvent.click(screen.getByRole('button', { name: '再設定する' }));
+    return fetch;
+  }
+
+  it('ログインの画面から開ける', async () => {
+    fakeFetch(signedOut);
+    renderAt('/login');
+
+    fireEvent.click(await screen.findByRole('link', { name: 'パスワードを忘れた' }));
+    expect(await screen.findByRole('heading', { name: 'パスワードの再設定' })).toBeDefined();
+  });
+
+  it('再設定すると新しいリカバリーコードを表示し、控えたことを選ぶまで先へ進めない。進むとログインの画面へ移り、コードは画面にも保存領域にも残らない', async () => {
+    const { calls } = await submitRecovery({
+      'POST /api/auth/recovery': () => json(200, { recoveryCode: NEW_CODE }),
+    });
+
+    expect(await screen.findByText(NEW_CODE)).toBeDefined();
+    const recovery = calls.find((c) => c.key === 'POST /api/auth/recovery')!;
+    expect(JSON.parse(String(recovery.init.body))).toEqual({
+      userId: 'alice',
+      recoveryCode: RECOVERY_CODE,
+      newPassword: 'password-2',
+    });
+    // 使ったコードは無効になったことを伝える
+    expect(screen.getByText(/使ったリカバリーコードは、もう使えません/)).toBeDefined();
+
+    const proceed = screen.getByRole('button', {
+      name: 'ログインの画面へ進む',
+    }) as HTMLButtonElement;
+    expect(proceed.disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'リカバリーコードを控えました' }));
+    fireEvent.click(proceed);
+
+    expect(await screen.findByRole('heading', { name: 'ログイン' })).toBeDefined();
+    expect(screen.queryByText(NEW_CODE)).toBeNull();
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it('ユーザーID かリカバリーコードが違えば、パスワードではなくリカバリーコードが違うと出し、入力を残す', async () => {
+    await submitRecovery({ 'POST /api/auth/recovery': () => error(401, 'invalid_credentials') });
+
+    const alert = (await screen.findByRole('alert')).textContent ?? '';
+    expect(alert).toContain('ユーザーID かリカバリーコードが違います');
+    expect(alert).not.toContain('パスワードが違います');
+    expect((screen.getByLabelText('ユーザーID') as HTMLInputElement).value).toBe('alice');
+  });
+
+  it('試行が多すぎれば、待つ秒数を出す', async () => {
+    await submitRecovery({
+      'POST /api/auth/recovery': () => error(429, 'too_many_requests', { 'Retry-After': '16' }),
+    });
+
+    expect((await screen.findByRole('alert')).textContent).toContain('16 秒');
+  });
+
+  it('応答の本体が読めなければ（JSON でない）、理由を出し、もう一度押せる状態に戻す', async () => {
+    await submitRecovery({
+      'POST /api/auth/recovery': () =>
+        new Response('<!doctype html>', { status: 200, headers: { 'Content-Type': 'text/html' } }),
+    });
+
+    expect((await screen.findByRole('alert')).textContent).toContain('うまくいきませんでした');
+    expect((screen.getByRole('button', { name: '再設定する' }) as HTMLButtonElement).disabled).toBe(
+      false,
     );
   });
 });
