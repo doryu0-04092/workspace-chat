@@ -275,6 +275,16 @@ export function createSessionStore(
     },
 
     renew,
+
+    /**
+     * 自分のプロフィールを変えた後、表示に使う利用者の情報を差し替える（F-04）。ログインは替えない（世代を進めない）。
+     * **ログインしている利用者と同じ id のときだけ差し替える**——応答を待つ間にログアウトして別の利用者がログインしていたら、前の利用者の情報を入れない。
+     */
+    updateUser(user: SessionUser): void {
+      const current = state.getState();
+      if (current.status !== 'signedIn' || current.user.id !== user.id) return;
+      set({ ...current, user });
+    },
   };
 }
 
