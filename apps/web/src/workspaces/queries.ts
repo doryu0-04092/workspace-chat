@@ -381,6 +381,48 @@ export function useLeaveChannel(workspaceId: string, channelId: string) {
   });
 }
 
+/**
+ * プライベートチャンネルへ招待する（F-08。REST の仕様の inviteChannelMember。招待した時点で参加する）。
+ * 通ったら、参加者の一覧に足し、管理用の一覧（F-35）のそのチャンネルの人数を1人増やす。**どちらも取り直しを待たずにその場で直す**（#533 第0巡の 🔴1）。
+ * 参加者の一覧の並びは api が持つので、足した後に取り直す。
+ */
+export function useInviteChannelMember(workspaceId: string, channelId: string) {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (member: UserSummary) =>
+      requestJson<void>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/members`,
+        {
+          method: 'POST',
+          body: { memberId: member.id } satisfies Schemas['InviteChannelMemberRequest'],
+        },
+      ),
+    onSuccess: (_, member) => {
+      const summary: UserSummary = {
+        id: member.id,
+        userId: member.userId,
+        displayName: member.displayName,
+      };
+      queryClient.setQueryData<UserSummary[]>(
+        channelMembersKey(workspaceId, channelId),
+        (members) =>
+          members && !members.some((m) => m.id === member.id) ? [...members, summary] : members,
+      );
+      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+        channels?.map((channel) =>
+          channel.id === channelId ? { ...channel, memberCount: channel.memberCount + 1 } : channel,
+        ),
+      );
+      void queryClient.invalidateQueries({
+        queryKey: channelMembersKey(workspaceId, channelId),
+        exact: true,
+      });
+    },
+  });
+}
+
 export function useJoinChannel(workspaceId: string) {
   const store = useSessionStore();
   const queryClient = useQueryClient();

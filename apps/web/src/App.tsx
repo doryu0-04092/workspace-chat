@@ -2,6 +2,7 @@ import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router';
 import { LoginPage } from './auth/LoginPage';
+import { RecoveryPage } from './auth/RecoveryPage';
 import { RegisterPage } from './auth/RegisterPage';
 import { GuestOnly, RequireSignedIn } from './auth/route-guards';
 import { SessionProvider } from './auth/session-context';
@@ -52,6 +53,7 @@ export function App({
           <Route element={<GuestOnly />}>
             <Route path="login" element={<LoginPage />} />
             <Route path="register" element={<RegisterPage />} />
+            <Route path="recovery" element={<RecoveryPage />} />
           </Route>
           <Route element={<RequireSignedIn />}>
             <Route
