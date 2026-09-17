@@ -71,7 +71,7 @@ describe('チャンネルの一覧の返信の表示', () => {
 });
 
 describe('スレッド', () => {
-  it('「N件の返信」を押すとスレッドを開き、親と返信を上が古い順に並べる。返信はトークンを付けて読む', async () => {
+  it('「N件の返信」を押すとスレッドを開き、親を先頭に、返信を上が新しい順に並べる（#608）。返信はトークンを付けて読む', async () => {
     const parent = message(2, { replyCount: 2, replyParticipants: [BOB] });
     const { calls } = fakeFetch(
       routes({
@@ -87,7 +87,7 @@ describe('スレッド', () => {
     await thread.findByText('返信 4');
     const shown = texts(thread);
     expect(shown[0]).toContain('メッセージ 2');
-    expect(shown.slice(1).map((text) => text.match(/返信 \d/)?.[0])).toEqual(['返信 3', '返信 4']);
+    expect(shown.slice(1).map((text) => text.match(/返信 \d/)?.[0])).toEqual(['返信 4', '返信 3']);
     const read = calls.find((c) => c.key === `GET ${repliesPath(parent)}`)!;
     expect(headerOf(read.init, 'Authorization')).toBe('Bearer t1');
   });

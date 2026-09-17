@@ -40,11 +40,7 @@ export function ThreadPanel({
         </button>
       </div>
       {parent && <MessageItem message={parent} />}
-      <PagedMessages
-        pages={replies}
-        labels={REPLY_LABELS}
-        renderMessage={(message) => <MessageItem message={message} />}
-      />
+      {/* 返信の入力欄は、親のすぐ下・返信の一覧の上に置く（返信も新しいものが上に来る。#608） */}
       {/* 削除済みと分かった親には返信のフォームを出さない（api が断る）。**親が読み込まれていなければ出す**——削除済みかは分からず、消すと読み込んだページより古い親に返信できなくなる */}
       {!readOnly && parent?.body !== null && (
         <MessageForm
@@ -57,6 +53,11 @@ export function ThreadPanel({
           submitLabel="返信を送信する"
         />
       )}
+      <PagedMessages
+        pages={replies}
+        labels={REPLY_LABELS}
+        renderMessage={(message) => <MessageItem message={message} />}
+      />
     </section>
   );
 }
