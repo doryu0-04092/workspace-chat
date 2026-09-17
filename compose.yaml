@@ -151,6 +151,9 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?.env に MINIO_ROOT_PASSWORD を設定してください}
       S3_BUCKET: ${S3_BUCKET:?.env に S3_BUCKET を設定してください}
     # 起動のたびにバケットを作り、バージョニングを有効にする（本番の infra/production/attachments.tf のバケットと揃える）。
+    # **配信用の接頭辞 avatars/ だけを匿名で読めるようにする**——手元には CloudFront の署名付き Cookie が無く、web の dev サーバーが
+    # /avatars をここへ中継する（apps/web/src/dev/storage-proxy.ts）。quarantine/ は読めない。**手元だけの形であり、本番のバケットは
+    # パブリックアクセスを全面遮断する**（ポートは 127.0.0.1 にだけ出している）。
     # 作り済みなら何もしない（mb --ignore-existing と version enable は何度流してもよい）。mc はこのイメージが同梱している。
     #
     # **踏むと壊れる: バケットを作る処理を、終わって止まる別のサービスに分けない。** `docker compose up -d --wait` は、
@@ -168,6 +171,7 @@ services:
         mc ready local >/dev/null 2>&1; do kill -0 "$$pid" || exit 1; sleep 1; done;
         mc mb --ignore-existing "local/$$S3_BUCKET" &&
         mc version enable "local/$$S3_BUCKET" &&
+        mc anonymous set download "local/$$S3_BUCKET/avatars" &&
         touch /tmp/bucket-ready;
         wait "$$pid"; wait "$$pid"
     ports:
