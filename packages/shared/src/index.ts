@@ -18,6 +18,7 @@ export type {
   PresenceChangedPayload,
   RealtimeEventKind,
   RealtimeEventName,
+  TypingPayload,
   UnreadUpdatedPayload,
 } from './realtime-events';
 // REST API の型。packages/shared/openapi/openapi.yaml から npm run generate:api で生成する（手で書き換えない）。
