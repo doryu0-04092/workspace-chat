@@ -44,6 +44,13 @@ const MB = 1024 * 1024;
 
 // 機能一覧 1.3（F-04 のアバター画像）。11.1 の受け入れ条件とテストの行を、1.3 の読み替え（画像だけ・本人のプロフィール・
 // キーの形式・確定で落ちたら本人に払い出されていない識別子への 404 だけ）で当てる。S3 は MinIO で代える（#427）。
+/** 本体を指定の大きさに詰める・切る（署名付き URL は大きさを署名に含むため、同じ URL で送り直すときは申告の大きさに揃える。#611）。 */
+function resized(bytes: Uint8Array, length: number): Uint8Array {
+  const out = new Uint8Array(length);
+  out.set(bytes.subarray(0, length));
+  return out;
+}
+
 describe('アバター画像のアップロード（F-04。POST /api/users/me/avatar/uploads と complete）', () => {
   let postgres: StartedPostgreSqlContainer;
   let valkey: StartedTestContainer;
@@ -224,13 +231,13 @@ describe('アバター画像のアップロード（F-04。POST /api/users/me/av
       expect(expiresAt - Date.now()).toBeLessThanOrEqual(300_000 + 1_000);
     });
 
-    it('署名付き URL の有効期限は 5 分で、If-None-Match: * と Content-Type を署名に含む', async () => {
+    it('署名付き URL の有効期限は 5 分で、If-None-Match: * と Content-Type と大きさを署名に含む', async () => {
       const { authorization } = await login();
       const url = new URL((await issued(authorization)).uploadUrl);
 
       expect(url.searchParams.get('X-Amz-Expires')).toBe('300');
       expect(url.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toEqual(
-        expect.arrayContaining(['content-type', 'host', 'if-none-match']),
+        expect.arrayContaining(['content-length', 'content-type', 'host', 'if-none-match']),
       );
       // 空の本体のチェックサムを焼き込まない（焼き込むとブラウザの PUT が断られる）
       expect([...url.searchParams.keys()].some((name) => /checksum/i.test(name))).toBe(false);
@@ -316,7 +323,8 @@ describe('アバター画像のアップロード（F-04。POST /api/users/me/av
       const { authorization } = await login();
       const ticket = await issued(authorization);
       expect((await put(ticket, SAMPLES.png)).status).toBe(200);
-      expect((await put(ticket, SAMPLES.jpeg)).status).toBe(412);
+      // 大きさは署名に含まれるため、2回目も同じ大きさで送る（#611）
+      expect((await put(ticket, resized(SAMPLES.jpeg, SAMPLES.png.length))).status).toBe(412);
     });
 
     it('Content-Type を変えた・If-None-Match を外した PUT は断られる', async () => {
@@ -376,7 +384,10 @@ describe('アバター画像のアップロード（F-04。POST /api/users/me/av
 
     it('配信の Content-Type と保存名の拡張子は、申告ではなく検証した形式から決める', async () => {
       const { authorization, id } = await login();
-      const ticket = await issued(authorization, { fileName: 'photo.png.php' });
+      const ticket = await issued(authorization, {
+        fileName: 'photo.png.php',
+        size: SAMPLES.jpeg.length,
+      });
       // image/png と申告して JPEG を上げる
       await put(ticket, SAMPLES.jpeg);
 
@@ -401,7 +412,7 @@ describe('アバター画像のアップロード（F-04。POST /api/users/me/av
       '%s は 422 で断り、配信用のキーへ移さず、隔離用のキーを削除し、avatarUrl を変えない',
       async (_, bytes, code) => {
         const { authorization, id } = await login();
-        const ticket = await issued(authorization);
+        const ticket = await issued(authorization, { size: bytes.length });
         expect((await put(ticket, bytes)).status).toBe(200);
 
         const res = await complete(authorization, ticket.uploadId);
@@ -414,12 +425,22 @@ describe('アバター画像のアップロード（F-04。POST /api/users/me/av
       },
     );
 
-    it('10 MB を超える本体は、申告が上限の内でも 422 file_too_large で断り、隔離用のキーを削除する', async () => {
+    it('申告と違う大きさの本体は、署名付き URL の PUT の時点で断られ、隔離用のキーに書かれない（#611）', async () => {
+      const { authorization } = await login();
+      for (const bytes of [new Uint8Array(SAMPLES.png.length + 1), SAMPLES.png.subarray(1)]) {
+        const ticket = await issued(authorization);
+        expect((await put(ticket, bytes)).status).toBe(403);
+        expect(await exists(keyOf(ticket))).toBe(false);
+      }
+    });
+
+    it('10 MB を超える本体が隔離用のキーに届いても（署名の前提が崩れた場合）、確定で 422 file_too_large で断り、隔離用のキーを削除する', async () => {
       const { authorization, id } = await login();
       const ticket = await issued(authorization);
       const large = new Uint8Array(10 * MB + 1);
       large.set(SAMPLES.png);
-      expect((await put(ticket, large)).status).toBe(200);
+      // 署名付き URL は申告と違う大きさを断るため（#611）、管理の資格情報で直接書いて前提が崩れた場合を作る
+      await admin.send(new PutObjectCommand({ Bucket: bucket, Key: keyOf(ticket), Body: large }));
 
       const res = await complete(authorization, ticket.uploadId);
 
@@ -483,7 +504,7 @@ describe('アバター画像のアップロード（F-04。POST /api/users/me/av
       await put(ticket, SAMPLES.png);
       expect((await complete(authorization, ticket.uploadId)).status).toBe(200);
       // 確定で隔離用のキーを削除した後は、期限内に同じ URL でもう1回だけ書ける（現行の版がデリートマーカーのため。11.1）
-      expect((await put(ticket, SAMPLES.gif)).status).toBe(200);
+      expect((await put(ticket, resized(SAMPLES.gif, SAMPLES.png.length))).status).toBe(200);
       const sent = recordS3Commands();
 
       const again = await complete(authorization, ticket.uploadId);
@@ -504,10 +525,10 @@ describe('アバター画像のアップロード（F-04。POST /api/users/me/av
 
     it('同じ識別子の2回目以降の確定は、コピーも削除もせず、1回目と同じ結果を返す（拒否。正しい画像を上げ直しても通らない）', async () => {
       const { authorization, id } = await login();
-      const ticket = await issued(authorization);
+      const ticket = await issued(authorization, { size: SAMPLES.svg.length });
       await put(ticket, SAMPLES.svg);
       expect((await complete(authorization, ticket.uploadId)).status).toBe(422);
-      expect((await put(ticket, SAMPLES.png)).status).toBe(200);
+      expect((await put(ticket, resized(SAMPLES.png, SAMPLES.svg.length))).status).toBe(200);
       const sent = recordS3Commands();
 
       const again = await complete(authorization, ticket.uploadId);
@@ -598,6 +619,7 @@ describe('アバター画像のアップロード（F-04。POST /api/users/me/av
       const second = await issued(authorization, {
         fileName: 'second.gif',
         contentType: 'image/gif',
+        size: SAMPLES.gif.length,
       });
       await put(second, SAMPLES.gif);
 

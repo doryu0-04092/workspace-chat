@@ -69,6 +69,7 @@ export class AvatarUploadService {
     const signed = await this.storage.sign(
       `${avatarQuarantineDirectory(userId, upload.id)}${fileName}`,
       format.contentType,
+      input.size,
     );
     return {
       uploadId: upload.id,
