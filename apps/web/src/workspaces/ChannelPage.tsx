@@ -7,7 +7,7 @@ import { PostMessageForm } from '../messages/PostMessageForm';
 import { useMessages } from '../messages/queries';
 import { ThreadPanel } from '../messages/ThreadPanel';
 import { useChannelRealtime } from '../realtime/use-channel-realtime';
-import { ChannelMembers } from './MemberLists';
+import { ChannelMembers, InviteToChannel } from './MemberLists';
 import { useChannels, useUpdateChannelRead, useWorkspace } from './queries';
 
 /** 開いているスレッドの親の id を持つ URL のパラメータ（機能一覧 6。開き直しても同じスレッドを開く）。 */
@@ -44,6 +44,13 @@ export function ChannelPage() {
       <Link to={`/workspaces/${workspaceId}`} className="text-sm underline">
         チャンネルの一覧へ
       </Link>
+      {channel.visibility === 'PRIVATE' && (
+        <InviteToChannel
+          key={`invite-${channelId}`}
+          workspaceId={workspaceId}
+          channelId={channelId}
+        />
+      )}
       <ChannelMembers
         key={`members-${channelId}`}
         workspaceId={workspaceId}

@@ -3,6 +3,7 @@ import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
 import {
   useChannelMembers,
+  useInviteChannelMember,
   useKickChannelMember,
   useKickWorkspaceMember,
   useWorkspaceMembers,
@@ -153,6 +154,73 @@ export function ChannelMembers({
       {kick.isError && (
         <p role="alert" className="mt-2 text-red-700">
           {errorMessage(kick.error)}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * プライベートチャンネルへの招待（F-08。参加者なら誰でも招待でき、招待した時点で参加する。判定は api）。
+ * **候補は押したときにだけ読む**——ワークスペースのメンバーのうち、このチャンネルに参加していない人を並べる。
+ */
+export function InviteToChannel({
+  workspaceId,
+  channelId,
+}: {
+  workspaceId: string;
+  channelId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const members = useWorkspaceMembers(workspaceId, open);
+  const participants = useChannelMembers(workspaceId, channelId, open);
+  const invite = useInviteChannelMember(workspaceId, channelId);
+  const failed = members.error ?? participants.error;
+  const joined = new Set(participants.data?.map((participant) => participant.id));
+  const candidates = members.data?.filter((member) => !joined.has(member.id));
+
+  return (
+    <section className="mt-4">
+      <button
+        type="button"
+        className="text-sm underline"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        メンバーを招待する
+      </button>
+      {open && failed && (
+        <p role="alert" className="mt-2 text-red-700">
+          招待できるメンバーを読み込めませんでした。{errorMessage(failed)}
+        </p>
+      )}
+      {open &&
+        !failed &&
+        candidates &&
+        participants.data &&
+        (candidates.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-600">招待できるメンバーはいません。</p>
+        ) : (
+          <ul aria-label="招待できるメンバー" className="mt-2 flex flex-col gap-1">
+            {candidates.map((member) => (
+              <li key={member.id} className="flex flex-wrap items-center gap-2">
+                <span>{`${member.displayName} @${member.userId}`}</span>
+                <button
+                  type="button"
+                  className="text-sm underline disabled:opacity-50"
+                  aria-label={`${member.displayName} を招待する`}
+                  disabled={invite.isPending}
+                  onClick={() => invite.mutate(member)}
+                >
+                  招待する
+                </button>
+              </li>
+            ))}
+          </ul>
+        ))}
+      {invite.isError && (
+        <p role="alert" className="mt-2 text-red-700">
+          {errorMessage(invite.error)}
         </p>
       )}
     </section>
