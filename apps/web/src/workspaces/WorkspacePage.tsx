@@ -6,6 +6,7 @@ import { ManagedChannels } from './ManagedChannels';
 import { WorkspaceMembers } from './MemberLists';
 import {
   type Channel,
+  useArchivedChannels,
   useChannels,
   useCreateChannel,
   useInviteToWorkspace,
@@ -94,6 +95,7 @@ export function WorkspacePage() {
           {errorMessage(join.error)}
         </p>
       )}
+      <ArchivedChannels workspaceId={workspaceId} />
       {workspace.data?.role === 'OWNER' && <CreateChannelForm workspaceId={workspaceId} />}
       {workspace.data?.role === 'OWNER' && <InviteForm workspaceId={workspaceId} />}
       {workspace.data?.role === 'OWNER' && <ManagedChannels workspaceId={workspaceId} />}
@@ -102,6 +104,50 @@ export function WorkspacePage() {
       )}
       {workspace.data && <LeaveWorkspace workspaceId={workspaceId} />}
     </main>
+  );
+}
+
+/**
+ * 自分が参加しているアーカイブ済みのチャンネル（F-35。機能一覧 3.2「参加者は読める」）。押したときにだけ読み、読むための画面へのリンクを並べる。
+ */
+function ArchivedChannels({ workspaceId }: { workspaceId: string }) {
+  const [open, setOpen] = useState(false);
+  const archived = useArchivedChannels(workspaceId, open);
+
+  return (
+    <section className="mt-8">
+      <button
+        type="button"
+        className="text-sm underline"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        アーカイブ済みのチャンネル
+      </button>
+      {open && archived.isError && (
+        <p role="alert" className="mt-2 text-red-700">
+          アーカイブ済みのチャンネルを読み込めませんでした。{errorMessage(archived.error)}
+        </p>
+      )}
+      {open &&
+        archived.data &&
+        (archived.data.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-600">アーカイブ済みのチャンネルはありません。</p>
+        ) : (
+          <ul aria-label="アーカイブ済みのチャンネル" className="mt-2 flex flex-col gap-1">
+            {archived.data.map((channel) => (
+              <li key={channel.id}>
+                <Link
+                  to={`/workspaces/${workspaceId}/channels/${channel.id}`}
+                  className="underline"
+                >
+                  {channelLabel(channel)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ))}
+    </section>
   );
 }
 

@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useContext } from 'react';
 
-type MessageChannel = { workspaceId: string; channelId: string };
+/** `readOnly`: アーカイブ済みのチャンネル（読むだけ。投稿・返信・編集・削除の操作を出さない。機能一覧 3.2）。 */
+type MessageChannel = { workspaceId: string; channelId: string; readOnly: boolean };
 
 const MessageChannelContext = createContext<MessageChannel | null>(null);
 
@@ -11,10 +12,11 @@ const MessageChannelContext = createContext<MessageChannel | null>(null);
 export function MessageChannelProvider({
   workspaceId,
   channelId,
+  readOnly,
   children,
 }: MessageChannel & { children: ReactNode }) {
   return (
-    <MessageChannelContext.Provider value={{ workspaceId, channelId }}>
+    <MessageChannelContext.Provider value={{ workspaceId, channelId, readOnly }}>
       {children}
     </MessageChannelContext.Provider>
   );
