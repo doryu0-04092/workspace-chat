@@ -13,6 +13,8 @@ import { DmsController } from './dms.controller';
 import { DmsService } from './dms.service';
 import { InvitationsController } from './invitations.controller';
 import { InvitationsService } from './invitations.service';
+import { PinsController } from './pins.controller';
+import { PinsService } from './pins.service';
 import { MessagesController } from './messages.controller';
 import { MessagesService } from './messages.service';
 import { SearchController } from './search.controller';
@@ -36,6 +38,7 @@ import { WorkspacesService } from './workspaces.service';
     ChannelsController,
     ChannelMembershipController,
     ChannelArchiveController,
+    PinsController,
     MessagesController,
     DmsController,
     SearchController,
@@ -49,6 +52,7 @@ import { WorkspacesService } from './workspaces.service';
     ChannelArchiveService,
     ChannelRoomsService,
     ChannelRoomsGateway,
+    PinsService,
     MessagesService,
     DmsService,
     SearchService,

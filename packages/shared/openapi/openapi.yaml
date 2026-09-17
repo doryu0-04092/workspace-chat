@@ -1240,6 +1240,120 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/pins:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    get:
+      operationId: listPins
+      summary: チャンネルのピン留めの一覧（F-33）
+      description: >-
+        ピン留めしたメッセージを、ピン留めした新しい順にすべて返す（1つのチャンネルに最大 100 件。機能一覧 13.2）。
+        削除済みのメッセージは返さない。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、
+        パブリックは 403 not_a_channel_member・プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。
+        アーカイブ済みでも参加者は読める（機能一覧 3.2）。ピン留めの変化は配信しない（要件定義書 4.1 の配信の対象イベントに無い）
+      responses:
+        '200':
+          description: ピン留めしたメッセージ（ピン留めした新しい順）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/messages/{messageId}/pin:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MessageId'
+    put:
+      operationId: pinMessage
+      summary: メッセージをピン留めする（F-33）
+      description: >-
+        既にピン留めしていれば何も変えず、最初にピン留めした人と時刻を 200 で返す。スレッドの返信もピン留めできる。
+        判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→
+        そのチャンネルに無い・削除済みのメッセージは 404 → アーカイブ済みのチャンネルは 409 channel_archived →
+        そのチャンネルのピン留め（削除済みのメッセージを除く）が 100 件に達していれば 409 pin_limit_reached（実装時に決めた値）。
+        配信しない（要件定義書 4.1 の配信の対象イベントに無い）。利用者ごとに1分 60 回まで（外すのとは別枠。実装時に決めた値）
+      responses:
+        '200':
+          description: ピン留めしたメッセージ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinnedMessage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）か、ピン留めの件数の上限（pin_limit_reached）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: unpinMessage
+      summary: メッセージのピン留めを外す（F-33）
+      description: >-
+        そのチャンネルの参加者なら、ピン留めした本人でなくても外せる（付けられる人と外せる人を揃える。機能一覧 13.2 の「判断が必要な点」の決定）。
+        ピン留めしていなければ何も変えずに 204 を返す。判定の順はピン留めと同じ（件数の上限を除く）。
+        配信しない。利用者ごとに1分 60 回まで（ピン留めとは別枠。実装時に決めた値）
+      responses:
+        '204':
+          description: 外した（ピン留めしていなかった場合も 204）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces/{id}/channels/{channelId}/messages:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
@@ -2172,6 +2286,7 @@ components:
             - owner_cannot_leave
             - password_mismatch
             - owner_cannot_delete_account
+            - pin_limit_reached
             - channel_name_taken
             - not_a_channel_member
             - already_channel_member
@@ -2803,6 +2918,38 @@ components:
         joined:
           description: 要求した利用者がこのチャンネルに参加しているか（メッセージのチャンネルは常に true）
           type: boolean
+    PinnedMessage:
+      description: ピン留めしたメッセージ（機能一覧 13.2）
+      type: object
+      additionalProperties: false
+      required:
+        - message
+        - pinnedBy
+        - pinnedAt
+      properties:
+        message:
+          $ref: '#/components/schemas/Message'
+        pinnedBy:
+          description: ピン留めした人。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
+          oneOf:
+            - $ref: '#/components/schemas/UserSummary'
+            - type: 'null'
+        pinnedAt:
+          description: ピン留めした時刻
+          type: string
+          format: date-time
+    PinList:
+      type: object
+      additionalProperties: false
+      required:
+        - pins
+      properties:
+        pins:
+          description: ピン留めした新しい順
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PinnedMessage'
     Channel:
       description: 一般の一覧（参加者向け）のチャンネル
       type: object

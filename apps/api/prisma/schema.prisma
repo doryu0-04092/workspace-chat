@@ -282,6 +282,8 @@ model User {
   memberships         Membership[]
   recoveryCodes       RecoveryCode[]
   refreshTokens       RefreshToken[]
+  /// ピン留めした（F-33）。
+  pinnedMessages      MessagePin[]
   /// 自分宛ての未承諾の招待（F-38）と、自分が出した招待（F-08）。
   invitationsReceived Invitation[]     @relation("InvitationInvitee")
   invitationsSent     Invitation[]     @relation("InvitationInviter")
@@ -772,6 +774,9 @@ model Message {
   readAsChannelLast ChannelRead[]
   readAsThreadParent ThreadRead[] @relation("ThreadReadParent")
   readAsThreadLast   ThreadRead[] @relation("ThreadReadLast")
+  /// ピン留め（F-33）。**1件のメッセージに1つまで**（`MessagePin.messageId` の一意制約）。リストにしているのは、参照先が複合キー（id, channelId）で
+  /// Prisma が1対1の関連に同じ組の一意制約を求めるためである（`messageId` だけで一意なので、組の一意索引は足さない）。
+  pins               MessagePin[]
 
   /// 通知（F-26）から指される向き。`Notification` の側が持ち主である。
   notifications Notification[]
@@ -1083,4 +1088,33 @@ model Notification {
   @@unique([messageId, userId, kind])
   /// 一覧は利用者ごとに新しい順（`id` の降順）で引く。
   @@index([userId, id(sort: Desc)])
+}
+
+// ============================================================================
+// ピン留め（F-33。機能一覧 13.2）
+// ============================================================================
+
+/// チャンネルにピン留めしたメッセージ（F-33。区分: 提案・承認済〔2026-09-03〕）。**1件のメッセージに1つまで**（`messageId` の一意制約）。
+/// **外せるのはそのチャンネルの参加者なら誰でもよい**ため、ピン留めした人は表示のためだけに持つ（判定に使わない）。
+/// **削除済みのメッセージの行も消さない**（削除は論理削除。一覧で返さないだけである）。
+model MessagePin {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。**一覧の並び（ピン留めした新しい順）にも使う。**
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @unique @db.Uuid
+
+  /// メッセージが属するチャンネル。**messageId から導けるが、あえて持つ**——チャンネルのピン留めの一覧をこの列で引き、
+  /// 下の複合外部キーで、別のチャンネルのメッセージを指せない。
+  channelId String @db.Uuid
+
+  /// ピン留めした人（`User.id`）。利用者は論理削除で行が残る（機能一覧 1.5）。
+  pinnedById String @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  message  Message @relation(fields: [messageId, channelId], references: [id, channelId], onDelete: Cascade)
+  pinnedBy User    @relation(fields: [pinnedById], references: [id], onDelete: Cascade)
+
+  /// **チャンネルのピン留めの一覧はこの向きで引く**（`channelId = ?` を新しい順）。
+  @@index([channelId, id])
 }

@@ -7,6 +7,7 @@ import { EditMessageForm, MessageActions } from './MessageActions';
 import { MessageBody } from './MessageBody';
 import { MessageReactions } from './MessageReactions';
 import { useMessageChannel } from './message-channel';
+import { PinControls } from './PinnedMessages';
 import { type Message, useMessages } from './queries';
 
 /**
@@ -262,6 +263,7 @@ export function MessageItem({
     <MessageShell
       message={message}
       mentions={message.mentions}
+      headerExtra={<PinControls message={message} />}
       editor={
         ownScope && editing ? (
           <EditMessageForm scope={ownScope} message={message} onDone={() => setEditing(false)} />
@@ -287,10 +289,12 @@ export function MessageItem({
  * 1件のメッセージの枠（チャンネル・スレッド・DM で共通。F-19）。**退会した書き手は「削除済みの利用者」（機能一覧 1.5）、
  * 削除済みは本文を置き換え、削除済みには「（編集済み）」を出さない（4.2）——この出し方はここだけに置く**（一覧ごとに持つと片方だけが変わる）。
  * `editor` を渡すと、本文の代わりに出す（編集中）。`children` は本文の下に置く（操作・スレッドの入口）。
+ * `headerExtra` は見出しの行の末尾に置く（チャンネルのメッセージのピン留め。DM には無い）。
  */
 export function MessageShell({
   message,
   mentions,
+  headerExtra = null,
   editor = null,
   children,
 }: {
@@ -301,6 +305,7 @@ export function MessageShell({
     body: string | null;
   };
   mentions?: Message['mentions'];
+  headerExtra?: ReactNode;
   editor?: ReactNode;
   children?: ReactNode;
 }) {
@@ -314,6 +319,7 @@ export function MessageShell({
         {message.editedAt !== null && message.body !== null && (
           <span className="text-slate-500">（編集済み）</span>
         )}
+        {headerExtra}
       </header>
       {message.body === null ? (
         <p className="text-slate-500">このメッセージは削除されました</p>

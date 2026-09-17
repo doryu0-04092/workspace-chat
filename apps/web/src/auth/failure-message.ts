@@ -38,6 +38,8 @@ export function failureMessage(failure: Failure): string {
       return 'その利用者はこのワークスペースのメンバーではありません。一覧を開き直してください。';
     case 'dm_counterpart_unavailable':
       return '相手がこのワークスペースのメンバーではなくなったため、送信できません。';
+    case 'pin_limit_reached':
+      return 'このチャンネルにピン留めできる件数の上限に達しています。';
     case 'owner_only':
       return 'この操作は、ワークスペースのオーナーだけが行えます。';
     case 'already_invited':
