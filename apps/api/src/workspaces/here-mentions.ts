@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
+import { addMentionNotifications } from '../notifications/mention-notifications';
 import { PrismaService } from '../prisma.service';
 import { HereReceipts } from '../realtime/here-receipts';
 import { PresenceRegistry } from '../realtime/presence-registry';
@@ -82,6 +83,21 @@ export class HereMentions {
         skipDuplicates: true,
       });
       const notified = await participantIds(this.prisma, channelId, { among: [...received] });
+      // 受け取りを返した利用者（いまも参加者）にだけ通知を作る（F-26。機能一覧 9.2・10.3「@here が一覧に載るのは、受け取りを返した利用者だけ」）。
+      // 受け取りを待つ間に消された・`@here` を編集で外したメッセージには作らない
+      const message = await this.prisma.message.findFirst({
+        where: { id: messageId, deletedAt: null, mentionsHere: true },
+        select: { workspaceId: true, authorId: true },
+      });
+      if (message) {
+        await addMentionNotifications(this.prisma, {
+          messageId,
+          channelId,
+          workspaceId: message.workspaceId,
+          authorId: message.authorId,
+          userIds: notified,
+        });
+      }
       for (const userId of notified) {
         await announceUnreadTo(this.emitter, this.prisma, channelId, userId);
       }

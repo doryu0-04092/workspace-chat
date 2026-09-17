@@ -105,6 +105,19 @@ describe('@here / @channel（F-21）', () => {
     return channel?.mentions;
   }
 
+  /** そのメッセージの通知（F-26）を持つ利用者。 */
+  async function notifiedOf(messageId: string): Promise<string[]> {
+    const rows = await t.prisma.notification.findMany({
+      where: { messageId },
+      select: { userId: true },
+    });
+    return rows.map((row) => row.userId);
+  }
+
+  function sorted(ids: readonly string[]): string[] {
+    return [...ids].sort();
+  }
+
   async function recipientsOf(messageId: string) {
     const rows = await t.prisma.hereMentionRecipient.findMany({ where: { messageId } });
     return new Map(rows.map((row) => [row.userId, row.receivedAt !== null]));
@@ -237,6 +250,12 @@ describe('@here / @channel（F-21）', () => {
       expect(sockets.owner.notices).toEqual([]);
       expect(await mentionsOf(bob, workspace.id, channelId)).toBe(1);
       expect(await mentionsOf(dave, workspace.id, channelId)).toBe(0);
+      // 通知一覧（F-26）にも、受け取りを返した利用者にだけ載る（機能一覧 9.2・10.3）
+      await vi.waitFor(
+        async () =>
+          expect(sorted(await notifiedOf(message.id))).toEqual(sorted([bob.id, carol.id])),
+        { timeout: RECORD_WAIT_MS, interval: 100 },
+      );
       await vi.waitFor(() =>
         expect(sockets.bob.unread.at(-1)).toMatchObject({ channelId, mentions: 1 }),
       );
@@ -271,6 +290,10 @@ describe('@here / @channel（F-21）', () => {
       expect(bobView.notices).toEqual([{ channelId, messageId: message.id }]);
       expect(await mentionsOf(bob, workspace.id, channelId)).toBe(0);
       expect(await mentionsOf(carol, workspace.id, channelId)).toBe(1);
+      await vi.waitFor(async () => expect(await notifiedOf(message.id)).toEqual([carol.id]), {
+        timeout: RECORD_WAIT_MS,
+        interval: 100,
+      });
     });
 
     it('編集で本文から @here を消すと、受け取りの記録は残し、メンションの件数に数えない', async () => {

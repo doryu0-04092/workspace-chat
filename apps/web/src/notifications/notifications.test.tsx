@@ -181,6 +181,48 @@ describe('ブラウザ通知（F-25）', () => {
     expect(shown[0]?.options?.body).toBe(`@${USER.userId} 見てください 2`);
   });
 
+  it('@channel が届いたら、自分が mentions に載っていなくても通知を出す。自分が書いた @channel には出さない（機能一覧 9.2・10.2）', async () => {
+    const { shown } = fakeNotificationApi('default', 'granted');
+    fakeFetch(routes());
+    const { sockets } = renderApp('/settings');
+    await enableBrowserNotifications();
+
+    deliverNew(sockets, message(1, { body: '@channel 集合です', mentions: [] }));
+    expect(shown).toHaveLength(1);
+    expect(shown[0]?.title).toBe('ボブ さんから @channel');
+    expect(shown[0]?.options?.body).toBe('@channel 集合です');
+
+    deliverNew(sockets, message(2, { author: USER, body: '@channel 自分から', mentions: [] }));
+    expect(shown).toHaveLength(1);
+  });
+
+  it('@here は、そのチャンネルを開いているときだけ通知を出す（開いていても、タブが見えていれば出さない。機能一覧 10.2）', async () => {
+    const { shown } = fakeNotificationApi('default', 'granted');
+    fakeFetch(routes({ [`GET ${MESSAGES}`]: () => page([]) }));
+    const settings = renderApp('/settings');
+    await enableBrowserNotifications();
+    // 開いていない（設定の画面）: 出さない
+    deliverNew(settings.sockets, message(1, { body: '@here いる人', mentions: [] }));
+    expect(shown).toHaveLength(0);
+    settings.unmount();
+
+    const { sockets } = renderApp(CHANNEL_PATH);
+    await screen.findByRole('heading', { name: `# ${GENERAL.name}` });
+    // 開いていて見えている: 出さない
+    deliverNew(sockets, message(2, { body: '@here いる人', mentions: [] }));
+    expect(shown).toHaveLength(0);
+
+    // 開いていて、別のタブを見ている: 出す
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      deliverNew(sockets, message(3, { body: '@here いる人', mentions: [] }));
+      expect(shown).toHaveLength(1);
+      expect(shown[0]?.title).toBe('ボブ さんから @here');
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
   it('許可されていても、有効にしていなければ通知を出さない', async () => {
     const { shown } = fakeNotificationApi('granted');
     fakeFetch(routes());

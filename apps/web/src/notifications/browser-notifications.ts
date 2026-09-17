@@ -1,3 +1,4 @@
+import { broadcastMentionsOf } from '@workspace-chat/shared';
 import type { Message } from '../messages/queries';
 
 /**
@@ -31,6 +32,35 @@ export function mentionNotificationOf(
   return {
     title: `${message.author?.displayName ?? '削除済みの利用者'} さんからのメンション`,
     body,
+    tag: `mention:${message.id}`,
+  };
+}
+
+/**
+ * 届いたメッセージが一斉メンション（F-21）なら通知の中身を返す（F-25）。そうでなければ null。
+ * - `@channel` は、届いたら出す（参加者全員が宛先。機能一覧 9.2 の表）
+ * - `@here` は、**そのチャンネルを開いているとき（`hereOpen`）だけ**出す（開いていなければブラウザ通知もバッジも出さない。機能一覧 10.2）
+ * - **自分が書いたメッセージは通知しない**。本文は Markdown のまま文字として渡す
+ */
+export function broadcastNotificationOf(
+  message: Message,
+  me: { readonly id: string },
+  { hereOpen }: { readonly hereOpen: boolean },
+): BrowserNotificationContent | null {
+  if (message.body === null || message.author?.id === me.id) return null;
+  const broadcast = broadcastMentionsOf(message.body);
+  const kind = broadcast.has('channel')
+    ? 'channel'
+    : broadcast.has('here') && hereOpen
+      ? 'here'
+      : null;
+  if (kind === null) return null;
+  const body =
+    message.body.length > BODY_LIMIT ? `${message.body.slice(0, BODY_LIMIT)}…` : message.body;
+  return {
+    title: `${message.author?.displayName ?? '削除済みの利用者'} さんから @${kind}`,
+    body,
+    // 個人のメンションと同じ鍵にする（同じメッセージで両方に当たっても、ブラウザが1つにまとめる）
     tag: `mention:${message.id}`,
   };
 }
