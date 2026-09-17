@@ -117,7 +117,14 @@ echo "== 6. web を置く"
 npm ci --no-audit --no-fund
 npm run build -w @workspace-chat/shared
 npm run build -w @workspace-chat/web
-aws s3 sync apps/web/dist "s3://$(tf output -raw web_bucket)" --delete
-aws cloudfront create-invalidation --distribution-id "$(tf output -raw cloudfront_distribution_id)" --paths '/*' >/dev/null
+# 踏むと壊れる: 置く順番を変えない（#604）。古い資産を消すのは、index.html を no-cache で置き直し、無効化が終わった後にする。
+# 先に消すと、ブラウザや CloudFront に残った古い index.html が消えた /assets/index-<hash>.js を読みに行き、画面が出ない。
+# index.html に Cache-Control を付けないと、ブラウザが Last-Modified から推定した間だけ古いものを使い回す（RFC 9111 4.2.2）。
+web_bucket=$(tf output -raw web_bucket)
+aws s3 sync apps/web/dist "s3://$web_bucket" --exclude index.html
+aws s3 cp apps/web/dist/index.html "s3://$web_bucket/index.html" --cache-control no-cache --content-type text/html
+invalidation=$(aws cloudfront create-invalidation --distribution-id "$(tf output -raw cloudfront_distribution_id)" --paths '/*'   --query 'Invalidation.Id' --output text)
+aws cloudfront wait invalidation-completed --distribution-id "$(tf output -raw cloudfront_distribution_id)" --id "$invalidation"
+aws s3 sync apps/web/dist "s3://$web_bucket" --delete --exclude index.html
 
 echo "公開した: $(tf output -raw web_url)"
