@@ -346,6 +346,33 @@ describe('管理用の一覧からのキック（F-09）', () => {
     expect(USER.id).not.toBe(BOB.id);
   });
 
+  // 機能一覧の web の節「アーカイブ済みのチャンネルからも、相手を選んで外す」（#543 の追記）
+  it('アーカイブ済みのチャンネルの参加者を見て、外せる', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const old = { ...MANAGED_GENERAL, name: 'old-1', memberCount: 1, archived: true };
+    const oldMembers = `${CHANNELS}/${old.id}/members`;
+    const { count } = fakeFetch(
+      routes({
+        ...AS_OWNER,
+        [`GET ${MANAGED}`]: () => json(200, [old]),
+        [`GET ${oldMembers}`]: () => json(200, [BOB]),
+        [`DELETE ${oldMembers}/${BOB.id}`]: () => new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+    const list = await openManaged();
+    const row = within(rowOf(list, /old-1/));
+    expect(row.getByText('アーカイブ済み')).toBeDefined();
+
+    fireEvent.click(row.getByRole('button', { name: '参加者を見る' }));
+    const members = within(await row.findByRole('list', { name: '参加者' }));
+    fireEvent.click(members.getByRole('button', { name: 'ボブ をチャンネルから外す' }));
+
+    await waitFor(() => expect(members.queryByText(/ボブ/)).toBeNull());
+    expect(count(`DELETE ${oldMembers}/${BOB.id}`)).toBe(1);
+    expect(rowOf(list, /old-1/).textContent).toContain('参加者 0 人');
+  });
+
   // ワークスペースからのキックは、外した相手がどのチャンネルに居たかを画面が知らないため、管理用の一覧を取り直す（#545 第0巡の 🔴1）。
   it('ワークスペースからキックしたら、開いている管理用の一覧を取り直し、人数を直す', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
