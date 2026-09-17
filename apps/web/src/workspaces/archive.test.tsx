@@ -28,6 +28,12 @@ const SECRET = {
   archived: false,
 };
 
+/** 初回だけ返し、取り直しは返さない応答——取り直しを待つ間に一覧がどう描かれるかを見るため。 */
+function onceThenNever(first: () => Response) {
+  let calls = 0;
+  return () => (calls++ === 0 ? first() : new Promise<Response>(() => {}));
+}
+
 async function pause() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -402,5 +408,43 @@ describe('管理用の一覧からのキック（F-09）', () => {
 
     await waitFor(() => expect(rowOf(list, /general/).textContent).toContain('参加者 1 人'));
     expect(count(`GET ${MANAGED}`)).toBe(2);
+  });
+
+  // **読み込んである参加者の一覧から外したチャンネルは、同じ行の人数も取り直しを待たずに減らす**（#554）。
+  // 取り直しは返さない。相手の居ないチャンネル（secret）の人数は変えない。
+  it('ワークスペースからキックしたら、参加者の一覧を開いてある行の人数を、取り直しを待たずに減らす', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fakeFetch(
+      routes({
+        ...AS_OWNER,
+        [`GET ${MANAGED}`]: onceThenNever(() => json(200, [MANAGED_GENERAL, SECRET])),
+        [`GET ${CHANNELS}/${GENERAL.id}/members`]: onceThenNever(() => json(200, [USER, BOB])),
+        [`GET ${CHANNELS}/${SECRET.id}/members`]: onceThenNever(() => json(200, [USER])),
+        [`GET /api/workspaces/${WORKSPACE_ID}/members`]: () =>
+          json(200, [
+            { ...USER, role: 'OWNER' },
+            { ...BOB, role: 'MEMBER' },
+          ]),
+        [`DELETE /api/workspaces/${WORKSPACE_ID}/members/${BOB.id}`]: () =>
+          new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+    const list = await openManaged();
+    const general = within(rowOf(list, /general/));
+    fireEvent.click(general.getByRole('button', { name: '参加者を見る' }));
+    const generalMembers = within(await general.findByRole('list', { name: '参加者' }));
+    expect(generalMembers.getByText(/ボブ/)).toBeDefined();
+    const secret = within(rowOf(list, /secret/));
+    fireEvent.click(secret.getByRole('button', { name: '参加者を見る' }));
+    await secret.findByRole('list', { name: '参加者' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'メンバーを見る' }));
+    const members = within(await screen.findByRole('list', { name: 'メンバー' }));
+    fireEvent.click(members.getByRole('button', { name: 'ボブ をキックする' }));
+
+    await waitFor(() => expect(generalMembers.queryByText(/ボブ/)).toBeNull());
+    expect(rowOf(list, /general/).textContent).toContain('参加者 1 人');
+    expect(rowOf(list, /secret/).textContent).toContain('参加者 1 人');
   });
 });
