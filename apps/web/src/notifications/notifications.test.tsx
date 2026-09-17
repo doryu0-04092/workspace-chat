@@ -168,8 +168,13 @@ describe('ブラウザ通知（F-25）', () => {
     const { sockets } = renderApp('/settings');
     await enableBrowserNotifications();
 
-    const { channelId: _channelId, mentions: _mentions, ...rest } = mentionMessage(1);
-    deliverNew(sockets, { ...rest, dmId: '01920000-0000-7000-8000-0000000000d1' });
+    const dmMessage: Record<string, unknown> = {
+      ...mentionMessage(1),
+      dmId: '01920000-0000-7000-8000-0000000000d1',
+    };
+    delete dmMessage.channelId;
+    delete dmMessage.mentions;
+    deliverNew(sockets, dmMessage);
     deliverNew(sockets, mentionMessage(2));
 
     expect(shown).toHaveLength(1);
