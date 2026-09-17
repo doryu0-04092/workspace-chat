@@ -96,6 +96,9 @@ resource "aws_ecs_task_definition" "api" {
         { name = "TRUST_PROXY_HOPS", value = tostring(local.trust_proxy_hops) },
         { name = "API_TASK_COUNT", value = tostring(local.api_task_count) },
         { name = "WEB_ORIGIN", value = "https://${aws_cloudfront_distribution.main.domain_name}" },
+        # 添付とアバターのバケット（attachments.tf）。S3_ENDPOINT・S3_FORCE_PATH_STYLE は渡さない（AWS の既定の宛先と仮想ホスト形式）。
+        { name = "S3_BUCKET", value = aws_s3_bucket.attachments.bucket },
+        { name = "S3_REGION", value = data.aws_region.current.region },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.database_url.arn },
