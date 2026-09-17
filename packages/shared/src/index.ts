@@ -1,5 +1,13 @@
-export { MENTION_BEING_TYPED, MENTION_PATTERN, mentionedLoginIds } from './mentions';
 export {
+  BROADCAST_MENTIONS,
+  broadcastMentionsOf,
+  MENTION_BEING_TYPED,
+  MENTION_PATTERN,
+  mentionedLoginIds,
+} from './mentions';
+export type { BroadcastMention } from './mentions';
+export {
+  HERE_MENTION_NOTICE,
   REALTIME_EVENT_KINDS,
   REALTIME_EVENT_NAMES,
   REALTIME_PATH,
@@ -11,6 +19,8 @@ export type {
   ChannelRoomAck,
   ChannelRoomRejection,
   ChannelRoomRequest,
+  HereMentionPayload,
+  HereMentionReceipt,
   InvitationNewPayload,
   MessageDeletedPayload,
   MessageNewPayload,

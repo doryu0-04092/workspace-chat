@@ -173,3 +173,17 @@ export type PresenceChangedPayload = {
   readonly present: boolean;
   readonly sentAt: string;
 };
+
+/**
+ * `@here` の受け取りの確かめ（F-21。機能一覧 9.2「タスクをまたぐ在席」）の名前。**配信の対象イベントではない**ため、
+ * `REALTIME_EVENT_KINDS` / `REALTIME_EVENT_NAMES` には入れない。
+ * サーバーは `@here` の宛先の利用者の接続へ、acknowledgement 付きで `HereMentionPayload` を送る。
+ * **受け取った側は、そのチャンネルを開いていれば `HereMentionReceipt` を返し、開いていなければ返さずに弾く**（10.2）。
+ */
+export const HERE_MENTION_NOTICE = 'mention:here';
+
+/** `@here` の受け取りの確かめの本体。 */
+export type HereMentionPayload = { readonly channelId: string; readonly messageId: string };
+
+/** `@here` の受け取りの返事。 */
+export type HereMentionReceipt = { readonly received: true };

@@ -9,6 +9,7 @@ import { ChannelRoomsGateway } from './channel-rooms.gateway';
 import { ChannelRoomsService } from './channel-rooms.service';
 import { ChannelsController } from './channels.controller';
 import { ChannelsService } from './channels.service';
+import { HereMentions } from './here-mentions';
 import { InvitationsController } from './invitations.controller';
 import { InvitationsService } from './invitations.service';
 import { MessagesController } from './messages.controller';
@@ -41,6 +42,7 @@ import { WorkspacesService } from './workspaces.service';
     ChannelRoomsService,
     ChannelRoomsGateway,
     MessagesService,
+    HereMentions,
   ],
 })
 export class WorkspacesModule {}
