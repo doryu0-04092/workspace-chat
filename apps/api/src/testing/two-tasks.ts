@@ -86,9 +86,16 @@ export async function startTwoTasks(
     REDIS_URL: started.url,
     TRUST_PROXY_HOPS: '1',
   });
-  const logger = options.logger ?? false;
-  const first = await createApp({ logger });
-  const second = await createApp({ logger });
+  // 調査用（マージしない）: 2 タスクの検査で、アプリの warn と error だけを CI のログに出す
+  const diagnostic = (task: string): LoggerService => ({
+    log: () => undefined,
+    warn: (message: unknown, ...rest: unknown[]) =>
+      console.warn(`[two-tasks ${ipPrefix} ${task}] warn`, JSON.stringify(message), JSON.stringify(rest)),
+    error: (message: unknown, ...rest: unknown[]) =>
+      console.error(`[two-tasks ${ipPrefix} ${task}] error`, JSON.stringify(message), JSON.stringify(rest)),
+  });
+  const first = await createApp({ logger: options.logger ?? diagnostic("first") });
+  const second = await createApp({ logger: options.logger ?? diagnostic("second") });
   const firstBase = await listen(first);
   const secondBase = await listen(second);
   const prisma = first.get(PrismaService);
