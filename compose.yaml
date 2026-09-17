@@ -1,4 +1,4 @@
-# 開発環境のミドルウェア（DB・Redis）。
+# 開発環境のミドルウェア（DB・Redis・S3 互換のストレージ）。
 #
 # アプリ（apps/api / apps/web）はここに入れない。ホットリロードとデバッグのしやすさを
 # 優先し、ホストの Node で動かす。起動手順は README.md を参照。
@@ -137,7 +137,56 @@ services:
       timeout: 5s
       retries: 20
 
+  minio:
+    # 添付とアバターの S3 の代わりの S3 互換のストレージ（#427 の決定。手元とテストでは S3 を MinIO で代える）。
+    # **手元では署名者と確定の主体を分けない**（api は下の管理者の資格情報1つで読み書きする。分けることの確認は本番で行う）。
+    #
+    # **このタグは apps/api/src/testing/minio.ts の MINIO_IMAGE と同じ**で、そちらは npm test のたびに取り直す。
+    # 手元でテストを回さない人には `docker compose pull minio` だけが取り込みの経路になる（タグごとの経路の一覧は .github/dependabot.yml の末尾）。
+    # Docker Hub の minio/minio は取れない（2026-09-17 に Docker Hub の API が 404 を返した）ため、quay.io から取る。
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    environment:
+      # 管理者の資格情報。**ローカル専用の使い捨ての値にする。** MinIO は利用者名 3 文字以上・パスワード 8 文字以上を求める。
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?.env に MINIO_ROOT_USER を設定してください}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?.env に MINIO_ROOT_PASSWORD を設定してください}
+      S3_BUCKET: ${S3_BUCKET:?.env に S3_BUCKET を設定してください}
+    # 起動のたびにバケットを作り、バージョニングを有効にする（本番の infra/production/attachments.tf のバケットと揃える）。
+    # 作り済みなら何もしない（mb --ignore-existing と version enable は何度流してもよい）。mc はこのイメージが同梱している。
+    #
+    # **踏むと壊れる: バケットを作る処理を、終わって止まる別のサービスに分けない。** `docker compose up -d --wait` は、
+    # 終了コード 0 で止まったコンテナがあっても失敗（終了コード 1）を返す（Compose v5.1.4 で確かめた。2026-09-17）。
+    # 同じコンテナの中でサーバーを裏で起動し、バケットを作り終えてから印のファイルを置き、healthcheck がその印を見る。
+    # シェルが PID 1 になるため、停止のシグナルは trap でサーバーへ渡す（渡さないと stop が猶予の 10 秒を待って強制終了になる）。
+    # $$ は compose の変数展開ではなくコンテナ内のシェルに渡すための書き方（db の healthcheck と同じ）。
+    entrypoint: ['sh', '-c']
+    command:
+      - >-
+        rm -f /tmp/bucket-ready;
+        minio server /data & pid=$$!;
+        trap 'kill -TERM "$$pid"' TERM INT;
+        until mc alias set local http://127.0.0.1:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 &&
+        mc ready local >/dev/null 2>&1; do kill -0 "$$pid" || exit 1; sleep 1; done;
+        mc mb --ignore-existing "local/$$S3_BUCKET" &&
+        mc version enable "local/$$S3_BUCKET" &&
+        touch /tmp/bucket-ready;
+        wait "$$pid"; wait "$$pid"
+    ports:
+      # S3 の API だけを 127.0.0.1 に出す（管理画面のポートは出さない）。
+      - '127.0.0.1:${MINIO_PORT:?.env に MINIO_PORT を設定してください}:9000'
+    # 名前付きボリュームにする。アバターの行は db-data に残るため、こちらだけ消えると画像の無い行が残る。
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # バケットを作り終えるまでは healthy にしない（`up -d --wait` が、バケットの無いまま戻らないように）。
+      test:
+        - CMD-SHELL
+        - test -f /tmp/bucket-ready && curl --fail --silent http://127.0.0.1:9000/minio/health/live
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   # 名前付きボリューム。コンテナを作り直してもデータが残る。
   # 消し方は README.md（`docker compose down -v`）。
   db-data:
+  minio-data:

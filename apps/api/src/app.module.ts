@@ -12,6 +12,7 @@ import { ErrorResponseFilter } from './error-response';
 import { OpenApiValidationMiddleware } from './openapi-validation';
 import { PrismaModule } from './prisma.service';
 import { RealtimeModule } from './realtime/realtime.module';
+import { StorageModule } from './storage/storage.module';
 import { UsersModule } from './users/users.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 
@@ -37,6 +38,7 @@ export class AppModule implements NestModule {
       imports: [
         ApiConfigModule.forRoot(config),
         PrismaModule,
+        StorageModule,
         AuthModule,
         UsersModule,
         WorkspacesModule,
