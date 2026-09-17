@@ -10,6 +10,7 @@
     "dev": "node --watch --no-warnings dist/main.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1134.0",
     "@nest-lab/throttler-storage-redis": "^1.2.0",
     "@nestjs/common": "^11.2.3",
     "@nestjs/core": "^11.2.3",

@@ -340,6 +340,45 @@ paths:
           $ref: '#/components/responses/UnsupportedMediaType'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /users/me/delete:
+    post:
+      operationId: deleteMyAccount
+      summary: 自分のアカウントの削除（退会。F-36）
+      description: >-
+        本人だけ（アクセストークンの利用者を削除する。他人を指す手段を持たない）。パスワードの再入力で本人であることを確かめる。
+        パスワードが違えば 403 password_mismatch、ワークスペースのオーナーなら 403 owner_cannot_delete_account（理由のメッセージを返す）。
+        論理削除であり、同一トランザクションで未使用のリカバリーコードを使用済みにし、所属（Membership。チャンネル参加は連鎖して消える）を消し、
+        リフレッシュトークンをすべて失効させる。その利用者の WebSocket 接続を切り、refresh_token の Cookie を消す（機能一覧 1.5）。
+        ユーザーID ごとに、パスワードを連続して誤った回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+      responses:
+        '204':
+          description: 削除した（Cookie を消す）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パスワードが違う（password_mismatch）か、ワークスペースのオーナーである（owner_cannot_delete_account）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces:
     post:
       operationId: createWorkspace
@@ -695,6 +734,58 @@ paths:
           $ref: '#/components/responses/NotFound'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/search:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: search
+      summary: 検索（F-30・F-31）
+      description: >-
+        1回の要求で、種別ごとのセクション（メッセージ・チャンネル・ユーザー）を返す（機能一覧 12.1）。
+        q は空白で区切った語と、絞り込み演算子 `from:@ユーザーID`・`in:#チャンネル名` からなる。語はすべてを含むものに当たる（大文字小文字を区別する。
+        チャンネルとユーザーは区別しない）。演算子はメッセージだけを絞り、同じ演算子を2回書いたら後のものを使う。
+        メッセージは、要求した利用者が参加しているチャンネルの、削除されていないもの（返信を含む。アーカイブ済みのチャンネルのものを含む）だけを、新しい順に最大20件返す。
+        オーナーの例外は及ばない（参加していないプライベートチャンネルのメッセージは返さない。機能一覧 3.1）。
+        `from:` は退会した利用者も指せる（過去のメッセージは残る。機能一覧 1.5）。
+        チャンネルは、パブリックでアーカイブされていないものと、参加しているもの（アーカイブ済みを含む）を名前の順に最大20件。
+        ユーザーは、そのワークスペースのメンバーで退会していない利用者を、ユーザーID か表示名で当て、ユーザーID の小文字の順に最大20人。
+        所属していなければ、存在の有無を区別せず 404。`in:` のチャンネルはコードが2段階で決まる: 無いチャンネル・参加していないプライベートは 404、
+        参加していないパブリックは 403 not_a_channel_member。利用者単位で1分に60回まで
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 検索の文字列。1〜200 文字（コードポイント）で、空白だけは不可
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: '\S'
+      responses:
+        '200':
+          description: 種別ごとの結果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: '`in:` のパブリックチャンネルに参加していない（not_a_channel_member）'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /workspaces/{id}/channels/{channelId}/mention-candidates:
@@ -1911,6 +2002,8 @@ components:
             - already_invited
             - already_member
             - owner_cannot_leave
+            - password_mismatch
+            - owner_cannot_delete_account
             - channel_name_taken
             - not_a_channel_member
             - already_channel_member
@@ -2094,6 +2187,17 @@ components:
             スレッド内の未読を、チャンネルの未読に含めるか（既定は含める）。
             切り替えても既読位置は動かさないため、「含めない」→「含める」で過去の未読の返信が未読として現れる（機能一覧 10.1）
           type: boolean
+    DeleteAccountRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - password
+      properties:
+        password:
+          description: 今のパスワード。1〜128文字（LoginRequest の password と同じ）
+          type: string
+          minLength: 1
+          maxLength: 128
     UpdateUserSettingsRequest:
       type: object
       additionalProperties: false
@@ -2386,6 +2490,96 @@ components:
             - string
             - 'null'
           format: uuid
+    SearchResult:
+      description: >-
+        検索の結果（機能一覧 12.1）。種別ごとのセクションを持つ。DM（F-19）とファイル（F-27）のセクションは、それぞれの実装で足す
+      type: object
+      additionalProperties: false
+      required:
+        - messages
+        - channels
+        - users
+      properties:
+        messages:
+          description: 新しい順。最大20件
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/SearchMessage'
+        channels:
+          description: 名前の順。最大20件
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/SearchChannel'
+        users:
+          description: ユーザーID の小文字の順。最大20人
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/UserSummary'
+    SearchMessage:
+      description: 検索に当たったメッセージ。本文は削除されていないものだけが当たるため、常にある
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - channel
+        - parentId
+        - author
+        - body
+        - createdAt
+        - editedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          $ref: '#/components/schemas/SearchChannel'
+        parentId:
+          description: スレッドの返信なら親の id。チャンネルの本体のメッセージなら null（機能一覧 6）
+          type:
+            - string
+            - 'null'
+          format: uuid
+        author:
+          description: 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
+          oneOf:
+            - $ref: '#/components/schemas/UserSummary'
+            - type: 'null'
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        editedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    SearchChannel:
+      description: 検索に当たったチャンネルと、メッセージが属するチャンネル
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - visibility
+        - archived
+        - joined
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        visibility:
+          $ref: '#/components/schemas/ChannelVisibility'
+        archived:
+          type: boolean
+        joined:
+          description: 要求した利用者がこのチャンネルに参加しているか（メッセージのチャンネルは常に true）
+          type: boolean
     Channel:
       description: 一般の一覧（参加者向け）のチャンネル
       type: object

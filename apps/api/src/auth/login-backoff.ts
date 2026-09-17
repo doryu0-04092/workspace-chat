@@ -13,8 +13,11 @@ import { errorKind } from '../logging/error-kind';
  * ——存在する ID だけを止めると、止まるかどうかで登録済みの ID を調べられる。
  */
 
-/** アカウント単位の制限を掛ける用途（ログイン・リカバリーコードの照合。機能一覧 1.1・1.2）。 */
-export type AccountBackoffPurpose = 'login' | 'recovery';
+/**
+ * アカウント単位の制限を掛ける用途（ログイン・リカバリーコードの照合。機能一覧 1.1・1.2。アカウントの削除のパスワードの再入力。1.5）。
+ * `account_deletion` だけはログインした利用者の `User.id` で数える（ユーザーID を受け取らない経路のため）。
+ */
+export type AccountBackoffPurpose = 'login' | 'recovery' | 'account_deletion';
 
 /**
  * アカウント単位の制限のキー。**用途ごとに前置きを分ける**——同じキーで数えると、一方の失敗で他方も待たされる。

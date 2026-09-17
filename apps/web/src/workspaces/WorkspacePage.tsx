@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError, errorMessage } from '../api/client';
 import { DmList } from '../dms/DmList';
 import { useUnreadRealtime } from '../realtime/use-unread-realtime';
+import { SearchForm } from '../search/SearchForm';
 import { ManagedChannels } from './ManagedChannels';
 import { WorkspaceMembers } from './MemberLists';
 import {
@@ -45,6 +46,8 @@ export function WorkspacePage() {
   return (
     <main className="mx-auto max-w-xl p-6">
       <h1 className="text-2xl font-bold">{workspace.data?.name ?? ''}</h1>
+      {/* 検索（F-30。機能一覧 12.1）。結果は検索の画面に出す */}
+      <SearchForm workspaceId={workspaceId} />
       {(workspace.isError || channels.isError) && (
         <p role="alert" className="mt-4 text-red-700">
           チャンネルを読み込めませんでした。{errorMessage(workspace.error ?? channels.error)}
