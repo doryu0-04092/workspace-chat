@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fakeFetch, json } from '../testing/fake-api';
+import { fakeFetch, json, USER } from '../testing/fake-api';
 import {
   CHANNEL_PATH,
   channelWithUnread,
@@ -223,6 +223,46 @@ describe('未読の画面（F-23）', () => {
       // 参加する前のメッセージは線の下（既読の側）に置く
       expect(texts[dividerAt - 1] ?? '').toContain('メッセージ 2');
       expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 1');
+    });
+
+    it('自分の投稿は未読に数えないので、線も自分の投稿を飛ばして、他人の未読のうち最も古いものの下に出す', async () => {
+      const older = message(1);
+      const mine = message(2, { author: USER });
+      const newer = message(3);
+      fakeFetch(
+        routes({
+          [CHANNELS]: () =>
+            json(200, [channelWithUnread({ unread: 1, lastReadMessageId: older.id })]),
+          [`GET ${MESSAGES}`]: () => page([newer, mine, older]),
+        }),
+      );
+
+      renderApp(CHANNEL_PATH);
+
+      await screen.findByRole('separator', { name: 'ここから上が未読' });
+      const texts = [...document.querySelectorAll('article, [role="separator"]')].map(
+        (node) => node.textContent ?? '',
+      );
+      const dividerAt = texts.findIndex((text) => text.includes('ここから上が未読'));
+      expect(texts[dividerAt - 1] ?? '').toContain('メッセージ 3');
+      expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 2');
+    });
+
+    it('既読位置より後が自分の投稿だけなら、線を出さない', async () => {
+      const older = message(1);
+      const mine = message(2, { author: USER });
+      fakeFetch(
+        routes({
+          [CHANNELS]: () =>
+            json(200, [channelWithUnread({ unread: 0, lastReadMessageId: older.id })]),
+          [`GET ${MESSAGES}`]: () => page([mine, older]),
+        }),
+      );
+
+      renderApp(CHANNEL_PATH);
+
+      await screen.findByText('メッセージ 2');
+      expect(screen.queryByRole('separator', { name: 'ここから上が未読' })).toBeNull();
     });
 
     it('既読位置も参加した時刻も無ければ線を出さない', async () => {

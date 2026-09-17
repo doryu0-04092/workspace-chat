@@ -10,6 +10,7 @@ import { useSession } from '../auth/session-context';
 import type { Message } from '../messages/queries';
 import { useRealtime } from '../realtime/realtime-context';
 import {
+  broadcastNotificationOf,
   dmNotificationOf,
   mentionNotificationOf,
   showBrowserNotification,
@@ -74,7 +75,14 @@ export function useMentionRealtime() {
         return;
       }
       const { message } = payload;
-      const content = mentionNotificationOf(message, { id: userId });
+      // 個人のメンション、なければ一斉メンション（@channel・開いているチャンネルの @here。機能一覧 9.2・10.2）
+      const content =
+        mentionNotificationOf(message, { id: userId }) ??
+        broadcastNotificationOf(
+          message,
+          { id: userId },
+          { hereOpen: locationRef.current.pathname.endsWith(`/channels/${message.channelId}`) },
+        );
       if (content === null) return;
       void queryClient.invalidateQueries({ queryKey: notificationsKey });
       if (onScreen(locationRef.current, message)) return;

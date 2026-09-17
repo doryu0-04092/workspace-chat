@@ -359,6 +359,77 @@ describe('通知の一覧と既読化（F-26）', () => {
     });
   });
 
+  // 機能一覧 9.2 の表「@channel の通知先はそのチャンネルの参加者全員」・10.3「受け取ったメンションを一覧表示する」。
+  // @channel の通知は、メンションの件数（バッジ）と同じ対象に作る（件数に数えるのに一覧に無い、を作らない）。
+  describe('@channel の通知', () => {
+    it('@channel は、参加者全員（書いた本人を除く）の通知一覧に載り、参加していない人には載らない', async () => {
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const outsider = await login();
+      const workspace = await workspaceWith(alice, bob, carol, outsider);
+      const channel = await channelRow(workspace.id, 'PRIVATE', [alice, bob, carol]);
+
+      const message = await posted(alice, workspace.id, channel.id, '@channel お知らせ');
+
+      for (const who of [bob, carol]) {
+        expect((await notificationsOf(who)).notifications.map((n) => n.message.id)).toEqual([
+          message.id,
+        ]);
+      }
+      expect((await notificationsOf(alice)).notifications).toEqual([]);
+      expect((await notificationsOf(outsider)).notifications).toEqual([]);
+    });
+
+    it('同じ利用者を @channel と個人のメンションの両方で指しても、通知は1件', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channel = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+
+      await posted(alice, workspace.id, channel.id, `@channel @${bob.loginId} 両方`);
+
+      expect((await notificationsOf(bob)).notifications).toHaveLength(1);
+    });
+
+    it('スレッドの返信の @channel も、参加者の通知一覧に載る', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channel = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const parent = await posted(alice, workspace.id, channel.id, '親');
+
+      const reply = await replied(alice, workspace.id, channel.id, parent.id, '@channel 返信');
+
+      expect((await notificationsOf(bob)).notifications.map((n) => n.message.id)).toEqual([
+        reply.id,
+      ]);
+    });
+
+    it('編集で @channel を足すと参加者に載り、外すと個人のメンションで指していない人の通知は消える。指している人の通知は既読のまま残る', async () => {
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const workspace = await workspaceWith(alice, bob, carol);
+      const channel = await channelRow(workspace.id, 'PUBLIC', [alice, bob, carol]);
+      const message = await posted(alice, workspace.id, channel.id, `@${bob.loginId} だけ`);
+      expect((await notificationsOf(carol)).notifications).toEqual([]);
+
+      await edited(alice, workspace.id, channel.id, message.id, `@channel @${bob.loginId} 全員`);
+      expect((await notificationsOf(carol)).notifications.map((n) => n.message.id)).toEqual([
+        message.id,
+      ]);
+      const [bobNote] = (await notificationsOf(bob)).notifications;
+      expect((await markRead(bob, bobNote!.id)).status).toBe(204);
+
+      await edited(alice, workspace.id, channel.id, message.id, `@${bob.loginId} だけに戻す`);
+      expect((await notificationsOf(carol)).notifications).toEqual([]);
+      const [kept] = (await notificationsOf(bob)).notifications;
+      expect(kept?.id).toBe(bobNote!.id);
+      expect(kept?.readAt).not.toBeNull();
+    });
+  });
+
   // 機能一覧 10.2・10.3「受け取ったメンション・DM を時系列で一覧表示する」（#623）。
   describe('DM の通知（#623）', () => {
     async function dmWith(from: LoggedIn, workspaceId: string, to: LoggedIn): Promise<string> {
