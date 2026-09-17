@@ -9,7 +9,14 @@ import {
 import type { Socket } from 'socket.io-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { POSTGRES_STARTUP_TIMEOUT_MS } from '../testing/postgres';
-import { type LoggedIn, type TwoTasks, startTwoTasks } from '../testing/two-tasks';
+import {
+  CROSS_TASK_QUIET_MS,
+  CROSS_TASK_TEST_TIMEOUT_MS,
+  CROSS_TASK_WAIT_MS,
+  type LoggedIn,
+  type TwoTasks,
+  startTwoTasks,
+} from '../testing/two-tasks';
 import { ChannelRoomsService } from '../workspaces/channel-rooms.service';
 import { PresenceRegistry } from './presence-registry';
 import { RealtimeEmitter } from './realtime.emitter';
@@ -17,13 +24,13 @@ import { RealtimeGateway } from './realtime.gateway';
 import { RoomMembershipReconciler } from './room-membership-reconciler';
 
 /** 届かないことを確かめるときに待つ時間（届くものは vi.waitFor で待つ）。 */
-const QUIET_MS = 700;
+const QUIET_MS = CROSS_TASK_QUIET_MS;
 
 // 機能一覧 9.2（在席状態は、その利用者の接続が1本でもそのチャンネルの部屋に入っているかで判定する。受け入れ条件・タスクをまたぐ在席）・
 // 2.2（参加資格を失ったとき、入っていた部屋にだけ在席の変化を配る）・5.2（サーバーが自発的に配るイベントの payload に送信時刻を載せる）、
 // 要件定義書 4.2（在席の通知・取り直しが失敗しても未処理の例外にしない）。
 // サーバーを2つ立て、アダプタを通して確かめる（9.2「1つのプロセスでは落ちない」）。
-describe('在席（F-22）', () => {
+describe('在席（F-22）', { timeout: CROSS_TASK_TEST_TIMEOUT_MS }, () => {
   let t: TwoTasks;
 
   beforeAll(async () => {
@@ -63,7 +70,25 @@ describe('在席（F-22）', () => {
           expect(app.get(PresenceRegistry).usersIn(channelId).includes(userId)).toBe(present);
         }
       },
-      { timeout: 3_000, interval: 50 },
+      { timeout: CROSS_TASK_WAIT_MS, interval: 50 },
+    );
+  }
+
+  /**
+   * 両方のタスクの在席の一覧で、その利用者の接続が `count` 本になるまで待つ（同じ利用者の2本目が別のタスクから入った・外れた知らせが届くまで）。
+   * 一覧の中身は公開していないため、検査の側から読む（`PresenceRegistry` の `channels`：チャンネル → 利用者 → 接続の id）。
+   */
+  async function untilConnections(channelId: string, userId: string, count: number) {
+    await vi.waitFor(
+      () => {
+        for (const app of [t.first, t.second]) {
+          const registry = app.get(PresenceRegistry) as unknown as {
+            channels: Map<string, Map<string, Set<string>>>;
+          };
+          expect(registry.channels.get(channelId)?.get(userId)?.size ?? 0).toBe(count);
+        }
+      },
+      { timeout: CROSS_TASK_WAIT_MS, interval: 50 },
     );
   }
 
@@ -162,7 +187,7 @@ describe('在席（F-22）', () => {
 
       await t.first.get(RoomMembershipReconciler).reconcile();
 
-      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 3_000 });
+      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: CROSS_TASK_WAIT_MS });
       expect(received[0]).toMatchObject({ channelId, userId: alice.id, present: false });
       await untilBothSee(channelId, alice.id, false);
       await quiet();
@@ -177,7 +202,7 @@ describe('在席（F-22）', () => {
 
       const before = Date.now();
       await enter(await t.open(t.firstBase, alice), channelId);
-      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 3_000 });
+      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: CROSS_TASK_WAIT_MS });
       expect(received[0]).toMatchObject({ channelId, userId: alice.id, present: true });
       expect(Date.parse(received[0]?.sentAt ?? '')).toBeGreaterThanOrEqual(before - 1_000);
       await untilBothSee(channelId, alice.id, true);
@@ -197,6 +222,8 @@ describe('在席（F-22）', () => {
       await enter(aliceSecond, channelId);
       await untilBothSee(channelId, alice.id, true);
       // 2本目の入室の通知が最初のタスクに届くまで待つ（届く前に外れると、在席が消えたと配られる。9.2 の代償）。
+      // 時間で待たず、両方のタスクの一覧に2本とも載ったことを見る（CI では 0.7 秒の待ちでは届かなかった）
+      await untilConnections(channelId, alice.id, 2);
       await quiet();
       const received = collect(bobSocket);
 
@@ -206,7 +233,7 @@ describe('在席（F-22）', () => {
       expect(t.second.get(PresenceRegistry).usersIn(channelId)).toContain(alice.id);
 
       await exit(aliceSecond, channelId);
-      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 3_000 });
+      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: CROSS_TASK_WAIT_MS });
       expect(received[0]).toMatchObject({ channelId, userId: alice.id, present: false });
       await untilBothSee(channelId, alice.id, false);
     });
@@ -222,7 +249,7 @@ describe('在席（F-22）', () => {
 
       aliceSocket.close();
 
-      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 3_000 });
+      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: CROSS_TASK_WAIT_MS });
       expect(received[0]).toMatchObject({ channelId, userId: alice.id, present: false });
       await untilBothSee(channelId, alice.id, false);
     });
@@ -291,7 +318,7 @@ describe('在席（F-22）', () => {
           expect(received).toContainEqual(
             expect.objectContaining({ channelId, userId: alice.id, present: false }),
           ),
-        { timeout: 3_000, interval: 50 },
+        { timeout: CROSS_TASK_WAIT_MS, interval: 50 },
       );
       await untilBothSee(channelId, alice.id, false);
     });
@@ -337,7 +364,7 @@ describe('在席（F-22）', () => {
             expect(received).toContainEqual(
               expect.objectContaining({ channelId, userId: alice.id, present: false }),
             ),
-          { timeout: 3_000, interval: 50 },
+          { timeout: CROSS_TASK_WAIT_MS, interval: 50 },
         );
         release();
 
@@ -369,7 +396,7 @@ describe('在席（F-22）', () => {
       );
       expect(res.status).toBe(204);
 
-      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 3_000 });
+      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: CROSS_TASK_WAIT_MS });
       expect(received[0]).toMatchObject({ channelId, userId: alice.id, present: false });
       await untilBothSee(channelId, alice.id, false);
       await quiet();
@@ -392,7 +419,7 @@ describe('在席（F-22）', () => {
       const res = await t.send('POST', `/workspaces/${workspace.id}/leave`, alice);
       expect(res.status).toBe(204);
 
-      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 3_000 });
+      await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: CROSS_TASK_WAIT_MS });
       expect(received[0]).toMatchObject({ channelId, userId: alice.id, present: false });
       await quiet();
       expect(received.map((payload) => payload.channelId)).toEqual([channelId]);

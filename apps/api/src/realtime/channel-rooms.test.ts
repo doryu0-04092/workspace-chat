@@ -10,7 +10,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { CapturingLogger } from '../testing/capturing-logger';
 import { POSTGRES_STARTUP_TIMEOUT_MS } from '../testing/postgres';
 import { nextEvent } from '../testing/realtime-client';
-import { type TwoTasks, startTwoTasks } from '../testing/two-tasks';
+import {
+  CROSS_TASK_TEST_TIMEOUT_MS,
+  CROSS_TASK_WAIT_MS,
+  type TwoTasks,
+  startTwoTasks,
+} from '../testing/two-tasks';
 import { RealtimeGateway, channelRoom } from './realtime.gateway';
 
 const NOT_FOUND = { code: 'not_found', message: '見つかりません' };
@@ -25,7 +30,10 @@ const ENTER_LIMIT = 60;
 // 機能一覧 9.2「部屋（Socket.IO の room）」・2.2（参加資格を失ったとき）、要件定義書 4.8 の3
 // （WebSocket が非参加者にイベントを配信しないこと: 非参加者をチャンネルの部屋に入れないこと、参加者でなくなった接続を部屋から外すこと）。
 // タスクを2つに見立て、Redis アダプタを通して確かめる（1つのプロセスでは、他のタスクの接続を外し損ねても落ちない）。
-describe('チャンネルの部屋への入室・退室と、参加資格を失ったときに部屋から外す処理（#335 の4つ目・#331）', () => {
+const SUITE =
+  'チャンネルの部屋への入室・退室と、参加資格を失ったときに部屋から外す処理（#335 の4つ目・#331）';
+
+describe(SUITE, { timeout: CROSS_TASK_TEST_TIMEOUT_MS }, () => {
   let t: TwoTasks;
   const logger = new CapturingLogger();
 
@@ -77,7 +85,7 @@ describe('チャンネルの部屋への入室・退室と、参加資格を失�
   /** 部屋から外す処理は他のタスクへアダプタを通って届くため、外れ切るまで待つ。 */
   async function untilLeft(channelId: string, userId: string): Promise<void> {
     await vi.waitFor(async () => expect(await usersInRoom(channelId)).not.toContain(userId), {
-      timeout: 3_000,
+      timeout: CROSS_TASK_WAIT_MS,
       interval: 50,
     });
   }
@@ -142,7 +150,11 @@ describe('チャンネルの部屋への入室・退室と、参加資格を失�
         error: { code: 'not_a_channel_member' },
       });
       expect(publicAck.ok === false && publicAck.error.message).not.toBe(NOT_FOUND.message);
-      expect(await enter(socket, privateId)).toEqual({ ok: false, status: 404, error: NOT_FOUND });
+      expect(await enter(socket, privateId)).toEqual({
+        ok: false,
+        status: 404,
+        error: NOT_FOUND,
+      });
 
       expect(await reached([socket], publicId)).toEqual([false]);
       expect(await reached([socket], privateId)).toEqual([false]);
@@ -157,7 +169,11 @@ describe('チャンネルの部屋への入室・退室と、参加資格を失�
       const privateId = await t.channelRow(workspace.id, 'PRIVATE', [alice]);
       const socket = await t.open(t.firstBase, owner);
 
-      expect(await enter(socket, privateId)).toEqual({ ok: false, status: 404, error: NOT_FOUND });
+      expect(await enter(socket, privateId)).toEqual({
+        ok: false,
+        status: 404,
+        error: NOT_FOUND,
+      });
       expect(await enter(socket, publicId)).toMatchObject({ ok: false, status: 403 });
       expect(await reached([socket], privateId)).toEqual([false]);
     });
@@ -172,7 +188,11 @@ describe('チャンネルの部屋への入室・退室と、参加資格を失�
       });
       const socket = await t.open(t.firstBase, alice);
 
-      expect(await enter(socket, channelId)).toEqual({ ok: false, status: 404, error: NOT_FOUND });
+      expect(await enter(socket, channelId)).toEqual({
+        ok: false,
+        status: 404,
+        error: NOT_FOUND,
+      });
     });
 
     it('チャンネルの ID が UUID の文字列でなければ 400 validation_failed で断る', async () => {

@@ -14,13 +14,20 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { PresenceRegistry } from '../realtime/presence-registry';
 import { HERE_RECEIPT_TIMEOUT_MS } from '../realtime/here-receipts';
 import { POSTGRES_STARTUP_TIMEOUT_MS } from '../testing/postgres';
-import { type LoggedIn, type TwoTasks, startTwoTasks } from '../testing/two-tasks';
+import {
+  CROSS_TASK_QUIET_MS,
+  CROSS_TASK_TEST_TIMEOUT_MS,
+  CROSS_TASK_WAIT_MS,
+  type LoggedIn,
+  type TwoTasks,
+  startTwoTasks,
+} from '../testing/two-tasks';
 
 type Message = components['schemas']['Message'];
 type Channel = components['schemas']['Channel'];
 
 /** 届かないことを確かめるときに待つ時間（届くものは vi.waitFor で待つ）。 */
-const QUIET_MS = 700;
+const QUIET_MS = CROSS_TASK_QUIET_MS;
 /** 受け取りの記録を待つ時間（受け取りを待つ期限と、タスクをまたぐ問い合わせの余裕）。 */
 const RECORD_WAIT_MS = HERE_RECEIPT_TIMEOUT_MS + 8_000;
 
@@ -28,7 +35,7 @@ const RECORD_WAIT_MS = HERE_RECEIPT_TIMEOUT_MS + 8_000;
 // 5.2（利用者の部屋を宛先に加えるなら、加える利用者がその値を受け取る資格を持つことを確認する。在席の一覧に載っていることを資格の根拠にしない）、
 // 要件定義書 4.2（在席の通知・取り直しが失敗しても未処理の例外にしない）・4.8 の3（WebSocket が非参加者にイベントを配信しないこと）。
 // サーバーを2つ立て、アダプタを通して確かめる（9.2「1つのプロセスでは落ちない」）。
-describe('@here / @channel（F-21）', () => {
+describe('@here / @channel（F-21）', { timeout: CROSS_TASK_TEST_TIMEOUT_MS }, () => {
   let t: TwoTasks;
 
   beforeAll(async () => {
@@ -121,7 +128,7 @@ describe('@here / @channel（F-21）', () => {
         }
       },
       // CI では、他のタスクへの在席の通知が手元より遅れて届く（10 本をまとめた PR の CI で、3 秒では1人ぶん届かなかった）
-      { timeout: 15_000, interval: 50 },
+      { timeout: CROSS_TASK_WAIT_MS, interval: 50 },
     );
   }
 
@@ -163,11 +170,14 @@ describe('@here / @channel（F-21）', () => {
 
       const message = await post(alice, workspace.id, channelId, '@channel お知らせです');
 
-      await vi.waitFor(() => {
-        for (const name of ['bob', 'carol', 'dave'] as const) {
-          expect(sockets[name].messages.map((m) => m.id)).toEqual([message.id]);
-        }
-      });
+      await vi.waitFor(
+        () => {
+          for (const name of ['bob', 'carol', 'dave'] as const) {
+            expect(sockets[name].messages.map((m) => m.id)).toEqual([message.id]);
+          }
+        },
+        { timeout: CROSS_TASK_WAIT_MS },
+      );
       await quiet();
       expect(sockets.erin.messages).toEqual([]);
       expect(sockets.owner.messages).toEqual([]);
@@ -195,7 +205,9 @@ describe('@here / @channel（F-21）', () => {
       expect(res.status).toBe(201);
       const reply = (await res.json()) as Message;
 
-      await vi.waitFor(() => expect(sockets.dave.messages.map((m) => m.id)).toContain(reply.id));
+      await vi.waitFor(() => expect(sockets.dave.messages.map((m) => m.id)).toContain(reply.id), {
+        timeout: CROSS_TASK_WAIT_MS,
+      });
     });
 
     it('編集で本文から @channel を消すと、メンションの件数に数えない', async () => {
@@ -237,8 +249,9 @@ describe('@here / @channel（F-21）', () => {
       expect(sockets.owner.notices).toEqual([]);
       expect(await mentionsOf(bob, workspace.id, channelId)).toBe(1);
       expect(await mentionsOf(dave, workspace.id, channelId)).toBe(0);
-      await vi.waitFor(() =>
-        expect(sockets.bob.unread.at(-1)).toMatchObject({ channelId, mentions: 1 }),
+      await vi.waitFor(
+        () => expect(sockets.bob.unread.at(-1)).toMatchObject({ channelId, mentions: 1 }),
+        { timeout: CROSS_TASK_WAIT_MS },
       );
     });
 
