@@ -162,7 +162,7 @@ describe('ブラウザ通知（F-25）', () => {
   });
 
   // DM（F-19）の `message:new` は同じイベント名で届き、`mentions` を持たない。チャンネルのメンションとして扱って落ちてはならない。
-  it('DM の message:new は、メンションの通知として扱わない（落ちない）', async () => {
+  it('DM の message:new は、メンションではなく DM の通知として出す。自分が書いた DM には出さない（機能一覧 10.2。#623）', async () => {
     const { shown } = fakeNotificationApi('default', 'granted');
     fakeFetch(routes());
     const { sockets } = renderApp('/settings');
@@ -175,10 +175,56 @@ describe('ブラウザ通知（F-25）', () => {
     delete dmMessage.channelId;
     delete dmMessage.mentions;
     deliverNew(sockets, dmMessage);
+    deliverNew(sockets, { ...dmMessage, id: '01920000-0000-7000-8000-0000000000d9', author: USER });
     deliverNew(sockets, mentionMessage(2));
 
+    expect(shown.map((item) => item.title)).toEqual([
+      'ボブ さんからの DM',
+      'ボブ さんからのメンション',
+    ]);
+    expect(shown[0]?.options?.body).toBe(`@${USER.userId} 見てください 1`);
+  });
+
+  it('@channel が届いたら、自分が mentions に載っていなくても通知を出す。自分が書いた @channel には出さない（機能一覧 9.2・10.2）', async () => {
+    const { shown } = fakeNotificationApi('default', 'granted');
+    fakeFetch(routes());
+    const { sockets } = renderApp('/settings');
+    await enableBrowserNotifications();
+
+    deliverNew(sockets, message(1, { body: '@channel 集合です', mentions: [] }));
     expect(shown).toHaveLength(1);
-    expect(shown[0]?.options?.body).toBe(`@${USER.userId} 見てください 2`);
+    expect(shown[0]?.title).toBe('ボブ さんから @channel');
+    expect(shown[0]?.options?.body).toBe('@channel 集合です');
+
+    deliverNew(sockets, message(2, { author: USER, body: '@channel 自分から', mentions: [] }));
+    expect(shown).toHaveLength(1);
+  });
+
+  it('@here は、そのチャンネルを開いているときだけ通知を出す（開いていても、タブが見えていれば出さない。機能一覧 10.2）', async () => {
+    const { shown } = fakeNotificationApi('default', 'granted');
+    fakeFetch(routes({ [`GET ${MESSAGES}`]: () => page([]) }));
+    const settings = renderApp('/settings');
+    await enableBrowserNotifications();
+    // 開いていない（設定の画面）: 出さない
+    deliverNew(settings.sockets, message(1, { body: '@here いる人', mentions: [] }));
+    expect(shown).toHaveLength(0);
+    settings.unmount();
+
+    const { sockets } = renderApp(CHANNEL_PATH);
+    await screen.findByRole('heading', { name: `# ${GENERAL.name}` });
+    // 開いていて見えている: 出さない
+    deliverNew(sockets, message(2, { body: '@here いる人', mentions: [] }));
+    expect(shown).toHaveLength(0);
+
+    // 開いていて、別のタブを見ている: 出す
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      deliverNew(sockets, message(3, { body: '@here いる人', mentions: [] }));
+      expect(shown).toHaveLength(1);
+      expect(shown[0]?.title).toBe('ボブ さんから @here');
+    } finally {
+      visibility.mockRestore();
+    }
   });
 
   it('許可されていても、有効にしていなければ通知を出さない', async () => {
@@ -296,6 +342,45 @@ describe('通知の一覧（F-26）', () => {
     expect(within(items[0]!).getByText(/見てください 2/)).toBeDefined();
     expect(within(items[1]!).getByText(/既読/)).toBeDefined();
     expect(within(items[1]!).queryByRole('button', { name: '既読にする' })).toBeNull();
+  });
+
+  it('DM の通知は、ワークスペース・相手・本文と一緒に出し、「メッセージへ移動」は DM の画面へ向く（#623）', async () => {
+    const dmId = '01920000-0000-7000-8000-0000000000d1';
+    const dmNote = {
+      id: '01920000-0000-7000-8000-00000000009e',
+      kind: 'DM',
+      createdAt: SENT_AT,
+      readAt: null,
+      workspace: { id: WORKSPACE_ID, name: WORKSPACE.name },
+      dm: { id: dmId, counterpart: BOB },
+      message: {
+        id: '01920000-0000-7000-8000-0000000000d2',
+        dmId,
+        author: BOB,
+        body: 'DM の本文です',
+        createdAt: SENT_AT,
+        editedAt: null,
+        deleted: false,
+      },
+    };
+    fakeFetch(
+      routes({
+        [`GET ${NOTIFICATIONS}`]: () =>
+          json(200, { notifications: [dmNote, notification(1)], nextBefore: null }),
+      }),
+    );
+
+    renderApp('/notifications');
+
+    const items = await screen.findAllByRole('article');
+    expect(items).toHaveLength(2);
+    expect(within(items[0]!).getByText(new RegExp(`${WORKSPACE.name} / DM`))).toBeDefined();
+    expect(within(items[0]!).getByText(/ボブ さんからの DM/)).toBeDefined();
+    expect(within(items[0]!).getByText('DM の本文です')).toBeDefined();
+    expect(
+      within(items[0]!).getByRole('link', { name: 'メッセージへ移動' }).getAttribute('href'),
+    ).toBe(`/workspaces/${WORKSPACE_ID}/dms/${dmId}`);
+    expect(within(items[1]!).getByText(/ボブ さんからのメンション/)).toBeDefined();
   });
 
   // CLAUDE.md「必ずテストを書く箇所」: Markdown が HTML として解釈されないこと（通知の本文も同じ部品で描く）。

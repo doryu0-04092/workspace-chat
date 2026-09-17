@@ -71,7 +71,7 @@ describe('チャンネルの一覧の返信の表示', () => {
 });
 
 describe('スレッド', () => {
-  it('「N件の返信」を押すとスレッドを開き、親と返信を上が古い順に並べる。返信はトークンを付けて読む', async () => {
+  it('「N件の返信」を押すとスレッドを開き、親を先頭に、返信を上が新しい順に並べる（#608）。返信はトークンを付けて読む', async () => {
     const parent = message(2, { replyCount: 2, replyParticipants: [BOB] });
     const { calls } = fakeFetch(
       routes({
@@ -87,7 +87,7 @@ describe('スレッド', () => {
     await thread.findByText('返信 4');
     const shown = texts(thread);
     expect(shown[0]).toContain('メッセージ 2');
-    expect(shown.slice(1).map((text) => text.match(/返信 \d/)?.[0])).toEqual(['返信 3', '返信 4']);
+    expect(shown.slice(1).map((text) => text.match(/返信 \d/)?.[0])).toEqual(['返信 4', '返信 3']);
     const read = calls.find((c) => c.key === `GET ${repliesPath(parent)}`)!;
     expect(headerOf(read.init, 'Authorization')).toBe('Bearer t1');
   });
@@ -177,7 +177,8 @@ describe('スレッド', () => {
     fireEvent.change(thread.getByLabelText('返信'), { target: { value: 'わかった' } });
     fireEvent.click(thread.getByRole('button', { name: '返信を送信する' }));
 
-    await waitFor(() => expect(texts(thread).at(-1)).toContain('わかった'));
+    // 先頭は親。返信は新しいものが上に来る
+    await waitFor(() => expect(texts(thread)[1]).toContain('わかった'));
     const post = calls.find((c) => c.key === `POST ${repliesPath(parent)}`)!;
     expect(JSON.parse(String(post.init.body))).toEqual({ body: 'わかった' });
     expect(headerOf(post.init, 'Authorization')).toBe('Bearer t1');
@@ -229,7 +230,7 @@ describe('スレッド', () => {
     expect(alert.textContent).toContain('見つかりません');
   });
 
-  it('続きがあれば、古い返信を before を付けて読み、上に足す', async () => {
+  it('続きがあれば、古い返信を before を付けて読み、下に足す', async () => {
     const parent = message(2, { replyCount: 3 });
     fakeFetch(
       routes({
@@ -251,7 +252,7 @@ describe('スレッド', () => {
       texts(thread)
         .slice(1)
         .map((text) => text.match(/返信 \d/)?.[0]),
-    ).toEqual(['返信 3', '返信 4', '返信 5']);
+    ).toEqual(['返信 5', '返信 4', '返信 3']);
     expect(thread.queryByRole('button', { name: '古い返信を読み込む' })).toBeNull();
   });
 });
@@ -275,13 +276,13 @@ describe('スレッドの配信の反映', () => {
     return { ...fetch, socket, thread };
   }
 
-  it('開いているスレッドの返信の message:new を返信の最後に足し、同じ id は2行にしない。ほかのスレッドの返信は足さない', async () => {
+  it('開いているスレッドの返信の message:new を返信の先頭に足し、同じ id は2行にしない。ほかのスレッドの返信は足さない', async () => {
     const parent = message(2, { replyCount: 1 });
     const other = message(7);
     const { socket, thread } = await openWithSocket(parent, [reply(3, parent)]);
 
     act(() => socket.deliver('message:new', { message: reply(4, parent), sentAt: SENT_AT }));
-    await waitFor(() => expect(texts(thread).at(-1)).toContain('返信 4'));
+    await waitFor(() => expect(texts(thread)[1]).toContain('返信 4'));
     act(() => socket.deliver('message:new', { message: reply(4, parent), sentAt: SENT_AT }));
     act(() => socket.deliver('message:new', { message: reply(8, other), sentAt: SENT_AT }));
     await pause();

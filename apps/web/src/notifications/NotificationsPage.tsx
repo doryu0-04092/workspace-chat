@@ -3,15 +3,18 @@ import { errorMessage, segment } from '../api/client';
 import { MessageBody } from '../messages/MessageBody';
 import { type Notification, useMarkNotificationRead, useNotifications } from './queries';
 
-/** 通知から移る先。本体はそのチャンネル、返信はそのスレッドを開いたチャンネル（`ChannelPage` の `thread`）。 */
+/** 通知から移る先。本体はそのチャンネル、返信はそのスレッドを開いたチャンネル（`ChannelPage` の `thread`）、DM はその DM（#623）。 */
 function messagePathOf(notification: Notification): string {
+  if (notification.kind === 'DM') {
+    return `/workspaces/${segment(notification.workspace.id)}/dms/${segment(notification.dm.id)}`;
+  }
   const channel = `/workspaces/${segment(notification.workspace.id)}/channels/${segment(notification.channel.id)}`;
   const { parentId } = notification.message;
   return parentId === null ? channel : `${channel}?${new URLSearchParams({ thread: parentId })}`;
 }
 
 /**
- * 通知の一覧（F-26。機能一覧 10.3）。受け取ったメンションを新しい順に出し、既読化と、該当メッセージへの移動ができる。
+ * 通知の一覧（F-26。機能一覧 10.3）。受け取ったメンションと DM（#623）を新しい順に出し、既読化と、該当メッセージへの移動ができる。
  * **未読か既読かは文字でも出す**（太字は装飾であり、支援技術には伝わらない。10.1 の未読と同じ）。
  */
 export function NotificationsPage() {
@@ -51,17 +54,28 @@ export function NotificationsPage() {
                   <span className={unread ? 'font-bold' : 'text-slate-500'}>
                     {unread ? '未読' : '既読'}
                   </span>
-                  <span>{`${notification.workspace.name} / # ${notification.channel.name}`}</span>
+                  <span>
+                    {notification.kind === 'DM'
+                      ? `${notification.workspace.name} / DM`
+                      : `${notification.workspace.name} / # ${notification.channel.name}`}
+                  </span>
                   <span className="font-bold">
-                    {`${message.author?.displayName ?? '削除済みの利用者'} さんからのメンション`}
+                    {`${message.author?.displayName ?? '削除済みの利用者'} さんからの${notification.kind === 'DM' ? ' DM' : 'メンション'}`}
                   </span>
                   <time dateTime={notification.createdAt} className="text-slate-500">
                     {new Date(notification.createdAt).toLocaleString('ja-JP')}
                   </time>
                 </header>
-                {message.body !== null && (
-                  <MessageBody body={message.body} mentions={message.mentions} />
-                )}
+                {notification.kind === 'DM'
+                  ? notification.message.body !== null && (
+                      <MessageBody body={notification.message.body} />
+                    )
+                  : notification.message.body !== null && (
+                      <MessageBody
+                        body={notification.message.body}
+                        mentions={notification.message.mentions}
+                      />
+                    )}
                 <div className="mt-1 flex gap-3 text-sm">
                   <Link
                     to={messagePathOf(notification)}

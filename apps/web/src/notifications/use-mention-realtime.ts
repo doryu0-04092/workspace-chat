@@ -9,7 +9,12 @@ import { type Location, useLocation, useNavigate } from 'react-router';
 import { useSession } from '../auth/session-context';
 import type { Message } from '../messages/queries';
 import { useRealtime } from '../realtime/realtime-context';
-import { mentionNotificationOf, showBrowserNotification } from './browser-notifications';
+import {
+  broadcastNotificationOf,
+  dmNotificationOf,
+  mentionNotificationOf,
+  showBrowserNotification,
+} from './browser-notifications';
 import { notificationsKey } from './queries';
 
 const MESSAGE_NEW = 'message:new' satisfies RealtimeEventName;
@@ -53,10 +58,31 @@ export function useMentionRealtime() {
   useEffect(() => {
     if (userId === null) return;
     const onNew = (payload: MessageNewPayload | DmMessageNewPayload) => {
-      // **DM の `message:new` は同じイベント名で届く**（`dmId` を持ち、`mentions` を持たない）。メンションの通知として扱わない
-      if ('dmId' in payload.message) return;
+      // **DM の `message:new` は同じイベント名で届く**（`dmId` を持ち、`mentions` を持たない）。メンションではなく DM の通知として扱う（#623）
+      if ('dmId' in payload.message) {
+        const dm = payload.message;
+        const dmContent = dmNotificationOf(dm, { id: userId });
+        if (dmContent === null) return;
+        void queryClient.invalidateQueries({ queryKey: notificationsKey });
+        // いまその DM を開いて見ていれば出さない
+        if (
+          document.visibilityState === 'visible' &&
+          locationRef.current.pathname.endsWith(`/dms/${dm.dmId}`)
+        ) {
+          return;
+        }
+        showBrowserNotification(userId, dmContent, () => navigate('/notifications'));
+        return;
+      }
       const { message } = payload;
-      const content = mentionNotificationOf(message, { id: userId });
+      // 個人のメンション、なければ一斉メンション（@channel・開いているチャンネルの @here。機能一覧 9.2・10.2）
+      const content =
+        mentionNotificationOf(message, { id: userId }) ??
+        broadcastNotificationOf(
+          message,
+          { id: userId },
+          { hereOpen: locationRef.current.pathname.endsWith(`/channels/${message.channelId}`) },
+        );
       if (content === null) return;
       void queryClient.invalidateQueries({ queryKey: notificationsKey });
       if (onScreen(locationRef.current, message)) return;

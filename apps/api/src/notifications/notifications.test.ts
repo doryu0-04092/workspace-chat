@@ -216,7 +216,9 @@ describe('通知の一覧と既読化（F-26）', () => {
       await replied(alice, workspace.id, channel.id, parent.id, `@${bob.loginId} 返信`);
 
       const { notifications } = await notificationsOf(bob);
-      expect(notifications.map((n) => n.message.parentId)).toEqual([parent.id]);
+      expect(notifications.map((n) => (n.kind === 'MENTION' ? n.message.parentId : null))).toEqual([
+        parent.id,
+      ]);
     });
 
     it('新しい順に返し、limit を超えた分は before で続きを取る', async () => {
@@ -354,6 +356,192 @@ describe('通知の一覧と既読化（F-26）', () => {
 
     it('トークンが無ければ 401', async () => {
       expect((await fetch(`${base}/api/users/me/notifications`)).status).toBe(401);
+    });
+  });
+
+  // 機能一覧 9.2 の表「@channel の通知先はそのチャンネルの参加者全員」・10.3「受け取ったメンションを一覧表示する」。
+  // @channel の通知は、メンションの件数（バッジ）と同じ対象に作る（件数に数えるのに一覧に無い、を作らない）。
+  describe('@channel の通知', () => {
+    it('@channel は、参加者全員（書いた本人を除く）の通知一覧に載り、参加していない人には載らない', async () => {
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const outsider = await login();
+      const workspace = await workspaceWith(alice, bob, carol, outsider);
+      const channel = await channelRow(workspace.id, 'PRIVATE', [alice, bob, carol]);
+
+      const message = await posted(alice, workspace.id, channel.id, '@channel お知らせ');
+
+      for (const who of [bob, carol]) {
+        expect((await notificationsOf(who)).notifications.map((n) => n.message.id)).toEqual([
+          message.id,
+        ]);
+      }
+      expect((await notificationsOf(alice)).notifications).toEqual([]);
+      expect((await notificationsOf(outsider)).notifications).toEqual([]);
+    });
+
+    it('同じ利用者を @channel と個人のメンションの両方で指しても、通知は1件', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channel = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+
+      await posted(alice, workspace.id, channel.id, `@channel @${bob.loginId} 両方`);
+
+      expect((await notificationsOf(bob)).notifications).toHaveLength(1);
+    });
+
+    it('スレッドの返信の @channel も、参加者の通知一覧に載る', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channel = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const parent = await posted(alice, workspace.id, channel.id, '親');
+
+      const reply = await replied(alice, workspace.id, channel.id, parent.id, '@channel 返信');
+
+      expect((await notificationsOf(bob)).notifications.map((n) => n.message.id)).toEqual([
+        reply.id,
+      ]);
+    });
+
+    it('編集で @channel を足すと参加者に載り、外すと個人のメンションで指していない人の通知は消える。指している人の通知は既読のまま残る', async () => {
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const workspace = await workspaceWith(alice, bob, carol);
+      const channel = await channelRow(workspace.id, 'PUBLIC', [alice, bob, carol]);
+      const message = await posted(alice, workspace.id, channel.id, `@${bob.loginId} だけ`);
+      expect((await notificationsOf(carol)).notifications).toEqual([]);
+
+      await edited(alice, workspace.id, channel.id, message.id, `@channel @${bob.loginId} 全員`);
+      expect((await notificationsOf(carol)).notifications.map((n) => n.message.id)).toEqual([
+        message.id,
+      ]);
+      const [bobNote] = (await notificationsOf(bob)).notifications;
+      expect((await markRead(bob, bobNote!.id)).status).toBe(204);
+
+      await edited(alice, workspace.id, channel.id, message.id, `@${bob.loginId} だけに戻す`);
+      expect((await notificationsOf(carol)).notifications).toEqual([]);
+      const [kept] = (await notificationsOf(bob)).notifications;
+      expect(kept?.id).toBe(bobNote!.id);
+      expect(kept?.readAt).not.toBeNull();
+    });
+  });
+
+  // 機能一覧 10.2・10.3「受け取ったメンション・DM を時系列で一覧表示する」（#623）。
+  describe('DM の通知（#623）', () => {
+    async function dmWith(from: LoggedIn, workspaceId: string, to: LoggedIn): Promise<string> {
+      const res = await fetch(`${base}/api/workspaces/${workspaceId}/dms`, {
+        method: 'POST',
+        headers: { authorization: from.authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: to.id }),
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { id: string }).id;
+    }
+
+    function dmSent(by: LoggedIn, workspaceId: string, dmId: string, body: string) {
+      return send(
+        'POST',
+        `${base}/api/workspaces/${workspaceId}/dms/${dmId}/messages`,
+        by,
+        body,
+        201,
+      );
+    }
+
+    it('DM を受け取ると相手の通知一覧に DM の通知が載り、書き手には載らない', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const dmId = await dmWith(alice, workspace.id, bob);
+
+      const sent = await dmSent(alice, workspace.id, dmId, 'こんにちは');
+
+      const { notifications } = await notificationsOf(bob);
+      expect(notifications).toEqual([
+        {
+          id: expect.any(String),
+          kind: 'DM',
+          createdAt: expect.any(String),
+          readAt: null,
+          workspace: { id: workspace.id, name: workspace.name },
+          dm: {
+            id: dmId,
+            counterpart: { id: alice.id, userId: alice.loginId, displayName: alice.displayName },
+          },
+          message: expect.objectContaining({ id: sent.id, dmId, body: 'こんにちは' }),
+        },
+      ]);
+      expect((await notificationsOf(alice)).notifications).toEqual([]);
+    });
+
+    it('チャンネルの通知と DM の通知は新しい順に混ざって返り、limit と before で続けて取れる', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const channel = await channelRow(workspace.id, 'PUBLIC', [alice, bob]);
+      const dmId = await dmWith(alice, workspace.id, bob);
+      const first = await posted(alice, workspace.id, channel.id, `@${bob.loginId} 1`);
+      const second = await dmSent(alice, workspace.id, dmId, '2');
+      const third = await posted(alice, workspace.id, channel.id, `@${bob.loginId} 3`);
+      const fourth = await dmSent(alice, workspace.id, dmId, '4');
+
+      const page1 = await notificationsOf(bob, '?limit=3');
+      expect(page1.notifications.map((n) => n.message.id)).toEqual([
+        fourth.id,
+        third.id,
+        second.id,
+      ]);
+      expect(page1.notifications.map((n) => n.kind)).toEqual(['DM', 'MENTION', 'DM']);
+      expect(page1.nextBefore).toBe(page1.notifications[2]?.id);
+
+      const page2 = await notificationsOf(bob, `?limit=3&before=${page1.nextBefore}`);
+      expect(page2.notifications.map((n) => n.message.id)).toEqual([first.id]);
+      expect(page2.nextBefore).toBeNull();
+    });
+
+    it('DM の通知を既読にでき、他人の DM の通知は既読にできず 404', async () => {
+      const alice = await login();
+      const bob = await login();
+      const carol = await login();
+      const workspace = await workspaceWith(alice, bob, carol);
+      const dmId = await dmWith(alice, workspace.id, bob);
+      await dmSent(alice, workspace.id, dmId, '読んで');
+      const [note] = (await notificationsOf(bob)).notifications;
+
+      const others = await markRead(carol, note!.id);
+      expect(others.status).toBe(404);
+      expect(await others.json()).toEqual(NOT_FOUND);
+
+      expect((await markRead(bob, note!.id)).status).toBe(204);
+      expect((await notificationsOf(bob)).notifications[0]?.readAt).not.toBeNull();
+    });
+
+    it('削除された DM と、ワークスペースから外れた後の DM の通知は出さない', async () => {
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(alice, bob);
+      const dmId = await dmWith(alice, workspace.id, bob);
+      const sent = await dmSent(alice, workspace.id, dmId, '消す');
+      const removed = await fetch(
+        `${base}/api/workspaces/${workspace.id}/dms/${dmId}/messages/${sent.id}`,
+        {
+          method: 'DELETE',
+          headers: { authorization: alice.authorization },
+        },
+      );
+      expect(removed.status).toBe(204);
+      expect((await notificationsOf(bob)).notifications).toEqual([]);
+
+      await dmSent(alice, workspace.id, dmId, '残す');
+      expect((await notificationsOf(bob)).notifications).toHaveLength(1);
+      await prisma.membership.delete({
+        where: { workspaceId_userId: { workspaceId: workspace.id, userId: bob.id } },
+      });
+      expect((await notificationsOf(bob)).notifications).toEqual([]);
     });
   });
 

@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { ApiError, errorMessage } from '../api/client';
 import { DmList } from '../dms/DmList';
@@ -11,6 +11,7 @@ import {
   useArchivedChannels,
   useChannels,
   useCreateChannel,
+  useInvitationCandidates,
   useInviteToWorkspace,
   useJoinChannel,
   useLeaveWorkspace,
@@ -157,17 +158,36 @@ function ArchivedChannels({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+/** 入力が止まってから（250 ミリ秒）、前後の空白を除いた値を返す。空白だけなら null（#616。打つたびに候補を読まない）。 */
+function useSettledQuery(input: string): string | null {
+  const [settled, setSettled] = useState<string | null>(null);
+  useEffect(() => {
+    const trimmed = input.trim();
+    const timer = setTimeout(() => setSettled(trimmed === '' ? null : trimmed), 250);
+    return () => clearTimeout(timer);
+  }, [input]);
+  return settled;
+}
+
 /**
  * ワークスペースへの招待（F-08）。**オーナーにだけ出すのは画面の出し分けであり、権限の根拠ではない**（判定は api。CLAUDE.md 2）。
  * 招待できたら入力を空にし、誰を招待したかを出す（承諾されるまで参加は成立しない。F-38）。
+ * **入力に合わせて候補を出し、押せばその人のユーザーID で招待する**（ユーザーID を正確に知らなくても招待できる。#616）。
+ * 候補を読むのは入力が止まってから（打つたびに読むと、1分 60 回の上限に当たる）。空白だけなら読まない。
  */
 function InviteForm({ workspaceId }: { workspaceId: string }) {
   const invite = useInviteToWorkspace(workspaceId);
   const [userId, setUserId] = useState('');
+  const q = useSettledQuery(userId);
+  const candidates = useInvitationCandidates(workspaceId, q);
+
+  function send(target: string) {
+    invite.mutate({ userId: target }, { onSuccess: () => setUserId('') });
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    invite.mutate({ userId }, { onSuccess: () => setUserId('') });
+    send(userId);
   }
 
   return (
@@ -181,6 +201,29 @@ function InviteForm({ workspaceId }: { workspaceId: string }) {
         value={userId}
         onChange={(event) => setUserId(event.target.value)}
       />
+      {q !== null &&
+        userId.trim() !== '' &&
+        candidates.data &&
+        (candidates.data.length === 0 ? (
+          <p className="text-sm text-slate-600">招待できる利用者は見つかりません。</p>
+        ) : (
+          <ul aria-label="招待の候補" className="flex flex-col gap-1 rounded border p-2">
+            {candidates.data.map((candidate) => (
+              <li key={candidate.id} className="flex flex-wrap items-center gap-2">
+                <span>{`${candidate.displayName} @${candidate.userId}`}</span>
+                <button
+                  type="button"
+                  className="text-sm underline disabled:opacity-50"
+                  aria-label={`${candidate.displayName}（@${candidate.userId}）を招待する`}
+                  disabled={invite.isPending}
+                  onClick={() => send(candidate.userId)}
+                >
+                  招待する
+                </button>
+              </li>
+            ))}
+          </ul>
+        ))}
       {invite.isError && (
         <p role="alert" className="text-red-700">
           {errorMessage(invite.error)}

@@ -340,12 +340,12 @@ describe('チャンネルの部屋（機能一覧 9.2）', () => {
 });
 
 describe('配信の反映（機能一覧 5.2）', () => {
-  it('message:new を、開いているチャンネルの一覧の最後に足す。同じ id がもう一度届いても1行だけにする', async () => {
+  it('message:new を、開いているチャンネルの一覧の先頭に足す。同じ id がもう一度届いても1行だけにする', async () => {
     const { socket, count } = await openChannel();
     await accept(socket, count, 2);
 
     act(() => socket.deliver('message:new', { message: message(2), sentAt: SENT_AT }));
-    await waitFor(() => expect(rows().at(-1)).toContain('メッセージ 2'));
+    await waitFor(() => expect(rows()[0]).toContain('メッセージ 2'));
     act(() => socket.deliver('message:new', { message: message(2), sentAt: SENT_AT }));
     await pause();
 
@@ -421,7 +421,7 @@ describe('配信の反映（機能一覧 5.2）', () => {
     await accept(socket, count, 2);
 
     act(() => socket.deliver('message:new', { message: mine, sentAt: SENT_AT }));
-    await waitFor(() => expect(rows().at(-1)).toContain('こんにちは'));
+    await waitFor(() => expect(rows()[0]).toContain('こんにちは'));
     fireEvent.change(screen.getByLabelText('メッセージ'), { target: { value: 'こんにちは' } });
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
     await waitFor(() =>

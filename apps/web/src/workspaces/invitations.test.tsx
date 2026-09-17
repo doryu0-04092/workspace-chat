@@ -251,8 +251,85 @@ describe('ワークスペースへの招待（F-08）', () => {
       [`GET /api/workspaces/${workspace.id}`]: () => json(200, workspace),
       [`GET /api/workspaces/${workspace.id}/channels`]: () => json(200, []),
       [`GET /api/workspaces/${workspace.id}/dms`]: () => json(200, []),
+      // 入力に合わせて候補を読む（#616）。既存の検査が入れる 'bob' には候補を返さない
+      [`GET /api/workspaces/${workspace.id}/invitation-candidates?q=bob`]: () => json(200, []),
     };
   }
+
+  /** 招待の候補の問い合わせのキー（#616）。 */
+  const candidatesKey = (workspaceId: string, q: string) =>
+    `GET /api/workspaces/${workspaceId}/invitation-candidates?${new URLSearchParams({ q })}`;
+
+  /** テストで使う試用の利用者（実在の人物ではない）。 */
+  const TRIAL_1 = {
+    id: '01920000-0000-7000-8000-0000000000a1',
+    userId: 'trial_1',
+    displayName: '試用さん1',
+  };
+  const TRIAL_2 = {
+    id: '01920000-0000-7000-8000-0000000000a2',
+    userId: 'trial_2',
+    displayName: '試用さん2',
+  };
+
+  it('招待の入力に一部を入れると候補を出し、押すとその人のユーザーID で招待する（#616）', async () => {
+    const { calls } = fakeFetch({
+      ...workspaceRoutes(OWNED),
+      [candidatesKey(OWNED.id, 'tr')]: () => json(200, [TRIAL_1, TRIAL_2]),
+      [`POST /api/workspaces/${OWNED.id}/invitations`]: () =>
+        json(201, {
+          id: INVITATION.id,
+          workspaceId: OWNED.id,
+          invitee: TRIAL_2,
+          createdAt: '2026-09-18T00:00:00.000Z',
+        }),
+    });
+    renderApp(`/workspaces/${OWNED.id}`);
+    await screen.findByRole('heading', { name: '開発チーム' });
+
+    type('招待するユーザーID', 'tr');
+
+    const list = within(await screen.findByRole('list', { name: '招待の候補' }));
+    expect(list.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+      expect.stringContaining('試用さん1 @trial_1'),
+      expect.stringContaining('試用さん2 @trial_2'),
+    ]);
+    fireEvent.click(list.getByRole('button', { name: '試用さん2（@trial_2）を招待する' }));
+
+    expect((await screen.findByRole('status', { name: '招待の結果' })).textContent).toContain(
+      '試用さん2（@trial_2）を招待しました',
+    );
+    const invite = calls.find((c) => c.key === `POST /api/workspaces/${OWNED.id}/invitations`)!;
+    expect(JSON.parse(String(invite.init.body))).toEqual({ userId: 'trial_2' });
+    await waitFor(() => expect(screen.queryByRole('list', { name: '招待の候補' })).toBeNull());
+  });
+
+  it('表示名（日本語）でも探せ、空白だけでは探さない（#616）', async () => {
+    const { calls } = fakeFetch({
+      ...workspaceRoutes(OWNED),
+      [candidatesKey(OWNED.id, '試用')]: () => json(200, [TRIAL_1]),
+    });
+    renderApp(`/workspaces/${OWNED.id}`);
+    await screen.findByRole('heading', { name: '開発チーム' });
+
+    type('招待するユーザーID', '  ');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(calls.some((c) => c.key.includes('invitation-candidates'))).toBe(false);
+
+    type('招待するユーザーID', '試用');
+    const list = within(await screen.findByRole('list', { name: '招待の候補' }));
+    expect(list.getByText('試用さん1 @trial_1')).toBeDefined();
+  });
+
+  it('候補が無ければ無いことを出す（#616）', async () => {
+    fakeFetch({ ...workspaceRoutes(OWNED), [candidatesKey(OWNED.id, 'zzz')]: () => json(200, []) });
+    renderApp(`/workspaces/${OWNED.id}`);
+    await screen.findByRole('heading', { name: '開発チーム' });
+
+    type('招待するユーザーID', 'zzz');
+
+    expect(await screen.findByText('招待できる利用者は見つかりません。')).toBeDefined();
+  });
 
   it('オーナーには招待のフォームを出し、ユーザーID を送る。招待できたら入力を空にし、招待したことを出す', async () => {
     const { calls } = fakeFetch({

@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe('チャンネルのメッセージの表示', () => {
-  it('メッセージをトークンを付けて読み、上が古く下が新しい順に並べる', async () => {
+  it('メッセージをトークンを付けて読み、上が新しく下が古い順に並べる（#608）', async () => {
     const { calls } = fakeFetch(
       routes({ [`GET ${MESSAGES}`]: () => page([message(3), message(2), message(1)]) }),
     );
@@ -25,9 +25,9 @@ describe('チャンネルのメッセージの表示', () => {
 
     await screen.findByText('メッセージ 3');
     expect(articles().map((a) => within(a).getByText(/^メッセージ \d$/).textContent)).toEqual([
-      'メッセージ 1',
-      'メッセージ 2',
       'メッセージ 3',
+      'メッセージ 2',
+      'メッセージ 1',
     ]);
     const list = calls.find((c) => c.key === `GET ${MESSAGES}`)!;
     expect(headerOf(list.init, 'Authorization')).toBe('Bearer t1');
@@ -98,7 +98,7 @@ describe('チャンネルのメッセージの表示', () => {
     expect(within(article).queryByText('（編集済み）')).toBeNull();
   });
 
-  it('続きがあれば、古いメッセージを before を付けて読み、上に足す。既に出ていたメッセージの位置は動かさない', async () => {
+  it('続きがあれば、古いメッセージを before を付けて読み、下に足す。既に出ていたメッセージの位置は動かさない', async () => {
     const { calls } = fakeFetch(
       routes({
         [`GET ${MESSAGES}`]: () => page([message(4), message(3)], message(3).id),
@@ -107,7 +107,7 @@ describe('チャンネルのメッセージの表示', () => {
     );
     renderApp(CHANNEL_PATH);
 
-    // data-item-index は firstItemIndex を足した行の番号（data-index は描いている行の中の順番で、先頭に足すと変わる）
+    // data-item-index は行の番号。古いものは下に足すため、既に出ていた行の番号は変わらない
     const indexOf = (text: string) =>
       screen.getByText(text).closest('[data-item-index]')!.getAttribute('data-item-index');
     await screen.findByText('メッセージ 4');
@@ -117,10 +117,10 @@ describe('チャンネルのメッセージの表示', () => {
 
     await screen.findByText('メッセージ 1');
     expect(articles().map((a) => within(a).getByText(/^メッセージ \d$/).textContent)).toEqual([
-      'メッセージ 1',
-      'メッセージ 2',
-      'メッセージ 3',
       'メッセージ 4',
+      'メッセージ 3',
+      'メッセージ 2',
+      'メッセージ 1',
     ]);
     expect({ three: indexOf('メッセージ 3'), four: indexOf('メッセージ 4') }).toEqual(before);
     const older = calls.find((c) => c.key.includes('?before='))!;
@@ -153,6 +153,16 @@ describe('チャンネルのメッセージの表示', () => {
     await screen.findByText('メッセージ 1');
     const scroller = screen.getByTestId('virtuoso-scroller');
     expect(scroller.style.height).toBe('60vh');
+  });
+
+  it('入力欄は一覧の上に置く（最新を見るにも入力するにも下までスクロールしない。#608）', async () => {
+    fakeFetch(routes({ [`GET ${MESSAGES}`]: () => page([message(1)]) }));
+    renderApp(CHANNEL_PATH);
+
+    await screen.findByText('メッセージ 1');
+    const input = screen.getByLabelText('メッセージ');
+    const list = screen.getByRole('region', { name: 'メッセージの一覧' });
+    expect(input.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('メッセージが無ければ、無いことを出す', async () => {
@@ -189,7 +199,7 @@ describe('チャンネルのメッセージの表示', () => {
 });
 
 describe('チャンネルへの投稿', () => {
-  it('投稿すると本文を送り、応答のメッセージを一覧の最後に足して、入力欄を空にする（一覧は読み直さない）', async () => {
+  it('投稿すると本文を送り、応答のメッセージを一覧の先頭に足して、入力欄を空にする（一覧は読み直さない）', async () => {
     const mine = message(2, { author: USER, body: 'こんにちは' });
     const { calls, count } = fakeFetch(
       routes({
@@ -203,8 +213,8 @@ describe('チャンネルへの投稿', () => {
     type('こんにちは');
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
 
-    // 入力欄の textarea も本文の文字を持つため、文字で探さず、最後の行に出るまで待つ
-    await waitFor(() => expect(articles().at(-1)!.textContent).toContain('こんにちは'));
+    // 入力欄の textarea も本文の文字を持つため、文字で探さず、先頭の行に出るまで待つ
+    await waitFor(() => expect(articles()[0]!.textContent).toContain('こんにちは'));
     const post = calls.find((c) => c.key === `POST ${MESSAGES}`)!;
     expect(JSON.parse(String(post.init.body))).toEqual({ body: 'こんにちは' });
     expect(headerOf(post.init, 'Authorization')).toBe('Bearer t1');

@@ -120,6 +120,23 @@ export function useDeclineInvitation() {
   });
 }
 
+/**
+ * 招待の候補（#616。REST の仕様の listInvitationCandidates。オーナーだけ。判定は api）。**`q` が null の間は読まない**（何も入れていない）。
+ * 同じ `q` はキャッシュを使う。
+ */
+export function useInvitationCandidates(workspaceId: string, q: string | null) {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: ['workspaces', workspaceId, 'invitation-candidates', q],
+    queryFn: () =>
+      requestJson<UserSummary[]>(
+        store,
+        `/api/workspaces/${segment(workspaceId)}/invitation-candidates?${new URLSearchParams({ q: q ?? '' })}`,
+      ),
+    enabled: q !== null,
+  });
+}
+
 /** ワークスペースへ招待する（F-08。オーナーだけ。判定は api）。宛先はユーザーID。 */
 export function useInviteToWorkspace(workspaceId: string) {
   const store = useSessionStore();

@@ -419,6 +419,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/invitation-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * 招待の候補（F-08。#616）
+         * @description ワークスペースへ招待できる利用者を、q の文字列から探す（ユーザーID を正確に知らなくても招待できるようにする。 提案・承認済・2026-09-18・依頼側。#616）。オーナーだけが呼べる（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。 対象は退会していない利用者のうち、そのワークスペースのメンバーでなく、未承諾の招待も無い人。 ユーザーID か表示名に q を含む人を、大文字小文字を区別せずに当てる。 並びは、ユーザーID の先頭一致 → 表示名の先頭一致 → 途中の一致の順で、同じ段ではユーザーID の小文字の順。最大10人。 利用者単位で1分に60回まで
+         */
+        get: operations["listInvitationCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workspaces/{id}/channels": {
         parameters: {
             query?: never;
@@ -1683,18 +1706,24 @@ export interface components {
             nextBefore: string | null;
         };
         /**
-         * @description 通知の種類（機能一覧 10.3）。いまはメンションだけ（DM は F-19 で足す）
+         * @description 通知の種類（機能一覧 10.3）。MENTION はチャンネルのメッセージのメンション（個人・@channel・受け取りを返した @here）、 DM は DM で受け取ったメッセージ（#623）
          * @enum {string}
          */
-        NotificationKind: "MENTION";
-        /** @description 受け取った通知（機能一覧 10.3） */
-        Notification: {
+        NotificationKind: "MENTION" | "DM";
+        /** @description 受け取った通知（機能一覧 10.3）。kind で、チャンネルの通知か DM の通知かを見分ける（#623） */
+        Notification: components["schemas"]["ChannelNotification"] | components["schemas"]["DmNotification"];
+        /** @description チャンネルのメッセージのメンションの通知（機能一覧 10.3） */
+        ChannelNotification: {
             /**
              * Format: uuid
              * @description UUIDv7。一覧のカーソル（before）にそのまま使う
              */
             id: string;
-            kind: components["schemas"]["NotificationKind"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "MENTION";
             /**
              * Format: date-time
              * @description 通知を作った時刻（メンションを保存した時刻。編集で足したメンションなら編集の時刻）
@@ -1717,6 +1746,42 @@ export interface components {
             };
             /** @description メンションしたメッセージ（チャンネルの一覧と同じ形。返信なら parentId を持つ） */
             message: components["schemas"]["Message"];
+        };
+        /** @description DM で受け取ったメッセージの通知（機能一覧 10.2・10.3。#623）。宛先は DM の相手だけ（書き手本人には作らない） */
+        DmNotification: {
+            /**
+             * Format: uuid
+             * @description UUIDv7。一覧のカーソル（before）にそのまま使う（チャンネルの通知と同じ並びに混ぜる）
+             */
+            id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "DM";
+            /**
+             * Format: date-time
+             * @description 通知を作った時刻（DM を受け取った時刻）
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description 既読にした時刻。未読なら null
+             */
+            readAt: string | null;
+            workspace: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            };
+            dm: {
+                /** Format: uuid */
+                id: string;
+                /** @description 相手（書き手）。退会した利用者なら null */
+                counterpart: components["schemas"]["UserSummary"] | null;
+            };
+            /** @description 受け取った DM のメッセージ（DM の一覧と同じ形） */
+            message: components["schemas"]["DmMessage"];
         };
         NotificationPage: {
             /** @description 新しい順 */
@@ -2582,6 +2647,47 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listInvitationCandidates: {
+        parameters: {
+            query: {
+                /** @description 探す文字列。1〜50 文字（コードポイント）で、空白だけは不可 */
+                q: string;
+            };
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 候補（最大10人） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"][];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description オーナーでない（owner_only） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };
     };
