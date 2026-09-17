@@ -5,8 +5,43 @@ import { useSessionStore } from '../auth/session-context';
 
 type Schemas = components['schemas'];
 export type UserSettings = Schemas['UserSettings'];
+export type Profile = Schemas['Profile'];
 
 export const settingsKey = ['users', 'me', 'settings'] as const;
+
+const profileKey = ['users', 'me', 'profile'] as const;
+
+const PROFILE_PATH = '/api/users/me';
+
+/** 自分のプロフィール（F-04。REST の仕様の getMyProfile）。ステータスはログインの状態に持たないため、編集の画面で読む。 */
+export function useMyProfile() {
+  const store = useSessionStore();
+  return useQuery({
+    queryKey: profileKey,
+    queryFn: () => requestJson<Profile>(store, PROFILE_PATH),
+  });
+}
+
+/**
+ * プロフィールを変える（F-04。REST の仕様の updateMyProfile）。通ったら、応答で読み込んだプロフィールを置き換え、
+ * **画面の枠の表示名に使うログインの状態の利用者の情報も、読み直さずに差し替える**。
+ */
+export function useUpdateProfile() {
+  const store = useSessionStore();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas['UpdateProfileRequest']) =>
+      requestJson<Profile>(store, PROFILE_PATH, { method: 'PATCH', body }),
+    onSuccess: (profile) => {
+      queryClient.setQueryData<Profile>(profileKey, profile);
+      store.updateUser({
+        id: profile.id,
+        userId: profile.userId,
+        displayName: profile.displayName,
+      });
+    },
+  });
+}
 
 const SETTINGS_PATH = '/api/users/me/settings';
 

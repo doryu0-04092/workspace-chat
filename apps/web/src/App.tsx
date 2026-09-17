@@ -9,6 +9,7 @@ import type { SessionStore } from './auth/session-store';
 import { SignedInLayout } from './layout/SignedInLayout';
 import type { ConnectRealtime } from './realtime/connect';
 import { RealtimeProvider } from './realtime/realtime-context';
+import { ProfilePage } from './users/ProfilePage';
 import { SettingsPage } from './users/SettingsPage';
 import { ChannelPage } from './workspaces/ChannelPage';
 import { WorkspacePage } from './workspaces/WorkspacePage';
@@ -60,6 +61,7 @@ export function App({
                 </RealtimeProvider>
               }
             >
+              <Route path="profile" element={<ProfilePage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="workspaces" element={<WorkspacesPage />} />
               <Route path="workspaces/:workspaceId" element={<WorkspacePage />} />
