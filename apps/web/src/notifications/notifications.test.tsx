@@ -161,6 +161,21 @@ describe('ブラウザ通知（F-25）', () => {
     expect(shown).toHaveLength(1);
   });
 
+  // DM（F-19）の `message:new` は同じイベント名で届き、`mentions` を持たない。チャンネルのメンションとして扱って落ちてはならない。
+  it('DM の message:new は、メンションの通知として扱わない（落ちない）', async () => {
+    const { shown } = fakeNotificationApi('default', 'granted');
+    fakeFetch(routes());
+    const { sockets } = renderApp('/settings');
+    await enableBrowserNotifications();
+
+    const { channelId: _channelId, mentions: _mentions, ...rest } = mentionMessage(1);
+    deliverNew(sockets, { ...rest, dmId: '01920000-0000-7000-8000-0000000000d1' });
+    deliverNew(sockets, mentionMessage(2));
+
+    expect(shown).toHaveLength(1);
+    expect(shown[0]?.options?.body).toBe(`@${USER.userId} 見てください 2`);
+  });
+
   it('許可されていても、有効にしていなければ通知を出さない', async () => {
     const { shown } = fakeNotificationApi('granted');
     fakeFetch(routes());
