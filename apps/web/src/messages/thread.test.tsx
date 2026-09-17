@@ -106,6 +106,43 @@ describe('スレッド', () => {
     expect(await thread.findByText('返信 10')).toBeDefined();
   });
 
+  // #538: 削除済みの親には api が返信を断る。**削除済みと分かったときだけ**入力欄を消し、返信の一覧は残す（機能一覧 4.2）
+  it('親が削除済みなら、返信は読むが返信のフォームは出さない', async () => {
+    const parent = message(2, { body: null, deleted: true, replyCount: 1 });
+    fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () => page([parent]),
+        [`GET ${repliesPath(parent)}`]: () => page([reply(3, parent)]),
+      }),
+    );
+    renderApp(`${CHANNEL_PATH}?thread=${parent.id}`);
+
+    const thread = await openThread();
+    expect(await thread.findByText('返信 3')).toBeDefined();
+    // 親はチャンネルの一覧が読み込まれてから出る。出る前は削除済みと分からない
+    expect(await thread.findByText('このメッセージは削除されました')).toBeDefined();
+    expect(thread.queryByLabelText('返信')).toBeNull();
+    expect(thread.queryByRole('button', { name: '返信を送信する' })).toBeNull();
+  });
+
+  // 親が一覧に読み込まれていなければ、削除済みかは分からない。分からないときは消さない——消すと、読み込んだページより古い親に返信できなくなる
+  it('親が一覧に読み込まれていなければ、返信のフォームを出す', async () => {
+    const parent = message(9, { replyCount: 1 });
+    fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () => page([message(1)]),
+        [`GET ${repliesPath(parent)}`]: () => page([reply(10, parent)]),
+      }),
+    );
+    renderApp(`${CHANNEL_PATH}?thread=${parent.id}`);
+
+    const thread = await openThread();
+    await thread.findByText('返信 10');
+    await screen.findByText('メッセージ 1');
+    expect(thread.getByLabelText('返信')).toBeDefined();
+    expect(thread.getByRole('button', { name: '返信を送信する' })).toBeDefined();
+  });
+
   it('「スレッドを閉じる」でスレッドを閉じる', async () => {
     const parent = message(2, { replyCount: 1 });
     fakeFetch(
@@ -274,6 +311,25 @@ describe('スレッドの配信の反映', () => {
 
     await thread.findByText('このメッセージは削除されました');
     expect(thread.queryByText('返信 4')).toBeNull();
+  });
+
+  it('開いているスレッドの親の message:deleted で、返信のフォームを消し、返信は残す', async () => {
+    const parent = message(2, { replyCount: 1 });
+    const { socket, thread } = await openWithSocket(parent, [reply(3, parent)]);
+    expect(thread.getByLabelText('返信')).toBeDefined();
+
+    act(() =>
+      socket.deliver('message:deleted', {
+        channelId: GENERAL.id,
+        messageId: parent.id,
+        sentAt: SENT_AT,
+      }),
+    );
+
+    await thread.findByText('このメッセージは削除されました');
+    await waitFor(() => expect(thread.queryByLabelText('返信')).toBeNull());
+    expect(thread.queryByRole('button', { name: '返信を送信する' })).toBeNull();
+    expect(thread.getByText('返信 3')).toBeDefined();
   });
 
   it('件数が変わった親の message:updated で、一覧の「N件の返信」と返信した人を置き換える', async () => {

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { MessageItem, PagedMessages, REPLY_LABELS } from './MessageList';
+import { useMessageChannel } from './message-channel';
 import { MessageForm } from './PostMessageForm';
 import {
   type Message,
@@ -27,6 +28,7 @@ export function ThreadPanel({
   const parent = useLoadedMessage(workspaceId, channelId, parentId);
   const replies = useReplies(workspaceId, channelId, parentId);
   const post = usePostReply(workspaceId, channelId, parentId);
+  const readOnly = useMessageChannel()?.readOnly === true;
   useAdvanceThreadRead(workspaceId, channelId, parentId, replies.data?.pages[0]?.messages);
 
   return (
@@ -39,15 +41,18 @@ export function ThreadPanel({
       </div>
       {parent && <MessageItem message={parent} />}
       <PagedMessages pages={replies} labels={REPLY_LABELS} />
-      <MessageForm
-        submit={post.mutate}
-        pending={post.isPending}
-        error={post.error}
-        workspaceId={workspaceId}
-        channelId={channelId}
-        label="返信"
-        submitLabel="返信を送信する"
-      />
+      {/* 削除済みと分かった親には返信のフォームを出さない（api が断る）。**親が読み込まれていなければ出す**——削除済みかは分からず、消すと読み込んだページより古い親に返信できなくなる */}
+      {!readOnly && parent?.body !== null && (
+        <MessageForm
+          submit={post.mutate}
+          pending={post.isPending}
+          error={post.error}
+          workspaceId={workspaceId}
+          channelId={channelId}
+          label="返信"
+          submitLabel="返信を送信する"
+        />
+      )}
     </section>
   );
 }

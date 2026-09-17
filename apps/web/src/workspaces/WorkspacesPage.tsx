@@ -17,7 +17,18 @@ function ReceivedInvitations() {
   const invitations = useMyInvitations();
   const accept = useAcceptInvitation();
   const decline = useDeclineInvitation();
+  // **出す理由は、直前の操作のものだけにする**——承諾と辞退の失敗を合わせて出すため、操作の前にもう一方の結果を消す
   const failed = accept.error ?? decline.error;
+
+  function onAccept(invitationId: string) {
+    decline.reset();
+    accept.mutate(invitationId);
+  }
+
+  function onDecline(invitationId: string) {
+    accept.reset();
+    decline.mutate(invitationId);
+  }
 
   // **読めなかったことを黙らない**——黙ると、届いている招待が見えないまま、利用者は無いと思い込む
   if (invitations.isError) {
@@ -44,7 +55,7 @@ function ReceivedInvitations() {
               className="rounded bg-slate-800 px-2 py-0.5 text-sm text-white disabled:opacity-50"
               aria-label={`${invitation.workspace.name} への招待を承諾する`}
               disabled={pending}
-              onClick={() => accept.mutate(invitation.id)}
+              onClick={() => onAccept(invitation.id)}
             >
               承諾する
             </button>
@@ -53,7 +64,7 @@ function ReceivedInvitations() {
               className="rounded border px-2 py-0.5 text-sm disabled:opacity-50"
               aria-label={`${invitation.workspace.name} への招待を辞退する`}
               disabled={pending}
-              onClick={() => decline.mutate(invitation.id)}
+              onClick={() => onDecline(invitation.id)}
             >
               辞退する
             </button>

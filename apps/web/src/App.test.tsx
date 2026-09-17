@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { error, fakeFetch, json, loggedIn, PROFILE, token } from './testing/fake-api';
+import { hang, manualTimeouts } from './testing/manual-timeouts';
 import { renderApp } from './testing/render-app';
 
 const RECOVERY_CODE = '0123-4567-89AB-CDEF';
@@ -86,6 +87,29 @@ describe('起動時の復元と行き先', () => {
       const { unmount } = renderApp(path);
       expect(await screen.findByRole('heading', { name: heading }), path).toBeDefined();
       expect(screen.queryByRole('button', { name: '再読み込み' }), path).toBeNull();
+      unmount();
+    }
+  });
+
+  it('復元の要求が返らなくても、時限で打ち切り、利用者が自分で開いたログインの画面・登録の画面を出す（#530）', async () => {
+    for (const [path, heading] of [
+      ['/login', 'ログイン'],
+      ['/register', '新規登録'],
+    ] as const) {
+      const { count } = fakeFetch({ 'POST /api/auth/refresh': [hang, hang] });
+      const timeouts = manualTimeouts();
+      const { unmount } = renderApp(path, {
+        session: { wait: () => Promise.resolve(), timeoutSignal: timeouts.timeoutSignal },
+      });
+
+      expect(screen.getByRole('status').textContent, path).toContain('読み込み中');
+      await waitFor(() => expect(timeouts.requested, path).toHaveLength(1));
+      timeouts.fire(0);
+      await waitFor(() => expect(timeouts.requested, path).toHaveLength(2));
+      timeouts.fire(1);
+
+      expect(await screen.findByRole('heading', { name: heading }), path).toBeDefined();
+      expect(count('POST /api/auth/refresh'), path).toBe(2);
       unmount();
     }
   });
