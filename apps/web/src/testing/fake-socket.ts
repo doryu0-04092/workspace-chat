@@ -73,9 +73,9 @@ export class FakeSocket {
     this.fire('disconnect', 'transport close');
   }
 
-  /** サーバーが配った。 */
-  deliver(event: string, payload: unknown): void {
-    this.fire(event, payload);
+  /** サーバーが配った。acknowledgement 付きで送られたときは、最後の引数に返事を受ける関数を渡す。 */
+  deliver(event: string, ...args: unknown[]): void {
+    this.fire(event, ...args);
   }
 
   private fire(event: string, ...args: unknown[]): void {

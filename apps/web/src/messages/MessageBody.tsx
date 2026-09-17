@@ -1,4 +1,4 @@
-import { type components, MENTION_PATTERN } from '@workspace-chat/shared';
+import { BROADCAST_MENTIONS, type components, MENTION_PATTERN } from '@workspace-chat/shared';
 import { gfmAutolinkLiteralFromMarkdown } from 'mdast-util-gfm-autolink-literal';
 import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough';
 import { gfmAutolinkLiteral } from 'micromark-extension-gfm-autolink-literal';
@@ -85,6 +85,8 @@ type Mention = components['schemas']['MessageMention'];
  * `@表示名`（退会した対象は `@削除済みの利用者`）の `span.mention` にする。載っていない `@` は書いた文字のまま残す（解決していない）。
  * 照合は大文字小文字によらない（1.1）。**リンクの文字と、コード（`inlineCode`・`code` は文字の節を持たない）の中は置き換えない**。
  * 表示名は文字の節として入れ、HTML として解釈しない。
+ * **`@here` / `@channel`（F-21）は、`mentions` に同じ綴りのユーザーID が無ければ、記法のまま `span.mention` にする**
+ * （本文から拾う規則は api と同じ `MENTION_PATTERN`。同じ綴りの利用者へのメンションが載っていれば、その表示名を出す。#497）。
  * **踏むと壊れる: `asWrittenText` より後に置く**——前に置くと、この節は F-14 の記法の外として書いた文字に戻される。
  */
 function mentionSpans(mentions: readonly Mention[]) {
@@ -93,13 +95,22 @@ function mentionSpans(mentions: readonly Mention[]) {
     const nodes: MarkdownNode[] = [];
     let rest = 0;
     for (const match of text.matchAll(MENTION_PATTERN)) {
-      const mention = byLoginId.get((match[1] ?? '').toLowerCase());
-      if (!mention) continue;
+      const written = (match[1] ?? '').toLowerCase();
+      const mention = byLoginId.get(written);
+      const broadcast = BROADCAST_MENTIONS.find((name) => name === written);
+      if (!mention && !broadcast) continue;
       if (match.index > rest) nodes.push({ type: 'text', value: text.slice(rest, match.index) });
       nodes.push({
         type: 'mention',
         data: { hName: 'span', hProperties: { className: ['mention'] } },
-        children: [{ type: 'text', value: `@${mention.user?.displayName ?? '削除済みの利用者'}` }],
+        children: [
+          {
+            type: 'text',
+            value: mention
+              ? `@${mention.user?.displayName ?? '削除済みの利用者'}`
+              : `@${broadcast}`,
+          },
+        ],
       });
       rest = match.index + match[0].length;
     }
@@ -108,7 +119,6 @@ function mentionSpans(mentions: readonly Mention[]) {
     return nodes;
   };
   return () => (tree: MarkdownNode) => {
-    if (byLoginId.size === 0) return;
     const walk = (node: MarkdownNode) => {
       if (node.type === 'link' || !node.children) return;
       node.children = node.children.flatMap((child) => {
