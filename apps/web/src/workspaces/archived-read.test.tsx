@@ -117,6 +117,28 @@ describe('アーカイブ済みのチャンネルを読む（F-35）', () => {
     expect(await screen.findByText('チャンネルが見つかりません。')).toBeDefined();
   });
 
+  // アーカイブ済みのチャンネルからも抜けられる（機能一覧 3.2）。抜けたら、アーカイブ済みの一覧から**取り直しを待たずに外す**。
+  it('アーカイブ済みのチャンネルから抜けたら、アーカイブ済みの一覧から取り直しを待たずに外す', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fakeFetch(
+      routes({
+        [CHANNELS]: () => json(200, []),
+        [ARCHIVED]: onceThenNever(() => json(200, [ARCHIVED_GENERAL])),
+        [`GET ${MESSAGES}`]: () => page([]),
+        [`POST /api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/leave`]: () =>
+          new Response(null, { status: 204 }),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+    const list = await openArchivedList();
+    fireEvent.click(list.getByRole('link', { name: '# general-1' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'このチャンネルから抜ける' }));
+
+    await screen.findByRole('button', { name: 'アーカイブ済みのチャンネル' });
+    fireEvent.click(screen.getByRole('button', { name: 'アーカイブ済みのチャンネル' }));
+    expect(await screen.findByText('アーカイブ済みのチャンネルはありません。')).toBeDefined();
+  });
+
   // 管理用の一覧で復元したら、そのチャンネルはアーカイブ済みの一覧から、**取り直しを待たずに外す**（#533 第0巡の 🔴1）。
   it('オーナーが復元したら、アーカイブ済みの一覧から取り直しを待たずに外す', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);

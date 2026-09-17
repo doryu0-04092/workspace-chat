@@ -397,6 +397,10 @@ export function useLeaveChannel(workspaceId: string, channelId: string) {
           return [{ ...channel, joined: false }];
         }),
       );
+      // アーカイブ済みのチャンネルからも抜けられる（機能一覧 3.2）。アーカイブ済みの一覧からも、取り直しを待たずに外す
+      queryClient.setQueryData<Channel[]>(archivedChannelsKey(workspaceId), (channels) =>
+        channels?.filter((channel) => channel.id !== channelId),
+      );
       const session = store.getState();
       if (session.status === 'signedIn') {
         removeFromChannel(queryClient, workspaceId, channelId, session.user.id);
