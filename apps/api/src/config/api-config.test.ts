@@ -72,6 +72,10 @@ const VALID_ENV = {
   REGISTRATION_ENABLED: 'false',
   JWT_SECRET: 'jwt-key-9x'.repeat(4),
   WEB_ORIGIN: 'https://chat.example.com',
+  S3_BUCKET: 'workspace-chat-attachments-123456789012',
+  S3_REGION: 'ap-northeast-1',
+  S3_ENDPOINT: 'http://127.0.0.1:9000',
+  S3_FORCE_PATH_STYLE: 'true',
 };
 
 describe('起動の設定（resolveApiConfig）', () => {
@@ -84,17 +88,38 @@ describe('起動の設定（resolveApiConfig）', () => {
       registrationEnabled: false,
       jwtSecret: VALID_ENV.JWT_SECRET,
       webOrigin: VALID_ENV.WEB_ORIGIN,
+      s3Bucket: VALID_ENV.S3_BUCKET,
+      s3Region: VALID_ENV.S3_REGION,
+      s3Endpoint: VALID_ENV.S3_ENDPOINT,
+      s3ForcePathStyle: true,
     });
   });
 
   it('任意の設定は、未設定なら既定値になる', () => {
-    const env = { ...VALID_ENV, API_TASK_COUNT: undefined, REGISTRATION_ENABLED: undefined };
-    expect(resolveApiConfig(env)).toMatchObject({ apiTaskCount: 1, registrationEnabled: true });
+    const env = {
+      ...VALID_ENV,
+      API_TASK_COUNT: undefined,
+      REGISTRATION_ENABLED: undefined,
+      S3_ENDPOINT: undefined,
+      S3_FORCE_PATH_STYLE: undefined,
+    };
+    const config = resolveApiConfig(env);
+    expect(config).toMatchObject({
+      apiTaskCount: 1,
+      registrationEnabled: true,
+      s3ForcePathStyle: false,
+    });
+    expect(config.s3Endpoint).toBeUndefined();
   });
 
   // 1つ直して起動し直すたびに次の不正が見つかる形だと、デプロイを設定の数だけ繰り返すことになる。
   it('不正な設定が複数あれば、そのすべてを1つの失敗で知らせる', () => {
-    const env = { API_TASK_COUNT: '0', REGISTRATION_ENABLED: 'no' };
+    const env = {
+      API_TASK_COUNT: '0',
+      REGISTRATION_ENABLED: 'no',
+      S3_ENDPOINT: '127.0.0.1:9000',
+      S3_FORCE_PATH_STYLE: 'yes',
+    };
     let message = '';
     try {
       resolveApiConfig(env);
