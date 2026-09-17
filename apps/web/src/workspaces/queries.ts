@@ -195,6 +195,25 @@ function removeFromChannel(
   );
 }
 
+/** チャンネルに1人加わったこと（招待）を、`removeFromChannel` と同じ2つに、取り直しを待たずに当てる。 */
+function addToChannel(
+  queryClient: QueryClient,
+  workspaceId: string,
+  channelId: string,
+  member: UserSummary,
+): void {
+  queryClient.setQueryData<UserSummary[]>(channelMembersKey(workspaceId, channelId), (members) =>
+    members && !members.some((current) => current.id === member.id)
+      ? [...members, member]
+      : members,
+  );
+  queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
+    channels?.map((channel) =>
+      channel.id === channelId ? { ...channel, memberCount: channel.memberCount + 1 } : channel,
+    ),
+  );
+}
+
 /**
  * チャンネルをアーカイブする（F-35。オーナーだけ。判定は api）。
  *
@@ -285,7 +304,8 @@ function isChannelMembersKeyOf(workspaceId: string, queryKey: readonly unknown[]
 /**
  * ワークスペースからキックする（F-09。オーナーだけ。判定は api）。
  *
- * **踏むと壊れる: 通ったら、メンバーの一覧と、読み込んである全てのチャンネルの参加者の一覧から、その相手をその場で外す。**
+ * **踏むと壊れる: 通ったら、メンバーの一覧と、読み込んである全てのチャンネルの参加者の一覧から、その相手をその場で外す**
+ * （外したチャンネルの管理用の一覧の人数も、`removeFromChannel` で同じ処理の中で減らす）。
  * キックされた利用者は所属していた全チャンネルから外れる（機能一覧 2.2）。取り直しの印を付けるだけにすると、
  * 次に参加者の一覧を開いたとき、**取り直しが返るまでキャッシュの一覧（キックした相手を含む）が描かれる**（#533 第0巡の 🔴1 と同じ型。#540 第0巡）。
  */
@@ -303,11 +323,15 @@ export function useKickWorkspaceMember(workspaceId: string) {
       queryClient.setQueryData<WorkspaceMember[]>(membersKey(workspaceId), (members) =>
         members?.filter((member) => member.id !== memberId),
       );
-      queryClient.setQueriesData<UserSummary[]>(
-        { predicate: ({ queryKey }) => isChannelMembersKeyOf(workspaceId, queryKey) },
-        (members) => members?.filter((member) => member.id !== memberId),
-      );
-      // 管理用の一覧の人数（F-35）は、外した相手がどのチャンネルに居たかを画面が知らないため、その場では直せない。
+      const loaded = queryClient.getQueriesData<UserSummary[]>({
+        predicate: ({ queryKey }) => isChannelMembersKeyOf(workspaceId, queryKey),
+      });
+      for (const [queryKey, members] of loaded) {
+        if (members?.some((member) => member.id === memberId)) {
+          removeFromChannel(queryClient, workspaceId, queryKey[3] as string, memberId);
+        }
+      }
+      // 参加者の一覧を読み込んでいないチャンネルは、相手が居たかを画面が知らないため、管理用の一覧（F-35）の人数をその場では直せない。
       // **取り直す**——開いていれば即座に返り、閉じていれば次に開いたとき読む。鍵の前方には一般の一覧が入らないが、`exact` で揃える
       return queryClient.invalidateQueries({
         queryKey: managedChannelsKey(workspaceId),
@@ -400,21 +424,11 @@ export function useInviteChannelMember(workspaceId: string, channelId: string) {
         },
       ),
     onSuccess: (_, member) => {
-      const summary: UserSummary = {
+      addToChannel(queryClient, workspaceId, channelId, {
         id: member.id,
         userId: member.userId,
         displayName: member.displayName,
-      };
-      queryClient.setQueryData<UserSummary[]>(
-        channelMembersKey(workspaceId, channelId),
-        (members) =>
-          members && !members.some((m) => m.id === member.id) ? [...members, summary] : members,
-      );
-      queryClient.setQueryData<ManagedChannel[]>(managedChannelsKey(workspaceId), (channels) =>
-        channels?.map((channel) =>
-          channel.id === channelId ? { ...channel, memberCount: channel.memberCount + 1 } : channel,
-        ),
-      );
+      });
       void queryClient.invalidateQueries({
         queryKey: channelMembersKey(workspaceId, channelId),
         exact: true,
