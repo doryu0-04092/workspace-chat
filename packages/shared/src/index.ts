@@ -22,3 +22,12 @@ export type {
 } from './realtime-events';
 // REST API の型。packages/shared/openapi/openapi.yaml から npm run generate:api で生成する（手で書き換えない）。
 export type { components, operations, paths } from './api.gen';
+export {
+  AVATAR_FORMAT_IDS,
+  UPLOAD_FORMATS,
+  UPLOAD_LIMIT_BYTES,
+  uploadFormatByContentType,
+  uploadFormatById,
+  uploadFormatForFile,
+} from './upload-formats';
+export type { UploadFormat, UploadFormatId, UploadKind } from './upload-formats';
