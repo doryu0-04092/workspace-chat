@@ -7,6 +7,7 @@ import type { Socket } from 'socket.io-client';
 import type { StartedTestContainer } from 'testcontainers';
 import { expect, vi } from 'vitest';
 import { createApp } from '../app-setup';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { hashSecret } from '../auth/secret-hash';
 import { PrismaService } from '../prisma.service';
 import { stubApiEnv } from './api-env';
@@ -70,11 +71,29 @@ export async function startTwoTasks(
     REDIS_URL: started.url,
     TRUST_PROXY_HOPS: '1',
   });
-  const logger = options.logger ?? false;
-  const first = await createApp({ logger });
-  const second = await createApp({ logger });
+  // 調査用（マージしない）: アプリの warn と error を CI のログに出す
+  const diagnostic = (task: string): LoggerService => ({
+    log: () => undefined,
+    warn: (message: unknown, ...rest: unknown[]) =>
+      console.warn(
+        `[two-tasks ${ipPrefix} ${task}] warn`,
+        JSON.stringify(message),
+        JSON.stringify(rest),
+      ),
+    error: (message: unknown, ...rest: unknown[]) =>
+      console.error(
+        `[two-tasks ${ipPrefix} ${task}] error`,
+        JSON.stringify(message),
+        JSON.stringify(rest),
+      ),
+  });
+  const first = await createApp({ logger: options.logger ?? diagnostic('first') });
+  const second = await createApp({ logger: options.logger ?? diagnostic('second') });
   const firstBase = await listen(first);
   const secondBase = await listen(second);
+  // 調査用（マージしない）: タスク間の経路（serverSideEmit）が繋がるまでの時間を測る。
+  // 繋がらなければ、在席の通知も部屋から外す処理も届かない（#618 の落ち方と一致するか見る）
+  await probeCrossTask(first, second, ipPrefix);
   const prisma = first.get(PrismaService);
   const opened: Socket[] = [];
   let sequence = 0;
@@ -176,4 +195,48 @@ export async function startTwoTasks(
       vi.unstubAllEnvs();
     },
   };
+}
+
+/** 調査用（マージしない）: 片方のタスクから serverSideEmit を送り、もう片方が答えるまでの時間を測って出す（#618）。 */
+async function probeCrossTask(
+  first: INestApplication,
+  second: INestApplication,
+  ipPrefix: string,
+): Promise<void> {
+  const firstServer = first.get(RealtimeGateway).server;
+  const secondServer = second.get(RealtimeGateway).server;
+  secondServer.on(
+    'two-tasks-probe' as never,
+    ((ack: (value: string) => void) => {
+      ack('second');
+    }) as never,
+  );
+  const started = Date.now();
+  const deadline = started + 20_000;
+  for (let attempt = 1; ; attempt += 1) {
+    const answered = await new Promise<string[]>((resolve) => {
+      const timer = setTimeout(() => resolve([]), 1_000);
+      firstServer.serverSideEmit(
+        'two-tasks-probe' as never,
+        ((error: unknown, responses: string[]) => {
+          clearTimeout(timer);
+          resolve(error ? [] : responses);
+        }) as never,
+      );
+    });
+    if (answered.length > 0) {
+      console.warn(
+        `[two-tasks ${ipPrefix} probe] 繋がった`,
+        JSON.stringify({ ms: Date.now() - started, attempt }),
+      );
+      return;
+    }
+    if (Date.now() > deadline) {
+      console.error(
+        `[two-tasks ${ipPrefix} probe] 20 秒たっても繋がらない`,
+        JSON.stringify({ attempt }),
+      );
+      return;
+    }
+  }
 }
