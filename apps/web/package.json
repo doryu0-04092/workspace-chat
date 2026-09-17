@@ -12,6 +12,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",
     "@workspace-chat/shared": "*",
+    "highlight.js": "^11.11.2",
     "mdast-util-gfm-autolink-literal": "^2.0.1",
     "mdast-util-gfm-strikethrough": "^2.0.0",
     "micromark-extension-gfm-autolink-literal": "^2.1.0",
@@ -21,6 +22,7 @@
     "react-markdown": "^10.1.0",
     "react-router": "^8.3.1",
     "react-virtuoso": "^4.18.13",
+    "rehype-highlight": "^7.0.2",
     "rehype-sanitize": "^6.0.0",
     "remark-breaks": "^4.0.0",
     "socket.io-client": "^4.8.3",
