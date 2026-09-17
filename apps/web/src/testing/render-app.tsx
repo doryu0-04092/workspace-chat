@@ -21,9 +21,19 @@ export function testQueryClient(): QueryClient {
 /**
  * 指定した URL から画面の入口を描画する。ロックは使わない（jsdom に navigator.locks は無い）。
  * リアルタイムの接続は偽のソケットに差し替え、作られた順に `sockets` に並べる。
+ * `session` はログインの状態の store に渡す（復元のやり直しの待ち方・時限の差し替え）。
  */
-export function renderApp(path: string, { strict = false } = {}) {
-  const store = createSessionStore({ locks: undefined });
+export function renderApp(
+  path: string,
+  {
+    strict = false,
+    session = {},
+  }: {
+    strict?: boolean;
+    session?: Omit<NonNullable<Parameters<typeof createSessionStore>[0]>, 'locks'>;
+  } = {},
+) {
+  const store = createSessionStore({ ...session, locks: undefined });
   const sockets: FakeSocket[] = [];
   const connectRealtime: ConnectRealtime = (token) => {
     const socket = new FakeSocket(token);
