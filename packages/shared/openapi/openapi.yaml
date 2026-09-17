@@ -3721,12 +3721,25 @@ components:
           format: uuid
 
     NotificationKind:
-      description: 通知の種類（機能一覧 10.3）。いまはメンションだけ（DM は F-19 で足す）
+      description: >-
+        通知の種類（機能一覧 10.3）。MENTION はチャンネルのメッセージのメンション（個人・@channel・受け取りを返した @here）、
+        DM は DM で受け取ったメッセージ（#623）
       type: string
       enum:
         - MENTION
+        - DM
     Notification:
-      description: 受け取った通知（機能一覧 10.3）
+      description: 受け取った通知（機能一覧 10.3）。kind で、チャンネルの通知か DM の通知かを見分ける（#623）
+      oneOf:
+        - $ref: '#/components/schemas/ChannelNotification'
+        - $ref: '#/components/schemas/DmNotification'
+      discriminator:
+        propertyName: kind
+        mapping:
+          MENTION: '#/components/schemas/ChannelNotification'
+          DM: '#/components/schemas/DmNotification'
+    ChannelNotification:
+      description: チャンネルのメッセージのメンションの通知（機能一覧 10.3）
       type: object
       additionalProperties: false
       required:
@@ -3743,7 +3756,9 @@ components:
           type: string
           format: uuid
         kind:
-          $ref: '#/components/schemas/NotificationKind'
+          type: string
+          enum:
+            - MENTION
         createdAt:
           description: 通知を作った時刻（メンションを保存した時刻。編集で足したメンションなら編集の時刻）
           type: string
@@ -3781,6 +3796,67 @@ components:
         message:
           description: メンションしたメッセージ（チャンネルの一覧と同じ形。返信なら parentId を持つ）
           $ref: '#/components/schemas/Message'
+    DmNotification:
+      description: DM で受け取ったメッセージの通知（機能一覧 10.2・10.3。#623）。宛先は DM の相手だけ（書き手本人には作らない）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - createdAt
+        - readAt
+        - workspace
+        - dm
+        - message
+      properties:
+        id:
+          description: UUIDv7。一覧のカーソル（before）にそのまま使う（チャンネルの通知と同じ並びに混ぜる）
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+            - DM
+        createdAt:
+          description: 通知を作った時刻（DM を受け取った時刻）
+          type: string
+          format: date-time
+        readAt:
+          description: 既読にした時刻。未読なら null
+          type:
+            - string
+            - 'null'
+          format: date-time
+        workspace:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        dm:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - counterpart
+          properties:
+            id:
+              type: string
+              format: uuid
+            counterpart:
+              description: 相手（書き手）。退会した利用者なら null
+              oneOf:
+                - $ref: '#/components/schemas/UserSummary'
+                - type: 'null'
+        message:
+          description: 受け取った DM のメッセージ（DM の一覧と同じ形）
+          $ref: '#/components/schemas/DmMessage'
     NotificationPage:
       type: object
       additionalProperties: false
