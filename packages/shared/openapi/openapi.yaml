@@ -340,6 +340,70 @@ paths:
           $ref: '#/components/responses/UnsupportedMediaType'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /users/me/notifications:
+    get:
+      operationId: listMyNotifications
+      summary: 自分の通知の一覧（F-26）
+      description: >-
+        受け取ったメンションの通知を、新しい順に返す（機能一覧 10.3）。接続していない間に受けたものも残る。
+        before（通知の id）を渡すと、それより古いものを返す（カーソルページネーション）。続きがあれば nextBefore に次の before を、無ければ null を返す。
+        **本人の通知だけを返し、いまそのチャンネルの参加者である通知だけを返す**——抜けた・外されたチャンネルと、
+        ワークスペースから外れた後のそのワークスペースの通知は出さない（CLAUDE.md 2）。削除済みのメッセージの通知も出さない。
+        書き手本人には通知を作らない。編集で本文からメンションを外すと通知は消え、編集で足すと通知が作られる
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: これより古い通知を返す（通知の id）。形が uuid でなければ 400
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: 返す件数の上限。1〜100、既定は 50（実装時に決めた値。メッセージの一覧と揃える）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: 通知（新しい順）と、続きを取るための before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /users/me/notifications/{notificationId}/read:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    put:
+      operationId: markNotificationRead
+      summary: 通知の既読化（F-26）
+      description: >-
+        通知を既読にする（機能一覧 10.3）。既に既読なら、最初に既読にした時刻を変えずに 204 を返す。
+        **他の利用者の通知・いまそのチャンネルの参加者でない通知・削除済みのメッセージの通知・存在しない通知は、区別せず 404**（存在を認めない。CLAUDE.md 2）
+      responses:
+        '204':
+          description: 既読にした（既に既読だった場合も 204）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces:
     post:
       operationId: createWorkspace
@@ -1502,6 +1566,14 @@ components:
       schema:
         type: string
         format: uuid
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      description: 通知の id。形が uuid でなければ 400
+      schema:
+        type: string
+        format: uuid
     WorkspaceId:
       name: id
       in: path
@@ -2252,3 +2324,82 @@ components:
         createdAt:
           type: string
           format: date-time
+    NotificationKind:
+      description: 通知の種類（機能一覧 10.3）。いまはメンションだけ（DM は F-19 で足す）
+      type: string
+      enum:
+        - MENTION
+    Notification:
+      description: 受け取った通知（機能一覧 10.3）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - createdAt
+        - readAt
+        - workspace
+        - channel
+        - message
+      properties:
+        id:
+          description: UUIDv7。一覧のカーソル（before）にそのまま使う
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/NotificationKind'
+        createdAt:
+          description: 通知を作った時刻（メンションを保存した時刻。編集で足したメンションなら編集の時刻）
+          type: string
+          format: date-time
+        readAt:
+          description: 既読にした時刻。未読なら null
+          type:
+            - string
+            - 'null'
+          format: date-time
+        workspace:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        channel:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        message:
+          description: メンションしたメッセージ（チャンネルの一覧と同じ形。返信なら parentId を持つ）
+          $ref: '#/components/schemas/Message'
+    NotificationPage:
+      type: object
+      additionalProperties: false
+      required:
+        - notifications
+        - nextBefore
+      properties:
+        notifications:
+          description: 新しい順
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        nextBefore:
+          description: 続きを取るときに before に渡す id。続きが無ければ null
+          type:
+            - string
+            - 'null'
+          format: uuid
