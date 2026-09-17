@@ -171,13 +171,13 @@ describe('DM の画面（F-19）', () => {
       [`POST ${DM_MESSAGES}`]: () => json(201, sent),
     });
     await screen.findByText('DM 2');
-    expect(rows().map((row) => row.includes('DM 1'))).toEqual([true, false]);
+    expect(rows().map((row) => row.includes('DM 1'))).toEqual([false, true]);
 
     fireEvent.change(screen.getByLabelText('メッセージ'), { target: { value: '送った本文' } });
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
 
     await screen.findByText('送った本文');
-    expect(rows().at(-1)).toContain('送った本文');
+    expect(rows()[0]).toContain('送った本文');
     const post = calls.find((c) => c.key === `POST ${DM_MESSAGES}`)!;
     expect(JSON.parse(String(post.init.body))).toEqual({ body: '送った本文' });
     expect(count(`GET ${DM_MESSAGES}`)).toBe(1);
@@ -205,19 +205,19 @@ describe('DM の画面（F-19）', () => {
     expect(JSON.parse(String(put.init.body))).toEqual({ lastReadMessageId: dmMessage(2).id });
   });
 
-  it('「ここから未読」の線を、開いた時点の既読位置の次のメッセージの上に出す', async () => {
+  it('「ここから上が未読」の線を、開いた時点の既読位置の次のメッセージの下に出す（#608）', async () => {
     await openDm({
       [`GET ${DMS}`]: () => json(200, [{ ...DM, unread: 1, lastReadMessageId: dmMessage(1).id }]),
       [`GET ${DM_MESSAGES}`]: () => dmPage([dmMessage(2), dmMessage(1)]),
     });
     await screen.findByText('DM 2');
 
-    const divider = screen.getByRole('separator', { name: 'ここから未読' });
+    const divider = screen.getByRole('separator', { name: 'ここから上が未読' });
     const next = screen.getByText('DM 2').closest('article')!;
-    expect(divider.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(divider.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(
       divider.compareDocumentPosition(screen.getByText('DM 1').closest('article')!) &
-        Node.DOCUMENT_POSITION_PRECEDING,
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 

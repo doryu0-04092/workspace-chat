@@ -142,8 +142,8 @@ describe('未読の画面（F-23）', () => {
     });
   });
 
-  describe('「ここから未読」の区切り線', () => {
-    it('開いた時点の既読位置の次に出し、読み進めても動かさない', async () => {
+  describe('「ここから上が未読」の区切り線', () => {
+    it('開いた時点の既読位置の次のメッセージの下に出し、読み進めても動かさない（上が新しい並び。#608）', async () => {
       const older = message(1);
       const newer = message(2);
       fakeFetch(
@@ -157,14 +157,15 @@ describe('未読の画面（F-23）', () => {
       renderApp(CHANNEL_PATH);
 
       // **区切り線は装飾ではなく境目**なので、支援技術にも分かれ目として渡す（`separator`）
-      await screen.findByRole('separator', { name: 'ここから未読' });
-      // 線は「既読位置の次のメッセージ」の上に出る。並びは DOM の順で読む
+      await screen.findByRole('separator', { name: 'ここから上が未読' });
+      // 線は「既読位置の次のメッセージ」の下に出る（上が新しい並び）。並びは DOM の順で読む
       const texts = [...document.querySelectorAll('article, [role="separator"]')].map(
         (node) => node.textContent ?? '',
       );
-      const dividerAt = texts.findIndex((text) => text.includes('ここから未読'));
+      const dividerAt = texts.findIndex((text) => text.includes('ここから上が未読'));
       expect(dividerAt).toBeGreaterThan(-1);
-      expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 2');
+      expect(texts[dividerAt - 1] ?? '').toContain('メッセージ 2');
+      expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 1');
     });
 
     it('一覧を取り直して既読位置が進んでも、開いている間は線が動かない', async () => {
@@ -182,7 +183,7 @@ describe('未読の画面（F-23）', () => {
       );
 
       renderApp(CHANNEL_PATH);
-      await screen.findByRole('separator', { name: 'ここから未読' });
+      await screen.findByRole('separator', { name: 'ここから上が未読' });
 
       // 画面に戻ったときの取り直し。**TanStack Query は `window` の `visibilitychange` を購読する**
       // （@tanstack/query-core の focusManager。`document` に投げても届かない）
@@ -192,13 +193,13 @@ describe('未読の画面（F-23）', () => {
       const texts = [...document.querySelectorAll('article, [role="separator"]')].map(
         (node) => node.textContent ?? '',
       );
-      const dividerAt = texts.findIndex((text) => text.includes('ここから未読'));
-      expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 2');
+      const dividerAt = texts.findIndex((text) => text.includes('ここから上が未読'));
+      expect(texts[dividerAt - 1] ?? '').toContain('メッセージ 2');
     });
 
     // **既読位置をまだ持たないチャンネルでは、参加した時点より後の最初の上に出す**（機能一覧 10.1・openapi の Channel.lastReadMessageId）。
     // **参加した直後に初めて開いたチャンネルは全部が未読**であり、線がいちばん要る場面である
-    it('既読位置を持たないチャンネルでは、参加した時点より後の最初の上に出す', async () => {
+    it('既読位置を持たないチャンネルでは、参加した時点より後の最初の下に出す', async () => {
       const before = message(1);
       const after = message(2);
       fakeFetch(
@@ -214,14 +215,14 @@ describe('未読の画面（F-23）', () => {
 
       renderApp(CHANNEL_PATH);
 
-      await screen.findByRole('separator', { name: 'ここから未読' });
+      await screen.findByRole('separator', { name: 'ここから上が未読' });
       const texts = [...document.querySelectorAll('article, [role="separator"]')].map(
         (node) => node.textContent ?? '',
       );
-      const dividerAt = texts.findIndex((text) => text.includes('ここから未読'));
-      // 参加する前のメッセージの上には出さない
-      expect(texts[dividerAt - 1] ?? '').toContain('メッセージ 1');
-      expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 2');
+      const dividerAt = texts.findIndex((text) => text.includes('ここから上が未読'));
+      // 参加する前のメッセージは線の下（既読の側）に置く
+      expect(texts[dividerAt - 1] ?? '').toContain('メッセージ 2');
+      expect(texts[dividerAt + 1] ?? '').toContain('メッセージ 1');
     });
 
     it('既読位置も参加した時刻も無ければ線を出さない', async () => {
@@ -241,7 +242,7 @@ describe('未読の画面（F-23）', () => {
       renderApp(CHANNEL_PATH);
 
       await screen.findByText('メッセージ 1');
-      expect(screen.queryByRole('separator', { name: 'ここから未読' })).toBeNull();
+      expect(screen.queryByRole('separator', { name: 'ここから上が未読' })).toBeNull();
     });
   });
 
