@@ -9,7 +9,11 @@ import { type Location, useLocation, useNavigate } from 'react-router';
 import { useSession } from '../auth/session-context';
 import type { Message } from '../messages/queries';
 import { useRealtime } from '../realtime/realtime-context';
-import { mentionNotificationOf, showBrowserNotification } from './browser-notifications';
+import {
+  broadcastNotificationOf,
+  mentionNotificationOf,
+  showBrowserNotification,
+} from './browser-notifications';
 import { notificationsKey } from './queries';
 
 const MESSAGE_NEW = 'message:new' satisfies RealtimeEventName;
@@ -56,7 +60,14 @@ export function useMentionRealtime() {
       // **DM の `message:new` は同じイベント名で届く**（`dmId` を持ち、`mentions` を持たない）。メンションの通知として扱わない
       if ('dmId' in payload.message) return;
       const { message } = payload;
-      const content = mentionNotificationOf(message, { id: userId });
+      // 個人のメンション、なければ一斉メンション（@channel・開いているチャンネルの @here。機能一覧 9.2・10.2）
+      const content =
+        mentionNotificationOf(message, { id: userId }) ??
+        broadcastNotificationOf(
+          message,
+          { id: userId },
+          { hereOpen: locationRef.current.pathname.endsWith(`/channels/${message.channelId}`) },
+        );
       if (content === null) return;
       void queryClient.invalidateQueries({ queryKey: notificationsKey });
       if (onScreen(locationRef.current, message)) return;

@@ -13,10 +13,7 @@ import {
   mentionedLoginIds,
   type paths,
 } from '@workspace-chat/shared';
-import {
-  addMentionNotifications,
-  removeMentionNotifications,
-} from '../notifications/mention-notifications';
+import { addMentionNotifications } from '../notifications/mention-notifications';
 import { PrismaService } from '../prisma.service';
 import { ATTACHMENT_UNAVAILABLE } from '../file-uploads/upload-errors';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
@@ -102,12 +99,11 @@ async function saveMentions(
  * 本文から消えた対象だけを外し、まだ保存していない `@` は経路1 で解決して足す（足すのは経路1 が返した対象だけ）。
  */
 async function replaceMentions(
-  tx: Pick<PrismaService, '$queryRaw' | 'messageMention' | 'notification'>,
+  tx: Pick<PrismaService, '$queryRaw' | 'messageMention'>,
   {
     messageId,
-    workspaceId,
     ...target
-  }: { messageId: string; workspaceId: string; viewerId: string; channelId: string; body: string },
+  }: { messageId: string; viewerId: string; channelId: string; body: string },
 ): Promise<void> {
   const loginIds = new Set(mentionedLoginIds(target.body));
   const saved = await tx.messageMention.findMany({
@@ -127,14 +123,59 @@ async function replaceMentions(
   if (added.length > 0) {
     await tx.messageMention.createMany({ data: added.map((userId) => ({ messageId, userId })) });
   }
-  // 通知（F-26）も対象に揃える: 外した対象の通知は消し、足した対象には作る。本文に残した対象の通知は既読のまま残す
-  await removeMentionNotifications(tx, { messageId, userIds: removed.map(({ userId }) => userId) });
+}
+
+/**
+ * 編集の後に、メッセージの通知（F-26）を宛先に揃える。**編集で通知を触るのはここだけ**——個人のメンションと一斉メンションを
+ * 別々に足し引きすると、片方で外した利用者がもう片方でまだ指されているのに通知を消す。
+ *
+ * 宛先は次の和（書いた本人を除く。機能一覧 9.1・9.2・10.3。メンションの件数〔unread.ts の MENTION_COUNT〕と同じ対象）:
+ * - 保存しているメンションの対象（`MessageMention`）
+ * - 本文に `@channel` があれば、そのチャンネルの参加者（退会していない）
+ * - 本文に `@here` があれば、受け取りを返した利用者（`HereMentionRecipient.receivedAt`）
+ *
+ * **宛先に残る利用者の通知は作り直さない**（既読のまま残す。`skipDuplicates`）。宛先から外れた利用者の通知は消す。
+ */
+async function syncNotifications(
+  tx: Pick<PrismaService, '$queryRaw' | 'messageMention' | 'notification' | 'hereMentionRecipient'>,
+  {
+    messageId,
+    channelId,
+    workspaceId,
+    authorId,
+    body,
+  }: { messageId: string; channelId: string; workspaceId: string; authorId: string; body: string },
+): Promise<void> {
+  const broadcast = broadcastColumnsOf(body);
+  const mentioned = await tx.messageMention.findMany({
+    where: { messageId },
+    select: { userId: true },
+  });
+  const everyone = broadcast.mentionsChannel
+    ? await participantIds(tx, channelId, { except: authorId })
+    : [];
+  const here = broadcast.mentionsHere
+    ? await tx.hereMentionRecipient.findMany({
+        where: { messageId, receivedAt: { not: null } },
+        select: { userId: true },
+      })
+    : [];
+  const recipients = [
+    ...new Set([
+      ...mentioned.map(({ userId }) => userId),
+      ...everyone,
+      ...here.map(({ userId }) => userId),
+    ]),
+  ].filter((userId) => userId !== authorId);
+  await tx.notification.deleteMany({
+    where: { messageId, kind: 'MENTION', userId: { notIn: recipients } },
+  });
   await addMentionNotifications(tx, {
     messageId,
-    channelId: target.channelId,
+    channelId,
     workspaceId,
-    authorId: target.viewerId,
-    userIds: added,
+    authorId,
+    userIds: recipients,
   });
 }
 
@@ -511,6 +552,14 @@ export class MessagesService {
         authorId: userId,
         body: input.body,
       });
+      // @channel の宛先の通知（F-26。機能一覧 9.2 の表・10.3）。個人のメンションと重なる利用者は1件のまま（同じ種類の一意制約）
+      await addMentionNotifications(tx, {
+        messageId: row.id,
+        channelId,
+        workspaceId,
+        authorId: userId,
+        userIds: everyone,
+      });
       return { message: await messageOf(tx, row), mentioned: [...mentioned, ...everyone] };
     });
     await this.announceNew(channelId, userId, message, input.body, mentioned);
@@ -594,6 +643,19 @@ export class MessagesService {
         },
         select: MESSAGE_SELECT,
       });
+      const everyone = await channelMentionTargets(tx, {
+        channelId,
+        authorId: userId,
+        body: input.body,
+      });
+      // @channel の宛先の通知（投稿と同じ）
+      await addMentionNotifications(tx, {
+        messageId: created.id,
+        channelId,
+        workspaceId,
+        authorId: userId,
+        userIds: everyone,
+      });
       const mentioned = [
         ...(await saveMentions(tx, {
           messageId: created.id,
@@ -602,7 +664,7 @@ export class MessagesService {
           channelId,
           body: input.body,
         })),
-        ...(await channelMentionTargets(tx, { channelId, authorId: userId, body: input.body })),
+        ...everyone,
       ];
       const counted = await tx.message.findUniqueOrThrow({
         where: { id: parentId },
@@ -704,9 +766,15 @@ export class MessagesService {
       // メンションの対象は、編集後の本文に合わせる（本文に残した対象は消さない）。**編集では対象の部屋へ配らない**（機能一覧 9.1 の実装時に決めた値）
       await replaceMentions(tx, {
         messageId,
-        workspaceId,
         viewerId: userId,
         channelId,
+        body: input.body,
+      });
+      await syncNotifications(tx, {
+        messageId,
+        channelId,
+        workspaceId,
+        authorId: userId,
         body: input.body,
       });
       const row = await tx.message.findUniqueOrThrow({
