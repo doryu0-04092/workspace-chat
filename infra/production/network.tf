@@ -111,6 +111,9 @@ resource "aws_route_table_association" "private" {
 # 送信元を ALB のセキュリティグループ以外に広げると、CloudFront を経ずに api へ直接届く。
 # 広げる誤りは validate でも plan でも落ちないため、apply の後に、タスクのセキュリティグループの受信が
 # ALB のセキュリティグループからの api のポート（compute.tf の local.api_port）だけであることを実物で確かめる（技術スタックの同じ代償）。
+#
+# 踏むと壊れる: マイグレーションの run-task が要る規則（例: db_from_task）を足したら、scripts/release.sh の
+# 手順 3 の -target にも足す。足さないと、初回のリリースで手順 4 の run-task が規則の無いまま失敗する。
 
 resource "aws_security_group" "alb" {
   name   = "workspace-chat-alb"

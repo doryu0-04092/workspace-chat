@@ -85,6 +85,9 @@ echo "== 3. マイグレーション用のタスク定義を新しいタグに�
 # 送信の規則・RDS への受信の規則・ロールにぶら下がるポリシー（実行ロールの ECR とログの管理ポリシー・パラメータの読み出し、
 # マイグレーションのタスクロールの ECS Exec）。初回のリリースでは、これが無いと手順 4 の run-task が成り立たない。
 # api のタスク定義とサービスは手順 5 に残す（マイグレーションの前に新しいタスク定義へ切り替えない）。
+# 踏むと壊れる: run-task の前提（infra/production/network.tf のセキュリティグループの規則・compute.tf の
+# IAM のロール・ポリシーなど）を足したら、この -target の一覧にも足す。足さないと、初回のリリースで
+# 手順 4 の run-task が前提の無いまま失敗する。
 tf apply -input=false \
   -target=aws_ecs_task_definition.migrate \
   -target=aws_ecs_cluster.main \
