@@ -288,6 +288,10 @@ describe('Socket.IO の接続の入口（F-16）', () => {
         );
         expect(disconnected).toContain(id);
         expect(disconnected).not.toContain(token);
+        // 切断の理由を載せる（機能一覧 5.2。#353）。Socket.IO が与える文字列は決め打ちしない
+        const [entry] = JSON.parse(disconnected ?? '[]') as [{ reason?: unknown }];
+        expect(typeof entry.reason).toBe('string');
+        expect(entry.reason).not.toBe('');
       } finally {
         logged.mockRestore();
       }
