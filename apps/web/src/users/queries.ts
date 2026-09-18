@@ -50,6 +50,7 @@ export function useUpdateProfile() {
         id: profile.id,
         userId: profile.userId,
         displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
       });
     },
   });

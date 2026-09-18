@@ -475,6 +475,7 @@ export function useInviteChannelMember(workspaceId: string, channelId: string) {
         id: member.id,
         userId: member.userId,
         displayName: member.displayName,
+        avatarUrl: member.avatarUrl,
       });
       void queryClient.invalidateQueries({
         queryKey: channelMembersKey(workspaceId, channelId),

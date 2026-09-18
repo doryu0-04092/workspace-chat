@@ -152,6 +152,7 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
           id: invitee.id,
           userId: invitee.loginId,
           displayName: expect.any(String) as string,
+          avatarUrl: null,
         },
         createdAt: expect.any(String) as string,
       });
@@ -163,6 +164,7 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
           id: owner.id,
           userId: owner.loginId,
           displayName: expect.any(String) as string,
+          avatarUrl: null,
         },
         sentAt: expect.any(String) as string,
       });
@@ -300,6 +302,10 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
       const workspace = await createWorkspace(owner);
       const t = tag();
       const idPrefix = await user(`${t}_alpha`, 'アルファ');
+      await prisma.user.update({
+        where: { id: idPrefix },
+        data: { avatarUrl: `/avatars/${idPrefix}/u/a.png` },
+      });
       const namePrefix = await user(`zz_name_${sequence}`, `${t}さん`);
       const nameMiddle = await user(`ww_name_${sequence}`, `名前${t}`);
       const idMiddle = await user(`yy_${t}`, '途中');
@@ -309,10 +315,10 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
       expect(await candidateIds(owner, workspace.id, t)).toEqual(expected);
       // 大文字小文字によらない
       expect(await candidateIds(owner, workspace.id, t.toUpperCase())).toEqual(expected);
-      // 返すのはユーザーID と表示名だけ
+      // 返すのはユーザーID と表示名だけ（アバターがあっても配信 URL は渡さない）
       const res = await candidates(owner, workspace.id, `${t}_al`);
       expect(await res.json()).toEqual([
-        { id: idPrefix, userId: `${t}_alpha`, displayName: 'アルファ' },
+        { id: idPrefix, userId: `${t}_alpha`, displayName: 'アルファ', avatarUrl: null },
       ]);
     });
 
@@ -417,6 +423,7 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
             id: owner.id,
             userId: owner.loginId,
             displayName: expect.any(String) as string,
+            avatarUrl: null,
           },
           createdAt: invitation.createdAt,
         },

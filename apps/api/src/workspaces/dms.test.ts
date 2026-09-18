@@ -230,7 +230,12 @@ describe('ダイレクトメッセージ（F-19）', () => {
 
       expect(dm).toEqual({
         id: expect.any(String),
-        counterpart: { id: bob.id, userId: bob.loginId, displayName: bob.displayName },
+        counterpart: {
+          id: bob.id,
+          userId: bob.loginId,
+          displayName: bob.displayName,
+          avatarUrl: null,
+        },
         writable: true,
         joinedAt: expect.any(String),
         unread: 0,
@@ -402,7 +407,7 @@ describe('ダイレクトメッセージ（F-19）', () => {
       expect(second).toEqual({
         id: expect.any(String),
         dmId: dm.id,
-        author: { id: bob.id, userId: bob.loginId, displayName: bob.displayName },
+        author: { id: bob.id, userId: bob.loginId, displayName: bob.displayName, avatarUrl: null },
         body: '2',
         createdAt: expect.any(String),
         editedAt: null,

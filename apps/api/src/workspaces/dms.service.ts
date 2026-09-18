@@ -16,7 +16,7 @@ import type {
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
-import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
+import { USER_SUMMARY_SELECT, toUserSummary, type UserSummaryRow } from '../users/user-summary';
 import { NOT_MESSAGE_AUTHOR } from './channel-errors';
 import { DM_COUNTERPART_NOT_FOUND, DM_COUNTERPART_UNAVAILABLE, DM_WITH_SELF } from './dm-errors';
 import { advanceReadPosition } from './unread';
@@ -45,7 +45,7 @@ export const DM_MESSAGE_SELECT = {
   createdAt: true,
   editedAt: true,
   deletedAt: true,
-  author: { select: { ...USER_SUMMARY_SELECT, deletedAt: true } },
+  author: { select: USER_SUMMARY_SELECT },
 } as const;
 
 type DmMessageRow = {
@@ -55,7 +55,7 @@ type DmMessageRow = {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
-  author: { id: string; loginId: string; displayName: string; deletedAt: Date | null };
+  author: UserSummaryRow;
 };
 
 /**
@@ -397,7 +397,6 @@ export class DmsService {
       where: { id: { in: rows.map(({ counterpartId }) => counterpartId) } },
       select: {
         ...USER_SUMMARY_SELECT,
-        deletedAt: true,
         memberships: { where: { workspaceId }, select: { id: true } },
       },
     });

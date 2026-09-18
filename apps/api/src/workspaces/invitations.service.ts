@@ -8,7 +8,12 @@ import type { InvitationNewPayload, paths } from '@workspace-chat/shared';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
-import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
+import {
+  USER_SUMMARY_SELECT,
+  toUserSummary,
+  type UserSummaryRow,
+  userSummaryColumns,
+} from '../users/user-summary';
 import { ALREADY_INVITED, ALREADY_MEMBER, INVITEE_NOT_FOUND } from './invitation-errors';
 import {
   type Workspace,
@@ -107,10 +112,8 @@ export class InvitationsService {
    */
   async candidates(ownerId: string, workspaceId: string, q: string): Promise<UserSummary[]> {
     await this.workspaces.ownerMembershipOf(ownerId, workspaceId);
-    const rows = await this.prisma.$queryRaw<
-      { id: string; loginId: string; displayName: string }[]
-    >`
-      SELECT u."id", u."userId" AS "loginId", u."displayName"
+    const rows = await this.prisma.$queryRaw<UserSummaryRow[]>`
+      SELECT ${userSummaryColumns('u')}
       FROM "User" u
       WHERE u."deletedAt" IS NULL
         AND (strpos(lower(u."userId"), lower(${q})) > 0 OR strpos(lower(u."displayName"), lower(${q})) > 0)
@@ -129,7 +132,8 @@ export class InvitationsService {
         lower(u."userId")
       LIMIT ${INVITATION_CANDIDATE_LIMIT}
     `;
-    return rows.map(toUserSummary);
+    // ワークスペースの外の利用者を返す経路のため、アバターの配信 URL は渡さない（承認の範囲は id・ユーザーID・表示名。#616）
+    return rows.map((row) => toUserSummary({ ...row, avatarUrl: null }));
   }
 
   /** 自分宛ての未承諾の招待。届いた順（同時刻は id〔UUIDv7〕の順）。 */

@@ -282,6 +282,7 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       id: '01920000-0000-7000-8000-000000000001',
       userId: 'Alice_1',
       displayName: 'アリス',
+      avatarUrl: null,
     };
 
     function renderWith(body: string, mentions: Mention[]): HTMLElement {

@@ -470,7 +470,12 @@ describe('通知の一覧と既読化（F-26）', () => {
           workspace: { id: workspace.id, name: workspace.name },
           dm: {
             id: dmId,
-            counterpart: { id: alice.id, userId: alice.loginId, displayName: alice.displayName },
+            counterpart: {
+              id: alice.id,
+              userId: alice.loginId,
+              displayName: alice.displayName,
+              avatarUrl: null,
+            },
           },
           message: expect.objectContaining({ id: sent.id, dmId, body: 'こんにちは' }),
         },

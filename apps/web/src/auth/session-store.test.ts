@@ -704,6 +704,7 @@ describe('利用者の情報の差し替え', () => {
       id: '01920000-0000-7000-8000-000000000002',
       userId: 'bob',
       displayName: 'ボブ',
+      avatarUrl: null,
     });
 
     expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't1', user: USER });

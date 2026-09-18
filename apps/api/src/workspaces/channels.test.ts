@@ -481,7 +481,12 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
       const res = await members(member, workspace.id, channel);
       expect(res.status).toBe(200);
       expect((await res.json()) as ChannelMember[]).toEqual([
-        { id: member.id, userId: member.loginId, displayName: expect.any(String) as string },
+        {
+          id: member.id,
+          userId: member.loginId,
+          displayName: expect.any(String) as string,
+          avatarUrl: null,
+        },
       ]);
     });
 
@@ -560,7 +565,12 @@ describe('チャンネルの作成・一覧・参加者一覧（F-10）', () => 
     }
 
     function summaryOf(user: LoggedIn) {
-      return { id: user.id, userId: user.loginId, displayName: expect.any(String) as string };
+      return {
+        id: user.id,
+        userId: user.loginId,
+        displayName: expect.any(String) as string,
+        avatarUrl: null,
+      };
     }
 
     /** この it だけのユーザーID の頭（ほかの it の利用者と前方一致しない）。 */
