@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
+import { type UserSummary, toUserSummary } from '../users/user-summary';
 import { assertChannelParticipant } from './channel-access';
 import { WorkspacesService } from './workspaces.service';
 
@@ -19,6 +20,7 @@ export function channelIdOf(body: unknown): string {
  *   所属していて参加していなければ、パブリックは 403 `not_a_channel_member`・プライベートは 404。無いチャンネルも 404
  * - **オーナーの例外は及ばない**（例外は一覧・取得 API だけ。9.2「参加していないオーナーには届かない」）
  * - アーカイブ済みでも参加者は入れる（参加者は読める。3.2）
+ * - 入れてよければ、要求した利用者の要約を返す（入力中の配信に載せる。F-34）
  */
 @Injectable()
 export class ChannelRoomsService {
@@ -27,7 +29,7 @@ export class ChannelRoomsService {
     private readonly workspaces: WorkspacesService,
   ) {}
 
-  async assertCanEnter(userId: string, channelId: string): Promise<void> {
+  async assertCanEnter(userId: string, channelId: string): Promise<UserSummary> {
     const channel = await this.prisma.channel.findFirst({
       where: { id: channelId },
       select: {
@@ -37,10 +39,11 @@ export class ChannelRoomsService {
       },
     });
     if (!channel) throw new NotFoundException();
-    await this.workspaces.membershipOf(userId, channel.workspaceId);
+    const membership = await this.workspaces.membershipOf(userId, channel.workspaceId);
     assertChannelParticipant({
       visibility: channel.visibility,
       joined: channel.members.length > 0,
     });
+    return toUserSummary(membership.user);
   }
 }

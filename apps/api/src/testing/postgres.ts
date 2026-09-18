@@ -1,37 +1,36 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { PullPolicy } from 'testcontainers';
 
 /**
  * テストで実際の PostgreSQL を使うための部品。**製品コードから読み込まない**（tsconfig.build.json が外す）。
  *
  * ## 実行の前提: **Docker のデーモンが動いていること**
  *
- * Testcontainers で `postgres:17` のコンテナを起動する。動いていない環境では起動できず、
+ * Testcontainers で PostgreSQL 17 のコンテナを起動する。動いていない環境では起動できず、
  * **これを使うテストが一式落ちる。** 落ちたメッセージに `docker` /
  * `Could not find a working container runtime` が出ているなら、疑うのはテストの対象ではなく Docker である。
  *
- * ## イメージに pg_bigm を含めない理由
+ * ## イメージは開発環境の db と同じ Dockerfile から作る
  *
- * 全文検索（F-30）は別のイシューで扱う。**検索のモデルが入る時点で、pg_bigm を同梱した
- * イメージが別途必要になる**（イシュー #34 に代償として記録した）。
+ * **マイグレーションが `CREATE EXTENSION pg_bigm` を含む**（全文検索。F-30）。公式の `postgres:17` には pg_bigm が無く、
+ * そのままではマイグレーションが通らない。**docker/postgres/Dockerfile から、起動のたびに `docker build --pull` で作る**
+ * （土台の取り直しは作るたびに入る。手元に同じタグがあっても古い土台のまま通さない）。
+ * **代償: 土台を起動するたびにレジストリへ問い合わせるため npm test が遅くなり、手元に作った層が無い最初の1回は pg_bigm のビルドを待つ。
+ * レジストリと pg_bigm の取得元に届かない環境では、手元にイメージがあっても起動できない**（scripts/api-image.test.sh と同じ）。
  */
 /**
- * **踏むと壊れる: この値は scripts/api-image.test.sh も読み、毎回 `docker pull` する。レジストリから取れる名前にすること**
- * （README「CI が回すのと同じ検査を手元で通す」の前提。手元でビルドしただけの名前では、その検査が `docker pull` で落ちる）。
- *
- * **npm test の起動（startMigratedPostgres・valkey.ts の startValkey）も、起動のたびにイメージを取り直す**——
- * Testcontainers の既定は手元に同じタグがあれば取り直さず、手元の緑が CI と同じ版の土台で出ない。
- * **代償: 土台を起動するたびにレジストリへ問い合わせるため npm test が遅くなり（手元でも CI でも。CI も同じジョブの中では
- * 2回目以降の起動で手元のイメージを使っていた）、レジストリに届かない環境では、手元にイメージがあっても起動できない**
- * （scripts/api-image.test.sh と同じ）。
+ * テストの PostgreSQL のイメージの名前（手元で作る。レジストリには無い）。
+ * **踏むと壊れる: この値は scripts/api-image.test.sh も読み、同じ Dockerfile から同じ名前で作る**——開発環境の db（`workspace-chat-db:local`）とは別の名前にし、
+ * テストの `--pull` が開発環境のイメージを差し替えないようにする。
+ * 土台（docker/postgres/Dockerfile の POSTGRES_IMAGE）は Dependabot で追わないと決めており、タグごとの経路の一覧は .github/dependabot.yml の末尾にある。
  */
-export const POSTGRES_IMAGE = 'postgres:17';
+export const POSTGRES_IMAGE = 'workspace-chat-db:test';
 
 /**
- * コンテナの起動とマイグレーションの適用を待つ時間（10 分）。起動のたびにレジストリへイメージを問い合わせ、手元に無い・版が変わったときは取得が入る。
+ * コンテナの起動とマイグレーションの適用を待つ時間（10 分）。起動のたびにイメージを作ってレジストリへ土台を問い合わせ、手元に層が無い・土台の版が変わったときは取得と pg_bigm のビルドが入る。
  *
  * **ci.yml の timeout-minutes（15）より小さくする。** あちらはジョブ全体に掛かる。
  * ここに大きい値を置くと、先に GitHub Actions がジョブごと打ち切り、
@@ -75,10 +74,20 @@ export function runPrisma(args: string[], databaseUrl: string): string {
   });
 }
 
-/** コンテナを起動し、空の DB にマイグレーションを適用して返す。 */
+const postgresImageContext = join(repositoryRoot, 'docker', 'postgres');
+
+/**
+ * コンテナを起動し、空の DB にマイグレーションを適用して返す。
+ * イメージは起動のたびに docker/postgres/Dockerfile から作る（`--pull`。上の説明）。**`shared_preload_libraries=pg_bigm` は開発環境（compose.yaml）と本番（infra/production/database.tf）と揃える。**
+ */
 export async function startMigratedPostgres(): Promise<StartedPostgreSqlContainer> {
+  await promisify(execFile)(
+    'docker',
+    ['build', '--pull', '--quiet', '--tag', POSTGRES_IMAGE, postgresImageContext],
+    { maxBuffer: 16 * 1024 * 1024 },
+  );
   const container = await new PostgreSqlContainer(POSTGRES_IMAGE)
-    .withPullPolicy(PullPolicy.alwaysPull())
+    .withCommand(['postgres', '-c', 'shared_preload_libraries=pg_bigm'])
     .start();
   // ここが落ちるなら、マイグレーションが実際の PostgreSQL に適用できていない。
   runPrisma(['migrate', 'deploy', '--schema', schemaPath], container.getConnectionUri());

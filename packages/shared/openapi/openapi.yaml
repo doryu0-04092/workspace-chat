@@ -244,7 +244,8 @@ paths:
       operationId: getMyProfile
       summary: 自分のプロフィールの取得（F-04）
       description: >-
-        アバター画像の設定はまだ無く、avatarUrl は null のままである（機能一覧 1.3。11.1 と同じ段で足す）。
+        avatarUrl は、アバター画像のアップロードの確定でサーバーが組み立てた配信 URL のパス（/avatars/{User.id}/{uploadId}/{保存名}）か、
+        設定していなければ null（機能一覧 1.3。/users/me/avatar/uploads）。
       responses:
         '200':
           description: 自分のプロフィール
@@ -287,6 +288,247 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /users/me/settings:
+    get:
+      operationId: getMySettings
+      summary: 自分の設定の取得（F-23）
+      description: >-
+        利用者ごとの設定を返す（機能一覧 10.1）。**プロフィールとは別の経路である**——
+        プロフィールが持つのは他人に見える情報であり、設定は本人にしか返さない
+      responses:
+        '200':
+          description: 自分の設定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateMySettings
+      summary: 自分の設定の編集（F-23）
+      description: >-
+        送った項目だけを変える（機能一覧 10.1）。**既読位置は動かさない**——
+        「含めない」→「含める」に戻すと、過去の未読の返信が未読として現れる（一括で既読扱いにしない）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserSettingsRequest'
+      responses:
+        '200':
+          description: 変えた後の設定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSettings'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /users/me/notifications:
+    get:
+      operationId: listMyNotifications
+      summary: 自分の通知の一覧（F-26）
+      description: >-
+        受け取ったメンションの通知を、新しい順に返す（機能一覧 10.3）。接続していない間に受けたものも残る。
+        before（通知の id）を渡すと、それより古いものを返す（カーソルページネーション）。続きがあれば nextBefore に次の before を、無ければ null を返す。
+        **本人の通知だけを返し、いまそのチャンネルの参加者である通知だけを返す**——抜けた・外されたチャンネルと、
+        ワークスペースから外れた後のそのワークスペースの通知は出さない（CLAUDE.md 2）。削除済みのメッセージの通知も出さない。
+        書き手本人には通知を作らない。編集で本文からメンションを外すと通知は消え、編集で足すと通知が作られる
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: これより古い通知を返す（通知の id）。形が uuid でなければ 400
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: 返す件数の上限。1〜100、既定は 50（実装時に決めた値。メッセージの一覧と揃える）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: 通知（新しい順）と、続きを取るための before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /users/me/notifications/{notificationId}/read:
+    parameters:
+      - $ref: '#/components/parameters/NotificationId'
+    put:
+      operationId: markNotificationRead
+      summary: 通知の既読化（F-26）
+      description: >-
+        通知を既読にする（機能一覧 10.3）。既に既読なら、最初に既読にした時刻を変えずに 204 を返す。
+        **他の利用者の通知・いまそのチャンネルの参加者でない通知・削除済みのメッセージの通知・存在しない通知は、区別せず 404**（存在を認めない。CLAUDE.md 2）
+      responses:
+        '204':
+          description: 既読にした（既に既読だった場合も 204）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+  /users/me/delete:
+    post:
+      operationId: deleteMyAccount
+      summary: 自分のアカウントの削除（退会。F-36）
+      description: >-
+        本人だけ（アクセストークンの利用者を削除する。他人を指す手段を持たない）。パスワードの再入力で本人であることを確かめる。
+        パスワードが違えば 403 password_mismatch、ワークスペースのオーナーなら 403 owner_cannot_delete_account（理由のメッセージを返す）。
+        論理削除であり、同一トランザクションで未使用のリカバリーコードを使用済みにし、所属（Membership。チャンネル参加は連鎖して消える）を消し、
+        リフレッシュトークンをすべて失効させる。その利用者の WebSocket 接続を切り、refresh_token の Cookie を消す（機能一覧 1.5）。
+        ユーザーID ごとに、パスワードを連続して誤った回数 n に対し 2^(n-1) 秒（上限 900 秒）の間は照合せずに 429 を返す（ログインとは別に数える）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+      responses:
+        '204':
+          description: 削除した（Cookie を消す）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パスワードが違う（password_mismatch）か、ワークスペースのオーナーである（owner_cannot_delete_account）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /users/me/avatar/uploads:
+    post:
+      operationId: createAvatarUpload
+      summary: アバター画像のアップロード用の署名付き URL の発行（F-04）
+      description: >-
+        自分のアバター画像を上げる署名付き URL を発行する（機能一覧 1.3・11.1）。ブラウザは uploadUrl へ uploadHeaders を付けて本体を PUT し、
+        終わったら complete で確定する。URL の宛先は隔離用のキー quarantine/avatars/{User.id}/{uploadId}/{保存名} であり、
+        キーはすべてサーバーが組み立てる（保存名はファイル名の英数字・.・_・- 以外と先頭の . を _ に置き換え、キー全体が 1,024 バイトに収まるよう切り詰めたもの）。
+        有効期限は 5 分で、Content-Type と If-None-Match: * を署名に含む（同じ URL での上書きは 412 で断られる）。
+        申告した Content-Type が画像（jpeg / png / gif / webp）でなければ 422 unsupported_file_type、大きさが 10 MB を超えれば 422 file_too_large。
+        申告は信用せず、確定で中身から検証する。利用者単位で 10 分に 30 回まで
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+      responses:
+        '201':
+          description: 発行したアップロード
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadTicket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: 受け付けない形式（unsupported_file_type）か、上限を超える大きさ（file_too_large）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /users/me/avatar/uploads/{uploadId}/complete:
+    parameters:
+      - $ref: '#/components/parameters/UploadId'
+    post:
+      operationId: completeAvatarUpload
+      summary: アバター画像のアップロードの確定（F-04）
+      description: >-
+        隔離用のキーに PUT した本体を中身から検証し、検証した版に固定して配信用のキー avatars/{User.id}/{uploadId}/{保存名} へコピーし、
+        隔離用のキーを削除して、avatarUrl を /avatars/{User.id}/{uploadId}/{保存名} にする（保存名の拡張子は検証した形式のものに付け替える。機能一覧 1.3・11.1）。
+        検証に通らなければ配信用のキーへ移さず隔離用のキーを削除し、422 を返す——画像でない・中身が形式に合わない（unsupported_file_type）、
+        10 MB を超える（file_too_large）、本体が PUT されていない（upload_not_received）。
+        確定は識別子ごとに1回だけ行い、2回目以降はコピーも削除もやり直さず、1回目と同じ状態コードを返す（成功なら、その時点のプロフィール）。
+        確定の途中にもう1つ確定を求めると 409 upload_in_progress。
+        本人に払い出されていない識別子は 404（識別子の存在を認めない）。利用者単位で 10 分に 30 回まで
+      responses:
+        '200':
+          description: 確定した後のプロフィール
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: 同じ識別子の確定が進行中（upload_in_progress）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: 検証に通らなかった（unsupported_file_type・file_too_large・upload_not_received）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /workspaces:
@@ -508,6 +750,57 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/invitation-candidates:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: listInvitationCandidates
+      summary: 招待の候補（F-08。#616）
+      description: >-
+        ワークスペースへ招待できる利用者を、q の文字列から探す（ユーザーID を正確に知らなくても招待できるようにする。
+        提案・承認済・2026-09-18・依頼側。#616）。オーナーだけが呼べる（メンバーは 403 owner_only、所属していなければ存在の有無を区別せず 404）。
+        対象は退会していない利用者のうち、そのワークスペースのメンバーでなく、未承諾の招待も無い人。
+        ユーザーID か表示名に q を含む人を、大文字小文字を区別せずに当てる。
+        並びは、ユーザーID の先頭一致 → 表示名の先頭一致 → 途中の一致の順で、同じ段ではユーザーID の小文字の順。最大10人。
+        利用者単位で1分に60回まで
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 探す文字列。1〜50 文字（コードポイント）で、空白だけは不可
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 50
+            pattern: '\S'
+      responses:
+        '200':
+          description: 候補（最大10人）
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10
+                items:
+                  $ref: '#/components/schemas/UserSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: オーナーでない（owner_only）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces/{id}/channels:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
@@ -608,6 +901,134 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           description: オーナーでない（owner_only）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/archived-channels:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: listArchivedChannels
+      summary: 自分が参加しているアーカイブ済みのチャンネル一覧（F-35）
+      description: >-
+        自分が参加しているアーカイブ済みのチャンネルだけを、一般の一覧と同じ形で返す（参加者は読めるが、一般の一覧からは外れるため。機能一覧 3.2）。
+        パブリックでも、参加していなければ含めない。オーナーの例外は及ばない。名前の順。所属していなければ、存在の有無を区別せず 404
+      responses:
+        '200':
+          description: 自分が参加しているアーカイブ済みのチャンネル
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Channel'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/search:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: search
+      summary: 検索（F-30・F-31）
+      description: >-
+        1回の要求で、種別ごとのセクション（メッセージ・チャンネル・ユーザー）を返す（機能一覧 12.1）。
+        q は空白で区切った語と、絞り込み演算子 `from:@ユーザーID`・`in:#チャンネル名` からなる。語はすべてを含むものに当たる（大文字小文字を区別する。
+        チャンネルとユーザーは区別しない）。演算子はメッセージだけを絞り、同じ演算子を2回書いたら後のものを使う。
+        メッセージは、要求した利用者が参加しているチャンネルの、削除されていないもの（返信を含む。アーカイブ済みのチャンネルのものを含む）だけを、新しい順に最大20件返す。
+        オーナーの例外は及ばない（参加していないプライベートチャンネルのメッセージは返さない。機能一覧 3.1）。
+        `from:` は退会した利用者も指せる（過去のメッセージは残る。機能一覧 1.5）。
+        チャンネルは、パブリックでアーカイブされていないものと、参加しているもの（アーカイブ済みを含む）を名前の順に最大20件。
+        ユーザーは、そのワークスペースのメンバーで退会していない利用者を、ユーザーID か表示名で当て、ユーザーID の小文字の順に最大20人。
+        所属していなければ、存在の有無を区別せず 404。`in:` のチャンネルはコードが2段階で決まる: 無いチャンネル・参加していないプライベートは 404、
+        参加していないパブリックは 403 not_a_channel_member。利用者単位で1分に60回まで
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 検索の文字列。1〜200 文字（コードポイント）で、空白だけは不可
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+            pattern: '\S'
+      responses:
+        '200':
+          description: 種別ごとの結果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: '`in:` のパブリックチャンネルに参加していない（not_a_channel_member）'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/mention-candidates:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    get:
+      operationId: listMentionCandidates
+      summary: メンションの補完候補（F-20）
+      description: >-
+        入力欄の `@` に続く文字列（prefix）で前方一致する、そのチャンネルの参加者で退会していない利用者を、ユーザーID の小文字の昇順に最大10人返す
+        （機能一覧 9.1。候補は投稿時の宛先解決で解決できる利用者と一致させ、照合は大文字小文字によらない）。
+        コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加者でなければ、パブリックは 403 not_a_channel_member・プライベートは 404。
+        オーナーの例外は及ばない（参加していないオーナーも同じ）。別のワークスペースのチャンネル・無いチャンネルは 404
+      parameters:
+        - name: prefix
+          in: query
+          required: false
+          description: >-
+            `@` に続けて入力した文字列。英数字とアンダースコアの 0〜30 文字で、それ以外の形なら 400。省略・空なら参加者の全員が照合に当たる
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_]{0,30}$'
+            default: ''
+      responses:
+        '200':
+          description: 候補（ユーザーID の小文字の昇順。最大10人。実装時に決めた値。機能一覧 9.1）
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10
+                items:
+                  $ref: '#/components/schemas/UserSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
           content:
             application/json:
               schema:
@@ -789,6 +1210,97 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/read:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    put:
+      operationId: updateChannelRead
+      summary: チャンネルの既読位置の更新（F-23）
+      description: >-
+        読んだ位置（そのチャンネルのメッセージの id）を渡して既読位置を進める（機能一覧 10.1）。
+        既読位置は戻さない——渡した id が既に読んだ位置より古ければ、何も変えずに 204 を返す。
+        コードは参加者一覧と同じ2段階: 所属していなければ種別によらず 404、所属していて参加者でなければパブリックは 403
+        not_a_channel_member・プライベートは 404。オーナーの例外は及ばない（参加していないチャンネルに既読位置を持たない）。
+        別のチャンネルのメッセージ・存在しないメッセージ・削除済みのメッセージの id は 404。
+        利用者ごとに1分 120 回まで（メッセージの書き込みとは別枠。機能一覧 10.1）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChannelReadRequest'
+      responses:
+        '204':
+          description: 既読位置を進めた（進まなかった場合も 204）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: そのチャンネルの参加者でない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/messages/{messageId}/read:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MessageId'
+    put:
+      operationId: updateThreadRead
+      summary: スレッドの既読位置の更新（F-23）
+      description: >-
+        スレッド（親のメッセージ）の中で読んだ位置を進める（機能一覧 10.1。「利用者 × スレッド」の既読位置）。
+        チャンネルの既読位置とは別系統で持つ——スレッド内の未読をチャンネルの未読に含めるかを利用者が切り替えられ、
+        切り替えた瞬間に集計対象が変わるためである。チャンネルの既読位置と同じく、進めるだけで戻さない。
+        判定は返信の一覧と同じ（所属 → 参加の2段階 → 親の有無。そのチャンネルに無い・返信なら 404）。
+        渡す id は、その親への削除されていない返信でなければ 404。
+        利用者ごとに1分 120 回まで（メッセージの書き込みとは別枠。機能一覧 10.1）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateChannelReadRequest'
+      responses:
+        '204':
+          description: 既読位置を進めた（進まなかった場合も 204）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: そのチャンネルの参加者でない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces/{id}/channels/{channelId}/archive:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
@@ -869,6 +1381,120 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/pins:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    get:
+      operationId: listPins
+      summary: チャンネルのピン留めの一覧（F-33）
+      description: >-
+        ピン留めしたメッセージを、ピン留めした新しい順にすべて返す（1つのチャンネルに最大 100 件。機能一覧 13.2）。
+        削除済みのメッセージは返さない。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、
+        パブリックは 403 not_a_channel_member・プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。
+        アーカイブ済みでも参加者は読める（機能一覧 3.2）。ピン留めの変化は配信しない（要件定義書 4.1 の配信の対象イベントに無い）
+      responses:
+        '200':
+          description: ピン留めしたメッセージ（ピン留めした新しい順）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/messages/{messageId}/pin:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MessageId'
+    put:
+      operationId: pinMessage
+      summary: メッセージをピン留めする（F-33）
+      description: >-
+        既にピン留めしていれば何も変えず、最初にピン留めした人と時刻を 200 で返す。スレッドの返信もピン留めできる。
+        判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→
+        そのチャンネルに無い・削除済みのメッセージは 404 → アーカイブ済みのチャンネルは 409 channel_archived →
+        そのチャンネルのピン留め（削除済みのメッセージを除く）が 100 件に達していれば 409 pin_limit_reached（実装時に決めた値）。
+        配信しない（要件定義書 4.1 の配信の対象イベントに無い）。利用者ごとに1分 60 回まで（外すのとは別枠。実装時に決めた値）
+      responses:
+        '200':
+          description: ピン留めしたメッセージ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinnedMessage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）か、ピン留めの件数の上限（pin_limit_reached）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: unpinMessage
+      summary: メッセージのピン留めを外す（F-33）
+      description: >-
+        そのチャンネルの参加者なら、ピン留めした本人でなくても外せる（付けられる人と外せる人を揃える。機能一覧 13.2 の「判断が必要な点」の決定）。
+        ピン留めしていなければ何も変えずに 204 を返す。判定の順はピン留めと同じ（件数の上限を除く）。
+        配信しない。利用者ごとに1分 60 回まで（ピン留めとは別枠。実装時に決めた値）
+      responses:
+        '204':
+          description: 外した（ピン留めしていなかった場合も 204）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /workspaces/{id}/channels/{channelId}/messages:
     parameters:
       - $ref: '#/components/parameters/WorkspaceId'
@@ -878,6 +1504,7 @@ paths:
       summary: チャンネルのメッセージの一覧（F-11・F-12）
       description: >-
         新しい順。before（メッセージの id）を渡すと、それより古いものを返す（カーソルページネーション。OFFSET を使わない。機能一覧 4.1）。
+        スレッドの返信は含めない（返信の一覧は replies。機能一覧 6）。
         before はそのチャンネルのメッセージでなくてもよく、存在を確かめない（id の順で比べる境目にすぎない）。
         続きがあれば nextBefore に次の before を、無ければ null を返す。
         参加者だけが取得できる。コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、
@@ -931,14 +1558,15 @@ paths:
         参加者だけが投稿できる。コードは一覧と同じ2段階（所属していなければ 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・
         プライベートは 404。オーナーでも参加していなければ同じ）。アーカイブ済みのチャンネルには投稿できない（409 channel_archived。機能一覧 3.2）。
         本文は 1〜4000 文字（コードポイント）で、空白だけは不可（機能一覧 4.1）。
-        作ったメッセージを message:new としてチャンネルの部屋へ配る（機能一覧 5.2）。
-        投稿・編集・削除を合わせて、利用者単位で1分に60回まで（3つのルートで1つの枠。機能一覧 4.1・4.2）
+        作ったメッセージを message:new としてチャンネルの部屋へ配る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で配る（機能一覧 5.2・9.1）。
+        attachmentIds で確定した添付を付けられる（自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけ。そうでなければ 422 attachment_unavailable で投稿しない。機能一覧 11.1）。
+        投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PostMessageRequest'
+              $ref: '#/components/schemas/CreateMessageRequest'
       responses:
         '201':
           description: 作ったメッセージ
@@ -970,6 +1598,12 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '415':
           $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: 付けられない添付がある（attachment_unavailable）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
         '500':
@@ -987,7 +1621,7 @@ paths:
         判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404 →
         そのチャンネルに無い・削除済みのメッセージは 404 → 作者でなければ 403 not_message_author → アーカイブ済みのチャンネルは 409 channel_archived。
         本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。編集したメッセージを message:updated としてチャンネルの部屋へ配る（機能一覧 5.2）。
-        投稿・編集・削除を合わせて、利用者単位で1分に60回まで（3つのルートで1つの枠。機能一覧 4.1・4.2）
+        投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
       requestBody:
         required: true
         content:
@@ -1035,7 +1669,9 @@ paths:
       description: >-
         論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、
         以後の応答と配信では返さない（body: null・deleted: true。要件定義書 3.4）。message:deleted（本文を載せない）をチャンネルの部屋へ配る。
-        投稿・編集・削除を合わせて、利用者単位で1分に60回まで（3つのルートで1つの枠。機能一覧 4.1・4.2）
+        返信を削除したら、親の返信件数（replyCount）を同じトランザクションで1つ減らし、親を message:updated として配る。
+        親を削除しても返信は残す（機能一覧 4.2・6）。
+        投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（4つのルートで1つの枠。機能一覧 4.1・4.2・6）
       responses:
         '204':
           description: 削除した
@@ -1061,6 +1697,660 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/messages/{messageId}/replies:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MessageId'
+    get:
+      operationId: listReplies
+      summary: スレッドの返信の一覧（F-17）
+      description: >-
+        親（messageId）の返信を新しい順に返す。before・limit・nextBefore の扱いはチャンネルの一覧と同じ（機能一覧 4.1・6）。
+        コードは2段階で決まる: 所属していなければ種別によらず 404。所属していて参加していなければ、パブリックは 403 not_a_channel_member・
+        プライベートは 404。オーナーでも参加していなければ同じ（オーナーの例外はメッセージに及ばない。機能一覧 3.1・4.1）。
+        そのチャンネルに無いメッセージと、返信（返信はスレッドを持たない。1階層のみ）は 404。
+        削除済みの親の返信も読める（返信は保持する。機能一覧 4.2）。アーカイブ済みでも参加者は読める（機能一覧 3.2）
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: これより古い返信を返す（メッセージの id）。形が uuid でなければ 400
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: 返す件数の上限。1〜100、既定は 50（チャンネルの一覧と同じ。機能一覧 4.1）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: 返信（新しい順）と、続きを取るための before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: postReply
+      summary: スレッドへの返信（F-17）
+      description: >-
+        判定の順: 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも同じ）→
+        そのチャンネルに無い・削除済みのメッセージと、返信（返信に返信はできない。1階層のみ）は 404 → アーカイブ済みのチャンネルは 409 channel_archived。
+        本文の形は投稿と同じ（1〜4000 文字・空白だけは不可）。親の返信件数（replyCount）を同じトランザクションで1つ増やす（要件定義書 4.1）。
+        作った返信を message:new として、返信件数が増えた親を message:updated として、チャンネルの部屋へ配る（機能一覧 5.2・6）。返信の本文のメンションの対象がいれば、返信の message:new はその利用者の部屋も加えて1回で配る（機能一覧 9.1）。
+        投稿・編集・削除と同じ枠で数える（利用者単位で1分に60回。機能一覧 4.1・4.2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostMessageRequest'
+      responses:
+        '201':
+          description: 作った返信（parentId を持つ）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/dms:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+    get:
+      operationId: listDms
+      summary: 自分が当事者の DM の一覧（F-19・F-23）
+      description: >-
+        そのワークスペースで、要求した利用者が当事者の DM だけを返す（機能一覧 8）。所属していなければ 404。
+        新しいメッセージのある順（メッセージの無い DM は始めた順の位置に並ぶ）。
+        相手がキック・退出・退会した DM も返す（過去のメッセージは残る。機能一覧 1.5・2.2）——相手が退会していれば counterpart は null、
+        いまメンバーでなければ writable は false（投稿できない）
+      responses:
+        '200':
+          description: DM（新しいメッセージのある順）
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Dm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: startDm
+      summary: DM を始める・開く（F-19）
+      description: >-
+        相手（User.id）との DM を返す。まだ無ければ作る。同じ相手との DM は1つに集約され、既にあればそれを返す（機能一覧 8）。
+        相手は同じワークスペースの、退会していないメンバーに限る（そうでなければ 422 dm_counterpart_not_found）。
+        自分自身とは始められない（422 dm_with_self）。所属していなければ 404
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartDmRequest'
+      responses:
+        '200':
+          description: 相手との DM（作ったもの、または既にあったもの）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: 相手がこのワークスペースの退会していないメンバーでない（dm_counterpart_not_found）か、自分自身（dm_with_self）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/dms/{dmId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/DmId'
+    get:
+      operationId: listDmMessages
+      summary: DM のメッセージの一覧（F-19）
+      description: >-
+        新しい順。before・limit・nextBefore の扱いはチャンネルの一覧と同じ（機能一覧 4.1）。
+        当事者だけが取得できる。所属していなければ 404、当事者でない DM・無い DM・別のワークスペースの DM も 404（存在の有無を区別しない。機能一覧 8）。
+        相手がいまメンバーでなくても、当事者は過去のメッセージを読める（機能一覧 1.5・2.2）。
+        退会した書き手のメッセージは author を null にする（機能一覧 1.5）
+      parameters:
+        - name: before
+          in: query
+          required: false
+          description: これより古いメッセージを返す（メッセージの id）。形が uuid でなければ 400
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: 返す件数の上限。1〜100、既定は 50（チャンネルの一覧と同じ。機能一覧 4.1）
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: メッセージ（新しい順）と、続きを取るための before
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DmMessagePage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: postDmMessage
+      summary: DM へのメッセージの投稿（F-19）
+      description: >-
+        当事者だけが投稿できる（所属していない・当事者でない・無い DM は 404）。
+        相手がいまそのワークスペースの退会していないメンバーでなければ 409 dm_counterpart_unavailable（機能一覧 8「相手は同一ワークスペースのメンバーに限る」）。
+        本文の形はチャンネルの投稿と同じ（1〜4000 文字・空白だけは不可）。
+        作ったメッセージを message:new として、当事者2人のうち、いまそのワークスペースの退会していないメンバーである利用者の部屋へ1回で配る（機能一覧 5.2 の DM の箇条）。
+        投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（チャンネルのメッセージの書き込みと同じ枠。機能一覧 4.1）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostMessageRequest'
+      responses:
+        '201':
+          description: 作ったメッセージ
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DmMessage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: 相手がいまこのワークスペースの退会していないメンバーでない（dm_counterpart_unavailable）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/dms/{dmId}/messages/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/DmId'
+      - $ref: '#/components/parameters/MessageId'
+    patch:
+      operationId: editDmMessage
+      summary: DM のメッセージの編集（F-19・F-13）
+      description: >-
+        自分のメッセージだけを編集できる。判定の順: 所属していなければ 404 → 当事者でない・無い DM は 404 →
+        その DM に無い・削除済みのメッセージは 404 → 作者でなければ 403 not_message_author。
+        相手がいまメンバーでなくても、自分のメッセージは編集できる。本文の形は投稿と同じ。
+        編集したメッセージを message:updated として、投稿と同じ宛先へ配る（機能一覧 5.2 の DM の箇条）。
+        投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（機能一覧 4.1・4.2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostMessageRequest'
+      responses:
+        '200':
+          description: 編集したメッセージ（editedAt を持つ）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DmMessage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 自分のメッセージではない（not_message_author）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteDmMessage
+      summary: DM のメッセージの削除（F-19・F-13）
+      description: >-
+        論理削除（機能一覧 4.2）。自分のメッセージだけを削除できる。判定の順は編集と同じ。本文は DB に残るが、
+        以後の応答と配信では返さない（body: null・deleted: true）。message:deleted（本文を載せない）を投稿と同じ宛先へ配る。
+        投稿・返信・編集・削除を合わせて、利用者単位で1分に60回まで（機能一覧 4.1・4.2）
+      responses:
+        '204':
+          description: 削除した
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 自分のメッセージではない（not_message_author）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/dms/{dmId}/read:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/DmId'
+    put:
+      operationId: updateDmRead
+      summary: DM の既読位置の更新（F-23）
+      description: >-
+        読んだ位置（その DM のメッセージの id）を渡して既読位置を進める（「利用者 × DM」の既読位置。機能一覧 10.1）。
+        既読位置は戻さない——渡した id が既に読んだ位置より古ければ、何も変えずに 204 を返す。
+        所属していない・当事者でない・無い DM は 404。その DM に無いメッセージ・削除済みのメッセージの id も 404。
+        進めた後の未読数を unread:updated として本人の部屋へだけ配る（機能一覧 5.2）。
+        利用者ごとに1分 120 回まで（チャンネル・スレッドの既読の更新とは別の枠。機能一覧 10.1）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDmReadRequest'
+      responses:
+        '204':
+          description: 既読位置を進めた（進まなかった場合も 204）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/messages/{messageId}/reactions/{emoji}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/MessageId'
+      - $ref: '#/components/parameters/Emoji'
+    put:
+      operationId: addReaction
+      summary: メッセージにリアクションを付ける（F-18）
+      description: >-
+        同じ絵文字を二重に付けない——既に付けていれば何も変えずに 200 を返す（機能一覧 7）。
+        判定の順: 絵文字1つでなければ 400 validation_failed → 所属していなければ 404 → 参加していなければパブリックは 403 not_a_channel_member・
+        プライベートは 404（オーナーでも同じ）→ そのチャンネルに無い・削除済みのメッセージは 404 → アーカイブ済みのチャンネルは 409 channel_archived →
+        そのメッセージに付いている絵文字が 50 種類に達していて、新しい絵文字なら 409 reaction_limit_reached（実装時に決めた値）。
+        スレッドの返信にも付けられる。件数はカウンタ列に持ち、付けるのと同じトランザクションで増やす（要件定義書 4.1）。
+        変わったら、そのメッセージのリアクションを reaction:changed としてチャンネルの部屋へ配る（機能一覧 5.2）。
+        利用者ごとに1分 60 回まで（外すのとは別枠。実装時に決めた値）
+      responses:
+        '200':
+          description: 付けた後の、そのメッセージのリアクション
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageReactions'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）か、絵文字の種類の上限（reaction_limit_reached）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: removeReaction
+      summary: メッセージから自分のリアクションを外す（F-18）
+      description: >-
+        自分が付けたものだけを外す。付けていなければ何も変えずに 200 を返す。判定の順は付けるのと同じ（種類の上限を除く）。
+        件数は外すのと同じトランザクションで減らし、0 になった絵文字は返さない。
+        変わったら、そのメッセージのリアクションを reaction:changed としてチャンネルの部屋へ配る（機能一覧 5.2）。
+        利用者ごとに1分 60 回まで（付けるのとは別枠。実装時に決めた値）
+      responses:
+        '200':
+          description: 外した後の、そのメッセージのリアクション
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageReactions'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: アーカイブ済みのチャンネル（channel_archived）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/attachments/uploads:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    post:
+      operationId: createAttachmentUpload
+      summary: 添付ファイルのアップロード用の署名付き URL の発行（F-27・F-28）
+      description: >-
+        チャンネルの添付を上げる署名付き URL を発行する（機能一覧 11.1）。参加者だけが発行できる。コードは2段階: 所属していなければ種別によらず 404。
+        所属していて参加していなければ、パブリックは 403 not_a_channel_member・プライベートは 404（オーナーでも参加していなければ同じ）。
+        URL の宛先は隔離用のキー quarantine/workspace/{id}/channel/{channelId}/{uploadId}/{保存名} であり、キーはすべてサーバーが組み立てる
+        （保存名はファイル名の英数字・.・_・- 以外と先頭の . を _ に置き換え、キー全体が 1,024 バイトに収まるよう切り詰めたもの）。
+        有効期限は 5 分で、Content-Type と If-None-Match: * を署名に含む。
+        申告した Content-Type が許可リスト（画像 jpeg / png / gif / webp、動画 mp4 / webm、文書 pdf / txt / csv / md / docx / xlsx / pptx、圧縮 zip）に無ければ
+        422 unsupported_file_type、種別の上限（画像 10 MB・動画 100 MB・文書と圧縮 25 MB）を超えれば 422 file_too_large。
+        申告は信用せず、確定で中身から検証する。利用者単位で 10 分に 30 回まで
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+      responses:
+        '201':
+          description: 発行したアップロード
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadTicket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          description: 受け付けない形式（unsupported_file_type）か、上限を超える大きさ（file_too_large）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/attachments/uploads/{uploadId}/complete:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+      - $ref: '#/components/parameters/UploadId'
+    post:
+      operationId: completeAttachmentUpload
+      summary: 添付ファイルのアップロードの確定（F-27・F-28）
+      description: >-
+        本人に払い出され、このワークスペースとチャンネルで発行した識別子だけを確定できる（そうでなければ 404。識別子の存在を認めず、確定の権利も使わない）。
+        キーとやり直す参加者判定の対象チャンネルは、発行のときにサーバーが保持した値から組み立てる（機能一覧 11.1）。
+        確定の時点で参加者判定をやり直し、落ちたら発行と同じ2段階のコード（404 / 403 not_a_channel_member）を返して隔離用のキーを削除する。
+        通れば中身から形式を検証し、検証した版に固定して配信用のキー workspace/{id}/channel/{channelId}/{uploadId}/{保存名} へコピーし、隔離用のキーを削除する
+        （保存名の拡張子は検証した形式のものに付け替え、配信の Content-Type と Content-Disposition は検証した形式から決める）。
+        検証に通らなければ配信用のキーへ移さず隔離用のキーを削除し、422 を返す——許可リストに無い・中身が形式に合わない（unsupported_file_type）、
+        種別の上限を超える（file_too_large）、本体が PUT されていない（upload_not_received）。
+        確定は識別子ごとに1回だけ行い、2回目以降はコピーも削除もやり直さず、1回目と同じ結果を返す（参加者判定に落ちたときも同じ。やり直すには発行からやり直す）。
+        確定の途中にもう1つ確定を求めると 409 upload_in_progress。確定した添付は、投稿（postMessage）の attachmentIds で投稿に付ける。
+        利用者単位で 10 分に 30 回まで
+      responses:
+        '200':
+          description: 確定した添付
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Attachment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: パブリックチャンネルに参加していない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: 同じ識別子の確定が進行中（upload_in_progress）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: 検証に通らなかった（unsupported_file_type・file_too_large・upload_not_received）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /avatars/cookies:
+    post:
+      operationId: issueAvatarCookies
+      summary: アバターの配信の署名付き Cookie の発行（F-04）
+      description: >-
+        ログインしている利用者に、CloudFront の /avatars/* に有効な署名付き Cookie を発行する（機能一覧 1.3。ワークスペースやチャンネルの参加を問わない）。
+        Cookie は CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id の3つで、Path=/avatars; HttpOnly; Secure; SameSite=Strict。
+        期限（expiresIn 秒）より前に取り直す。CloudFront の署名鍵を設定していない環境（手元）では Cookie を発行せず 204 を返す。
+        本体は送らない
+      responses:
+        '200':
+          description: 発行した
+          headers:
+            Set-Cookie:
+              description: CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id（Path=/avatars）
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignedCookiesResponse'
+        '204':
+          description: CloudFront の署名鍵を設定していない環境であり、Cookie を発行しない
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /workspaces/{id}/channels/{channelId}/files/cookies:
+    parameters:
+      - $ref: '#/components/parameters/WorkspaceId'
+      - $ref: '#/components/parameters/ChannelId'
+    post:
+      operationId: issueChannelFileCookies
+      summary: チャンネルの添付の配信の署名付き Cookie の発行（F-29）
+      description: >-
+        そのチャンネルの参加者に、CloudFront の /files/workspace/{ws}/channel/{ch}/* に限って有効な署名付き Cookie を発行する（機能一覧 11.2）。
+        Cookie は CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id の3つで、Path=/files; HttpOnly; Secure; SameSite=Strict。
+        同じ名前・Path の Cookie は上書きされるため、有効なのは最後に発行したチャンネルの分だけである。期限（expiresIn 秒）より前に取り直す。
+        コードは参加者一覧と同じ2段階: 所属していなければ種別によらず 404、所属していて参加者でなければパブリックは 403
+        not_a_channel_member・プライベートは 404。オーナーの例外は及ばない。アーカイブ済みのチャンネルも、参加者には発行する（読める。機能一覧 3.2）。
+        CloudFront の署名鍵を設定していない環境（手元）では、判定を通ったときに Cookie を発行せず 204 を返す。本体は送らない
+      responses:
+        '200':
+          description: 発行した
+          headers:
+            Set-Cookie:
+              description: CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id（Path=/files）
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignedCookiesResponse'
+        '204':
+          description: CloudFront の署名鍵を設定していない環境であり、Cookie を発行しない
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: そのチャンネルの参加者でない（not_a_channel_member）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /invitations:
@@ -1169,11 +2459,46 @@ components:
       schema:
         type: string
         format: uuid
+    DmId:
+      name: dmId
+      in: path
+      required: true
+      description: DM の id。形が uuid でなければ 400
+      schema:
+        type: string
+        format: uuid
+    Emoji:
+      name: emoji
+      in: path
+      required: true
+      description: >-
+        リアクションの絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ。URL エンコードして渡す）。
+        絵文字1つでなければ 400。JSON Schema の pattern では文字列の性質を書けないため、絵文字1つかは api が確かめる
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 32
+    UploadId:
+      name: uploadId
+      in: path
+      required: true
+      description: アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400
+      schema:
+        type: string
+        format: uuid
     InvitationId:
       name: id
       in: path
       required: true
       description: 招待の id。形が uuid でなければ 400
+      schema:
+        type: string
+        format: uuid
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      description: 通知の id。形が uuid でなければ 400
       schema:
         type: string
         format: uuid
@@ -1303,6 +2628,9 @@ components:
             - already_invited
             - already_member
             - owner_cannot_leave
+            - password_mismatch
+            - owner_cannot_delete_account
+            - pin_limit_reached
             - channel_name_taken
             - not_a_channel_member
             - already_channel_member
@@ -1310,6 +2638,15 @@ components:
             - channel_not_private
             - channel_not_archived
             - not_message_author
+            - dm_with_self
+            - dm_counterpart_not_found
+            - dm_counterpart_unavailable
+            - reaction_limit_reached
+            - unsupported_file_type
+            - file_too_large
+            - upload_not_received
+            - upload_in_progress
+            - attachment_unavailable
             - request_rejected
             - internal_error
         message:
@@ -1432,6 +2769,16 @@ components:
         expiresIn:
           description: アクセストークンの有効期間（秒）
           type: integer
+    SignedCookiesResponse:
+      description: 発行した CloudFront の署名付き Cookie の有効期間
+      type: object
+      additionalProperties: false
+      required:
+        - expiresIn
+      properties:
+        expiresIn:
+          description: 署名付き Cookie の有効期間（秒）。これより前に取り直す
+          type: integer
     LoginResponse:
       type: object
       additionalProperties: false
@@ -1468,6 +2815,40 @@ components:
           type: string
         displayName:
           type: string
+    UserSettings:
+      description: >-
+        利用者ごとの設定（F-23。機能一覧 10.1）。**プロフィール（Profile）とは分ける**——
+        プロフィールが持つのは他人に見える情報であり、設定は本人にしか返さない。
+        通知の設定（F-24・F-25）が増えたら、ここに足す
+      type: object
+      additionalProperties: false
+      required:
+        - threadUnreadIncluded
+      properties:
+        threadUnreadIncluded:
+          description: >-
+            スレッド内の未読を、チャンネルの未読に含めるか（既定は含める）。
+            切り替えても既読位置は動かさないため、「含めない」→「含める」で過去の未読の返信が未読として現れる（機能一覧 10.1）
+          type: boolean
+    DeleteAccountRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - password
+      properties:
+        password:
+          description: 今のパスワード。1〜128文字（LoginRequest の password と同じ）
+          type: string
+          minLength: 1
+          maxLength: 128
+    UpdateUserSettingsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        threadUnreadIncluded:
+          description: 送った項目だけを変える（機能一覧 10.1）
+          type: boolean
     Profile:
       type: object
       additionalProperties: false
@@ -1529,6 +2910,68 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Status'
             - type: 'null'
+    UploadRequest:
+      description: >-
+        アップロードの発行の要求（機能一覧 11.1）。どれも申告であり、形式と大きさは確定で中身から検証する。
+        キー・パス・URL は指定できない（サーバーが組み立てる）
+      type: object
+      additionalProperties: false
+      required:
+        - fileName
+        - contentType
+        - size
+      properties:
+        fileName:
+          description: 元のファイル名（1〜255 文字）。保存名はこれを置き換えて作る
+          type: string
+          minLength: 1
+          maxLength: 255
+        contentType:
+          description: >-
+            申告する Content-Type。許可リスト（packages/shared の UPLOAD_FORMATS）の値でなければ 422 unsupported_file_type。
+            署名付き URL の PUT には、この値をそのまま Content-Type に付ける
+          type: string
+          minLength: 1
+          maxLength: 255
+        size:
+          description: 申告する大きさ（バイト）。種別の上限を超えれば 422 file_too_large
+          type: integer
+          minimum: 1
+    UploadTicket:
+      description: 発行したアップロード（機能一覧 11.1）
+      type: object
+      additionalProperties: false
+      required:
+        - uploadId
+        - uploadUrl
+        - uploadHeaders
+        - expiresAt
+      properties:
+        uploadId:
+          description: アップロードの識別子。確定の要求に使う
+          type: string
+          format: uuid
+        uploadUrl:
+          description: 本体を PUT する署名付き URL（宛先は隔離用のキー）
+          type: string
+        uploadHeaders:
+          description: PUT に付けるヘッダー。どちらも署名に含まれ、変えたり外したりすると断られる
+          type: object
+          additionalProperties: false
+          required:
+            - Content-Type
+            - If-None-Match
+          properties:
+            Content-Type:
+              type: string
+            If-None-Match:
+              type: string
+              enum:
+                - '*'
+        expiresAt:
+          description: 署名付き URL の有効期限（発行から 5 分）。この時刻までに PUT を始める
+          type: string
+          format: date-time
     HealthResponse:
       type: object
       additionalProperties: false
@@ -1604,6 +3047,18 @@ components:
       enum:
         - PUBLIC
         - PRIVATE
+    UpdateChannelReadRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - lastReadMessageId
+      properties:
+        lastReadMessageId:
+          description: >-
+            読んだ位置（そのチャンネルのメッセージの id。F-23。機能一覧 10.1）。
+            既読位置は戻さないため、いま持っている位置より古い id を渡しても既読位置は変わらない
+          type: string
+          format: uuid
     CreateChannelRequest:
       type: object
       additionalProperties: false
@@ -1621,6 +3076,81 @@ components:
           pattern: '\S'
         visibility:
           $ref: '#/components/schemas/ChannelVisibility'
+    CreateMessageRequest:
+      description: >-
+        チャンネルへの投稿の本体（機能一覧 4.1）。確定した添付を最大 10 件付けられる。
+        本文は 4000 文字まで。添付が無ければ PostMessageRequest と同じく 1 文字以上で空白だけは不可、
+        添付が 1 件以上あれば空・空白だけでもよい（画像だけの投稿。#614）
+      type: object
+      additionalProperties: false
+      required:
+        - body
+      # 添付が1件以上あれば本文は空でもよい。無ければ 1 文字以上で空白だけは不可（#614）。
+      # anyOf で書くと生成する型が緩い和になるため、if/then/else で書く（型は properties のまま）
+      if:
+        required:
+          - attachmentIds
+        properties:
+          attachmentIds:
+            minItems: 1
+      else:
+        properties:
+          body:
+            minLength: 1
+            pattern: '\S'
+      properties:
+        body:
+          description: 4000 文字まで（文字数はコードポイントで数える）。添付が無ければ 1 文字以上で空白だけは不可（機能一覧 4.1・#614）
+          type: string
+          maxLength: 4000
+        attachmentIds:
+          description: >-
+            付ける添付の識別子（確定の応答の id）。自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけを付けられる
+            （1つでも当たらなければ 422 attachment_unavailable で、投稿しない）。並びは上げた順になる
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+    Attachment:
+      description: 添付ファイル（機能一覧 11.1・11.2）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - fileName
+        - contentType
+        - kind
+        - size
+        - url
+      properties:
+        id:
+          description: アップロードの識別子
+          type: string
+          format: uuid
+        fileName:
+          description: 利用者が付けた元のファイル名（表示用。保存名とは違う）
+          type: string
+        contentType:
+          description: 配信の Content-Type（検証した形式からサーバーが決めた値。テキスト系は text/plain; charset=utf-8）
+          type: string
+        kind:
+          description: 種別（画像は表示し、動画は #t=30 の位置を表示し、それ以外はリンクにする。機能一覧 11.1）
+          type: string
+          enum:
+            - image
+            - video
+            - document
+            - archive
+        size:
+          description: 大きさ（バイト）
+          type: integer
+          minimum: 1
+        url:
+          description: >-
+            配信 URL のパス（/files/workspace/{workspaceId}/channel/{channelId}/{id}/{保存名}）。CloudFront の署名付き Cookie で取得する（機能一覧 11.2）
+          type: string
     PostMessageRequest:
       type: object
       additionalProperties: false
@@ -1645,6 +3175,12 @@ components:
         - createdAt
         - editedAt
         - deleted
+        - parentId
+        - replyCount
+        - replyParticipants
+        - mentions
+        - reactions
+        - attachments
       properties:
         id:
           description: UUIDv7。一覧のカーソル（before）にそのまま使う
@@ -1653,6 +3189,24 @@ components:
         channelId:
           type: string
           format: uuid
+        parentId:
+          description: スレッドの親の id。チャンネルの本体のメッセージなら null（機能一覧 6）
+          type:
+            - string
+            - 'null'
+          format: uuid
+        replyCount:
+          description: 削除されていない返信の件数。返信なら常に 0（返信はスレッドを持たない。機能一覧 6）
+          type: integer
+          minimum: 0
+        replyParticipants:
+          description: >-
+            返信した参加者。削除されていない返信を書いた、退会していない利用者を、最後に返信した順に最大3人（機能一覧 6）。
+            返信と、返信の無いメッセージは空
+          type: array
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/UserSummary'
         author:
           description: 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
           oneOf:
@@ -1675,6 +3229,90 @@ components:
         deleted:
           description: 削除済みか（「このメッセージは削除されました」に置き換えて表示する。機能一覧 4.2）
           type: boolean
+        mentions:
+          description: >-
+            本文のメンションの対象（機能一覧 9.1）。投稿・返信のときに、そのチャンネルの参加者で退会していない利用者へ解決できた
+            `@ユーザーID` を保存し、本文に最初に現れた順に1人1件で載せる。編集では、本文にユーザーID が残っている対象は解決し直さずに残す
+            （チャンネルを抜けた・退会した対象も残り、退会した対象は user が null）。本文から消えた対象は外し、新しく書いた `@` は投稿と同じく解決して足す。
+            削除済みのメッセージは空
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageMention'
+        reactions:
+          description: >-
+            リアクション（機能一覧 7）。絵文字ごとに1件で、その絵文字を初めて付けた順。削除済みのメッセージは空
+            （本文を返さないのと同じく返さない。付けた記録は DB に残る）
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/Reaction'
+        attachments:
+          description: >-
+            投稿に付けた添付（上げた順）。削除済みのメッセージは空（本文を返さないのと同じく返さない。機能一覧 4.2）
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+    Reaction:
+      description: 1つの絵文字のリアクション（機能一覧 7）
+      type: object
+      additionalProperties: false
+      required:
+        - emoji
+        - count
+        - users
+      properties:
+        emoji:
+          description: 絵文字1つ
+          type: string
+        count:
+          description: >-
+            付けた人数（カウンタ列。一覧で COUNT を発行しない。要件定義書 4.1）。退会した利用者の分も数える
+          type: integer
+          minimum: 1
+        users:
+          description: >-
+            付けた人（「誰が付けたか」をホバーで出す。機能一覧 7）。付けた順。退会した利用者は含めない
+            （そのため count より少ないことがある）
+          type: array
+          items:
+            $ref: '#/components/schemas/UserSummary'
+    MessageReactions:
+      description: 1つのメッセージのリアクション（付け外しの応答。reaction:changed の payload も同じ項目に送信時刻を足す）
+      type: object
+      additionalProperties: false
+      required:
+        - channelId
+        - messageId
+        - reactions
+      properties:
+        channelId:
+          type: string
+          format: uuid
+        messageId:
+          type: string
+          format: uuid
+        reactions:
+          description: Message.reactions と同じ
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/Reaction'
+    MessageMention:
+      description: メンションの対象（表示時の参照先。機能一覧 9.1 の経路2。対象がいまそのチャンネルの参加者かは問わない）
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+        - user
+      properties:
+        userId:
+          description: 対象のユーザーID（登録したときの大文字小文字のまま）。本文の `@ユーザーID` とは大文字小文字によらず照合する（機能一覧 1.1）
+          type: string
+        user:
+          description: 対象の利用者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
+          oneOf:
+            - $ref: '#/components/schemas/UserSummary'
+            - type: 'null'
     MessagePage:
       type: object
       additionalProperties: false
@@ -1693,6 +3331,128 @@ components:
             - string
             - 'null'
           format: uuid
+    SearchResult:
+      description: >-
+        検索の結果（機能一覧 12.1）。種別ごとのセクションを持つ。DM（F-19）とファイル（F-27）のセクションは、それぞれの実装で足す
+      type: object
+      additionalProperties: false
+      required:
+        - messages
+        - channels
+        - users
+      properties:
+        messages:
+          description: 新しい順。最大20件
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/SearchMessage'
+        channels:
+          description: 名前の順。最大20件
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/SearchChannel'
+        users:
+          description: ユーザーID の小文字の順。最大20人
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/UserSummary'
+    SearchMessage:
+      description: 検索に当たったメッセージ。本文は削除されていないものだけが当たるため、常にある
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - channel
+        - parentId
+        - author
+        - body
+        - createdAt
+        - editedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          $ref: '#/components/schemas/SearchChannel'
+        parentId:
+          description: スレッドの返信なら親の id。チャンネルの本体のメッセージなら null（機能一覧 6）
+          type:
+            - string
+            - 'null'
+          format: uuid
+        author:
+          description: 投稿者。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
+          oneOf:
+            - $ref: '#/components/schemas/UserSummary'
+            - type: 'null'
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        editedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    SearchChannel:
+      description: 検索に当たったチャンネルと、メッセージが属するチャンネル
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - visibility
+        - archived
+        - joined
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        visibility:
+          $ref: '#/components/schemas/ChannelVisibility'
+        archived:
+          type: boolean
+        joined:
+          description: 要求した利用者がこのチャンネルに参加しているか（メッセージのチャンネルは常に true）
+          type: boolean
+    PinnedMessage:
+      description: ピン留めしたメッセージ（機能一覧 13.2）
+      type: object
+      additionalProperties: false
+      required:
+        - message
+        - pinnedBy
+        - pinnedAt
+      properties:
+        message:
+          $ref: '#/components/schemas/Message'
+        pinnedBy:
+          description: ピン留めした人。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
+          oneOf:
+            - $ref: '#/components/schemas/UserSummary'
+            - type: 'null'
+        pinnedAt:
+          description: ピン留めした時刻
+          type: string
+          format: date-time
+    PinList:
+      type: object
+      additionalProperties: false
+      required:
+        - pins
+      properties:
+        pins:
+          description: ピン留めした新しい順
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/PinnedMessage'
     Channel:
       description: 一般の一覧（参加者向け）のチャンネル
       type: object
@@ -1702,6 +3462,10 @@ components:
         - name
         - visibility
         - joined
+        - joinedAt
+        - unread
+        - mentions
+        - lastReadMessageId
       properties:
         id:
           type: string
@@ -1713,6 +3477,37 @@ components:
         joined:
           description: 要求した利用者がこのチャンネルに参加しているか
           type: boolean
+        joinedAt:
+          description: >-
+            要求した利用者がこのチャンネルに参加した時刻（F-23。機能一覧 10.1）。参加していなければ null。
+            **既読位置をまだ持たない利用者の「ここから未読」の区切り線を、この時刻より後の最初のメッセージの上に出すために要る**——
+            未読数から位置を数えてはならないため、境目は時刻か id でしか決められない
+          type:
+            - string
+            - 'null'
+          format: date-time
+        unread:
+          description: >-
+            要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。
+            既読位置をまだ持たない利用者は、参加した時点より後だけを数える。参加していないパブリックチャンネルは常に 0
+          type: integer
+          minimum: 0
+        mentions:
+          description: >-
+            要求した利用者のメンションの件数（F-24。機能一覧 10.2）。**未読のうち、要求した利用者をメンションしているもの**を数える
+            ——`unread` と同じ条件で数えるため、常に `unread` 以下であり、既読を進めると一緒に減る。
+            `@channel` は参加者全員に、`@here` は受け取りを返した利用者にだけ数える（F-21。機能一覧 9.2）。参加していないチャンネルは常に 0
+          type: integer
+          minimum: 0
+        lastReadMessageId:
+          description: >-
+            要求した利用者の既読位置（F-23。機能一覧 10.1）。「ここから未読」の区切り線を、この次のメッセージの上に出す。
+            まだ既読位置を持たない利用者と、参加していないチャンネルでは null（線は、参加した時点より後の最初のメッセージの上に出す）。
+            未読数から位置を数えてはならない——自分の投稿と削除済みは未読に数えないが、一覧には並ぶため必ずずれる
+          type:
+            - string
+            - 'null'
+          format: uuid
     ManagedChannel:
       description: >-
         オーナーの管理用の一覧の項目。持つのはこれだけで、メッセージ・添付ファイル・未読数・在席は持たない（機能一覧 3.1 の但し書き）
@@ -1810,3 +3605,286 @@ components:
         createdAt:
           type: string
           format: date-time
+    StartDmRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - userId
+      properties:
+        userId:
+          description: 相手の User.id（ワークスペースの参加者一覧が返す id。ユーザーID ではない）
+          type: string
+          format: uuid
+    UpdateDmReadRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - lastReadMessageId
+      properties:
+        lastReadMessageId:
+          description: >-
+            読んだ位置（その DM のメッセージの id。F-23。機能一覧 10.1）。
+            既読位置は戻さないため、いま持っている位置より古い id を渡しても既読位置は変わらない
+          type: string
+          format: uuid
+    Dm:
+      description: 自分が当事者の DM（機能一覧 8・10.1）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - counterpart
+        - writable
+        - joinedAt
+        - unread
+        - lastReadMessageId
+      properties:
+        id:
+          type: string
+          format: uuid
+        counterpart:
+          description: 相手。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
+          oneOf:
+            - $ref: '#/components/schemas/UserSummary'
+            - type: 'null'
+        writable:
+          description: >-
+            相手がいまこのワークスペースの退会していないメンバーか。false なら投稿できない（409 dm_counterpart_unavailable。機能一覧 8）。
+            過去のメッセージは読める
+          type: boolean
+        joinedAt:
+          description: >-
+            要求した利用者がこのワークスペースに参加した時刻（F-23。機能一覧 10.1）。既読位置をまだ持たないとき、
+            未読はこの時刻より後のメッセージだけを数え、「ここから未読」の区切り線もこの時刻より後の最初のメッセージの上に出す
+          type: string
+          format: date-time
+        unread:
+          description: >-
+            要求した利用者の未読数（F-23。機能一覧 10.1）。既読位置からの差分で求め、自分の投稿と削除済みは数えない。
+            既読位置をまだ持たない利用者は、joinedAt より後だけを数える
+          type: integer
+          minimum: 0
+        lastReadMessageId:
+          description: >-
+            要求した利用者の既読位置（F-23。機能一覧 10.1）。「ここから未読」の区切り線を、この次のメッセージの上に出す。
+            まだ既読位置を持たなければ null。未読数から線の位置を数えてはならない
+          type:
+            - string
+            - 'null'
+          format: uuid
+    DmMessage:
+      description: DM のメッセージ（機能一覧 8・4.2）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - dmId
+        - author
+        - body
+        - createdAt
+        - editedAt
+        - deleted
+      properties:
+        id:
+          description: UUIDv7。一覧のカーソル（before）にそのまま使う
+          type: string
+          format: uuid
+        dmId:
+          type: string
+          format: uuid
+        author:
+          description: 書き手。退会した利用者なら null（削除済みの利用者として表示する。機能一覧 1.5）
+          oneOf:
+            - $ref: '#/components/schemas/UserSummary'
+            - type: 'null'
+        body:
+          description: 本文。削除済みなら null（本文は DB に残るが返さない。機能一覧 4.2）
+          type:
+            - string
+            - 'null'
+        createdAt:
+          type: string
+          format: date-time
+        editedAt:
+          description: 最後に編集した時刻。編集していなければ null（機能一覧 4.2）
+          type:
+            - string
+            - 'null'
+          format: date-time
+        deleted:
+          description: 削除済みか（機能一覧 4.2）
+          type: boolean
+    DmMessagePage:
+      type: object
+      additionalProperties: false
+      required:
+        - messages
+        - nextBefore
+      properties:
+        messages:
+          description: 新しい順
+          type: array
+          items:
+            $ref: '#/components/schemas/DmMessage'
+        nextBefore:
+          description: 続きを取るときに before に渡す id。続きが無ければ null
+          type:
+            - string
+            - 'null'
+          format: uuid
+
+    NotificationKind:
+      description: >-
+        通知の種類（機能一覧 10.3）。MENTION はチャンネルのメッセージのメンション（個人・@channel・受け取りを返した @here）、
+        DM は DM で受け取ったメッセージ（#623）
+      type: string
+      enum:
+        - MENTION
+        - DM
+    Notification:
+      description: 受け取った通知（機能一覧 10.3）。kind で、チャンネルの通知か DM の通知かを見分ける（#623）
+      oneOf:
+        - $ref: '#/components/schemas/ChannelNotification'
+        - $ref: '#/components/schemas/DmNotification'
+      discriminator:
+        propertyName: kind
+        mapping:
+          MENTION: '#/components/schemas/ChannelNotification'
+          DM: '#/components/schemas/DmNotification'
+    ChannelNotification:
+      description: チャンネルのメッセージのメンションの通知（機能一覧 10.3）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - createdAt
+        - readAt
+        - workspace
+        - channel
+        - message
+      properties:
+        id:
+          description: UUIDv7。一覧のカーソル（before）にそのまま使う
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+            - MENTION
+        createdAt:
+          description: 通知を作った時刻（メンションを保存した時刻。編集で足したメンションなら編集の時刻）
+          type: string
+          format: date-time
+        readAt:
+          description: 既読にした時刻。未読なら null
+          type:
+            - string
+            - 'null'
+          format: date-time
+        workspace:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        channel:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        message:
+          description: メンションしたメッセージ（チャンネルの一覧と同じ形。返信なら parentId を持つ）
+          $ref: '#/components/schemas/Message'
+    DmNotification:
+      description: DM で受け取ったメッセージの通知（機能一覧 10.2・10.3。#623）。宛先は DM の相手だけ（書き手本人には作らない）
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - kind
+        - createdAt
+        - readAt
+        - workspace
+        - dm
+        - message
+      properties:
+        id:
+          description: UUIDv7。一覧のカーソル（before）にそのまま使う（チャンネルの通知と同じ並びに混ぜる）
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+            - DM
+        createdAt:
+          description: 通知を作った時刻（DM を受け取った時刻）
+          type: string
+          format: date-time
+        readAt:
+          description: 既読にした時刻。未読なら null
+          type:
+            - string
+            - 'null'
+          format: date-time
+        workspace:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+        dm:
+          type: object
+          additionalProperties: false
+          required:
+            - id
+            - counterpart
+          properties:
+            id:
+              type: string
+              format: uuid
+            counterpart:
+              description: 相手（書き手）。退会した利用者なら null
+              oneOf:
+                - $ref: '#/components/schemas/UserSummary'
+                - type: 'null'
+        message:
+          description: 受け取った DM のメッセージ（DM の一覧と同じ形）
+          $ref: '#/components/schemas/DmMessage'
+    NotificationPage:
+      type: object
+      additionalProperties: false
+      required:
+        - notifications
+        - nextBefore
+      properties:
+        notifications:
+          description: 新しい順
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        nextBefore:
+          description: 続きを取るときに before に渡す id。続きが無ければ null
+          type:
+            - string
+            - 'null'
+          format: uuid

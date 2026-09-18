@@ -24,13 +24,19 @@ export const NOT_MESSAGE_AUTHOR: ErrorResponse = {
   message: '自分のメッセージだけを編集・削除できます',
 };
 
+/** そのチャンネルのピン留めが上限に達している（409。F-33。機能一覧 13.2。上限は pins.service.ts の `PIN_LIMIT`）。 */
+export const PIN_LIMIT_REACHED: ErrorResponse = {
+  code: 'pin_limit_reached',
+  message: 'このチャンネルにピン留めできる件数の上限に達しています',
+};
+
 /** 既にそのチャンネルの参加者である（409。参加・招待。一意索引 `ChannelMember_channelId_userId_key`）。 */
 export const ALREADY_CHANNEL_MEMBER: ErrorResponse = {
   code: 'already_channel_member',
   message: '既にこのチャンネルの参加者です',
 };
 
-/** アーカイブ済みのチャンネルである（409。参加・招待では人を増やせない・投稿・編集・削除ではメッセージを書けない・アーカイブでは再びアーカイブできない。機能一覧 3.2）。 */
+/** アーカイブ済みのチャンネルである（409。参加・招待では人を増やせない・投稿・返信・編集・削除ではメッセージを書けない・アーカイブでは再びアーカイブできない。機能一覧 3.2）。 */
 export const CHANNEL_ARCHIVED: ErrorResponse = {
   code: 'channel_archived',
   message: 'アーカイブ済みのチャンネルです',
@@ -55,4 +61,10 @@ export const CHANNEL_NOT_PRIVATE: ErrorResponse = {
 export const CHANNEL_INVITEE_NOT_FOUND: ErrorResponse = {
   code: 'invitee_not_found',
   message: 'その利用者はこのワークスペースのメンバーではありません',
+};
+
+/** そのメッセージに付いている絵文字の種類が上限に達していて、新しい絵文字を付けようとした（409。F-18。機能一覧 7。上限は reactions.ts の `REACTION_KINDS_LIMIT`）。 */
+export const REACTION_LIMIT_REACHED: ErrorResponse = {
+  code: 'reaction_limit_reached',
+  message: 'このメッセージに付けられる絵文字の種類の上限に達しています',
 };

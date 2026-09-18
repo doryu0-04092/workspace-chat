@@ -1,11 +1,23 @@
 import { type DynamicModule, Module } from '@nestjs/common';
 import { resolveRegistrationEnabled } from '../auth/registration-enabled';
 import {
+  resolveCloudFrontKeyPairId,
+  resolveCloudFrontPrivateKey,
+} from '../delivery/cloudfront-config';
+import {
   resolveApiTaskCount,
   resolveRedisUrl,
   resolveTrustProxyHops,
 } from '../rate-limit/rate-limit-config';
+import {
+  resolveS3Bucket,
+  resolveS3Endpoint,
+  resolveS3ForcePathStyle,
+  resolveS3Region,
+  resolveS3UploadRoleArn,
+} from '../storage/s3-config';
 import { resolveDatabaseUrl } from './database-url';
+import { isHttpOrigin } from './http-origin';
 
 /**
  * アプリの組み立てに要る設定。createApp が環境変数から resolveApiConfig で作り、組み立ての前にすべて検証する。
@@ -22,6 +34,13 @@ export interface ApiConfig {
   readonly registrationEnabled: boolean;
   readonly jwtSecret: string;
   readonly webOrigin: string;
+  readonly s3Bucket: string;
+  readonly s3Region: string;
+  readonly s3Endpoint: string | undefined;
+  readonly s3ForcePathStyle: boolean;
+  readonly s3UploadRoleArn: string | undefined;
+  readonly cloudfrontKeyPairId: string | undefined;
+  readonly cloudfrontPrivateKey: string | undefined;
 }
 
 /** ApiConfig を注入するトークン。 */
@@ -33,6 +52,11 @@ export const API_CONFIG = Symbol('API_CONFIG');
  * **踏むと壊れる: 本番の JWT_SECRET は英数字・長さ 64 で作る**（技術スタックの「本番の HTTPS・秘密情報・state の置き場」。
  * `infra/production/cache.tf` の `locals` の `jwt_secret_length`）。この定数を 64 より上げると、本番の api は起動時に落ちる。
  * 上げるときは、同じ `apply` で `jwt_secret_length` と `jwt_secret_version` を上げ、ECS のタスクを入れ替える。
+ * **代償: 止めずにローリングで入れ替えると、新旧の鍵を持つタスクが同時に動く区間ができる。**
+ * ALB にスティッキーセッションを置いていないため、**発行済みのアクセストークンを持つ利用者の要求が、
+ * 当たったタスクによって通ったり 401 になったりする**（リフレッシュで取り直せるが、その間は失敗が見える）。
+ * **漏えいの疑いで入れ替えるときは、この区間を作らない**——api を止めてから入れ替える
+ * （docs/requirements.md 4.2「秘密の値が漏れた疑いがあるとき」の JWT_SECRET の箇条）。
  */
 const JWT_SECRET_MIN_BYTES = 32;
 
@@ -65,17 +89,7 @@ export function resolveWebOrigin(raw: string | undefined): string {
       'WEB_ORIGIN が設定されていません（web の origin。例: https://chat.example.com）',
     );
   }
-  let url: URL | undefined;
-  try {
-    url = new URL(raw);
-  } catch {
-    url = undefined;
-  }
-  if (
-    url === undefined ||
-    (url.protocol !== 'https:' && url.protocol !== 'http:') ||
-    url.origin !== raw
-  ) {
+  if (!isHttpOrigin(raw)) {
     throw new Error(
       `WEB_ORIGIN の値が不正です（スキーム://ホスト[:ポート] の形で、末尾の / やパスを付けない）: ${JSON.stringify(raw)}`,
     );
@@ -90,6 +104,15 @@ export function resolveWebOrigin(raw: string | undefined): string {
  * `secret: true` の設定を足したら Terraform の側にもパラメータを足し、タスク定義の `environment` には書かない
  * （docs/tech-stack.md の「本番の HTTPS・秘密情報・state の置き場」）。マイグレーション用のタスク定義の `secrets` には `DATABASE_URL` 以外を足さない
  * （運用者が ECS Exec で入る先であり、足すと認証の外に出る。docs/requirements.md 4.2 手順 5 の代償）。
+ * `secret: true` の設定を3つより減らすと、api-config-infra.test.ts の「数え上げる対象がある」の下限で落ちる（減らすなら、その下限も直す）。
+ *
+ * **踏むと壊れる: `secret: true` を足したら、漏えいの疑いで入れ替えるときの手順も決めて
+ * docs/requirements.md 4.2「秘密の値が漏れた疑いがあるとき」に足す**（止めるか止めないか・その間に古い値が通用するか・代償）。
+ * **同節と docs/tech-stack.md の秘密情報の行は「`secret: true` と宣言した設定のすべて」と宣言している**ため、
+ * 足して手順を書かないと、その宣言が黙って偽になる。
+ * **あわせて、値を名前で並べている3箇所も直す**——docs/requirements.md の復旧の表の「Parameter Store の値」の行と
+ * 同 4.2 の節の導入文、docs/tech-stack.md の秘密情報の行が「いまは …」として名前を挙げている。**この食い違いを捕まえる検査は無い**
+ * （タスク定義とパラメータの対応は api-config-infra.test.ts が見るが、入れ替えの手順が決まっているかは誰も見ない）。
  */
 type Setting<T> = {
   readonly env: string;
@@ -125,7 +148,37 @@ export const API_SETTINGS: ApiSettings = {
     hint: `${JWT_SECRET_MIN_BYTES} バイト以上の乱数を渡す`,
   },
   webOrigin: { env: 'WEB_ORIGIN', resolve: resolveWebOrigin, secret: false },
+  s3Bucket: { env: 'S3_BUCKET', resolve: resolveS3Bucket, secret: false },
+  s3Region: { env: 'S3_REGION', resolve: resolveS3Region, secret: false },
+  s3Endpoint: { env: 'S3_ENDPOINT', resolve: resolveS3Endpoint, secret: false },
+  s3ForcePathStyle: {
+    env: 'S3_FORCE_PATH_STYLE',
+    resolve: resolveS3ForcePathStyle,
+    secret: false,
+  },
+  s3UploadRoleArn: { env: 'S3_UPLOAD_ROLE_ARN', resolve: resolveS3UploadRoleArn, secret: false },
+  cloudfrontKeyPairId: {
+    env: 'CLOUDFRONT_KEY_PAIR_ID',
+    resolve: resolveCloudFrontKeyPairId,
+    secret: false,
+  },
+  // 踏むと壊れる: 本番の値は Terraform の外（scripts/cloudfront-signing-key.sh）で Parameter Store に置く（#427）。
+  // Terraform は値を読まず、名前から ARN を組み立てて渡す（api-config-infra.test.ts の externalParameters）。
+  cloudfrontPrivateKey: {
+    env: 'CLOUDFRONT_PRIVATE_KEY',
+    resolve: resolveCloudFrontPrivateKey,
+    secret: true,
+    hint: 'PEM の RSA 秘密鍵を渡す',
+  },
 };
+
+/**
+ * 揃えて設定する設定の組（片方だけでは使えない）。**名前だけを知らせ、値を載せない**（秘密を含む組がある）。
+ * CloudFront の署名付き Cookie は、キーペア ID と秘密鍵の両方が要る——キーペア ID だけなら発行のたびに落ち、秘密鍵だけなら黙って発行しない。
+ */
+const PAIRED_SETTINGS: readonly (readonly [keyof ApiConfig, keyof ApiConfig])[] = [
+  ['cloudfrontKeyPairId', 'cloudfrontPrivateKey'],
+];
 
 /**
  * 環境変数から ApiConfig を組み立てる。**不正な設定が複数あれば、すべてを1つの例外で知らせる**
@@ -153,6 +206,21 @@ export function resolveApiConfig(
             ? error.message
             : String(error),
       );
+    }
+  }
+  for (const [first, second] of PAIRED_SETTINGS) {
+    const a = settings[first].env;
+    const b = settings[second].env;
+    const directions: readonly (readonly [string, string])[] = [
+      [a, b],
+      [b, a],
+    ];
+    for (const [given, absent] of directions) {
+      if (env[given] !== undefined && env[absent] === undefined) {
+        problems.push(
+          `${absent} が設定されていません（${given} を設定したときは、${absent} も揃えて渡す）`,
+        );
+      }
     }
   }
   if (problems.length > 0) {

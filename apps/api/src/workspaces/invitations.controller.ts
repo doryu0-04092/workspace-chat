@@ -1,5 +1,17 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard';
+import { UserRateLimitGuard } from '../rate-limit/user-rate-limit.guard';
 import {
   type CreateInvitationRequest,
   type Invitation,
@@ -7,6 +19,12 @@ import {
   type MyInvitation,
 } from './invitations.service';
 import type { Workspace } from './workspaces.service';
+
+/**
+ * 招待の候補の上限（利用者ごとに1分 60 回。#616。実装時に決めた値）。1要求が利用者の表への部分一致の問い合わせを1本起こすため（CWE-770）。
+ * **踏むと壊れる: 変えるなら openapi.yaml の `listInvitationCandidates` の description も同じ値にする。**
+ */
+export const INVITATION_CANDIDATES_LIMIT = { limit: 60, ttl: 60 * 1000 } as const;
 
 /**
  * ワークスペースへの招待と、招待の承諾・辞退（F-08 / F-38。機能一覧 2.2）。アクセストークンを求める（AccessTokenGuard の既定）。
@@ -24,6 +42,17 @@ export class InvitationsController {
     @Body() body: CreateInvitationRequest,
   ): Promise<Invitation> {
     return this.invitations.invite(user.id, workspaceId, body);
+  }
+
+  @Get('workspaces/:id/invitation-candidates')
+  @UseGuards(UserRateLimitGuard)
+  @Throttle({ default: INVITATION_CANDIDATES_LIMIT })
+  candidates(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+    @Query('q') q: string,
+  ): ReturnType<InvitationsService['candidates']> {
+    return this.invitations.candidates(user.id, workspaceId, q);
   }
 
   @Get('invitations')
