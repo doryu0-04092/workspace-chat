@@ -61,6 +61,10 @@ resource "aws_ecs_cluster" "main" {
 # --- IAM のロール ---------------------------------------------------------------
 #
 # 踏むと壊れる: この下のロール・ポリシー・結び付きは IAM の面に入る。足す・変えるときは、main.tf の冒頭の条件に従い、検査の iamSurface の表も直す。
+#
+# 踏むと壊れる: マイグレーションの run-task が要るロール・ポリシー（task_execution_managed・task_execution_parameters・
+# task_exec_command など）を足したら、scripts/release.sh の手順 3 の -target にも足す。足さないと、初回のリリースで
+# 手順 4 の run-task が権限の無いまま失敗する。
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
   statement {

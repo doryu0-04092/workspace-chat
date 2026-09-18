@@ -20,7 +20,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | **秘密の値の検査** | **完了**（[audit.yml](.github/workflows/audit.yml) の gitleaks。**中身を見るのはこれだけである**——`scripts/check-docs.test.sh` の 0c はファイル名しか見ない） |
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない）。**固定するのは「新しい版が出たから上げる」だけであり、脆弱性を塞ぐ更新は取り込む**（下記「依存の版を上げない方針」） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
-| 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17 と Valkey。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
+| 開発環境の Docker（DB・Redis・S3） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17・Valkey・MinIO（S3 互換のストレージ。#427）。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
 | Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#40） |
 | 実装 | 実装中 |
 
@@ -109,7 +109,7 @@ bash scripts/check-docs.test.sh
 ```
 
 （`shellcheck` は CI の ubuntu には既定で入っている。手元に無ければ
-この1行だけ飛ばす。`npm test` と `scripts/api-image.test.sh` は Docker が動いていることが前提。`scripts/api-image.test.sh` は `openssl` も要る（DB への TLS の検査に使う、使い捨ての証明書を作る）。**どちらも、タグで指す土台を毎回レジストリから取り直すため、レジストリに届くことも前提である**（`npm test` はテストの `POSTGRES_IMAGE`・`VALKEY_IMAGE`、`scripts/api-image.test.sh` は api の `NODE_IMAGE` とテストの `POSTGRES_IMAGE`）——手元に土台が残っていても、届かなければ通らない）
+この1行だけ飛ばす。`npm test` と `scripts/api-image.test.sh` は Docker が動いていることが前提。`scripts/api-image.test.sh` は `openssl` も要る（DB への TLS の検査に使う、使い捨ての証明書を作る）。**どちらも、タグで指す土台を毎回レジストリから取り直すため、レジストリに届くことも前提である**（`npm test` はテストの `POSTGRES_IMAGE`・`VALKEY_IMAGE`、`scripts/api-image.test.sh` は api の `NODE_IMAGE` とテストの `POSTGRES_IMAGE`）——手元に土台が残っていても、届かなければ通らない。`scripts/terraform.test.sh` は `terraform`（1.11 以上。CI は 1.15.7）が入っていることが前提で、**ロック（`infra/*/.terraform.lock.hcl`）が持つプラットフォーム（linux_amd64・linux_arm64・darwin_arm64・windows_amd64）でだけ通る**（`-lockfile=readonly` で回すため、記録の無いプラットフォームでは `init` が落ちる。`.gitignore` の Terraform の節の代償））
 
 `scripts/lint-scope.test.sh` が見るのは**走査範囲だけではない**。次の2つを確かめる
 （**番号は付けない**——下記の出力の見出し `1.`〜`3.` と桁が揃わず、別のものを指してしまう）。
@@ -376,22 +376,19 @@ redis://127.0.0.1:<REDIS_PORT>
 そのため [docker/postgres/Dockerfile](docker/postgres/Dockerfile) で
 ソースからビルドしている。初回の `up` はそのぶん遅い。
 
-**`CREATE EXTENSION pg_bigm` はこの compose では自動実行しない。**
-拡張を作るのは Prisma のマイグレーションの役目とする。
+**`CREATE EXTENSION pg_bigm` はこの compose の初期化スクリプトでは自動実行しない。**
+拡張を作るのは Prisma のマイグレーション（`apps/api/prisma/migrations/20260917192455_message_search`
+の `CREATE EXTENSION IF NOT EXISTS pg_bigm`）の役目である。
 初期化スクリプトで作ると、**ローカルだけ拡張があり、RDS には無い**状態が生まれ、
-「手元では検索できるのに本番で落ちる」という形で後から露見する。
+「手元では検索できるのに本番で落ちる」という形で後から露見する。マイグレーションはどの環境にも同じに適用するため、この差が生まれない。
 
-> **代償。** マイグレーションを書くまで、起動しただけの DB に pg_bigm は入っていない。
-> 手で確かめるには次を実行する。
+**起動しただけで、まだマイグレーションを適用していない DB には pg_bigm が入っていない。**
+`npx prisma migrate dev` などでマイグレーションを適用すれば入る。入っているかを手で確かめるには次を実行する
+（`\dx` は一覧するだけで状態を変えない）。
 
 ```
-docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "CREATE EXTENSION pg_bigm; DROP EXTENSION pg_bigm;"'
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dx pg_bigm"'
 ```
-
-**同じ1行で `DROP` まで済ませるのは、確認が状態を変えないようにするためである。**
-作ったまま放置すると、**この手順を実行した人の DB にだけ拡張が残る。**
-すぐ上に書いた「起動しただけの DB に pg_bigm は入っていない」という前提が、
-**手順に従った直後に、その人の手元でだけ崩れる。** 再現しない差が最も厄介である。
 
 **`sh -c` で包むのは、変数をコンテナの中で展開させるためである。**
 `.env` を読むのは compose であって手元のシェルではない。
@@ -473,6 +470,8 @@ Vite も設定ファイルを評価する時点では `.env` を読まず、そ�
 手元では `openssl rand -base64 32` などで作った乱数を渡す。**値をリポジトリ・ログ・チャットに出さない。**
 
 **api の起動には環境変数 `WEB_ORIGIN`（web の origin）も要る。** リフレッシュとログアウトの要求の `Origin` / `Referer` と、WebSocket（Socket.IO）のハンドシェイクの `Origin` と突き合わせる（CSRF と CSWSH の対処。要件定義書 4.3）。**スキーム://ホスト[:ポート] の形で、末尾の `/` を付けない**（付けると起動時に落ちる）。手元では web の開発サーバーの origin（例: `http://localhost:5173`）を渡す。
+
+**api の起動には環境変数 `S3_BUCKET`（バケット名）と `S3_REGION`（例: `ap-northeast-1`）も要る。** 未設定・空は起動時に落ちる（`apps/api/src/storage/s3-config.ts`）。手元では `compose.yaml` の `minio` サービス（S3 互換のストレージ。`#427`）に向け、`S3_ENDPOINT=http://127.0.0.1:<MINIO_PORT>` と `S3_FORCE_PATH_STYLE=true` も渡す（`S3_ENDPOINT` 未設定なら AWS の S3、`S3_FORCE_PATH_STYLE` 未設定なら既定の仮想ホスト形式になるため、本番ではどちらも渡さない）。資格情報は api の設定には無く、AWS SDK が `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`（手元は `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` と同じ値）から読む（本番は ECS のタスクロール）。詳しくは [.env.example](.env.example) の「S3 互換のストレージ」。
 
 | 環境変数 | 既定 | 意味 |
 |---|---|---|

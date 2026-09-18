@@ -109,6 +109,7 @@ COPY --from=build /app/packages/shared/openapi packages/shared/openapi
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY apps/api/certs/rds-global-bundle.pem certs/
 USER node
+# 3000 は apps/api/src/port.ts の既定のポート（infra/production/compute.tf の api_port）の写しである。
 EXPOSE 3000
 # --no-warnings: Node の警告の既定の出力（素のテキストで標準エラー）を止める。警告は api が 'warning' を受けて構造化ログに残す
 # （apps/api/src/bootstrap.ts の installWarningLog。要件定義書 4.6）。マイグレーション用の段には付けない——Prisma の CLI は警告を残す先を持たない。
