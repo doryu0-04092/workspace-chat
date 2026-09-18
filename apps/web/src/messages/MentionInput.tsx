@@ -22,6 +22,7 @@ function broadcastCandidates(prefix: string): UserSummary[] {
       id: `broadcast:${mention}`,
       userId: mention,
       displayName: BROADCAST_LABELS[mention],
+      avatarUrl: null,
     }),
   );
 }

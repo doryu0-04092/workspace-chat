@@ -3,6 +3,7 @@ import { type ReactNode, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
+import { UserAvatar } from '../users/UserAvatar';
 import { EditMessageForm, MessageActions } from './MessageActions';
 import { MessageAttachments } from './MessageAttachments';
 import { MessageBody } from './MessageBody';
@@ -293,7 +294,7 @@ export function MessageShell({
   children,
 }: {
   message: {
-    author: { displayName: string } | null;
+    author: { displayName: string; avatarUrl: string | null } | null;
     createdAt: string;
     editedAt: string | null;
     body: string | null;
@@ -306,6 +307,7 @@ export function MessageShell({
   return (
     <article className="px-2 py-2">
       <header className="flex items-baseline gap-2 text-sm">
+        <UserAvatar user={message.author} />
         <span className="font-bold">{message.author?.displayName ?? '削除済みの利用者'}</span>
         <time dateTime={message.createdAt} className="text-slate-500">
           {new Date(message.createdAt).toLocaleString('ja-JP')}
