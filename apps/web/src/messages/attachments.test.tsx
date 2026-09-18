@@ -310,6 +310,27 @@ describe('一覧の添付の表示（F-27）', () => {
     expect(link.getAttribute('href')).toBe(pdf.url);
   });
 
+  it('開いた会話の Cookie の発行が返るまでは、添付を取りに行かずファイル名だけを出す（#661）', async () => {
+    stubIntersectionObserver();
+    const cookies = deferred();
+    fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () => page([message(1, { attachments: [PNG] })]),
+        [`POST /api/workspaces/${WORKSPACE_ID}/channels/${GENERAL.id}/files/cookies`]:
+          cookies.handler,
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+
+    await screen.findByText('会議の写真.png');
+    expect(screen.queryByRole('img', { name: '会議の写真.png' })).toBeNull();
+
+    cookies.resolve(new Response(null, { status: 204 }));
+    expect((await screen.findByRole('img', { name: '会議の写真.png' })).getAttribute('src')).toBe(
+      PNG.url,
+    );
+  });
+
   it('動画は画面に入るまで <video> を作らず、入ったら #t=30 の位置を表示する', async () => {
     const observer = stubIntersectionObserver();
     const video = attachment(

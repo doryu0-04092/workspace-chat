@@ -526,4 +526,23 @@ describe('DM の添付ファイル（#239）', () => {
       false,
     );
   });
+
+  it('DM の Cookie の発行が返るまでは、添付を取りに行かずファイル名だけを出す（#661）', async () => {
+    let issued: (response: Response) => void = () => {};
+    await openDm({
+      [`GET ${DM_MESSAGES}`]: () => dmPage([dmMessage(1, { attachments: [PNG] })]),
+      [`POST ${DMS}/${DM.id}/files/cookies`]: () =>
+        new Promise<Response>((resolve) => {
+          issued = resolve;
+        }),
+    });
+
+    await screen.findByText('会議の写真.png');
+    expect(screen.queryByRole('img', { name: '会議の写真.png' })).toBeNull();
+
+    issued(new Response(null, { status: 204 }));
+    expect((await screen.findByRole('img', { name: '会議の写真.png' })).getAttribute('src')).toBe(
+      PNG.url,
+    );
+  });
 });
