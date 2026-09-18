@@ -178,5 +178,34 @@ describe('チャンネルの部屋の参加の照合', () => {
     it('照合の間隔は5分である', () => {
       expect(ROOM_RECONCILE_INTERVAL_MS).toBe(5 * 60 * 1000);
     });
+
+    // publish が来ないタスクでは、5分ごとの照合が参加者でなくなった接続を外す唯一の契機である（機能一覧 9.2。#369）。
+    it('起動すると5分ごとに照合し、終了した後は照合しない', () => {
+      vi.useFakeTimers();
+      const valkey = { onPublishRecovered: vi.fn() } as unknown as RealtimeValkeyClients;
+      const reconciler = new RoomMembershipReconciler(
+        {} as RealtimeGateway,
+        {} as PrismaService,
+        {} as RealtimePresence,
+        valkey,
+      );
+      const reconcile = vi.spyOn(reconciler, 'reconcile').mockResolvedValue();
+      try {
+        reconciler.onApplicationBootstrap();
+        vi.advanceTimersByTime(ROOM_RECONCILE_INTERVAL_MS - 1);
+        expect(reconcile).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(reconcile).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(ROOM_RECONCILE_INTERVAL_MS);
+        expect(reconcile).toHaveBeenCalledTimes(2);
+
+        reconciler.onModuleDestroy();
+        vi.advanceTimersByTime(ROOM_RECONCILE_INTERVAL_MS * 2);
+        expect(reconcile).toHaveBeenCalledTimes(2);
+      } finally {
+        reconciler.onModuleDestroy();
+        vi.useRealTimers();
+      }
+    });
   });
 });

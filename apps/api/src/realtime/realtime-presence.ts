@@ -24,6 +24,13 @@ type UserRemoved = { channelIds: string[]; userId: string };
  */
 @Injectable()
 export class RealtimePresence implements OnApplicationBootstrap {
+  /**
+   * 利用者をチャンネルの在席から外した回数（チャンネル × 利用者。このタスクと、サーバー間の通知で知った分）。
+   * 入室要求が参加の確認をまたいで見比べ、確認の往復の間に参加資格を失ったことを見分ける（#378）。
+   * 外された組だけが載る（キック・退出・退会の回数だけ増え、消さない）。
+   */
+  private readonly removals = new Map<string, number>();
+
   constructor(
     private readonly gateway: RealtimeGateway,
     private readonly registry: PresenceRegistry,
@@ -39,7 +46,10 @@ export class RealtimePresence implements OnApplicationBootstrap {
       this.registry.remove(channelId, userId, socketId);
     });
     server.on(USER_REMOVED, ({ channelIds, userId }: UserRemoved) => {
-      for (const channelId of channelIds) this.registry.removeUser(channelId, userId);
+      for (const channelId of channelIds) {
+        this.countRemoval(channelId, userId);
+        this.registry.removeUser(channelId, userId);
+      }
     });
   }
 
@@ -60,6 +70,16 @@ export class RealtimePresence implements OnApplicationBootstrap {
     await this.registry.refreshOne(channelId);
   }
 
+  /** その利用者をそのチャンネルの在席から外した回数（`removals`）。 */
+  removalsOf(channelId: string, userId: string): number {
+    return this.removals.get(`${channelId}:${userId}`) ?? 0;
+  }
+
+  private countRemoval(channelId: string, userId: string): void {
+    const key = `${channelId}:${userId}`;
+    this.removals.set(key, (this.removals.get(key) ?? 0) + 1);
+  }
+
   /** 接続が部屋から外れた（退室・切断）。 */
   left(channelId: string, userId: string, socketId: string): void {
     if (this.registry.remove(channelId, userId, socketId)) this.broadcast(channelId, userId, false);
@@ -72,6 +92,7 @@ export class RealtimePresence implements OnApplicationBootstrap {
    */
   userRemoved(channelIds: readonly string[], userId: string): void {
     for (const channelId of channelIds) {
+      this.countRemoval(channelId, userId);
       if (this.registry.removeUser(channelId, userId)) this.broadcast(channelId, userId, false);
     }
     this.gateway.server.serverSideEmit(USER_REMOVED, {
