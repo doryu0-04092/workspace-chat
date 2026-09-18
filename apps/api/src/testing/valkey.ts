@@ -10,6 +10,15 @@ import { GenericContainer, PullPolicy, type StartedTestContainer, Wait } from 't
  */
 export const VALKEY_IMAGE = 'valkey/valkey:8-alpine';
 
+/**
+ * Valkey だけを起動する `beforeAll` の待ち時間（120 秒）。`startValkey` は起動のたびに
+ * レジストリからイメージを取り直す（手元に無い・タグの中身が変わったときは取得が入る。上の VALKEY_IMAGE の docblock）。
+ * **取得に何秒かかるかは測っていない**——取り直す形になってから、これを使うテストの CI（`code` ジョブ）は
+ * 毎回通っている（未確認: 取得が遅い環境での実績は無い）。
+ * **ci.yml の timeout-minutes（15）より小さくする**（理由は postgres.ts の POSTGRES_STARTUP_TIMEOUT_MS と同じ）。
+ */
+export const VALKEY_STARTUP_TIMEOUT_MS = 120_000;
+
 export async function startValkey(): Promise<{ container: StartedTestContainer; url: string }> {
   const container = await new GenericContainer(VALKEY_IMAGE)
     .withPullPolicy(PullPolicy.alwaysPull())
