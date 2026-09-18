@@ -381,15 +381,15 @@
 
 | 対象 | 方式 |
 |---|---|
-| RDS | 自動バックアップを有効にする（**日次スナップショット＋トランザクションログの退避**。保持期間内の任意の時点へ復元できる）。保持期間と取得時間帯は Terraform に置く |
-| S3（添付ファイル） | バージョニングで誤削除に備える。**ライフサイクルは置かない。例外は `quarantine/`（検証前の隔離用のキー）だけ**である（[機能一覧](features.md) 11.1） |
+| RDS | **自動バックアップの保持期間は 0 日（自動バックアップを行わない）**（決定・2026-09-17・依頼側。無料プランの制限とスクール課題の検証用のため。`infra/production/database.tf` の `db_backup_retention_period`）。**代償: RDS の障害や誤操作からは、バックアップによる復元ができない**（下記「RDS の障害から復旧するとき」）。**`deletion_protection = false`**（`database.tf`）。**代償: `skip_final_snapshot`（下記）と組み合わさり、誤って `destroy` すると最終スナップショットも残らず、写しが一切残らない**。**`storage_encrypted = true`**（`database.tf`） |
+| S3（添付ファイル・アバター画像） | バージョニングで誤削除に備える。**ライフサイクルは置かない。例外は `quarantine/`（検証前の隔離用のキー）だけ**である（同じバケットの `avatars/` にアバター画像も置く。`infra/production/attachments.tf`。[機能一覧](features.md) 11.1） |
 | Terraform の state のバケット | バージョニングで誤削除と誤った書き込みに備える（HashiCorp の S3 バックエンドの文書「enable Bucket Versioning on the S3 bucket to allow for state recovery in the case of accidental deletions and human error」。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。**state を失うと、本体の構成を Terraform から操作できなくなる** |
 | `infra/bootstrap` の state（手元のファイル） | **対象外。写しを持たない**（state のバケットを作る前には置き場が無いため、手元のファイルに置く。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の state の行）。失ったら取り込み直す（下の「復旧手順」） |
 | Systems Manager Parameter Store（`secret: true` の設定の値） | **対象外。値の写しを持たない**（state にもプランにも残さない。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。失ったら作り直して入れ直す（下の「復旧手順」） |
 | ElastiCache Valkey | **対象外**（この節の「代償」） |
 | ECR のイメージ（api・マイグレーション用） | **対象外。写しを持たない**（ソースから作り直せるビルドの成果物である）。失ったら作り直して push し直す（下の「復旧手順」） |
 
-**S3 のバージョニングは、`terraform destroy` を止める。** バージョニングを有効にしたバケットは、
+**添付のバケットのバージョニングは、`terraform destroy` を止める。** バージョニングを有効にしたバケットは、
 オブジェクトを消しても**旧バージョンとデリートマーカーが残る**ため、`force_destroy` を指定しない限り
 バケットの削除が失敗する。ライフサイクルを置かないので旧バージョンが自動で消えることもない（`quarantine/` を除く）。
 **添付のバケットは `force_destroy` を指定する**（決定・2026-09-14・作業側。依頼側の「一般的なエンジニア目線で判断できることは判断してほしい」という委任による。#452。`infra/production/attachments.tf`）——デモの後に destroy する運用であり、旧バージョンに残る個人情報（6.2）も destroy で消す。**代償: 誤って destroy すると、添付ファイルは旧バージョンを含めて戻せない**（RDS も同じ destroy で消える）。
@@ -412,7 +412,7 @@
 
 #### 復旧手順
 
-**対象は7つあり、復旧の手順としてはそれぞれ閉じている。**
+**対象は7つあり、復旧の手順としてはそれぞれ閉じている。例外は Parameter Store の値と RDS・ElastiCache のパスワードで、同じ `apply` で `value_wo_version` と `password_wo_version`・`auth_token_wo_version` を揃える必要があり、独立には閉じていない**（下表「Parameter Store の値」の行）。
 
 | 対象 | 復旧の方式 |
 |---|---|
@@ -434,7 +434,7 @@ S3 に残ったまま、どのメッセージからも参照されなくなる**
 削除されたはずの添付ファイルが、参照されないまま、`terraform destroy` までは
 取り出せる状態で残る）**である。**
 
-**RDS の障害から復旧するとき**、次の順で行う。
+**RDS の障害から復旧するとき**、次の順で行う。**自動バックアップの保持期間は 0 日であり（上記「バックアップ」）、この手順が前提とする日次スナップショットとトランザクションログの退避は無い。手順 1 は成立せず、RDS の障害や誤操作からの復元はできない。**
 
 1. **復元する時点を決める。** RDS の自動バックアップは日次スナップショットに加えて
    トランザクションログを継続的に退避しており、**保持期間内の任意の時点へ復元できる**
