@@ -660,6 +660,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **この間、下記「アラート」の 5xx 率が鳴りうる**——ALB は健全なターゲットが無いとき 503 を返すためである。
   **ただし必ず鳴るわけではない**——このアラームは割合で、`treat_missing_data = "notBreaching"` である
   （`infra/production/alarms.tf`。要求が無い時間帯は割合が求まらず、鳴らさない）。
+  **鳴るのは評価期間（300 秒 × 2 期間＝10 分）続いたときである**（同じ `locals`。**入れ替えがそれより短ければ鳴らない**）。
   **要求の来ない時間帯に入れ替えれば、全断でも鳴らない。**
   鳴ったときは、**自分の入れ替えで鳴ったものと、別の異常とを取り違えないこと**
 - **ElastiCache の AUTH トークン（`REDIS_URL`）は、レプリケーショングループを作り直す**（`valkey_auth_token_version` を上げ、`tf apply -replace=aws_elasticache_replication_group.valkey` で**同じ `apply` の中で**作り直し、**その後に `aws ecs update-service --cluster "$cluster" --service "$service" --force-new-deployment` でタスクを入れ替え、`aws ecs wait services-stable --cluster "$cluster" --services "$service"` で安定を待つ**（変数は上の共通の前置きで束縛する）。**desired count を 0 にして戻す形は採らない**（この箇条が「api は止めない」と決めているため）。上の復旧の表の「ElastiCache Valkey」の行）。漏れたトークンは、古いクラスタとともに消える。**api は止めない。** **既存のクラスタのトークンを変える経路（ROTATE・SET）は使わない**——ROTATE は古いトークンを残し（ElastiCache の文書「The ROTATE strategy adds an additional AUTH token to the server while retaining the previous token.」）、古いトークンを外す SET には最後のトークンと同じ値を渡す必要がある（同「with same value as the last AUTH token」）が、トークンは `apply` ごとの ephemeral の乱数で作って手元に置かないため、同じ値を渡せない。**代償: 作り直しの間と、タスクを入れ替えるまでは、Valkey が止まっているときと同じ縮退になる**（上記「フェイルオーバーを行わない」）。
@@ -686,9 +687,13 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
      **こちらは動作の確認だけでは特に弱い**——**鍵が替わらなかったときのほうが容易に通る**（発行済みのトークンがそのまま通る）ため、
      どちらでも通ってしまい、漏れた鍵が生きているかを区別できない
 
-  **代償: 入れ替えの間、サービス全体が止まる**（上の RDS と同じく、この間は 5xx 率のアラートが鳴りうる。
-  **要求の来ない時間帯なら鳴らない**——同じ理由）。
+  **代償: 入れ替えの間、サービス全体が止まる**（上の RDS と同じく、この間は 5xx 率のアラートが鳴りうるが、
+  **鳴るのは評価期間（300 秒 × 2 期間＝10 分）続いたときである**（`infra/production/alarms.tf` の `locals`。
+  入れ替えがそれより短ければ鳴らない）。**要求の来ない時間帯なら鳴らない**——同じ理由）。
   **発行済みのアクセストークンはすべて無効になるが、利用者はログインし直さずに済む**——リフレッシュトークンは DB に置く乱数で、署名の鍵に依らないためである
+
+**ここからは、個々の入れ替え手順ではなく、この節の復旧手順全体に掛かる注記である。**
+
 - **2つの DB 利用者を交互に使い、止めずに入れ替える形は採らない**（Secrets Manager の文書が可用性の要る場合に勧める形。「After rotation, both `user` and `user_clone` credentials are valid.」）。DB は外から繋げないため、利用者の作成・権限の付与・パスワードの設定を、psql を持つマイグレーション用のタスクで流す仕組みが要る。**代償は、上の RDS の計画停止である**
 
 - **RTO（復旧までの目標時間）は定めない。** 学習用途であり、停止が業務に影響しないため
