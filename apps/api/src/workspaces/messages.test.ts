@@ -244,7 +244,12 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       expect(message).toEqual({
         id: expect.stringMatching(UUID_V7),
         channelId,
-        author: { id: alice.id, userId: alice.loginId, displayName: expect.any(String) },
+        author: {
+          id: alice.id,
+          userId: alice.loginId,
+          displayName: expect.any(String),
+          avatarUrl: null,
+        },
         body: 'こんにちは',
         createdAt: expect.any(String),
         editedAt: null,
@@ -1059,7 +1064,12 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
 
     /** 応答の `UserSummary` の形（表示名は login が連番で作る）。 */
     function summaryOf(user: LoggedIn) {
-      return { id: user.id, userId: user.loginId, displayName: expect.any(String) };
+      return {
+        id: user.id,
+        userId: user.loginId,
+        displayName: expect.any(String),
+        avatarUrl: null,
+      };
     }
 
     it('親の replyParticipants は、削除されていない返信を書いた退会していない利用者を、最後に返信した順に最大3人返す。返信は空', async () => {
@@ -1109,7 +1119,12 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
       expect(await res.json()).toEqual({
         id: expect.stringMatching(UUID_V7),
         channelId,
-        author: { id: bob.id, userId: bob.loginId, displayName: expect.any(String) },
+        author: {
+          id: bob.id,
+          userId: bob.loginId,
+          displayName: expect.any(String),
+          avatarUrl: null,
+        },
         body: '返信',
         createdAt: expect.any(String),
         editedAt: null,
@@ -1403,7 +1418,12 @@ describe('メッセージの投稿・一覧・編集・削除（F-11・F-12・F-
     function mentionOf(user: LoggedIn) {
       return {
         userId: user.loginId,
-        user: { id: user.id, userId: user.loginId, displayName: expect.any(String) },
+        user: {
+          id: user.id,
+          userId: user.loginId,
+          displayName: expect.any(String),
+          avatarUrl: null,
+        },
       };
     }
 

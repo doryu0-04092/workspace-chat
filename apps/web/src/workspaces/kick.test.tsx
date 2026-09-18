@@ -70,6 +70,26 @@ describe('ワークスペースのメンバー（F-06・F-09）', () => {
     expect(headerOf(read.init, 'Authorization')).toBe('Bearer t1');
   });
 
+  it('メンバーのアバターを表示名の横に出し、無ければ画像を出さない（F-04。機能一覧 1.3）', async () => {
+    const avatarUrl = '/avatars/01920000-0000-7000-8000-000000000002/u/b.png';
+    fakeFetch(
+      routes({
+        [`GET ${MEMBERS}`]: () =>
+          json(200, [
+            { ...ALICE_AS_OWNER, avatarUrl: null },
+            { ...BOB_AS_MEMBER, avatarUrl },
+          ]),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+
+    const list = await openList('メンバーを見る', 'メンバー');
+
+    const [alice, bob] = list.getAllByRole('listitem');
+    expect(alice!.querySelector('img')).toBeNull();
+    expect(bob!.querySelector('img')?.getAttribute('src')).toBe(avatarUrl);
+  });
+
   it('オーナーには自分以外の相手に「キックする」を出し、自分には出さない', async () => {
     fakeFetch(
       routes({ ...AS_OWNER, [`GET ${MEMBERS}`]: () => json(200, [ALICE_AS_OWNER, BOB_AS_MEMBER]) }),

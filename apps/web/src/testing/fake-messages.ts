@@ -27,6 +27,7 @@ export const BOB = {
   id: '01920000-0000-7000-8000-000000000002',
   userId: 'bob',
   displayName: 'ボブ',
+  avatarUrl: null as string | null,
 };
 export const SENT_AT = '2026-09-14T00:00:00.000Z';
 

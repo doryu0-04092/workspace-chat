@@ -2807,6 +2807,7 @@ components:
         - id
         - userId
         - displayName
+        - avatarUrl
       properties:
         id:
           type: string
@@ -2815,6 +2816,11 @@ components:
           type: string
         displayName:
           type: string
+        avatarUrl:
+          description: アバター画像の配信 URL のパス。無ければ null。**退会した利用者は null**（機能一覧 1.3・1.5）
+          type:
+            - string
+            - 'null'
     UserSettings:
       description: >-
         利用者ごとの設定（F-23。機能一覧 10.1）。**プロフィール（Profile）とは分ける**——
@@ -3030,6 +3036,7 @@ components:
         - id
         - userId
         - displayName
+        - avatarUrl
         - role
       properties:
         id:
@@ -3039,6 +3046,11 @@ components:
           type: string
         displayName:
           type: string
+        avatarUrl:
+          description: UserSummary の avatarUrl と同じ
+          type:
+            - string
+            - 'null'
         role:
           $ref: '#/components/schemas/WorkspaceRole'
     ChannelVisibility:

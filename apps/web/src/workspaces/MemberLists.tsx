@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
+import { UserAvatar } from '../users/UserAvatar';
 import { useChannelPresence } from '../realtime/presence';
 import { rankCandidates } from './candidate-rank';
 import {
@@ -67,6 +68,7 @@ export function WorkspaceMembers({
         <ul aria-label="メンバー" className="mt-2 flex flex-col gap-1">
           {members.data.map((member) => (
             <li key={member.id} className="flex flex-wrap items-center gap-2">
+              <UserAvatar user={member} />
               <span>{`${member.displayName} @${member.userId}`}</span>
               {member.role === 'OWNER' && <span className="text-sm text-slate-600">オーナー</span>}
               {isOwner && member.id !== me && (
@@ -139,6 +141,7 @@ export function ChannelMembers({
         <ul aria-label="参加者" className="mt-2 flex flex-col gap-1">
           {members.data.map((member) => (
             <li key={member.id} className="flex flex-wrap items-center gap-2">
+              <UserAvatar user={member} />
               <span>{`${member.displayName} @${member.userId}`}</span>
               {present.has(member.id) && (
                 <span className="text-sm text-emerald-700">
@@ -233,6 +236,7 @@ export function InviteToChannel({
           <ul aria-label="招待できるメンバー" className="mt-2 flex flex-col gap-1">
             {candidates.map((member) => (
               <li key={member.id} className="flex flex-wrap items-center gap-2">
+                <UserAvatar user={member} />
                 <span>{`${member.displayName} @${member.userId}`}</span>
                 <button
                   type="button"

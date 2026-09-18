@@ -8,7 +8,12 @@ export const PROFILE = {
   avatarUrl: null,
   status: null,
 };
-export const USER = { id: PROFILE.id, userId: PROFILE.userId, displayName: PROFILE.displayName };
+export const USER = {
+  id: PROFILE.id,
+  userId: PROFILE.userId,
+  displayName: PROFILE.displayName,
+  avatarUrl: PROFILE.avatarUrl as string | null,
+};
 
 export function json(
   status: number,

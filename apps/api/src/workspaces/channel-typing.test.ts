@@ -73,7 +73,7 @@ describe('入力中インジケータ（F-34）', () => {
 
   async function summaryOf(user: LoggedIn) {
     const row = await t.prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-    return { id: row.id, userId: row.loginId, displayName: row.displayName };
+    return { id: row.id, userId: row.loginId, displayName: row.displayName, avatarUrl: null };
   }
 
   it('部屋に入っている参加者の typing:start / typing:stop を、送信時刻と利用者の要約つきで、他のタスクの参加者を含むそのチャンネルの部屋へ配る', async () => {

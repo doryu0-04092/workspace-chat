@@ -18,7 +18,7 @@ function createService() {
     ownerMembershipOf: vi.fn(async () => ({
       role: 'OWNER' as const,
       workspace: { id: 'workspace-1', name: 'ワークスペース', createdAt: new Date() },
-      user: { id: 'owner-1', userId: 'owner', displayName: 'オーナー' },
+      user: { id: 'owner-1', userId: 'owner', displayName: 'オーナー', avatarUrl: null },
     })),
   };
   // 配信の出口。作成は一意制約違反で止まるため、ここでは呼ばれない（呼ばれたら落ちる形にしておく）。

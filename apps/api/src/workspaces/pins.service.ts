@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { components } from '@workspace-chat/shared';
 import { PrismaService } from '../prisma.service';
-import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
+import { USER_SUMMARY_SELECT, toUserSummary, type UserSummaryRow } from '../users/user-summary';
 import { assertChannelParticipant, channelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, PIN_LIMIT_REACHED } from './channel-errors';
 import { lockChannelRow } from './channel-row-lock';
@@ -22,7 +22,7 @@ export const PIN_LIMIT = 100;
 
 const PIN_SELECT = {
   createdAt: true,
-  pinnedBy: { select: { ...USER_SUMMARY_SELECT, deletedAt: true } },
+  pinnedBy: { select: USER_SUMMARY_SELECT },
   message: { select: MESSAGE_SELECT },
 } as const;
 
@@ -31,7 +31,7 @@ async function pinnedOf(
   db: Parameters<typeof toMessages>[0],
   rows: {
     createdAt: Date;
-    pinnedBy: { id: string; loginId: string; displayName: string; deletedAt: Date | null };
+    pinnedBy: UserSummaryRow;
     message: Parameters<typeof toMessages>[1][number];
   }[],
 ): Promise<PinnedMessage[]> {
