@@ -41,7 +41,8 @@ export function installFatalHandlers(
  * Node 自身の警告（`DeprecationWarning`・`MaxListenersExceededWarning` など）を、構造化ログの warn として残す（要件定義書 4.6）。
  *
  * - **既定の出力（素のテキストで標準エラー）を止めるのは、起動のコマンドの `--no-warnings` である**——`'warning'` を購読しても止まらない
- * - **警告は普段は出ない。残った警告は原因を調べる**（決定・2026-09-13・依頼側）——場所を辿れるようにスタックも残す
+ * - **警告は普段は出ない。残った警告は原因を調べる**（決定・2026-09-13・依頼側）——**原因を辿るため、`message` と `stack` をそのまま残す**
+ * - **`logging/error-kind.ts` の「warn に接続先を含みうるメッセージを残さない」とは狙いが違う**——あちらは失敗しても処理を続ける経路（DB・Valkey などへの接続の失敗）が対象で、繰り返し出うるログに接続先を残さないための選び方である。**ここは Node の警告そのもの**であり、繰り返しは想定せず、`message`・`stack` を削ると原因が辿れなくなる代償の方が大きいと判断した
  */
 export function installWarningLog(
   proc: NodeJS.Process = process,

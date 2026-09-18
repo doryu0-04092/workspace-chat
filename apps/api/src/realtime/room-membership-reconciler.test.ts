@@ -107,8 +107,10 @@ describe('チャンネルの部屋の参加の照合', () => {
     });
   });
 
-  // 照合は DB と Valkey に問い合わせ、接続の失敗のメッセージには接続先が入る（#382）。warn には code を残し、code が無ければ
-  // 種類の名前だけを残す（apps/api/src/logging/error-kind.ts。在席の一覧の取り直し〔presence-registry.ts〕と同じ残し方）。
+  // 照合は DB に問い合わせ、接続の失敗のメッセージには接続先が入る（#382。reconcile 自体は
+  // server.local.fetchSockets() で自タスクの接続だけを見るため Valkey には問い合わせない）。warn には code を残し、
+  // code が無ければ種類の名前だけを残す（apps/api/src/logging/error-kind.ts）。**在席の一覧の取り直し
+  // （presence-registry.ts）は code が無いとき message を残す**——code が無いときの選び方はこちら（reconcile）と逆である。
   // DB の呼び出しだけを失敗させるため、照合をこのタスクの本物の部品と、失敗を返す Prisma で組み立てる。
   describe('照合の失敗', () => {
     async function warnOfFailedReconcile(failure: Error): Promise<string[]> {
