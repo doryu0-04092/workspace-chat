@@ -105,7 +105,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | ビルド | **Vite** | **7.x** | Vite 8（2026-03 安定版）は内部バンドラを Rolldown / Oxc に刷新しており、プラグイン互換の実績が積み上がるまで見送る |
 | ルーティング | **React Router** | **8.x** | 決定・2026-09-13・依頼側。宣言型（`BrowserRouter`・`Routes`・`Route`）で使う。画面と URL は [機能一覧](features.md) 1.2 |
 | **メッセージ一覧** | **react-virtuoso** | 4.x | **難-1 の解決**。`firstItemIndex` は「先頭に要素を足しても表示位置を維持する」ための機能で、チャット用途を想定して用意されている。自前だと `scrollHeight` の差分補正が必要になる |
-| **Markdown 描画** | **react-markdown** + GFM の取り消し線と URL の自動リンクの拡張 + remark-breaks + rehype-sanitize | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線と URL の自動リンクの拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。選定時に挙げた rehype-highlight は採っていない。**解釈する記法と、その区分・承認（取り消し線・URL の自動リンク・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
+| **Markdown 描画** | **react-markdown** + GFM の取り消し線と URL の自動リンクの拡張 + remark-breaks + rehype-sanitize + rehype-highlight | — | **難-4 の構造的解決**。HTML 文字列を生成せず React 要素を直接構築するため、`dangerouslySetInnerHTML` を一度も使わない。**XSS が仕組みとして起きない**。**GFM をまとめて入れる remark-gfm は使わず、取り消し線と URL の自動リンクの拡張だけを積む**（remark-gfm は表・タスクリスト・脚注まで記法として読む）。**選定時に挙げた rehype-highlight は、言語指定のあるコードブロックだけを色付けする形（`detect: false`。言語の指定が無いものは推測しない）で採った**（F-32。`apps/web/src/messages/MessageBody.tsx`。`rehype-sanitize` より後に置き、色付けが足す class を `SANITIZE_SCHEMA` で絞る）。**解釈する記法と、その区分・承認（取り消し線・URL の自動リンク・段落の中の改行・色付けなど）は [機能一覧](features.md) 4.3 が持つ** |
 | データ取得 | **TanStack Query** | v5 | `useInfiniteQuery` がカーソルページネーションに直結する。WebSocket 受信を `setQueryData` でキャッシュに反映する |
 | 一時状態 | **Zustand** | v5 | 在席・入力中・ログインの状態（アクセストークンを含む）など、永続化しない状態を TanStack Query と分けて持つ（ログインの状態を含めるのは決定・2026-09-14・依頼側） |
 | スタイル | **Tailwind CSS** | 4.x | 密度の高い UI を素早く組む。画面数に対して独自 CSS は割に合わない |
