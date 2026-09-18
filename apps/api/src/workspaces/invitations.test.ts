@@ -257,6 +257,148 @@ describe('ワークスペースへの招待と、招待の承諾・辞退（F-08
     });
   });
 
+  // #616（2026-09-18・依頼側）: ユーザーID を正確に知らなくても招待できるよう、一部の文字や表示名から候補を出す。
+  describe('招待の候補（#616）', () => {
+    type Candidate = { id: string; userId: string; displayName: string };
+
+    function candidates(from: LoggedIn, workspaceId: string, q: string): Promise<Response> {
+      return request(
+        'GET',
+        `/workspaces/${workspaceId}/invitation-candidates?q=${encodeURIComponent(q)}`,
+        from.authorization,
+      );
+    }
+
+    async function candidateIds(from: LoggedIn, workspaceId: string, q: string): Promise<string[]> {
+      const res = await candidates(from, workspaceId, q);
+      expect(res.status).toBe(200);
+      return ((await res.json()) as Candidate[]).map((candidate) => candidate.id);
+    }
+
+    /** ほかの検査の利用者に当たらない、英小文字だけの目印（ユーザーID は英数字とアンダースコア）。 */
+    function tag(): string {
+      sequence += 1;
+      const letters = 'abcdefghijklmnopqrstuvwxyz';
+      const seed = `${Date.now()}${sequence}`;
+      return `c${[...seed].map((digit) => letters[Number(digit)]).join('')}`;
+    }
+
+    async function user(loginId: string, displayName: string, deleted = false): Promise<string> {
+      const created = await prisma.user.create({
+        data: {
+          loginId,
+          displayName,
+          passwordHash: 'argon2id-placeholder',
+          ...(deleted ? { deletedAt: new Date() } : {}),
+        },
+      });
+      return created.id;
+    }
+
+    it('オーナーは、ユーザーID と表示名の一部から退会していない利用者を探せる。並びはユーザーID の先頭一致 → 表示名の先頭一致 → 途中の一致', async () => {
+      const owner = await login();
+      const workspace = await createWorkspace(owner);
+      const t = tag();
+      const idPrefix = await user(`${t}_alpha`, 'アルファ');
+      const namePrefix = await user(`zz_name_${sequence}`, `${t}さん`);
+      const nameMiddle = await user(`ww_name_${sequence}`, `名前${t}`);
+      const idMiddle = await user(`yy_${t}`, '途中');
+      await user(`${t}_gone`, '退会した人', true);
+
+      const expected = [idPrefix, namePrefix, nameMiddle, idMiddle];
+      expect(await candidateIds(owner, workspace.id, t)).toEqual(expected);
+      // 大文字小文字によらない
+      expect(await candidateIds(owner, workspace.id, t.toUpperCase())).toEqual(expected);
+      // 返すのはユーザーID と表示名だけ
+      const res = await candidates(owner, workspace.id, `${t}_al`);
+      expect(await res.json()).toEqual([
+        { id: idPrefix, userId: `${t}_alpha`, displayName: 'アルファ' },
+      ]);
+    });
+
+    it('既にメンバーの人・招待中の人・自分は候補に出ない', async () => {
+      const owner = await login();
+      const workspace = await createWorkspace(owner);
+      const member = await login();
+      await invited(owner, workspace.id, member);
+      const pending = await login();
+      await invited(owner, workspace.id, pending);
+      const memberInvitation = (
+        (await (
+          await request('GET', '/invitations', member.authorization)
+        ).json()) as MyInvitation[]
+      ).find((invitation) => invitation.workspace.id === workspace.id)!;
+      const accepted = await request(
+        'POST',
+        `/invitations/${memberInvitation.id}/accept`,
+        member.authorization,
+      );
+      expect(accepted.status).toBe(200);
+      const free = await login();
+
+      for (const someone of [member, pending, owner]) {
+        expect(await candidateIds(owner, workspace.id, someone.loginId)).toEqual([]);
+      }
+      expect(await candidateIds(owner, workspace.id, free.loginId)).toEqual([free.id]);
+    });
+
+    it('候補は最大 10 人', async () => {
+      const owner = await login();
+      const workspace = await createWorkspace(owner);
+      const t = tag();
+      for (let i = 0; i < 12; i += 1) {
+        await user(`${t}_${String(i).padStart(2, '0')}`, `多い${i}`);
+      }
+      expect(await candidateIds(owner, workspace.id, t)).toHaveLength(10);
+    });
+
+    it('メンバーは 403 owner_only、所属していなければ 404', async () => {
+      const owner = await login();
+      const workspace = await createWorkspace(owner);
+      const member = await login();
+      await invited(owner, workspace.id, member);
+      const invitation = (
+        (await (
+          await request('GET', '/invitations', member.authorization)
+        ).json()) as MyInvitation[]
+      ).find((item) => item.workspace.id === workspace.id)!;
+      await request('POST', `/invitations/${invitation.id}/accept`, member.authorization);
+      const outsider = await login();
+
+      const forbidden = await candidates(member, workspace.id, 'Inv_');
+      expect(forbidden.status).toBe(403);
+      expect(((await forbidden.json()) as ErrorResponse).code).toBe('owner_only');
+      const hidden = await candidates(outsider, workspace.id, 'Inv_');
+      expect(hidden.status).toBe(404);
+      expect(await hidden.json()).toEqual(NOT_FOUND);
+    });
+
+    it.each([
+      ['無い', ''],
+      ['空', '?q='],
+      ['空白だけ', `?q=${encodeURIComponent(' 　')}`],
+      ['51 文字', `?q=${encodeURIComponent('あ'.repeat(51))}`],
+    ])('q が%sなら 400', async (_label, query) => {
+      const owner = await login();
+      const workspace = await createWorkspace(owner);
+      const res = await request(
+        'GET',
+        `/workspaces/${workspace.id}/invitation-candidates${query}`,
+        owner.authorization,
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it('同じ利用者は1分に60回までで、超えたら 429', async () => {
+      const owner = await login();
+      const workspace = await createWorkspace(owner);
+      for (let i = 0; i < 60; i += 1) {
+        expect((await candidates(owner, workspace.id, 'Inv_')).status).toBe(200);
+      }
+      expect((await candidates(owner, workspace.id, 'Inv_')).status).toBe(429);
+    }, 60_000);
+  });
+
   describe('招待の承諾・辞退（F-38）', () => {
     it('自分宛ての未承諾の招待だけを一覧で返す', async () => {
       const owner = await login();

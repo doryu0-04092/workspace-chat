@@ -20,6 +20,19 @@ export class RealtimeEmitter {
 
   /** チャンネルの部屋へ送る（チャンネル本体のイベント。機能一覧 5.2）。受け取れるのは入室の関門を通って部屋に入っている接続だけである。 */
   toChannel(channelId: string, event: RealtimeEventName, payload: unknown): void {
-    this.gateway.server.to(channelRoom(channelId)).emit(event, payload);
+    this.toChannelAndUsers(channelId, [], event, payload);
+  }
+
+  /**
+   * チャンネルの部屋に利用者の部屋を加えて1回で送る（個人メンションの `message:new`。機能一覧 5.2・9.1）。
+   * 加える利用者は、そのチャンネルの参加者であることを呼ぶ側が確かめてから渡す。
+   */
+  toChannelAndUsers(
+    channelId: string,
+    userIds: readonly string[],
+    event: RealtimeEventName,
+    payload: unknown,
+  ): void {
+    this.gateway.server.to([channelRoom(channelId), ...userIds.map(userRoom)]).emit(event, payload);
   }
 }

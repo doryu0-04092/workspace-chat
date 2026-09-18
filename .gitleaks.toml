@@ -10,7 +10,11 @@ description = """
   generic-api-key（変数名 password と、数字を含みエントロピーが 3.5 を超える値）に当たった（PR #246 第4巡）。
   PR の走査はコミットごとに行うため、値を変えても当たったコミットが残る限り落ち続ける。
   除外は値の完全一致に限る（コミットごと除外すると、同じコミットに入った本物の秘密も見逃す）。
+- argon2id-placeholder: API のテストが、ログインしない利用者を Prisma で直接作るときに passwordHash の列へ入れる偽の値（ハッシュでも秘密でもない）。
+  apps/api/src/workspaces/messages.test.ts（PR #496 第4巡）と channels.test.ts の `passwordHash: 'argon2id-placeholder'` が
+  generic-api-key に当たった。prisma-schema.test.ts の SQL の中の同じ値は当たっていない。上と同じく、値の完全一致だけを除外する。
 """
 regexes = [
   '''^leaky-secret-9f3k$''',
+  '''^argon2id-placeholder$''',
 ]

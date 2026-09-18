@@ -88,8 +88,8 @@ export type InvitationNewPayload = {
 };
 
 /**
- * `message:new` の payload（F-11。機能一覧 4.1・5.2）。チャンネルの部屋へ送る。
- * `message` は投稿の応答（REST の Message）と同じ形。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
+ * `message:new` の payload（F-11・F-17・F-20。機能一覧 4.1・5.2・6・9.1）。チャンネルの部屋へ送る。本文のメンションの対象がいれば、その利用者の部屋も加えて1回で送る。
+ * `message` は投稿・返信の応答（REST の Message）と同じ形（返信は `parentId` を持つ）。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
  */
 export type MessageNewPayload = {
   readonly message: components['schemas']['Message'];
@@ -97,7 +97,8 @@ export type MessageNewPayload = {
 };
 
 /**
- * `message:updated` の payload（F-13。機能一覧 4.2・5.2）。チャンネルの部屋へ送る。`message` は編集の応答と同じ形（`editedAt` を持つ）。
+ * `message:updated` の payload（F-13・F-17。機能一覧 4.2・5.2・6）。チャンネルの部屋へ送る。`message` は編集の応答と同じ形（`editedAt` を持つ）。
+ * **返信の投稿・削除で返信件数（`replyCount`）が変わった親も、これで送る**（`editedAt` は変わらない）。
  */
 export type MessageUpdatedPayload = {
   readonly message: components['schemas']['Message'];
@@ -110,6 +111,63 @@ export type MessageUpdatedPayload = {
 export type MessageDeletedPayload = {
   readonly channelId: string;
   readonly messageId: string;
+  readonly sentAt: string;
+};
+
+/**
+ * `reaction:changed` の payload（F-18。機能一覧 7・5.2）。チャンネルの部屋へ送る。
+ * **付け外しの後の、そのメッセージのリアクションの全体**（REST の MessageReactions と同じ項目）を載せる——差分にしないのは、
+ * 受け取る側が自分の付けたかどうかを `users` から決められ、届いた順が前後しても次の配信で揃うためである。
+ * **閲覧者ごとの値（自分が付けたか）は載せない**（部屋の全員に同じ payload を送る）。`sentAt` はサーバーが送った時刻（ISO 8601）。
+ */
+export type ReactionChangedPayload = components['schemas']['MessageReactions'] & {
+  readonly sentAt: string;
+};
+
+/**
+ * `unread:updated` の payload（F-23。機能一覧 10.1・5.2）。**その未読の持ち主の利用者の部屋へだけ送る**——
+ * チャンネルの部屋へは配らない（未読数はその人のものであり、他の参加者に配ると人数分の未読が全員に届く）。
+ * 送るときに、持ち主がいまもそのチャンネルの参加者であることを呼ぶ側が確かめる（5.2）。
+ * 出す契機は投稿・返信・削除・既読の更新。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため。
+ * `mentions` は、未読のうちその持ち主をメンションしているものの件数（F-24。機能一覧 10.2。REST の `Channel.mentions` と同じ値）。
+ */
+export type UnreadUpdatedPayload = {
+  readonly channelId: string;
+  readonly unread: number;
+  readonly mentions: number;
+  readonly sentAt: string;
+};
+
+/**
+ * DM で起きる `message:new` / `message:updated` の payload（F-19。機能一覧 5.2 の DM の箇条・8）。**イベント名はチャンネルと同じ**（配信の種類は増やさない。5.1）。
+ * **当事者2人のうち、いまそのワークスペースの退会していないメンバーである利用者の部屋へ1回で送る**（DM はチャンネルの部屋を持たない）。
+ * `message` は REST の DmMessage と同じ形で、**`channelId` ではなく `dmId` を持つ**——受け取る側は `dmId` の有無でチャンネルのメッセージと見分ける。
+ */
+export type DmMessageNewPayload = {
+  readonly message: components['schemas']['DmMessage'];
+  readonly sentAt: string;
+};
+
+/** DM で起きる `message:updated` の payload（F-19。宛先は `DmMessageNewPayload` と同じ）。 */
+export type DmMessageUpdatedPayload = DmMessageNewPayload;
+
+/** DM で起きる `message:deleted` の payload（F-19。宛先は `DmMessageNewPayload` と同じ）。**本文は載せない**。 */
+export type DmMessageDeletedPayload = {
+  readonly dmId: string;
+  readonly messageId: string;
+  readonly sentAt: string;
+};
+
+/**
+ * DM の未読の `unread:updated` の payload（「利用者 × DM」。F-19・F-23。機能一覧 10.1・5.2）。**その未読の持ち主の利用者の部屋へだけ送る**（相手には送らない）。
+ * 送るときに、持ち主がいまもその DM の当事者で、そのワークスペースの退会していないメンバーであることを呼ぶ側が確かめる（5.2）。
+ * **`channelId` ではなく `dmId` を持つ**——受け取る側は `dmId` の有無でチャンネルの未読と見分ける。DM はメンションを数えないため `mentions` を持たない。
+ * **`workspaceId` を載せる**——受け取る側は、開いているワークスペースの DM の一覧に無い DM のときだけ一覧を取り直す（別のワークスペースの DM で取り直さない）。
+ */
+export type DmUnreadUpdatedPayload = {
+  readonly workspaceId: string;
+  readonly dmId: string;
+  readonly unread: number;
   readonly sentAt: string;
 };
 
@@ -158,3 +216,28 @@ export type PresenceChangedPayload = {
   readonly present: boolean;
   readonly sentAt: string;
 };
+
+/**
+ * `typing:start` / `typing:stop` の payload（F-34。機能一覧 13.3）。そのチャンネルの部屋へ送る。
+ * **クライアントは同じ名前で、本体に `ChannelRoomRequest` を載せてサーバーへ送る**（部屋に入っている参加者の接続からだけ受け付ける）。
+ * `user` は入力している利用者（「○○さんが入力中…」の表示名のため）。`sentAt` はサーバーが送った時刻（ISO 8601）——配信遅延を測るため（機能一覧 5.2）。
+ */
+export type TypingPayload = {
+  readonly channelId: string;
+  readonly user: components['schemas']['UserSummary'];
+  readonly sentAt: string;
+};
+
+/**
+ * `@here` の受け取りの確かめ（F-21。機能一覧 9.2「タスクをまたぐ在席」）の名前。**配信の対象イベントではない**ため、
+ * `REALTIME_EVENT_KINDS` / `REALTIME_EVENT_NAMES` には入れない。
+ * サーバーは `@here` の宛先の利用者の接続へ、acknowledgement 付きで `HereMentionPayload` を送る。
+ * **受け取った側は、そのチャンネルを開いていれば `HereMentionReceipt` を返し、開いていなければ返さずに弾く**（10.2）。
+ */
+export const HERE_MENTION_NOTICE = 'mention:here';
+
+/** `@here` の受け取りの確かめの本体。 */
+export type HereMentionPayload = { readonly channelId: string; readonly messageId: string };
+
+/** `@here` の受け取りの返事。 */
+export type HereMentionReceipt = { readonly received: true };

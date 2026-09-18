@@ -7,11 +7,14 @@ import {
 import { APP_FILTER } from '@nestjs/core';
 import { AuthModule } from './auth/auth.module';
 import { type ApiConfig, ApiConfigModule } from './config/api-config';
+import { DeliveryModule } from './delivery/delivery.module';
 import { HealthController } from './health.controller';
 import { ErrorResponseFilter } from './error-response';
+import { NotificationsModule } from './notifications/notifications.module';
 import { OpenApiValidationMiddleware } from './openapi-validation';
 import { PrismaModule } from './prisma.service';
 import { RealtimeModule } from './realtime/realtime.module';
+import { StorageModule } from './storage/storage.module';
 import { UsersModule } from './users/users.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 
@@ -37,10 +40,13 @@ export class AppModule implements NestModule {
       imports: [
         ApiConfigModule.forRoot(config),
         PrismaModule,
+        StorageModule,
         AuthModule,
         UsersModule,
         WorkspacesModule,
+        NotificationsModule,
         RealtimeModule,
+        DeliveryModule,
       ],
     };
   }

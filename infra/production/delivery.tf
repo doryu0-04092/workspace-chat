@@ -1,11 +1,30 @@
 # CloudFront の配信（#452）。技術スタックのフロント配信の行・「HTTPS とドメイン」と、「リソースのサイジング」の CloudFront の行。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 #
-# 最初のリリースのビヘイビアは、既定（web の静的配信のバケット）と /api/*（ALB。VPC オリジン）の2つである。
-# /files/*・/avatars/*（添付のバケット）は、添付とアバターの配信（F-29・F-04。署名付き Cookie の鍵は #427）を実装するときに足す。
+# ビヘイビアは4つ: 既定（web の静的配信のバケット）・/api/*（ALB。VPC オリジン）・/files/* と /avatars/*（添付のバケット。署名付き Cookie を要求する。
+# 添付とアバターの配信。機能一覧 11.2・1.3。鍵は #427）。
 
 # 踏むと壊れる: 技術スタックと要件定義書が決めた値は、この locals にだけ書く（下のブロックには、名前・識別子・説明のほかに
 # リテラルの値を書かない）。どの値も、変えても validate も plan も CI も落ちない。変えるときは、文書の行を先に直す。
 locals {
+  # web の origin（api の WEB_ORIGIN と、添付のバケットの CORS が許す origin）。独自ドメインを持たない（技術スタックの「HTTPS とドメイン」）。
+  web_origin = "https://${aws_cloudfront_distribution.main.domain_name}"
+
+  # 添付とアバターの配信（要件定義書 4.3 の表。機能一覧 11.2・1.3）。どちらも署名付き Cookie を要求し、添付のバケットへ渡す。
+  # /files/* は /files を剥がして渡し（functions/strip-files-prefix.js）、/avatars/* は剥がさない（キーが avatars/ で始まる）。
+  # 踏むと壊れる: どちらのパスも /* に広げない。署名を要求しない既定のビヘイビアを添付のバケットへ向けない（/files を外した URL で取得できてしまう）。
+  files_path_pattern                 = "/files/*"
+  avatars_path_pattern               = "/avatars/*"
+  attachments_viewer_protocol_policy = "redirect-to-https"
+
+  # 署名付き Cookie の公開鍵（#427）。鍵の対は Terraform の外で作り（scripts/cloudfront-signing-key.sh）、公開鍵を keys/<名前>.pem に置く。
+  # keys/ の PEM はすべてキーグループに入る（入れ替えの間は新旧の2つを置き、配信を止めない）。
+  cloudfront_public_key_names = toset([for file in fileset("${path.module}/keys", "*.pem") : trimsuffix(file, ".pem")])
+  # api が署名に使う鍵の名前（keys/<名前>.pem）。Parameter Store の秘密鍵（compute.tf の cloudfront_private_key_parameter_name）と対のもの。
+  # 踏むと壊れる: スクリプトの既定の名前と揃える（検査が照合する）。この名前と Parameter Store の秘密鍵が対でないと、
+  # api は起動するが、発行した Cookie がすべて署名の検査に落ちる（validate も plan も CI も落ちない）。
+  cloudfront_signing_key_name = "signing-1"
+
   # 閲覧者から CloudFront までは HTTPS を必須にする（技術スタックの「HTTPS とドメイン」）。
   # 画面は http を https に振り替え、api は https だけを受ける（POST を振り替えると本体が落ちるため）。
   web_viewer_protocol_policy = "redirect-to-https"
@@ -24,6 +43,31 @@ locals {
   # web のバケットはビルドの成果物だけを持ち、destroy で中身ごと消す（ソースから作り直せる）。
   web_force_destroy       = true
   web_block_public_access = true
+
+  # 画面と api の応答に付けるセキュリティヘッダー（#609。決定・2026-09-18・依頼側）。
+  # 踏むと壊れる: connect-src から添付のバケットを外さない。ブラウザは署名付き URL で S3 へ直接 PUT する（外すと添付とアバターが上がらない）。
+  # WebSocket（/api/socket.io/）は同じ origin であり、'self' が wss の同じホストに当たる（CSP Level 3）。
+  # index.html はインラインのスクリプトもスタイルも持たない（Vite の成果物）。インラインを足すなら、この CSP を先に直す。
+  web_content_security_policy = join("; ", [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "media-src 'self'",
+    "connect-src 'self' https://${aws_s3_bucket.attachments.bucket_regional_domain_name}",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ])
+  web_hsts_max_age_sec        = 31536000
+  web_hsts_include_subdomains = false
+  web_hsts_preload            = false
+  web_frame_option            = "DENY"
+  web_referrer_policy         = "strict-origin-when-cross-origin"
+  web_removed_headers         = ["X-Powered-By"]
+  security_headers_override   = true
 }
 
 # --- web の静的配信のバケット ------------------------------------------------------
@@ -51,6 +95,7 @@ resource "aws_cloudfront_origin_access_control" "web" {
 }
 
 # CloudFront（このディストリビューション）からの読み出しだけを許す。
+# 踏むと壊れる: この文書とバケットのポリシーは IAM の面に入る。変えるときは、main.tf の冒頭の条件に従い、検査の iamSurface の表も直す。
 data "aws_iam_policy_document" "web_bucket" {
   statement {
     actions   = ["s3:GetObject"]
@@ -81,6 +126,89 @@ resource "aws_cloudfront_function" "spa_rewrite" {
   runtime = "cloudfront-js-2.0"
   publish = true
   code    = file("${path.module}/functions/spa-rewrite.js")
+}
+
+# --- 添付とアバターの配信（添付のバケット。署名付き Cookie） ------------------------------------
+#
+# バケットとそのポリシーは attachments.tf にある。
+
+resource "aws_cloudfront_origin_access_control" "attachments" {
+  name                              = "workspace-chat-attachments"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+# 公開鍵は秘密ではない。秘密鍵は Terraform の外で Parameter Store に置き、ここでは読まない（#427）。
+resource "aws_cloudfront_public_key" "signing" {
+  for_each = local.cloudfront_public_key_names
+
+  name        = "workspace-chat-${each.key}"
+  encoded_key = file("${path.module}/keys/${each.key}.pem")
+}
+
+resource "aws_cloudfront_key_group" "signed_cookies" {
+  name  = "workspace-chat-signed-cookies"
+  items = [for key in aws_cloudfront_public_key.signing : key.id]
+
+  lifecycle {
+    precondition {
+      condition     = contains(local.cloudfront_public_key_names, local.cloudfront_signing_key_name)
+      error_message = "keys/ に api が署名に使う公開鍵（cloudfront_signing_key_name の PEM）が無い。scripts/cloudfront-signing-key.sh で鍵の対を作る"
+    }
+  }
+}
+
+# /files/* の要求から /files を剥がし、S3 のキーと同じ形にする（要件定義書 4.3。剥がせるのは viewer-request で URI を書き換える手段だけ）。
+# コードと検査は functions/strip-files-prefix.js と scripts/cloudfront-functions.test.mjs。
+resource "aws_cloudfront_function" "strip_files_prefix" {
+  name    = "workspace-chat-strip-files-prefix"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = file("${path.module}/functions/strip-files-prefix.js")
+}
+
+# すべての応答に X-Content-Type-Options: nosniff を返す（機能一覧 11.1・1.3）。
+data "aws_cloudfront_response_headers_policy" "security_headers" {
+  name = "Managed-SecurityHeadersPolicy"
+}
+
+# 画面（既定のビヘイビア）と api（/api/*）の応答に付けるセキュリティヘッダー（#609）。値は上の locals にある。
+resource "aws_cloudfront_response_headers_policy" "web" {
+  name = "workspace-chat-web-security-headers"
+
+  security_headers_config {
+    content_security_policy {
+      content_security_policy = local.web_content_security_policy
+      override                = local.security_headers_override
+    }
+    strict_transport_security {
+      access_control_max_age_sec = local.web_hsts_max_age_sec
+      include_subdomains         = local.web_hsts_include_subdomains
+      preload                    = local.web_hsts_preload
+      override                   = local.security_headers_override
+    }
+    content_type_options {
+      override = local.security_headers_override
+    }
+    frame_options {
+      frame_option = local.web_frame_option
+      override     = local.security_headers_override
+    }
+    referrer_policy {
+      referrer_policy = local.web_referrer_policy
+      override        = local.security_headers_override
+    }
+  }
+
+  remove_headers_config {
+    dynamic "items" {
+      for_each = local.web_removed_headers
+      content {
+        header = items.value
+      }
+    }
+  }
 }
 
 # --- api（ALB。VPC オリジン） ------------------------------------------------------
@@ -151,6 +279,12 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   origin {
+    origin_id                = "attachments"
+    domain_name              = aws_s3_bucket.attachments.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.attachments.id
+  }
+
+  origin {
     origin_id   = "api"
     domain_name = aws_lb.api.dns_name
 
@@ -160,11 +294,12 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "web"
-    viewer_protocol_policy = local.web_viewer_protocol_policy
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
+    target_origin_id           = "web"
+    viewer_protocol_policy     = local.web_viewer_protocol_policy
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.web.id
 
     function_association {
       event_type   = "viewer-request"
@@ -173,13 +308,44 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   ordered_cache_behavior {
-    path_pattern             = local.api_path_pattern
-    target_origin_id         = "api"
-    viewer_protocol_policy   = local.api_viewer_protocol_policy
-    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods           = ["GET", "HEAD"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    path_pattern               = local.api_path_pattern
+    target_origin_id           = "api"
+    viewer_protocol_policy     = local.api_viewer_protocol_policy
+    allowed_methods            = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_disabled.id
+    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.web.id
+  }
+
+  # 添付（機能一覧 11.2）。Cookie の対象は /files/workspace/{ws}/channel/{ch}/*、Path 属性は /files（api が発行する）。
+  # 署名付き Cookie は CloudFront が確かめ、オリジンへは渡さない（キャッシュキーに Cookie を含めない CachingOptimized でよい）。
+  ordered_cache_behavior {
+    path_pattern               = local.files_path_pattern
+    target_origin_id           = "attachments"
+    viewer_protocol_policy     = local.attachments_viewer_protocol_policy
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
+    trusted_key_groups         = [aws_cloudfront_key_group.signed_cookies.id]
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.strip_files_prefix.arn
+    }
+  }
+
+  # アバター（機能一覧 1.3）。Cookie の対象は /avatars/*、Path 属性は /avatars（ログインしている利用者に発行する）。パスは剥がさない。
+  ordered_cache_behavior {
+    path_pattern               = local.avatars_path_pattern
+    target_origin_id           = "attachments"
+    viewer_protocol_policy     = local.attachments_viewer_protocol_policy
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = data.aws_cloudfront_cache_policy.caching_optimized.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
+    trusted_key_groups         = [aws_cloudfront_key_group.signed_cookies.id]
   }
 
   restrictions {
@@ -196,7 +362,7 @@ resource "aws_cloudfront_distribution" "main" {
 
 output "web_url" {
   description = "公開する URL（CloudFront の既定のドメイン）"
-  value       = "https://${aws_cloudfront_distribution.main.domain_name}"
+  value       = local.web_origin
 }
 
 output "web_bucket" {

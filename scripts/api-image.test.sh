@@ -40,23 +40,30 @@ fail() {
   exit 1
 }
 
-# テストで使う PostgreSQL のイメージは apps/api/src/testing/postgres.ts の POSTGRES_IMAGE の1箇所で決める（差し替えの時期は #34）。
+# テストで使う PostgreSQL のイメージの名前は apps/api/src/testing/postgres.ts の POSTGRES_IMAGE の1箇所で決める。
+# 中身は同じく docker/postgres/Dockerfile から作る（マイグレーションが pg_bigm を要る）。
 postgres_image=$(sed -n "s/^export const POSTGRES_IMAGE = '\([^']*\)';$/\1/p" apps/api/src/testing/postgres.ts)
 [ -n "$postgres_image" ] || fail "apps/api/src/testing/postgres.ts から POSTGRES_IMAGE を読めない"
 
 echo "== イメージを作る"
 # --pull: 土台（タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で作り、手元の緑が CI の緑と同じ意味を持たない（#281）。
-# 代償: レジストリに届かない環境では、手元に土台があってもこの検査は通らない（下の docker pull も同じ）。
+# **踏むと壊れる: 外すと、CI が確かめた土台と、本番に出すイメージの土台が揃わなくなる。**
+# scripts/release.sh も --pull で作るため（同じ NODE_IMAGE）、ここだけ外すと
+# **この検査は手元に残った古い土台で通り、本番は新しい土台で作られる。**
+# 土台は Dependabot で追わないと決めており、タグごとの経路の一覧は .github/dependabot.yml の末尾にある。
+# 代償: レジストリに届かない環境では、手元に土台があってもこの検査は通らない（下の PostgreSQL のイメージも同じ）。
 docker build --pull --file apps/api/Dockerfile --target migrate --tag "$migrate_image" . >/dev/null
 docker build --pull --file apps/api/Dockerfile --target runtime --tag "$runtime_image" . >/dev/null
+# PostgreSQL の土台（タグで指す）も毎回取り直す。docker run は手元に同じタグがあればレジストリを見ない。
+docker build --pull --quiet --tag "$postgres_image" docker/postgres >/dev/null
 
 echo "== 1. マイグレーション用のイメージを空の PostgreSQL に適用する"
 docker network create "$network" >/dev/null
-# 土台（タグで指す）は毎回取り直す。docker run も手元に同じタグがあればレジストリを見ない（docker build の --pull と同じ性質）。
-docker pull --quiet "$postgres_image" >/dev/null
 # 値はこの検査の中だけで使う使い捨ての資格情報である。
+# shared_preload_libraries=pg_bigm は開発環境（compose.yaml）と本番（infra/production/database.tf）と揃える。
 docker run --detach --name "$postgres" --network "$network" \
-  --env POSTGRES_PASSWORD=image-test --env POSTGRES_DB=chat "$postgres_image" >/dev/null
+  --env POSTGRES_PASSWORD=image-test --env POSTGRES_DB=chat "$postgres_image" \
+  postgres -c shared_preload_libraries=pg_bigm >/dev/null
 # **踏むと壊れる: 起動の待ち合わせは TCP（--host 127.0.0.1）で引く。** 公式イメージは初回に、ソケットだけで待ち受ける
 # 一時のサーバー（listen_addresses=''）で初期化し、止めてから本来のサーバーを起動し直す。ソケットで引くと一時のサーバーに
 # ready と答えられ、直後の停止の間に落ちる。TCP で答えるのは本来のサーバーだけである。
@@ -83,6 +90,8 @@ docker run --detach --name "$api" --network "$network" --publish 127.0.0.1::3000
   --env TRUST_PROXY_HOPS=0 \
   --env JWT_SECRET="$jwt_secret" \
   --env WEB_ORIGIN="http://web.test" \
+  --env S3_BUCKET="workspace-chat-image-test" \
+  --env S3_REGION="ap-northeast-1" \
   "$runtime_image" >/dev/null
 port=$(docker port "$api" 3000/tcp | head -n 1 | sed 's/.*://')
 status=""
@@ -181,7 +190,7 @@ docker create --name "$tls_postgres" --network "$network" \
     install -d -o postgres -m 700 /tmp/ssl &&
     install -o postgres -m 600 /tls/server.pem /tls/server.key /tmp/ssl/ &&
     printf "local all all trust\nhostssl all all all scram-sha-256\n" >/tmp/ssl/pg_hba.conf &&
-    exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/ssl/server.pem \
+    exec docker-entrypoint.sh postgres -c shared_preload_libraries=pg_bigm -c ssl=on -c ssl_cert_file=/tmp/ssl/server.pem \
       -c ssl_key_file=/tmp/ssl/server.key -c hba_file=/tmp/ssl/pg_hba.conf' >/dev/null
 docker cp "$tls_dir/." "$tls_postgres:/tls" >/dev/null
 docker start "$tls_postgres" >/dev/null

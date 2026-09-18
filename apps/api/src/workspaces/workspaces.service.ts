@@ -32,14 +32,15 @@ export class WorkspacesService {
   /**
    * 作成者をオーナーとして、**同じ文で**参加させる（schema.prisma の Membership の注記: オーナーが 0 人のワークスペースを作らない）。
    * 退会済みの利用者は作れない（入口の判定とは別に、書き込み側にも条件を置く。profile.service.ts と同じ）。
+   * **利用者の行を FOR SHARE で掴んでから読む**——アカウントの削除（AccountDeletionService）は同じ行を FOR UPDATE で掴んでから
+   * オーナーの所属を読む。掴まずに読むと、確定前の削除を見落としてオーナーの所属を作り、オーナーが退会済みのワークスペースが残る。
    */
   async create(userId: string, input: CreateWorkspaceRequest): Promise<Workspace> {
     return this.prisma.$transaction(async (tx) => {
-      const user = await tx.user.findFirst({
-        where: { id: userId, deletedAt: null },
-        select: { id: true },
-      });
-      if (!user) throw new BearerUnauthorizedException(INVALID_TOKEN);
+      const user = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "User" WHERE "id" = ${userId}::uuid AND "deletedAt" IS NULL FOR SHARE
+      `;
+      if (user.length === 0) throw new BearerUnauthorizedException(INVALID_TOKEN);
       const workspace = await tx.workspace.create({
         data: { name: input.name, memberships: { create: { userId, role: 'OWNER' } } },
         select: WORKSPACE_SELECT,

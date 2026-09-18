@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fakeFetch, headerOf, json, PROFILE, token, USER } from '../testing/fake-api';
+import { fakeFetch, headerOf, json, loggedIn, PROFILE, token, USER } from '../testing/fake-api';
+import { hang, manualTimeouts } from '../testing/manual-timeouts';
 import { createSessionStore, type RefreshLocks } from './session-store';
 
 afterEach(() => {
@@ -46,19 +47,218 @@ describe('起動時の復元', () => {
     expect(count('GET /api/users/me')).toBe(0);
   });
 
-  it('通信に失敗したとき・自分の情報を読めなかったときも、ログインしていない状態になる', async () => {
-    fakeFetch({ 'POST /api/auth/refresh': () => Promise.reject(new TypeError('Failed to fetch')) });
-    const offline = createSessionStore();
-    await offline.restore();
-    expect(offline.getState()).toEqual({ status: 'signedOut' });
+  describe('401 のほかの失敗（機能一覧 1.2。#420）', () => {
+    const offline = () => Promise.reject(new TypeError('Failed to fetch'));
+    const internalError = () => json(500, { code: 'internal_error', message: 'x' });
+    const tooMany = (retryAfter?: string) => () =>
+      json(
+        429,
+        { code: 'too_many_requests', message: 'x' },
+        retryAfter === undefined ? {} : { 'Retry-After': retryAfter },
+      );
 
-    fakeFetch({
-      'POST /api/auth/refresh': () => token('t1'),
-      'GET /api/users/me': () => json(500, { code: 'internal_error', message: 'x' }),
+    /** 待った時間を記録し、実際には待たない。 */
+    function recordingWait() {
+      const waited: number[] = [];
+      return {
+        waited,
+        wait: (ms: number) => {
+          waited.push(ms);
+          return Promise.resolve();
+        },
+      };
+    }
+
+    it('通信に失敗したら1秒待って1回だけやり直し、通ればログインした状態になる', async () => {
+      const { count } = fakeFetch({
+        'POST /api/auth/refresh': [offline, () => token('t1')],
+        'GET /api/users/me': () => json(200, PROFILE),
+      });
+      const { waited, wait } = recordingWait();
+      const store = createSessionStore({ wait });
+
+      await store.restore();
+
+      expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't1', user: USER });
+      expect(waited).toEqual([1000]);
+      expect(count('POST /api/auth/refresh')).toBe(2);
     });
-    const broken = createSessionStore();
-    await broken.restore();
-    expect(broken.getState()).toEqual({ status: 'signedOut' });
+
+    it('やり直しても 5xx・通信の失敗が続けば、ログインしていない状態にせず、確かめられなかった状態になる（やり直しは1回だけ）', async () => {
+      const { count } = fakeFetch({ 'POST /api/auth/refresh': [internalError, offline] });
+      const { waited, wait } = recordingWait();
+      const store = createSessionStore({ wait });
+
+      await store.restore();
+
+      expect(store.getState()).toEqual({ status: 'unavailable' });
+      expect(waited).toEqual([1000]);
+      expect(count('POST /api/auth/refresh')).toBe(2);
+      expect(count('GET /api/users/me')).toBe(0);
+    });
+
+    it('429 で Retry-After が 10 秒以下なら、その秒数待って1回だけやり直す', async () => {
+      fakeFetch({
+        'POST /api/auth/refresh': [tooMany('3'), () => token('t1')],
+        'GET /api/users/me': () => json(200, PROFILE),
+      });
+      const { waited, wait } = recordingWait();
+      const store = createSessionStore({ wait });
+
+      await store.restore();
+
+      expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't1', user: USER });
+      expect(waited).toEqual([3000]);
+    });
+
+    it('429 で Retry-After が 10 秒を超える・無いなら、やり直さずに確かめられなかった状態になる', async () => {
+      for (const retryAfter of ['11', undefined]) {
+        const { count } = fakeFetch({ 'POST /api/auth/refresh': tooMany(retryAfter) });
+        const { waited, wait } = recordingWait();
+        const store = createSessionStore({ wait });
+
+        await store.restore();
+
+        expect(store.getState(), String(retryAfter)).toEqual({ status: 'unavailable' });
+        expect(waited, String(retryAfter)).toEqual([]);
+        expect(count('POST /api/auth/refresh'), String(retryAfter)).toBe(1);
+      }
+    });
+
+    it('リフレッシュが通って自分の情報の読み込みだけが失敗したら、リフレッシュを送り直さず、読み込みだけを1回やり直す', async () => {
+      const { calls, count } = fakeFetch({
+        'POST /api/auth/refresh': () => token('t1'),
+        'GET /api/users/me': [internalError, () => json(200, PROFILE)],
+      });
+      const { waited, wait } = recordingWait();
+      const store = createSessionStore({ wait });
+
+      await store.restore();
+
+      expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't1', user: USER });
+      expect(count('POST /api/auth/refresh')).toBe(1);
+      expect(waited).toEqual([1000]);
+      const retried = calls.filter((c) => c.key === 'GET /api/users/me').at(-1)!;
+      expect(headerOf(retried.init, 'Authorization')).toBe('Bearer t1');
+    });
+
+    it('自分の情報の読み込みがやり直しても失敗すれば、確かめられなかった状態になる', async () => {
+      fakeFetch({
+        'POST /api/auth/refresh': () => token('t1'),
+        'GET /api/users/me': [internalError, offline],
+      });
+      const store = createSessionStore({ wait: recordingWait().wait });
+
+      await store.restore();
+
+      expect(store.getState()).toEqual({ status: 'unavailable' });
+    });
+
+    it('やり直した結果が 401 なら、ログインしていない状態になる', async () => {
+      fakeFetch({
+        'POST /api/auth/refresh': [
+          internalError,
+          () => json(401, { code: 'invalid_token', message: 'x' }),
+        ],
+      });
+      const store = createSessionStore({ wait: recordingWait().wait });
+
+      await store.restore();
+
+      expect(store.getState()).toEqual({ status: 'signedOut' });
+    });
+
+    it('401・429・5xx・通信の失敗のほかの断り（400 など）は、やり直さずに確かめられなかった状態になる', async () => {
+      const { count } = fakeFetch({
+        'POST /api/auth/refresh': () => json(400, { code: 'validation_failed', message: 'x' }),
+      });
+      const { waited, wait } = recordingWait();
+      const store = createSessionStore({ wait });
+
+      await store.restore();
+
+      expect(store.getState()).toEqual({ status: 'unavailable' });
+      expect(waited).toEqual([]);
+      expect(count('POST /api/auth/refresh')).toBe(1);
+    });
+
+    describe('応答が返らないとき（#530）', () => {
+      it('リフレッシュが返らなければ、10 秒の時限で打ち切って通信の失敗として1回だけやり直し、やり直しも返らなければ確かめられなかった状態になる', async () => {
+        const { count } = fakeFetch({ 'POST /api/auth/refresh': [hang, hang] });
+        const { waited, wait } = recordingWait();
+        const timeouts = manualTimeouts();
+        const store = createSessionStore({ wait, timeoutSignal: timeouts.timeoutSignal });
+
+        const restoring = store.restore();
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(1));
+        expect(timeouts.requested).toEqual([10_000]);
+        expect(store.getState()).toEqual({ status: 'checking' });
+        timeouts.fire(0);
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(2));
+        timeouts.fire(1);
+        await restoring;
+
+        expect(store.getState()).toEqual({ status: 'unavailable' });
+        expect(waited).toEqual([1000]);
+        expect(count('POST /api/auth/refresh')).toBe(2);
+        expect(count('GET /api/users/me')).toBe(0);
+      });
+
+      it('自分の情報の読み込みが返らなければ、打ち切って読み込みだけを1回やり直し、やり直しも返らなければ確かめられなかった状態になる', async () => {
+        const { count } = fakeFetch({
+          'POST /api/auth/refresh': () => token('t1'),
+          'GET /api/users/me': [hang, hang],
+        });
+        const timeouts = manualTimeouts();
+        const store = createSessionStore({
+          wait: recordingWait().wait,
+          timeoutSignal: timeouts.timeoutSignal,
+        });
+
+        const restoring = store.restore();
+        // 0 番目はリフレッシュの時限（応答が返ったので切らない）
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(2));
+        timeouts.fire(1);
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(3));
+        timeouts.fire(2);
+        await restoring;
+
+        expect(store.getState()).toEqual({ status: 'unavailable' });
+        expect(timeouts.requested).toEqual([10_000, 10_000, 10_000]);
+        expect(count('POST /api/auth/refresh')).toBe(1);
+        expect(count('GET /api/users/me')).toBe(2);
+      });
+
+      it('打ち切ったリフレッシュの応答が後から届いても、そのトークンを使わず、状態を書き換えない', async () => {
+        let deliverLate: ((response: Response) => void) | undefined;
+        // 打ち切りを無視して後から応答を返す要求（打ち切りが fetch に届かなかった場合）
+        const late = () =>
+          new Promise<Response>((resolve) => {
+            deliverLate = resolve;
+          });
+        const { count } = fakeFetch({
+          'POST /api/auth/refresh': [late, hang],
+          'GET /api/users/me': () => json(200, PROFILE),
+        });
+        const timeouts = manualTimeouts();
+        const store = createSessionStore({
+          wait: recordingWait().wait,
+          timeoutSignal: timeouts.timeoutSignal,
+        });
+
+        const restoring = store.restore();
+        await vi.waitFor(() => expect(deliverLate).toBeDefined());
+        timeouts.fire(0);
+        deliverLate!(token('t-late'));
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(2));
+        timeouts.fire(1);
+        await restoring;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        expect(store.getState()).toEqual({ status: 'unavailable' });
+        expect(count('GET /api/users/me')).toBe(0);
+      });
+    });
   });
 
   it('同時に2回呼んでも、リフレッシュの要求は1回だけ送る（系列ごとの失効を起こさない）', async () => {
@@ -473,5 +673,39 @@ describe('トークンを付けた要求', () => {
 
     expect([a.status, b.status]).toEqual([200, 200]);
     expect(count('POST /api/auth/refresh')).toBe(1);
+  });
+});
+
+// 機能一覧 1.3（F-04）: プロフィールを変えたら、画面の枠の表示名に使う情報を差し替える。#551。
+describe('利用者の情報の差し替え', () => {
+  async function signedInStore() {
+    fakeFetch({ 'POST /api/auth/login': () => loggedIn('t1') });
+    const store = createSessionStore();
+    await store.login('alice', 'password-1');
+    return store;
+  }
+
+  it('ログインしている利用者と同じ id なら差し替え、トークンは変えない', async () => {
+    const store = await signedInStore();
+
+    store.updateUser({ ...USER, displayName: 'ありす' });
+
+    expect(store.getState()).toEqual({
+      status: 'signedIn',
+      accessToken: 't1',
+      user: { ...USER, displayName: 'ありす' },
+    });
+  });
+
+  it('別の利用者の情報では差し替えない（待つ間にログインが替わっていたとき）', async () => {
+    const store = await signedInStore();
+
+    store.updateUser({
+      id: '01920000-0000-7000-8000-000000000002',
+      userId: 'bob',
+      displayName: 'ボブ',
+    });
+
+    expect(store.getState()).toEqual({ status: 'signedIn', accessToken: 't1', user: USER });
   });
 });

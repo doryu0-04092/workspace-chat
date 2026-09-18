@@ -1,56 +1,35 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { REALTIME_REQUESTS } from '@workspace-chat/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fakeFetch, json, PROFILE, token, USER } from '../testing/fake-api';
+import { fakeFetch, json, token, USER } from '../testing/fake-api';
+import {
+  CHANNEL_PATH,
+  GENERAL,
+  MESSAGES,
+  message,
+  page,
+  routes as signedInRoutes,
+  SENT_AT,
+  WORKSPACE_ID,
+} from '../testing/fake-messages';
 import type { FakeSocket } from '../testing/fake-socket';
 import { renderApp } from '../testing/render-app';
 
 const WORKSPACE = {
-  id: '01920000-0000-7000-8000-0000000000a1',
+  id: WORKSPACE_ID,
   name: '開発チーム',
   createdAt: '2026-09-13T00:00:00.000Z',
   role: 'MEMBER',
 };
-const GENERAL = {
-  id: '01920000-0000-7000-8000-0000000000c1',
-  name: 'general',
-  visibility: 'PUBLIC',
-  joined: true,
-};
 const OTHER_CHANNEL_ID = '01920000-0000-7000-8000-0000000000c9';
-/** テストで使うもう1人の利用者（実在の人物ではない）。 */
-const BOB = { id: '01920000-0000-7000-8000-000000000002', userId: 'bob', displayName: 'ボブ' };
-const SENT_AT = '2026-09-14T00:00:00.000Z';
 
-const CHANNEL_PATH = `/workspaces/${WORKSPACE.id}/channels/${GENERAL.id}`;
-const MESSAGES = `/api/workspaces/${WORKSPACE.id}/channels/${GENERAL.id}/messages`;
-
-function message(n: number, overrides: Record<string, unknown> = {}) {
-  return {
-    id: `01920000-0000-7000-8000-${String(n).padStart(12, '0')}`,
-    channelId: GENERAL.id,
-    author: BOB,
-    body: `メッセージ ${n}`,
-    createdAt: SENT_AT,
-    editedAt: null,
-    deleted: false,
-    ...overrides,
-  };
-}
-
-function page(messages: ReturnType<typeof message>[]) {
-  return json(200, { messages, nextBefore: null });
-}
-
+/** 共有の応答に、ワークスペースの取得と1件のメッセージの一覧を足す。 */
 function routes(extra: Parameters<typeof fakeFetch>[0] = {}) {
-  return {
-    'POST /api/auth/refresh': () => token('t1'),
-    'GET /api/users/me': () => json(200, PROFILE),
+  return signedInRoutes({
     [`GET /api/workspaces/${WORKSPACE.id}`]: () => json(200, WORKSPACE),
-    [`GET /api/workspaces/${WORKSPACE.id}/channels`]: () => json(200, [GENERAL]),
     [`GET ${MESSAGES}`]: () => page([message(1)]),
     ...extra,
-  };
+  });
 }
 
 async function openChannel(extra: Parameters<typeof fakeFetch>[0] = {}) {
@@ -361,12 +340,12 @@ describe('チャンネルの部屋（機能一覧 9.2）', () => {
 });
 
 describe('配信の反映（機能一覧 5.2）', () => {
-  it('message:new を、開いているチャンネルの一覧の最後に足す。同じ id がもう一度届いても1行だけにする', async () => {
+  it('message:new を、開いているチャンネルの一覧の先頭に足す。同じ id がもう一度届いても1行だけにする', async () => {
     const { socket, count } = await openChannel();
     await accept(socket, count, 2);
 
     act(() => socket.deliver('message:new', { message: message(2), sentAt: SENT_AT }));
-    await waitFor(() => expect(rows().at(-1)).toContain('メッセージ 2'));
+    await waitFor(() => expect(rows()[0]).toContain('メッセージ 2'));
     act(() => socket.deliver('message:new', { message: message(2), sentAt: SENT_AT }));
     await pause();
 
@@ -380,6 +359,22 @@ describe('配信の反映（機能一覧 5.2）', () => {
     act(() =>
       socket.deliver('message:new', {
         message: message(3, { channelId: OTHER_CHANNEL_ID }),
+        sentAt: SENT_AT,
+      }),
+    );
+    await pause();
+
+    expect(screen.queryByText('メッセージ 3')).toBeNull();
+  });
+
+  // 機能一覧 6「スレッドの返信は、チャンネル本体の一覧に混ざって表示されない」。返信もチャンネルの部屋へ message:new で届く。
+  it('スレッドの返信（parentId を持つ）の message:new は、開いているチャンネルの一覧に足さない', async () => {
+    const { socket, count } = await openChannel();
+    await accept(socket, count, 2);
+
+    act(() =>
+      socket.deliver('message:new', {
+        message: message(3, { parentId: message(1).id }),
         sentAt: SENT_AT,
       }),
     );
@@ -426,7 +421,7 @@ describe('配信の反映（機能一覧 5.2）', () => {
     await accept(socket, count, 2);
 
     act(() => socket.deliver('message:new', { message: mine, sentAt: SENT_AT }));
-    await waitFor(() => expect(rows().at(-1)).toContain('こんにちは'));
+    await waitFor(() => expect(rows()[0]).toContain('こんにちは'));
     fireEvent.change(screen.getByLabelText('メッセージ'), { target: { value: 'こんにちは' } });
     fireEvent.click(screen.getByRole('button', { name: '送信する' }));
     await waitFor(() =>

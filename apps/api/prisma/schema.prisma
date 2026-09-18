@@ -1,27 +1,31 @@
 // Prisma のスキーマ。
 //
-// このファイルが定義するのは **認証・ワークスペース・チャンネルの土台と、チャンネルのメッセージ**である。
-// スレッド・リアクション・メンション・添付・検索は別のイシューで扱う。
+// このファイルが定義するのは **認証・ワークスペース・チャンネルの土台と、チャンネルのメッセージとスレッドとメンションの対象と、本文の検索の索引**である。
+// 添付は別のイシューで扱う。
 //
 // ============================================================================
-// このファイルを直す人へ: **Prisma の記法で書けない制約が5つある**
+// このファイルを直す人へ: **Prisma の記法で書けない制約が9つある**
 // ============================================================================
 //
 // 部分一意索引（`WHERE` 付き）・式に対する索引（`lower(...)`）・検査制約（CHECK）は
 // Prisma のスキーマ言語に無い。
-// **マイグレーションの SQL に直接書いてある。** 具体的には次の5つ。
+// **マイグレーションの SQL に直接書いてある。** 具体的には次の9つ。
 //
 //   1. `User_userId_lower_key`                 … ユーザーID の一意性は大文字小文字を区別しない
 //   2. `Membership_single_owner_per_workspace` … 1ワークスペースにオーナーは1人
 //   3. `RecoveryCode_single_unused_per_user`   … 未使用のリカバリーコードは1人1つ
 //   4. `Channel_archive_naming_check`          … アーカイブと採番と改名が不可分
-//   5. `Message_body_check`                    … 本文は 1〜4000 文字で、空白だけではない
+//   5. `Message_body_check`                    … 本文は 4000 文字まで（空・空白だけは添付だけの投稿のため許す。#614）
+//   6. `Message_replyCount_check`              … 返信件数は負にならない
+//   7. `Dm_participants_check`                 … DM の当事者は小さい User.id が先で、自分自身ではない
+//   8. `DmMessage_body_check`                  … DM の本文も 1〜4000 文字で、空白だけではない
+//   9. `MessageReactionCount_count_check`      … リアクションの件数は 1 以上（0 になった絵文字の行は消す）
 //
-// **このファイルだけを見ても、この5つは見えない。** モデルを増減させるときは
-// `prisma/migrations/` の SQL も併せて読むこと。5つとも
+// **このファイルだけを見ても、この9つは見えない。** モデルを増減させるときは
+// `prisma/migrations/` の SQL も併せて読むこと。9つとも
 // `apps/api/src/prisma-schema.test.ts` が実際の PostgreSQL に対して検証している。
 //
-// 代償: 上の5つは `prisma migrate dev` の自動生成では復元されない。
+// 代償: 上の9つは `prisma migrate dev` の自動生成では復元されない。
 // スキーマを作り直すときは手で書き足す必要がある。
 // 採らなかった側（制約をアプリ側の実装だけで守る）の代償は、
 // **片方だけ実行された状態を DB が受け入れてしまう**ことである。
@@ -68,6 +72,11 @@ enum WorkspaceRole {
 enum ChannelVisibility {
   PUBLIC
   PRIVATE
+}
+
+/// 通知の種類（F-26。機能一覧 10.3）。**いまはメンションだけ**。DM（F-19）の通知はここに足す。
+enum NotificationKind {
+  MENTION
 }
 
 // ============================================================================
@@ -146,9 +155,10 @@ model User {
   ///   | 招待（2.2） | **対象側にも要求する側にも当てる**（対象側: この照合に `AND "deletedAt" IS NULL`。要求する側: 招待するオーナーの所属の問い合わせに `user: { deletedAt: null }`。`invite` が通る `WorkspacesService.membershipOf`） | 対象側: 招待し直せて `Membership` が復活する。要求する側: 退会したオーナーが招待を通せる（機能一覧 1.4 の2段構えの1段目） |
   ///   | 復旧（1.1） | **除く** | **退会済みのパスワードを書き換えられる** |
   ///   | メンション（9.1。経路1: 投稿時の宛先解決） | **対象側にも要求する側にも当てる**（対象側: `WHERE ... AND u."deletedAt" IS NULL`。要求する側: `JOIN "User" viewer ... AND viewer."deletedAt" IS NULL`） | 対象側: 消し込みを取りこぼすと、退会済みが新しい宛先として解決される。要求する側: 退会した利用者が宛先解決を求められる。**理由と経緯は機能一覧 9.1 の経路1 にある** |
-  ///   | メンションの補完候補（9.1。前方一致） | **経路1 と同じく、対象側にも要求する側にも当てる** | 対象側: 退会済みが候補に出る。要求する側: 消し込みを取りこぼした退会済みの利用者が、候補を引ける。**参照実装はまだ無い**（F-20 の実装で足す。#224） |
+  ///   | メンションの補完候補（9.1。前方一致） | **経路1 と同じく、対象側にも要求する側にも当てる** | 対象側: 退会済みが候補に出る。要求する側: 消し込みを取りこぼした退会済みの利用者が、候補を引ける。参照実装は `apps/api/src/prisma-schema.test.ts` の `mentionCandidatesByPrefix`（**`LIKE` ではなく `starts_with` で比べる**——`_` はユーザーID の文字であり、`LIKE` のワイルドカードでもある） |
   ///   | 新規登録の重複判定（1.1） | **含める**（`deletedAt` を条件にしない。1.5 の「ユーザーID は再利用させない」） | 退会済みのユーザーID を空いていると判定し、`INSERT` が `User_userId_lower_key` の一意制約違反で落ちる——再利用は DB が止めるが、応答が「既に使われている」にならない |
-  ///   | 検索の `from:@ユーザーID`・種別「ユーザー」（12.1） | **未決**（12.1 の実装で決める。#224） | **上の行を写さない**——`deletedAt IS NULL` を付けると、1.5 が残すと決めた退会した利用者の過去のメッセージを `from:` で引けなくなる |
+  ///   | 検索の `from:@ユーザーID`（12.1） | **含める**（対象側に `deletedAt` を条件にしない。要求する側は所属の確認〔`membershipOf`〕とメッセージの問い合わせの両方で除く。`search.service.ts`） | `deletedAt IS NULL` を付けると、1.5 が残すと決めた退会した利用者の過去のメッセージを `from:` で引けなくなる |
+  ///   | 検索の種別「ユーザー」（12.1） | **除く**（そのワークスペースの `Membership` を持ち `deletedAt IS NULL`。参加者一覧〔2.1〕と同じ） | 退会済みがユーザーの結果に出る |
   ///
   /// **復旧の経路は特に注意する。** 1.5 の「削除後、リカバリーコードによる
   /// 再設定もできない」を支えているのは「退会処理が同一トランザクションで
@@ -203,6 +213,19 @@ model User {
   avatarUrl   String?
   statusEmoji String?
   statusText  String? @db.VarChar(100)
+
+  /// スレッド内の未読を、チャンネルの未読に含めるか（F-23。機能一覧 10.1。**既定は含める**）。
+  ///
+  /// **代償: 利用者の設定をこの表の列として持っている。** 通知の設定（F-24・F-25）が増えたら、
+  /// 利用者の設定は別の表へ移すこと（移す時点で、この列は新しいマイグレーションで落とす）。
+  ///
+  /// **切り替えても既読位置は動かさない**（一括で既読扱いにしない。要件定義書 3.5.2）——
+  /// 「含めない」→「含める」で、過去の未読の返信が未読として現れる側を採っている。
+  ///
+  /// **この値を変えるのは `PATCH /api/users/me/settings` だけである**（#509。機能一覧 10.1）。
+  /// **プロフィール（`PATCH /api/users/me`）には混ぜない**——プロフィールが持つのは他人に見える情報であり、
+  /// 設定は本人にしか返さない。**切り替えても既読位置は動かさない**（上の段のとおり）。
+  threadUnreadIncluded Boolean @default(true)
 
   /// 退会（F-36）。**物理削除は行わない**（要件定義書 3.4）。
   ///
@@ -259,10 +282,21 @@ model User {
   memberships         Membership[]
   recoveryCodes       RecoveryCode[]
   refreshTokens       RefreshToken[]
+  /// ピン留めした（F-33）。
+  pinnedMessages      MessagePin[]
   /// 自分宛ての未承諾の招待（F-38）と、自分が出した招待（F-08）。
-  invitationsReceived Invitation[]   @relation("InvitationInvitee")
-  invitationsSent     Invitation[]   @relation("InvitationInviter")
+  invitationsReceived Invitation[]     @relation("InvitationInvitee")
+  invitationsSent     Invitation[]     @relation("InvitationInviter")
   messages            Message[]
+  mentionedIn         MessageMention[]
+  /// DM の当事者（F-19。`Dm` は User.id の小さい方と大きい方の2本で持つ）と、DM に書いたメッセージ。
+  dmsAsLow            Dm[]             @relation("DmLowUser")
+  dmsAsHigh           Dm[]             @relation("DmHighUser")
+  dmMessages          DmMessage[]
+  reactions           MessageReaction[]
+  avatarUploads       AvatarUpload[]
+  attachments         Attachment[]
+  hereMentionedIn     HereMentionRecipient[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
   /// ワークスペース参加（`Membership`）を経由してのみ成り立つ（`ChannelMember` を参照）。
@@ -357,6 +391,7 @@ model Workspace {
   memberships Membership[]
   channels    Channel[]
   invitations Invitation[]
+  dms         Dm[]
 
   /// ワークスペース名に一意制約を置かない。**誰でも作成できる**（要件定義書 3.5.1）以上、
   /// 名前を取り合う設計にすると、先に作った人が名前を占有する。
@@ -405,6 +440,17 @@ model Membership {
   /// `User.deletedAt` の説明を読むこと）。消さないと、
   /// **退会した利用者が参加者一覧と配信の対象に残り続ける。**
   channelMembers ChannelMember[]
+
+  /// **既読位置（F-23）も、この行が消えると消える。** 参照先を `User` ではなくここにしているのは、
+  /// **抜けた利用者の既読位置が残ると、復帰したときに抜けていた間の投稿が既読になる**ためである（機能一覧 10.1）。
+  channelReads ChannelRead[]
+  threadReads  ThreadRead[]
+  dmReads      DmRead[]
+  /// DM の通知（F-26。#623）。抜けたら連鎖して消える（`Notification` と同じ）。
+  dmNotifications DmNotification[]
+
+  /// 通知（F-26）も、この行が消えると消える（ワークスペースから外れた利用者に、そのワークスペースの通知を残さない）。
+  notifications Notification[]
 
   /// 同じ利用者が同じワークスペースに二重に参加しないこと。
   /// この索引は「そのワークスペースの参加者一覧」の取得にも効き、
@@ -539,8 +585,8 @@ model Channel {
 
   /// アーカイブした時刻（F-35）。null なら現役。
   ///
-  /// **この列を読んで、人を増やす・メッセージを書くかを決める経路（参加・招待・投稿・編集・削除）は、読む前にその行を掴むこと。**
-  /// 掴まずに読むと、アーカイブの確定の直前に読んだ古い値に基づいて、アーカイブの後に参加・招待・投稿・編集・削除が成立する。
+  /// **この列を読んで、人を増やす・メッセージを書くかを決める経路（参加・招待・投稿・返信・編集・削除）は、読む前にその行を掴むこと。**
+  /// 掴まずに読むと、アーカイブの確定の直前に読んだ古い値に基づいて、アーカイブの後に参加・招待・投稿・返信・編集・削除が成立する。
   /// DB の制約はこれを止めない。実装は apps/api/src/workspaces/channel-access.ts の `lockedChannelFor`（行を強さ `share` で掴んでから読む）を使う。
   archivedAt DateTime? @db.Timestamptz(3)
 
@@ -598,6 +644,13 @@ model Channel {
   workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   members   ChannelMember[]
   messages  Message[]
+  /// 添付ファイルのアップロード（F-27）。チャンネルを消せば行も消える（S3 のオブジェクトは残る）。
+  attachments Attachment[]
+  /// 既読位置（F-23）。チャンネルを消せば既読位置も消える。
+  reads     ChannelRead[]
+
+  /// 通知（F-26）。チャンネルを消せば通知も消える。
+  notifications Notification[]
 
   /// ワークスペース内で名前は一意。**ワークスペースをまたげば同じ名前を使える。**
   /// 一意制約の範囲が広すぎないことは、テストが別ワークスペースへの作成で確かめている。
@@ -683,7 +736,7 @@ model ChannelMember {
   @@index([userId])
 }
 
-/// チャンネルのメッセージ（F-11・F-13。機能一覧 4.1・4.2）。
+/// チャンネルのメッセージとスレッドの返信（F-11・F-13・F-17。機能一覧 4.1・4.2・6）。
 model Message {
   /// UUIDv7。一覧のカーソル（`before`）にそのまま使う。
   id String @id @default(uuid(7)) @db.Uuid
@@ -696,7 +749,8 @@ model Message {
   /// 投稿者。**退会しても行は残る**（利用者は論理削除。機能一覧 1.5）。
   authorId String @db.Uuid
 
-  /// 1〜4000 文字で、空白だけではない（検査制約 `Message_body_check`。マイグレーションに置く）。
+  /// 4000 文字まで（検査制約 `Message_body_check`。マイグレーションに置く）。**空・空白だけは DB では止めない**——添付だけの投稿は本文が空でよく（#614）、
+  /// 添付が無いときに断るのは REST の仕様（CreateMessageRequest）である。
   body String
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
@@ -707,9 +761,536 @@ model Message {
   /// 削除した時刻（論理削除）。**削除しても本文は残す**（要件定義書 3.4・機能一覧 4.2）。返さないのは応答と配信の側である。
   deletedAt DateTime? @db.Timestamptz(3)
 
-  channel Channel @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// スレッドの親（F-17。機能一覧 6）。チャンネルの本体のメッセージなら null。
+  /// **親は同じチャンネルのメッセージだけ**（複合外部キー）。**返信に返信はできない**（1階層のみ）——親が返信でないことは書く側が確かめる。
+  parentId String? @db.Uuid
 
-  /// **一覧（新しい順・`before` より古いもの）はこの向きで引く。**
-  @@index([channelId, id(sort: Desc)])
+  /// 削除されていない返信の件数（カウンタ列。一覧で `COUNT` を発行しない。返信の投稿・削除と同じトランザクションで増減する。要件定義書 4.1）。
+  replyCount Int @default(0)
+
+  /// 本文に `@channel` があるか（F-21。機能一覧 9.2。投稿・返信・編集で本文から決める）。
+  /// **参加者全員のメンションの件数に数える**（F-24。`unread.ts`）——参加者ごとの行を作らない（参加した時点より後だけを数える条件がそのまま効く）。
+  mentionsChannel Boolean @default(false)
+
+  /// 本文に `@here` があるか（F-21）。**メンションの件数に数えるのは、受け取りを返した利用者だけ**（`HereMentionRecipient`）。
+  /// 編集で本文から消えたら数えない（受け取りの記録は残す）。
+  mentionsHere Boolean @default(false)
+
+  channel  Channel          @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  author   User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// 親は論理削除だけで消える（返信は残す。機能一覧 4.2）。チャンネルごと消えるときは、同じ文の中で返信も消えるため NoAction にする。
+  parent   Message?         @relation("Thread", fields: [parentId, channelId], references: [id, channelId], onDelete: NoAction)
+  replies  Message[]        @relation("Thread")
+  mentions MessageMention[]
+  reactions      MessageReaction[]
+  reactionCounts MessageReactionCount[]
+  /// 投稿に結び付けた添付（F-27）。
+  attachments Attachment[]
+  hereRecipients HereMentionRecipient[]
+
+  /// 既読位置（F-23）から指される向き。**参照するだけで、このメッセージの側からは読まない。**
+  /// Prisma が双方向の関連を要求するために置いている（3本とも `ChannelRead` / `ThreadRead` の側が持ち主である）。
+  readAsChannelLast ChannelRead[]
+  readAsThreadParent ThreadRead[] @relation("ThreadReadParent")
+  readAsThreadLast   ThreadRead[] @relation("ThreadReadLast")
+  /// ピン留め（F-33）。**1件のメッセージに1つまで**（`MessagePin.messageId` の一意制約）。リストにしているのは、参照先が複合キー（id, channelId）で
+  /// Prisma が1対1の関連に同じ組の一意制約を求めるためである（`messageId` だけで一意なので、組の一意索引は足さない）。
+  pins               MessagePin[]
+
+  /// 通知（F-26）から指される向き。`Notification` の側が持ち主である。
+  notifications Notification[]
+
+  /// 返信の親を、同じチャンネルのメッセージに限る複合外部キーの参照先。
+  @@unique([id, channelId])
+  /// **未読の集計はこの向きで引く**（`channelId = ?` と、**本体（`parentId IS NULL`）についての** `id > 既読位置`。F-23。機能一覧 10.1）。
+  /// **上の `@@index([channelId, parentId, id])` では代わりにならない**——2列目が `parentId` のため、
+  /// チャンネルの中を `id` で切る条件が前方一致にならない。
+  ///
+  /// **返信はこの範囲では切れない。** 未読の述語は `(m."parentId" IS NOT NULL OR m."id" > 既読位置)` であり、
+  /// 左枝が id によらず返信を全部通すためである（返信を切るのは `ThreadRead` の `NOT EXISTS` の側。
+  /// 束5 で採った形の帰結であり、誤りではない。#505 第7巡の 🟡1）。
+  @@index([channelId, id])
+  /// **チャンネルの一覧（本体だけ。`parentId IS NULL`）と、スレッドの返信の一覧（`parentId` で絞る）は、どちらもこの向きで引く**
+  /// （新しい順・`before` より古いもの）。**踏むと壊れる: 返信を引く問い合わせは必ず `channelId` を伴う**——`parentId` だけで引くと、この索引の前方を使えない。
+  @@index([channelId, parentId, id(sort: Desc)])
+  /// **検索（F-30。機能一覧 12.1）の本文の照合はこの索引で引く**（pg_bigm の 2-gram。`LIKE likequery(語)`）。
+  /// **拡張 `pg_bigm` はマイグレーションの SQL が作る**（Prisma のスキーマでは宣言していない）。
+  @@index([body(ops: raw("gin_bigm_ops"))], map: "Message_body_bigm_idx", type: Gin)
+}
+
+/// メンションの対象（F-20。機能一覧 9.1）。投稿・返信のときに、本文の `@ユーザーID` を投稿時の宛先解決（経路1）で解決できた利用者を持つ。
+/// **編集では、本文にユーザーID が残っている対象を経路1 で解決し直さずに残す**（チャンネルを抜けた・退会した対象も残る）。本文から消えた対象だけを外し、
+/// まだ保存していない `@` だけを経路1 で解決して足す（`MessagesService` の `replaceMentions`）。**新しく足す行は、経路1 が返した利用者だけである**。
+/// **表示時の参照先解決（経路2）は、この表の `userId` から `User` を引く**——`ChannelMember` を条件にしないため、対象がチャンネルを抜けても退会しても引ける。
+model MessageMention {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @db.Uuid
+
+  /// 対象の利用者（`User.id`。ログイン識別子の `User.loginId` ではない）。
+  /// **`Membership` や `ChannelMember` を参照しない**——参照すると、キック・退出でメンションが消え、本文の `@` が誰を指したかを引けなくなる。
+  userId String @db.Uuid
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  /// 利用者は論理削除で行が残る（機能一覧 1.5）。
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 本文に同じ利用者を2回書いても1件。メッセージの対象を引く向きにも効く。
+  ///
+  /// 未読とメンションの集計（F-23・F-24。`unread.ts` の `MENTIONS_PARTICIPANT`）は、この表を `EXISTS` で引く（1つの未読の行につき高々1行にするため、
+  /// `LEFT JOIN` しない）。
+  @@unique([messageId, userId])
+}
+
+/// リアクション（F-18。機能一覧 7）。**誰がどの絵文字を付けたか**の1件。件数は `MessageReactionCount` に持つ。
+/// 絵文字は Unicode の RGI_Emoji に当たる列1つ（アプリ側で確かめる。`User.statusEmoji` と同じ理由で列の長さでは縛らない）。
+/// **削除済みのメッセージの行も消さない**（削除は論理削除。応答で返さないだけである）。
+model MessageReaction {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。付けた順にも使う。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @db.Uuid
+
+  /// 付けた利用者（`User.id`）。**`ChannelMember` を参照しない**——参照すると、チャンネルを抜けたときに行だけが連鎖で消え、
+  /// カウンタ列（`MessageReactionCount.count`）と食い違う。
+  userId String @db.Uuid
+
+  emoji String
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  /// 利用者は論理削除で行が残る（機能一覧 1.5）。
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// **同じ人が同じ絵文字を二重に付けられない**（機能一覧 7）。メッセージの行を引く向きにも効く。
+  @@unique([messageId, userId, emoji])
+}
+
+/// リアクションの件数（カウンタ列。F-18。要件定義書 4.1「リアクション数はカウンタ列として保持し、本体の更新と同一トランザクションで増減させる」）。
+/// **一覧で `COUNT` を発行しない**ためにある。メッセージと絵文字の組で1行。**件数は 1 以上**で、0 になったら行を消す
+/// （検査制約 `MessageReactionCount_count_check`。マイグレーションに置く）。
+///
+/// **踏むと壊れる: `MessageReaction` の行を足す・消す経路は、同じトランザクションでここを増減させる**（`reactions.service.ts`）。
+/// 増減はメッセージの行を `FOR UPDATE` で掴んでから行う——同じメッセージの付け外しを直列にし、件数の読み書きと種類の上限の判定を食い違わせない。
+model MessageReactionCount {
+  /// UUIDv7 の代理キー。**その絵文字を初めて付けた順**（応答の並び）にも使う。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @db.Uuid
+
+  emoji String
+
+  count Int
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, emoji])
+}
+
+/// `@here` の送った宛先と受け取り（F-21。機能一覧 9.2「タスクをまたぐ在席」）。
+/// **送った宛先ごとに1行**を持ち、受け取りを返した利用者は `receivedAt` を持つ——
+/// **送った宛先の一覧は全行、受け取りの一覧は `receivedAt` のある行**であり、一致しないときも両方が残る（届いていないかもしれない利用者を後から確かめる記録）。
+/// **`@here` の通知（メンションの件数）は、`receivedAt` のある行の利用者にだけ数える**（`unread.ts`）。
+/// **読む API は持たない**（誰が確かめられるかは、作るときにそのチャンネルの参加者の範囲で決める。9.2）。
+model HereMentionRecipient {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @db.Uuid
+
+  /// 送った宛先の利用者（`User.id`）。**送る時点でそのチャンネルの参加者と確かめた利用者だけ**を書く（5.2）。
+  userId String @db.Uuid
+
+  /// 受け取りを返した時刻。期限までに返らなかった宛先は null（受け取らなかったとして扱う）。
+  receivedAt DateTime? @db.Timestamptz(3)
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// 1つの `@here` の宛先に同じ利用者は1回。**未読の集計はこの組で引く**（1組に高々1行）。
+  @@unique([messageId, userId])
+}
+
+// ============================================================================
+// 既読位置（F-23。機能一覧 10.1）
+// ============================================================================
+
+/// チャンネルの既読位置（F-23。機能一覧 10.1）。**未読は、ここからの差分で求める**（都度集計しない）。
+///
+/// **位置は時刻ではなくメッセージの id で持つ。** 同じミリ秒に入った投稿の前後が時刻では決まらない。
+/// id は UUIDv7 で作った順に増え、一覧の並び（`id` の降順）とも `Message` の索引とも同じ軸である。
+///
+/// **参照先は `ChannelMember` と同じ考え方で `Membership` である**（`User` を直接参照しない）。
+/// **ワークスペースからのキック・退出（`Membership` の削除。F-37・F-38）では、これで既読位置も連鎖して消える。**
+///
+/// **踏むと壊れる: チャンネル単位のキック・退出（F-09・F-10）では連鎖しない。** 消えるのは `ChannelMember` だけであり、
+/// **既読位置はアプリが同じトランザクションで消す**（`unread.ts` の `forgetReadPositions`）。
+/// 残すと、再参加した利用者に**抜ける前の位置**が返り、「ここから未読」の線が参加前に引かれて未読数と食い違う
+/// （未読数の側は `m."createdAt" >= cm."joinedAt"` が守る。#505 第2巡の 🔴1）。
+/// **DM の既読位置（F-19）を足すときも、この2つの経路を両方とも見ること。**
+///
+/// **行が無い利用者の未読は、参加した時点（`ChannelMember.joinedAt`）より後だけを数える**
+/// （参加する前の履歴を未読にしない）。この規約は DB では縛れず、問い合わせの側が守る。
+model ChannelRead {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  channelId String @db.Uuid
+
+  /// チャンネルが属するワークスペース。`Membership` への複合外部キーに要る（`ChannelMember` と同じ）。
+  workspaceId String @db.Uuid
+
+  userId String @db.Uuid
+
+  /// 最後に読んだメッセージの id。**戻さない**——古いページを遡っても既読は進んだままにする（10.1）。
+  lastReadMessageId String @db.Uuid
+
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  channel    Channel    @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  /// 既読位置が指すメッセージ。**チャンネルごと消えるときは同じ文の中で消えるため NoAction にする**（`Message.parent` と同じ理由）。
+  lastRead   Message    @relation(fields: [lastReadMessageId, channelId], references: [id, channelId], onDelete: NoAction)
+
+  /// 利用者とチャンネルの組で1行。未読を引く向き（「この利用者のチャンネルごとの既読位置」）にも効く。
+  @@unique([channelId, userId])
+  @@index([userId])
+}
+
+/// スレッドの既読位置（F-23。機能一覧 10.1）。**チャンネルとは別系統で持つ**——
+/// 「スレッド内の未読をチャンネルの未読に含めるか」を利用者が切り替えられ（`User.threadUnreadIncluded`）、
+/// **切り替えた瞬間に集計対象が変わる**ためである（含めない側で読み進めても、チャンネルの既読位置は動かない）。
+///
+/// **切替時に一括で既読扱いにしない**（読んでいないものが読んだことになる。要件定義書 3.5.2）。
+/// 参照先の考え方と、行が無いときの下限は `ChannelRead` と同じである。
+model ThreadRead {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// スレッドの親のメッセージ（返信は1階層のみ。`Message.parentId`）。
+  parentMessageId String @db.Uuid
+
+  /// 親が属するチャンネル。`Message` の複合一意 `(id, channelId)` を参照するために持つ。
+  channelId String @db.Uuid
+
+  workspaceId String @db.Uuid
+
+  userId String @db.Uuid
+
+  /// 最後に読んだ返信の id。
+  lastReadMessageId String @db.Uuid
+
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  parent     Message    @relation("ThreadReadParent", fields: [parentMessageId, channelId], references: [id, channelId], onDelete: NoAction)
+  lastRead   Message    @relation("ThreadReadLast", fields: [lastReadMessageId, channelId], references: [id, channelId], onDelete: NoAction)
+
+  @@unique([parentMessageId, userId])
+  @@index([userId])
+}
+
+// ============================================================================
+// ダイレクトメッセージ（F-19。機能一覧 8）
+// ============================================================================
+
+/// 同じワークスペースの2人の DM（F-19。機能一覧 8）。**1対1のみ**（グループ DM は対象外。要件定義書 3.4）。
+///
+/// **DM はチャンネルではない**（機能一覧 5.2）。`Channel` / `Message` の行にしない——チャンネルの参加者判定・未読の集計・
+/// 部屋の関門は `ChannelMember` を根拠にしており、DM を混ぜると、その判定が DM に流れ込む（8「チャンネルの判定を DM に流用しない」と同じ理由）。
+/// **代償: リアクション（F-18）・検索（F-30）など、DM にも当てる機能は、この3つの表の側にも当て方を持つことになる。**
+///
+/// **同じ2人の DM は1つだけ**（8「同じ相手との DM は1つに集約される」）。当事者を **User.id の小さい方（`lowUserId`）と
+/// 大きい方（`highUserId`）の順**で持ち、`(workspaceId, lowUserId, highUserId)` の一意索引で止める。
+/// 順を逆にした行・自分自身との行は検査制約 `Dm_participants_check`（マイグレーションに置く）が止める——
+/// 順を縛らないと、同じ2人の行が逆の順でもう1つ入り、一意索引をすり抜ける。
+///
+/// **当事者を `Membership` ではなく `User` で参照する。** 参照先を `Membership` にすると、キック・退出で DM とメッセージが連鎖して消え、
+/// 「過去のメッセージは残る」（機能一覧 1.5・2.2）が DM で破れる。**その代わり、いまメンバーかは DB が縛らない**——
+/// 読み書きと配信のたびに、アプリが `Membership` と `User.deletedAt` を確かめる（5.2 の DM の箇条。`apps/api/src/workspaces/dms.service.ts`）。
+model Dm {
+  id          String @id @default(uuid(7)) @db.Uuid
+  workspaceId String @db.Uuid
+
+  /// 当事者のうち User.id の小さい方と大きい方（`Dm_participants_check`）。
+  lowUserId  String @db.Uuid
+  highUserId String @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lowUser   User        @relation("DmLowUser", fields: [lowUserId], references: [id], onDelete: Cascade)
+  highUser  User        @relation("DmHighUser", fields: [highUserId], references: [id], onDelete: Cascade)
+  messages  DmMessage[]
+  reads     DmRead[]
+  notifications DmNotification[]
+
+  /// 同じ2人の DM は1つ。**「この利用者の DM の一覧」を小さい方の側から引く向き**にも効く（先頭2列）。
+  @@unique([workspaceId, lowUserId, highUserId])
+  /// `DmRead` の複合外部キー `(dmId, workspaceId)` の参照先（`Channel` の `@@unique([id, workspaceId])` と同じ理由）。
+  @@unique([id, workspaceId])
+  /// 「この利用者の DM の一覧」を大きい方の側から引く向き。
+  @@index([workspaceId, highUserId])
+}
+
+/// DM のメッセージ（F-19。機能一覧 8）。**編集・論理削除の扱いはチャンネルのメッセージと同じ**（機能一覧 4.2。本文は削除しても残す）。
+///
+/// **書き手が当事者であることは DB では縛らない**（当事者は2列のどちらかで、外部キー1本で表せない）。書くのは `dms.service.ts` の投稿だけである。
+model DmMessage {
+  id   String @id @default(uuid(7)) @db.Uuid
+  dmId String @db.Uuid
+
+  /// 書き手。**退会しても行は残る**（機能一覧 1.5）。
+  authorId String @db.Uuid
+
+  /// 1〜4000 文字で、空白だけではない（検査制約 `DmMessage_body_check`。マイグレーションに置く）。
+  body String
+
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  editedAt  DateTime? @db.Timestamptz(3)
+  deletedAt DateTime? @db.Timestamptz(3)
+
+  dm     Dm   @relation(fields: [dmId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /// 既読位置から指される向き（`Message.readAsChannelLast` と同じく、参照するだけ）。
+  readAsLast DmRead[]
+  /// このメッセージの DM の通知（F-26）。
+  notifications DmNotification[]
+
+  /// `DmRead` の既読位置を、同じ DM のメッセージに限る複合外部キーの参照先。
+  @@unique([id, dmId])
+  /// 一覧（新しい順・`before` より古いもの）と、未読の集計（`dmId = ?` と `id > 既読位置`）の両方をこの向きで引く。
+  @@index([dmId, id(sort: Desc)])
+}
+
+/// DM の既読位置（「利用者 × DM」。F-23。機能一覧 10.1）。**考え方は `ChannelRead` と同じ**——位置はメッセージの id で持ち、戻さない。
+///
+/// **参照先は `Membership` である。** ワークスペースからのキック・退出・退会（`Membership` の削除）で連鎖して消える。
+/// 残すと、戻ったときに抜けていた間の位置が返る（`ChannelRead` の説明と同じ）。DM にはチャンネル単位の抜け方が無いため、アプリが消す経路は無い。
+///
+/// **行が無い利用者の未読は、そのワークスペースに参加した時点（`Membership.joinedAt`）より後だけを数える**（抜けて戻った利用者に、抜ける前の履歴を未読にしない）。
+model DmRead {
+  id          String @id @default(uuid(7)) @db.Uuid
+  dmId        String @db.Uuid
+  workspaceId String @db.Uuid
+  userId      String @db.Uuid
+
+  /// 最後に読んだメッセージの id。**戻さない**（10.1）。
+  lastReadMessageId String @db.Uuid
+
+  updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  dm         Dm         @relation(fields: [dmId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  /// DM ごと消えるときは同じ文の中で消えるため NoAction にする（`ChannelRead.lastRead` と同じ理由）。
+  lastRead   DmMessage  @relation(fields: [lastReadMessageId, dmId], references: [id, dmId], onDelete: NoAction)
+
+  @@unique([dmId, userId])
+  @@index([userId])
+}
+
+// ============================================================================
+// 通知（F-26。機能一覧 10.3）
+// ============================================================================
+
+/// 受け取った通知（F-26。機能一覧 10.3）。**オフライン中に受けたメンションを、次にログインしたときに一覧で確かめるために残す**（要件定義書 3.5.2「通知の永続化」）。
+///
+/// - **行を作るのはメンションの対象を保存するのと同じトランザクション**（`notifications/mention-notifications.ts`）。書き手本人には作らない
+/// - **編集で本文から外した対象の行は消し、足した対象の行は作る**（`MessageMention` に揃える）。本文に残した対象の行は既読のまま残す
+/// - **既読は行ごとの `readAt` で持つ**。チャンネルの既読位置（F-23）とは別系統である
+///
+/// **踏むと壊れる: 一覧と既読化は、いまそのチャンネルの参加者である行だけを返す**（`ChannelMember` との結合。CLAUDE.md 2）。
+/// **チャンネル単位のキック・退出では、この行は消えない**（`ChannelMember` だけが消える）——参加の条件を外すと、
+/// 抜けたプライベートチャンネルの本文が通知の一覧から読める。
+/// **削除済みのメッセージの行も返さない**（行は残す。メッセージは論理削除である）。
+model Notification {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// 受け取った利用者。
+  userId String @db.Uuid
+
+  workspaceId String @db.Uuid
+
+  /// メッセージが属するチャンネル。`Message` の複合一意 `(id, channelId)` を参照するために持つ。
+  channelId String @db.Uuid
+
+  messageId String @db.Uuid
+
+  kind NotificationKind
+
+  /// 既読にした時刻。未読なら null。**一度入れたら変えない**（2回目の既読化で時刻を進めない）。
+  readAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  channel    Channel    @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  /// メッセージは論理削除だけで消える。チャンネルごと消えるときは同じ文の中で消えるため NoAction にする（`ChannelRead` と同じ）。
+  message    Message    @relation(fields: [messageId, channelId], references: [id, channelId], onDelete: NoAction)
+
+  /// 同じメッセージの同じ種類の通知は1人1件（本文に同じ利用者を2回書いても1件）。
+  @@unique([messageId, userId, kind])
+  /// 一覧は利用者ごとに新しい順（`id` の降順）で引く。
+  @@index([userId, id(sort: Desc)])
+}
+
+/// DM の通知（F-26・F-19。機能一覧 10.2・10.3「受け取ったメンション・DM を時系列で一覧表示する」。#623）。
+/// チャンネルの通知（`Notification`）と表を分ける——あちらはチャンネルとメッセージ（`Message`）を参照し、DM は DM と `DmMessage` を参照するため、
+/// 1つの表にすると参照先が空になりうる列と、どちらか一方だけを持つことの検査制約が要る。一覧は2つの表を id（UUIDv7）の新しい順に合わせて返す。
+///
+/// - **行を作るのは DM の投稿と同じトランザクション**（`workspaces/dms.service.ts`）。宛先は相手だけ（書き手本人には作らない）
+/// - 既読は行ごとの `readAt` で持つ。DM の既読位置（`DmRead`）とは別系統である
+/// - **削除済みのメッセージの行は返さない**（行は残す。メッセージは論理削除である）
+/// - ワークスペースから抜けたら、`Membership` から連鎖して消える
+model DmNotification {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// 受け取った利用者（DM の相手）。
+  userId String @db.Uuid
+
+  workspaceId String @db.Uuid
+
+  dmId String @db.Uuid
+
+  messageId String @db.Uuid
+
+  /// 既読にした時刻。未読なら null。**一度入れたら変えない**。
+  readAt DateTime? @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  membership Membership @relation(fields: [workspaceId, userId], references: [workspaceId, userId], onDelete: Cascade)
+  dm         Dm         @relation(fields: [dmId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  /// メッセージは論理削除だけで消える。DM ごと消えるときは同じ文の中で消えるため NoAction にする（`DmRead` と同じ）。
+  message    DmMessage  @relation(fields: [messageId, dmId], references: [id, dmId], onDelete: NoAction)
+
+  /// 同じメッセージの通知は1人1件。
+  @@unique([messageId, userId])
+  /// 一覧は利用者ごとに新しい順（`id` の降順）で引く。
+  @@index([userId, id(sort: Desc)])
+}
+
+// ============================================================================
+// ピン留め（F-33。機能一覧 13.2）
+// ============================================================================
+
+/// チャンネルにピン留めしたメッセージ（F-33。区分: 提案・承認済〔2026-09-03〕）。**1件のメッセージに1つまで**（`messageId` の一意制約）。
+/// **外せるのはそのチャンネルの参加者なら誰でもよい**ため、ピン留めした人は表示のためだけに持つ（判定に使わない）。
+/// **削除済みのメッセージの行も消さない**（削除は論理削除。一覧で返さないだけである）。
+model MessagePin {
+  /// UUIDv7 の代理キー（主キーの形を全モデルでそろえる。要件定義書 3.5.2）。**一覧の並び（ピン留めした新しい順）にも使う。**
+  id String @id @default(uuid(7)) @db.Uuid
+
+  messageId String @unique @db.Uuid
+
+  /// メッセージが属するチャンネル。**messageId から導けるが、あえて持つ**——チャンネルのピン留めの一覧をこの列で引き、
+  /// 下の複合外部キーで、別のチャンネルのメッセージを指せない。
+  channelId String @db.Uuid
+
+  /// ピン留めした人（`User.id`）。利用者は論理削除で行が残る（機能一覧 1.5）。
+  pinnedById String @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  message  Message @relation(fields: [messageId, channelId], references: [id, channelId], onDelete: Cascade)
+  pinnedBy User    @relation(fields: [pinnedById], references: [id], onDelete: Cascade)
+
+  /// **チャンネルのピン留めの一覧はこの向きで引く**（`channelId = ?` を新しい順）。
+  @@index([channelId, id])
+}
+
+/// アップロードの段（機能一覧 11.1）。発行 → 確定の途中 → 成功か拒否。**確定は識別子ごとに1回だけ行う**——
+/// 発行の直後の行だけを「確定の途中」へ条件付きで進め、進められた要求だけが S3 を読み書きする。2回目以降は結果の列を返す。
+enum UploadState {
+  ISSUED
+  COMPLETING
+  SUCCEEDED
+  REJECTED
+}
+
+/// アバター画像のアップロード（F-04。機能一覧 1.3・11.1）。発行した署名付き URL 1つに1行。
+///
+/// **キーは列に持たず、この行から組み立てる**——隔離用のキーは `quarantine/avatars/{userId}/{id}/{fileName}`、
+/// 配信用のキーは `avatars/{userId}/{id}/{deliveredFileName}`（`apps/api/src/file-uploads/upload-keys.ts`）。
+/// **確定を求められるのは `userId` の本人だけであり、キーは要求の値ではなくこの行から作る**（11.1）。
+model AvatarUpload {
+  /// アップロードの識別子であり、キーの `{UUID}` でもある（推測できない値。UUIDv7）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  userId String @db.Uuid
+
+  /// 保存名（利用者のファイル名を許可リストで置き換え、隔離用のキーが 1,024 バイトに収まるよう切り詰めたもの。拡張子は付け替える前）。
+  fileName String
+
+  /// 申告した Content-Type（署名付き URL に焼き込んだ値。確定の検証では信用しない）。
+  contentType String
+
+  state UploadState @default(ISSUED)
+
+  /// 確定に成功したときの、拡張子を検証した形式のものに付け替えた保存名。
+  deliveredFileName String?
+
+  /// 確定で断ったときの状態コードと `code`（2回目以降の確定に同じものを返す）。
+  rejectedStatus Int?
+  rejectedCode   String?
+
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// チャンネルの添付ファイルのアップロード（F-27・F-28。機能一覧 11.1）。発行した署名付き URL 1つに1行。
+///
+/// **キーは列に持たず、この行から組み立てる**——隔離用のキーは `quarantine/workspace/{workspaceId}/channel/{channelId}/{id}/{fileName}`、
+/// 配信用のキーは `workspace/{workspaceId}/channel/{channelId}/{id}/{deliveredFileName}`（`apps/api/src/file-uploads/upload-keys.ts`）。
+/// **確定を求められるのは `uploaderId` の本人だけであり、キーとやり直す参加者判定の対象チャンネルは要求の値ではなくこの行から作る**（11.1。#211）。
+/// **DM の添付にこの行とキーの構造を流用しない**（11.1 の冒頭。#239）。
+model Attachment {
+  /// アップロードの識別子であり、キーの `{UUID}` でもある（推測できない値。UUIDv7）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// 参加者判定を通したチャンネルとそのワークスペース（複合外部キーで、別のワークスペースのチャンネルを指せない）。
+  workspaceId String @db.Uuid
+  channelId   String @db.Uuid
+
+  uploaderId String @db.Uuid
+
+  /// 利用者が付けた元のファイル名（表示用。保存名には使わない。11.1）。
+  originalName String
+
+  /// 保存名（許可リストで置き換え、隔離用のキーが 1,024 バイトに収まるよう切り詰めたもの。拡張子は付け替える前）。
+  fileName String
+
+  /// 申告した Content-Type（署名付き URL に焼き込んだ値。確定の検証では信用しない）。
+  contentType String
+
+  state UploadState @default(ISSUED)
+
+  /// 確定に成功したときの、検証した形式（共有の許可リストの id）・拡張子を付け替えた保存名・大きさ（バイト）。
+  formatId          String?
+  deliveredFileName String?
+  size              Int?
+
+  /// 確定で断ったときの状態コードと `code`（2回目以降の確定に同じものを返す）。
+  rejectedStatus Int?
+  rejectedCode   String?
+
+  /// 結び付けた投稿。**確定に成功した、まだどの投稿にも付いていない、本人が上げたものだけを、同じチャンネルの投稿に付ける**（書く側が確かめる）。
+  /// 投稿は同じチャンネルのものだけ（複合外部キー）。
+  messageId String? @db.Uuid
+
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+
+  channel  Channel  @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  uploader User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  message  Message? @relation(fields: [messageId, channelId], references: [id, channelId], onDelete: NoAction)
+
+  @@index([uploaderId])
+  @@index([channelId])
+  /// 一覧のメッセージに載せる添付を、メッセージの id でまとめて引く。
+  @@index([messageId])
 }

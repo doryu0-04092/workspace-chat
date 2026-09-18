@@ -1,4 +1,5 @@
-# PostgreSQL 17 に pg_bigm を足したイメージ。開発環境（compose.yaml）だけが使う。
+# PostgreSQL 17 に pg_bigm を足したイメージ。開発環境（compose.yaml）と、テスト（apps/api/src/testing/postgres.ts・scripts/api-image.test.sh）が使う。
+# 本番（RDS）は使わない（RDS が同梱する pg_bigm を使う）。
 #
 # なぜ自分でビルドするか。
 #   1. 公式の postgres:17 に pg_bigm は入っていない
@@ -21,7 +22,8 @@
 # 確認結果（17.11）も、その時点で確認した版という意味しか持たない。
 #
 # それでもタグにするのは、**固定するとマイナーの修正が届かなくなるため**である。
-# 依存の自動更新（dependabot.yml）は Dockerfile を見ていないので（#38）、
+# **この土台も Dependabot で追わないと決めている**（決定・2026-09-16・依頼側。
+# 理由は .github/dependabot.yml の末尾）。追う経路が無い以上、
 # ダイジェストで固定すると誰かが手で上げるまで古いままになる。
 #
 # **ただしタグにしただけでは届かない。** Docker は同じ名前のイメージが手元にあれば

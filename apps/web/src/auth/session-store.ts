@@ -1,15 +1,19 @@
 import type { components } from '@workspace-chat/shared';
 import { createStore } from 'zustand/vanilla';
-import type { Failure } from './failure';
+import { type Failure, readFailure } from './failure';
 import { postJson } from './post-json';
 
 type Schemas = components['schemas'];
 
 export type SessionUser = Schemas['UserSummary'];
 
+/**
+ * `unavailable`: 起動時の復元で、ログインの状態を確かめられなかった（401 のほかの失敗が、やり直しても続いた。機能一覧 1.2。#420）。
+ */
 export type SessionState =
   | { status: 'checking' }
   | { status: 'signedOut' }
+  | { status: 'unavailable' }
   | { status: 'signedIn'; accessToken: string; user: SessionUser };
 
 export type LoginResult = { ok: true } | Failure;
@@ -20,9 +24,72 @@ export interface RefreshLocks {
   request<T>(name: string, callback: () => Promise<T>): Promise<T>;
 }
 
+/** 1回の要求の結果。失敗は `Failure`（`status` の意味は failure.ts）。 */
+type Attempt<T> = { ok: true; value: T } | Failure;
+
 /** Cookie を使う要求（リフレッシュ・ログアウト）に付ける独自のヘッダーの値。綴りは REST の仕様の列挙を型が見る。 */
 const REQUESTED_BY: components['parameters']['RequestedBy'] = 'workspace-chat';
 const REFRESH_LOCK = 'workspace-chat:refresh';
+
+/**
+ * 起動時の復元のやり直し（機能一覧 1.2。#420。1 秒と 10 秒は実装時に決めた値）。
+ * 通信の失敗・5xx は 1 秒後に、429 は `Retry-After` が 10 秒以下ならその秒数の後に、1回だけやり直す。
+ */
+const RESTORE_RETRY_DELAY_MS = 1000;
+const RESTORE_RETRY_AFTER_LIMIT_SECONDS = 10;
+
+/**
+ * 起動時の復元の1つの要求（リフレッシュ・自分の情報の読み込み）の時限（#530。10 秒は実装時に決めた値）。
+ * 超えたら打ち切り、通信の失敗（status 0）として扱う——やり直し、それでも返らなければ `unavailable` になる。
+ * 時限が無いと、応答が返らない間 `checking` のままで、利用者が自分で開いたログイン・登録の画面も出ない。
+ * 10 秒は、小さな2つの要求の通常の応答より十分に長く遅い回線の応答を切らない一方、読み込み中のまま待たせる時間を抑える値である
+ * （返らない要求がやり直しでも続くと、1つの要求で 10 秒 + 1 秒 + 10 秒待つ）。
+ */
+const RESTORE_REQUEST_TIMEOUT_MS = 10_000;
+
+/** 時限で打ち切った要求の失敗。通信の失敗と同じく扱う。 */
+const TIMED_OUT: Failure = { ok: false, status: 0 };
+
+/**
+ * 要求の結果を、時限が切れたら待たずに `TIMED_OUT` で決着させる。
+ * **踏むと壊れる: 打ち切った後に届いた結果は捨てる。** `fetch` が打ち切りを受け取らずに後から応答を返しても、
+ * 決着した後なので状態に当たらない（当てると、やり直しと並んで状態を書き換える）。
+ */
+function withDeadline<T>(request: Promise<Attempt<T>>, signal?: AbortSignal): Promise<Attempt<T>> {
+  if (!signal) return request;
+  const timedOut = new Promise<Failure>((resolve) => {
+    if (signal.aborted) resolve(TIMED_OUT);
+    else signal.addEventListener('abort', () => resolve(TIMED_OUT), { once: true });
+  });
+  return Promise.race([request, timedOut]);
+}
+
+/** やり直すまでに待つミリ秒。やり直さない失敗なら null。 */
+function retryDelayOf(failure: Failure): number | null {
+  if (failure.status === 0 || failure.status >= 500) return RESTORE_RETRY_DELAY_MS;
+  if (
+    failure.status === 429 &&
+    failure.retryAfterSeconds !== undefined &&
+    failure.retryAfterSeconds <= RESTORE_RETRY_AFTER_LIMIT_SECONDS
+  ) {
+    return failure.retryAfterSeconds * 1000;
+  }
+  return null;
+}
+
+/** 復元が失敗で終わったときの状態。**ログインしていない状態にするのは 401 のときだけ**である。 */
+function stateAfterFailure(failure: Failure): SessionState {
+  return failure.status === 401 ? { status: 'signedOut' } : { status: 'unavailable' };
+}
+
+/** `fetch` が断ったときの失敗。通信そのものの失敗（`TypeError`）は status 0、ほかの例外は -1（failure.ts）。 */
+function thrownFailure(error: unknown): Failure {
+  return { ok: false, status: error instanceof TypeError ? 0 : -1 };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function browserLocks(): RefreshLocks | undefined {
   const locks = typeof navigator === 'undefined' ? undefined : navigator.locks;
@@ -42,9 +109,19 @@ function browserLocks(): RefreshLocks | undefined {
  *
  * 状態は Zustand の store（`zustand/vanilla`）に置き、画面は `useStore(store.state)` で読む
  * （技術スタックの「一時状態」。ログインの状態もその射程に含める。決定・2026-09-14・依頼側）。
+ * `wait` は復元のやり直しの待ち方（既定は `setTimeout`。テストは待った時間を記録して実際には待たない）。
+ * `timeoutSignal` は復元の要求の時限の作り方（既定は `AbortSignal.timeout`。テストは手で打ち切る）。
  */
-export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
+export function createSessionStore(
+  options: {
+    locks?: RefreshLocks;
+    wait?: (ms: number) => Promise<void>;
+    timeoutSignal?: (ms: number) => AbortSignal;
+  } = {},
+) {
   const locks = 'locks' in options ? options.locks : browserLocks();
+  const wait = options.wait ?? sleep;
+  const timeoutSignal = options.timeoutSignal ?? ((ms: number) => AbortSignal.timeout(ms));
   const state = createStore<SessionState>()(() => ({ status: 'checking' }));
   /**
    * ログインの世代。ログイン・ログアウト・起動時の復元・リフレッシュの失敗でログインが替わるたびに進む（アクセストークンの取り直しでは進まない）。
@@ -52,7 +129,7 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
    * ログアウトして別の利用者がログインし終えたとき、前の利用者のアクセストークンがその利用者のセッションに入る（認可の破れ）。
    */
   let generation = 0;
-  let refreshing: { generation: number; promise: Promise<string | null> } | null = null;
+  let refreshing: { generation: number; promise: Promise<Attempt<string>> } | null = null;
   let restoring: Promise<void> | null = null;
 
   function set(next: SessionState): void {
@@ -69,51 +146,76 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
     return locks ? locks.request(REFRESH_LOCK, task) : task();
   }
 
-  async function sendRefresh(): Promise<string | null> {
+  /** `signal` が打ち切られていたら送らない（ロックを待つ間に時限が切れた要求を、やり直しと並べて送らない）。 */
+  async function sendRefresh(signal?: AbortSignal): Promise<Attempt<string>> {
+    if (signal?.aborted) return TIMED_OUT;
     try {
       const response = await fetch('/api/auth/refresh', {
         method: 'POST',
         headers: { 'X-Requested-By': REQUESTED_BY },
+        signal,
       });
-      if (!response.ok) return null;
-      return ((await response.json()) as Schemas['RefreshResponse']).accessToken;
-    } catch {
-      return null;
+      if (!response.ok) return await readFailure(response);
+      const body = (await response.json().catch(() => null)) as Schemas['RefreshResponse'] | null;
+      return body === null
+        ? { ok: false, status: response.status }
+        : { ok: true, value: body.accessToken };
+    } catch (error) {
+      return signal?.aborted ? TIMED_OUT : thrownFailure(error);
     }
   }
 
   /**
-   * 新しいアクセストークン。使えなければ null。
+   * 新しいアクセストークン。使えなければ失敗の種類。`signal` を渡すと、ロックを待つ間も含めて時限で打ち切る（`withDeadline`）。
    * **ロックそのものが断られたら（文書が fully active でない `InvalidStateError` など）、ロックの外で送る**——
    * 断られたまま投げると `restore` が状態を決めずに終わり、確かめる途中のまま戻れない。ロックの外で送る代償は、ロックの無いブラウザと同じである。
    */
-  function refreshToken(): Promise<string | null> {
+  function refreshToken(signal?: AbortSignal): Promise<Attempt<string>> {
     // 同時の呼び出しは1本に束ねるが、束ねるのは同じログインの間だけ（前のログインの待っている分を使い回さない）
     if (refreshing?.generation !== generation) {
       const entry = {
         generation,
-        promise: withLock(sendRefresh)
-          .catch(sendRefresh)
-          .finally(() => {
-            if (refreshing === entry) refreshing = null;
-          }),
+        promise: withDeadline(
+          withLock(() => sendRefresh(signal)).catch(() => sendRefresh(signal)),
+          signal,
+        ).finally(() => {
+          if (refreshing === entry) refreshing = null;
+        }),
       };
       refreshing = entry;
     }
     return refreshing.promise;
   }
 
-  async function readMe(accessToken: string): Promise<SessionUser | null> {
-    try {
-      const response = await fetch('/api/users/me', {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (!response.ok) return null;
-      const { id, userId, displayName } = (await response.json()) as Schemas['Profile'];
-      return { id, userId, displayName };
-    } catch {
-      return null;
-    }
+  function readMe(accessToken: string, signal: AbortSignal): Promise<Attempt<SessionUser>> {
+    return withDeadline(
+      (async (): Promise<Attempt<SessionUser>> => {
+        try {
+          const response = await fetch('/api/users/me', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            signal,
+          });
+          if (!response.ok) return await readFailure(response);
+          const profile = (await response.json().catch(() => null)) as Schemas['Profile'] | null;
+          if (profile === null) return { ok: false, status: response.status };
+          const { id, userId, displayName } = profile;
+          return { ok: true, value: { id, userId, displayName } };
+        } catch (error) {
+          return signal.aborted ? TIMED_OUT : thrownFailure(error);
+        }
+      })(),
+      signal,
+    );
+  }
+
+  /** 起動時の復元の1つの要求を、失敗の種類によって1回だけやり直す（`retryDelayOf`）。 */
+  async function withRetry<T>(attempt: () => Promise<Attempt<T>>): Promise<Attempt<T>> {
+    const first = await attempt();
+    if (first.ok) return first;
+    const delay = retryDelayOf(first);
+    if (delay === null) return first;
+    await wait(delay);
+    return attempt();
   }
 
   /**
@@ -124,14 +226,14 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
     const started = generation;
     const renewed = await refreshToken();
     if (generation !== started) return null;
-    if (renewed === null) {
+    if (!renewed.ok) {
       changeLogin({ status: 'signedOut' });
       return null;
     }
     const latest = state.getState();
-    if (latest.status === 'signedIn' && latest.accessToken !== renewed)
-      set({ ...latest, accessToken: renewed });
-    return renewed;
+    if (latest.status === 'signedIn' && latest.accessToken !== renewed.value)
+      set({ ...latest, accessToken: renewed.value });
+    return renewed.value;
   }
 
   function send(path: string, init: RequestInit, accessToken: string): Promise<Response> {
@@ -146,15 +248,26 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
 
     getState: (): SessionState => state.getState(),
 
-    /** 起動時に1回だけ、リフレッシュで状態を取り直す。何度呼んでも同じ1回を待つ。 */
+    /**
+     * 起動時に1回だけ、リフレッシュで状態を取り直す。何度呼んでも同じ1回を待つ。
+     * **ログインしていない状態にするのは 401 のときだけ**。ほかの失敗は1回だけやり直し、それでも通らなければ `unavailable` にする
+     * （機能一覧 1.2。#420）。**自分の情報の読み込みだけが失敗したときは、リフレッシュを送り直さない**——入れ替えの時点のリフレッシュを
+     * 2回送ると、後の側が再利用とみなされる。
+     * 1つ1つの要求（やり直しを含む）に時限を置く（`RESTORE_REQUEST_TIMEOUT_MS`。#530）。
+     */
     restore(): Promise<void> {
       restoring ??= (async () => {
-        const accessToken = await refreshToken();
-        const user = accessToken === null ? null : await readMe(accessToken);
+        const deadline = () => timeoutSignal(RESTORE_REQUEST_TIMEOUT_MS);
+        const refreshed = await withRetry(() => refreshToken(deadline()));
+        if (!refreshed.ok) {
+          changeLogin(stateAfterFailure(refreshed));
+          return;
+        }
+        const me = await withRetry(() => readMe(refreshed.value, deadline()));
         changeLogin(
-          accessToken !== null && user !== null
-            ? { status: 'signedIn', accessToken, user }
-            : { status: 'signedOut' },
+          me.ok
+            ? { status: 'signedIn', accessToken: refreshed.value, user: me.value }
+            : stateAfterFailure(me),
         );
       })();
       return restoring;
@@ -206,6 +319,27 @@ export function createSessionStore(options: { locks?: RefreshLocks } = {}) {
     },
 
     renew,
+
+    /**
+     * アカウントを削除した後、ログインしていない状態にする（F-36。機能一覧 1.5）。ログアウトの api は呼ばない——
+     * 削除の応答が Cookie を消し、リフレッシュトークンは api が失効させてある。
+     * **削除した利用者がいまログインしているときだけ切り替える**——応答を待つ間にログアウトして別の利用者がログインしていたら、その利用者をログアウトさせない。
+     */
+    endDeletedAccount(userId: string): void {
+      const current = state.getState();
+      if (current.status !== 'signedIn' || current.user.id !== userId) return;
+      changeLogin({ status: 'signedOut' });
+    },
+
+    /**
+     * 自分のプロフィールを変えた後、表示に使う利用者の情報を差し替える（F-04）。ログインは替えない（世代を進めない）。
+     * **ログインしている利用者と同じ id のときだけ差し替える**——応答を待つ間にログアウトして別の利用者がログインしていたら、前の利用者の情報を入れない。
+     */
+    updateUser(user: SessionUser): void {
+      const current = state.getState();
+      if (current.status !== 'signedIn' || current.user.id !== user.id) return;
+      set({ ...current, user });
+    },
   };
 }
 
