@@ -3,7 +3,10 @@ import { Link, useParams } from 'react-router';
 import { useSession } from '../auth/session-context';
 import { MessageActionButtons } from '../messages/MessageActions';
 import { MessageShell, PagedMessages } from '../messages/MessageList';
-import { MessageForm } from '../messages/PostMessageForm';
+import { useDmFileCookies } from '../delivery/signed-cookies';
+import { useDmAttachmentDrafts } from '../messages/attachment-drafts';
+import { MessageAttachments } from '../messages/MessageAttachments';
+import { AttachmentField, MessageForm } from '../messages/PostMessageForm';
 import { useDmRealtime } from '../realtime/use-dm-realtime';
 import { counterpartName } from './DmList';
 import {
@@ -70,6 +73,9 @@ function DmMessages({ workspaceId, dm }: { workspaceId: string; dm: Dm }) {
   const [unreadFrom] = useState(dm.lastReadMessageId);
   const messages = useDmMessages(workspaceId, dm.id);
   const post = usePostDmMessage(workspaceId, dm.id);
+  // 添付（#239）: 選んだらすぐに上げ、確定したものを本文と一緒に送る。配信の Cookie は DM を開いている間だけ取り直す
+  const attachments = useDmAttachmentDrafts(workspaceId, dm.id);
+  useDmFileCookies(workspaceId, dm.id);
   useAdvanceDmRead(workspaceId, dm.id, messages.data?.pages[0]?.messages);
 
   return (
@@ -77,12 +83,31 @@ function DmMessages({ workspaceId, dm }: { workspaceId: string; dm: Dm }) {
       {/* 入力欄は一覧の上に置く（最新も上に来るため、下までスクロールしない。#608） */}
       {dm.writable ? (
         <MessageForm
-          submit={post.mutate}
-          pending={post.isPending}
+          submit={(body, options) =>
+            post.mutate(
+              { body, attachmentIds: attachments.readyIds },
+              {
+                onSuccess: () => {
+                  attachments.clear();
+                  options.onSuccess();
+                },
+              },
+            )
+          }
+          pending={post.isPending || attachments.uploading}
+          allowEmptyBody={attachments.readyIds.length > 0}
           error={post.error}
           workspaceId={workspaceId}
           label="メッセージ"
           submitLabel="送信する"
+          extra={
+            <AttachmentField
+              drafts={attachments.drafts}
+              full={attachments.full}
+              onChoose={attachments.add}
+              onRemove={attachments.remove}
+            />
+          }
         />
       ) : (
         <p className="mt-4 rounded bg-slate-100 px-3 py-2 text-sm">
@@ -148,6 +173,8 @@ function DmMessageItem({
         ) : null
       }
     >
+      {/* 削除済みのメッセージは添付も出さない（api も返さない。機能一覧 4.2） */}
+      {message.body !== null && <MessageAttachments attachments={message.attachments} />}
       {own && !editing && (
         <MessageActionButtons
           onEdit={() => setEditing(true)}

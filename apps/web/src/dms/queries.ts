@@ -88,10 +88,16 @@ export function usePostDmMessage(workspaceId: string, dmId: string) {
   const store = useSessionStore();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: string) =>
+    // 添付が無ければ attachmentIds を送らない（チャンネルの usePostMessage と同じ形。#239）
+    mutationFn: ({ body, attachmentIds }: { body: string; attachmentIds: readonly string[] }) =>
       requestJson<DmMessage>(store, dmMessagesPath(workspaceId, dmId), {
         method: 'POST',
-        body: { body } satisfies Schemas['PostMessageRequest'],
+        body: (attachmentIds.length === 0
+          ? { body }
+          : {
+              body,
+              attachmentIds: [...attachmentIds],
+            }) satisfies Schemas['CreateDmMessageRequest'],
       }),
     onSuccess: (message) =>
       queryClient.setQueryData<DmMessagePages>(dmMessagesKey(workspaceId, dmId), (data) =>

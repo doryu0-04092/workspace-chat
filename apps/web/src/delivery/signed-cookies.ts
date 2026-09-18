@@ -57,43 +57,51 @@ export function useAvatarCookies(): void {
 }
 
 /** いま添付の Cookie を取り直しているチャンネル（読み込みの記憶ごと。テストは記憶をテストごとに作る）。 */
-const openChannels = new WeakMap<QueryClient, { workspaceId: string; channelId: string }>();
+/** いま開いている会話（チャンネル・DM）の Cookie の発行の経路。 */
+const openConversations = new WeakMap<QueryClient, { path: string }>();
 
-const filesKey = (workspaceId: string, channelId: string) =>
-  ['delivery', 'files', workspaceId, channelId] as const;
+const filesKey = (cookiesPath: string) => ['delivery', 'files', cookiesPath] as const;
 
 /**
  * チャンネルを開いている間、そのチャンネルの `/files/workspace/{ws}/channel/{ch}/*` の Cookie を取り直す。
  *
- * **添付の Cookie は名前と Path（`/files`）が同じで、別のチャンネルで発行すると上書きされる。** そのため:
+ * **添付の Cookie は名前と Path（`/files`）が同じで、別のチャンネル・DM で発行すると上書きされる。** そのため:
  * - 閉じたら記憶を残さない（`gcTime: 0`）——開き直したときに、まだ新しいとみなして発行し直さない、を起こさない
- * - 前のチャンネルの発行が、移った先の発行より後に返ったら、いま開いているチャンネルの分を発行し直す（前の Cookie が残るため）
+ * - 前の会話の発行が、移った先の発行より後に返ったら、いま開いている会話の分を発行し直す（前の Cookie が残るため）
  */
 export function useChannelFileCookies(workspaceId: string, channelId: string): void {
+  useConversationFileCookies(
+    `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/files/cookies`,
+  );
+}
+
+/** DM を開いている間、その DM の `/files/workspace/{ws}/dm/{dmId}/*` の Cookie を取り直す（#239。扱いはチャンネルと同じ）。 */
+export function useDmFileCookies(workspaceId: string, dmId: string): void {
+  useConversationFileCookies(
+    `/api/workspaces/${segment(workspaceId)}/dms/${segment(dmId)}/files/cookies`,
+  );
+}
+
+function useConversationFileCookies(cookiesPath: string): void {
   const store = useSessionStore();
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const channel = { workspaceId, channelId };
-    openChannels.set(queryClient, channel);
+    const conversation = { path: cookiesPath };
+    openConversations.set(queryClient, conversation);
     return () => {
-      if (openChannels.get(queryClient) === channel) openChannels.delete(queryClient);
+      if (openConversations.get(queryClient) === conversation)
+        openConversations.delete(queryClient);
     };
-  }, [queryClient, workspaceId, channelId]);
+  }, [queryClient, cookiesPath]);
 
   useQuery({
-    queryKey: filesKey(workspaceId, channelId),
+    queryKey: filesKey(cookiesPath),
     queryFn: async () => {
-      const result = await issue(
-        store,
-        `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/files/cookies`,
-      );
-      const open = openChannels.get(queryClient);
-      if (open && (open.workspaceId !== workspaceId || open.channelId !== channelId)) {
-        void queryClient.refetchQueries({
-          queryKey: filesKey(open.workspaceId, open.channelId),
-          exact: true,
-        });
+      const result = await issue(store, cookiesPath);
+      const open = openConversations.get(queryClient);
+      if (open && open.path !== cookiesPath) {
+        void queryClient.refetchQueries({ queryKey: filesKey(open.path), exact: true });
       }
       return result;
     },

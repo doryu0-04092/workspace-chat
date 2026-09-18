@@ -24,21 +24,35 @@ let nextKey = 0;
 /**
  * 投稿に付ける添付の下書き（F-27。機能一覧 11.1）。ファイルを選んだらすぐに上げ（発行 → PUT → 確定）、確定したものの識別子を投稿に渡す。
  *
- * - **下書きはチャンネルごとに持つ**——別のチャンネルへ移ったら出さない（添付はそのチャンネルでしか付けられず、api が 422 で断る）
+ * - **下書きは会話（チャンネル・DM）ごとに持つ**——別の会話へ移ったら出さない（添付はその会話でしか付けられず、api が 422 で断る）
  * - 上げている間（`uploading`）は、呼ぶ側が送信を止める（確定していない添付を付けて送らない）
  * - 上げられなかったものは理由を出し、投稿には含めない。取り除ける
  */
 export function useAttachmentDrafts(workspaceId: string, channelId: string) {
+  return useUploadDrafts(
+    `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/attachments/uploads`,
+  );
+}
+
+/** DM の添付の下書き（#239）。上げる先が DM の経路であることのほかは、チャンネルの分と同じ。 */
+export function useDmAttachmentDrafts(workspaceId: string, dmId: string) {
+  return useUploadDrafts(
+    `/api/workspaces/${segment(workspaceId)}/dms/${segment(dmId)}/attachments/uploads`,
+  );
+}
+
+/** 会話ごとの下書き。`uploadsPath`（発行の経路）が会話を表し、変われば別の会話として出さない。 */
+function useUploadDrafts(uploadsPath: string) {
   const store = useSessionStore();
-  const [state, setState] = useState<{ channelId: string; drafts: AttachmentDraft[] }>({
-    channelId,
+  const [state, setState] = useState<{ path: string; drafts: AttachmentDraft[] }>({
+    path: uploadsPath,
     drafts: [],
   });
-  const drafts = state.channelId === channelId ? state.drafts : [];
+  const drafts = state.path === uploadsPath ? state.drafts : [];
 
   function update(key: number, next: AttachmentDraft) {
     setState((current) =>
-      current.channelId === channelId
+      current.path === uploadsPath
         ? { ...current, drafts: current.drafts.map((d) => (d.key === key ? next : d)) }
         : current,
     );
@@ -51,8 +65,8 @@ export function useAttachmentDrafts(workspaceId: string, channelId: string) {
       return { file, draft: { key: nextKey, fileName: file.name, status: 'uploading' } as const };
     });
     if (started.length === 0) return;
-    setState({ channelId, drafts: [...drafts, ...started.map(({ draft }) => draft)] });
-    const path = `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/attachments/uploads`;
+    setState({ path: uploadsPath, drafts: [...drafts, ...started.map(({ draft }) => draft)] });
+    const path = uploadsPath;
     for (const { file, draft } of started) {
       uploadFile<Attachment>(store, file, {
         issuePath: path,
@@ -66,11 +80,11 @@ export function useAttachmentDrafts(workspaceId: string, channelId: string) {
   }
 
   function remove(key: number) {
-    setState({ channelId, drafts: drafts.filter((draft) => draft.key !== key) });
+    setState({ path: uploadsPath, drafts: drafts.filter((draft) => draft.key !== key) });
   }
 
   function clear() {
-    setState({ channelId, drafts: [] });
+    setState({ path: uploadsPath, drafts: [] });
   }
 
   return {
