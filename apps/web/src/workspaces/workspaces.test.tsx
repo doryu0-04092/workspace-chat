@@ -139,6 +139,7 @@ describe('ワークスペースの画面', () => {
       [`GET /api/workspaces/${workspace.id}`]: () => json(200, workspace),
       [`GET /api/workspaces/${workspace.id}/channels`]: () => json(200, [GENERAL, RANDOM, SECRET]),
       [`GET /api/workspaces/${workspace.id}/dms`]: () => json(200, []),
+      [`GET /api/workspaces/${workspace.id}/archived-channels`]: () => json(200, []),
       ...extra,
     };
   }
@@ -316,6 +317,21 @@ describe('ワークスペースの画面', () => {
 
     expect(await screen.findByText('ワークスペースが見つかりません。')).toBeDefined();
     expect(calls.map((c) => c.key).filter((key) => key.includes('../'))).toEqual([]);
+  });
+
+  // #431: 参加しているチャンネルなのに、一覧の読み込みの失敗を「無い」と言い換えない（ワークスペースの画面と同じ見せ方）。
+  it('チャンネルの一覧を読み込めなければ、「見つかりません」ではなく読み込めなかった理由を出す', async () => {
+    fakeFetch(
+      routesFor(OWNED, {
+        [`GET /api/workspaces/${OWNED.id}/channels`]: () => error(500, 'internal_error'),
+      }),
+    );
+    renderApp(`/workspaces/${OWNED.id}/channels/${GENERAL.id}`);
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'チャンネルを読み込めませんでした',
+    );
+    expect(screen.queryByText('チャンネルが見つかりません。')).toBeNull();
   });
 
   it('参加していないチャンネルの URL を直接開いても、チャンネルの画面を出さない', async () => {

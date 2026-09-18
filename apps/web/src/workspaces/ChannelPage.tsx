@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { errorMessage } from '../api/client';
+import { ApiError, errorMessage } from '../api/client';
 import { failureMessage } from '../auth/failure-message';
 import { useChannelFileCookies } from '../delivery/signed-cookies';
 import { MessageChannelProvider } from '../messages/message-channel';
@@ -41,6 +41,24 @@ export function ChannelPage() {
       <p role="status" className="p-6 text-slate-600">
         読み込み中…
       </p>
+    );
+  }
+  // 一覧の読み込みの失敗を「無い」と言い換えない（404 だけが「見つかりません」。ワークスペースの画面と同じ見せ方。#431）
+  const loadError = channels.isError ? channels.error : !current ? archived.error : null;
+  if (
+    !channel &&
+    loadError &&
+    !(loadError instanceof ApiError && loadError.failure.status === 404)
+  ) {
+    return (
+      <main className="mx-auto max-w-xl p-6">
+        <p role="alert" className="text-red-700">
+          チャンネルを読み込めませんでした。{errorMessage(loadError)}
+        </p>
+        <Link to={`/workspaces/${workspaceId}`} className="underline">
+          チャンネルの一覧へ
+        </Link>
+      </main>
     );
   }
   if (!channel) {
