@@ -20,23 +20,34 @@ const GENERAL = {
   name: 'general',
   visibility: 'PUBLIC',
   joined: true,
+  unread: 0,
+  mentions: 0,
+  lastReadMessageId: null,
 };
 const RANDOM = {
   id: '01920000-0000-7000-8000-0000000000c2',
   name: 'random',
   visibility: 'PUBLIC',
   joined: false,
+  unread: 0,
+  mentions: 0,
+  lastReadMessageId: null,
 };
 const SECRET = {
   id: '01920000-0000-7000-8000-0000000000c3',
   name: 'secret',
   visibility: 'PRIVATE',
   joined: true,
+  unread: 0,
+  mentions: 0,
+  lastReadMessageId: null,
 };
 
 const session = {
   'POST /api/auth/refresh': () => token('t1'),
   'GET /api/users/me': () => json(200, PROFILE),
+  // ログインした画面の枠が、未承諾の招待の件数を読む（F-38。#532）
+  'GET /api/invitations': () => json(200, []),
 };
 
 function type(label: string, value: string) {
@@ -127,6 +138,7 @@ describe('ワークスペースの画面', () => {
       ...session,
       [`GET /api/workspaces/${workspace.id}`]: () => json(200, workspace),
       [`GET /api/workspaces/${workspace.id}/channels`]: () => json(200, [GENERAL, RANDOM, SECRET]),
+      [`GET /api/workspaces/${workspace.id}/dms`]: () => json(200, []),
       ...extra,
     };
   }

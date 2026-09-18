@@ -6,19 +6,13 @@ import {
   errorBodyForStatus,
 } from '../error-response';
 import { INVALID_TOKEN } from '../auth/session.service';
+import { isSingleEmoji } from '../emoji';
 import { PrismaService } from '../prisma.service';
 
 type GetOperation = paths['/users/me']['get'];
 type PatchOperation = paths['/users/me']['patch'];
 export type Profile = GetOperation['responses'][200]['content']['application/json'];
 export type UpdateProfileRequest = PatchOperation['requestBody']['content']['application/json'];
-
-/**
- * 絵文字1つ（Unicode の RGI_Emoji に当たる列1つ。肌の色・ZWJ で繋いだ列・国旗も1つ）。
- * JSON Schema の pattern（Unicode の `u` フラグ）では文字列の性質を書けないため、仕様ではなくここで確かめる。
- * 文字列の性質には `v` フラグが要る。tsconfig.base.json の target（ES2022）ではリテラルに書けないため、コンストラクタで作る（実行する Node 24 は扱える）。
- */
-const SINGLE_EMOJI = new RegExp('^\\p{RGI_Emoji}$', 'v');
 
 const PROFILE_SELECT = {
   id: true,
@@ -49,7 +43,7 @@ export class ProfileService {
    * （そのときは続く get が 401 を返す）。
    */
   async update(userId: string, input: UpdateProfileRequest): Promise<Profile> {
-    if (input.status != null && !SINGLE_EMOJI.test(input.status.emoji)) {
+    if (input.status != null && !isSingleEmoji(input.status.emoji)) {
       throw new BadRequestException({
         ...errorBodyForStatus(400),
         errors: [{ path: '/body/status/emoji', message: '絵文字1つにしてください' }],

@@ -203,7 +203,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
   });
 
   describe('マイグレーションの適用', () => {
-    it('9つのモデルの表がすべて作られている', async () => {
+    it('23のモデルの表がすべて作られている', async () => {
       const output = await expectSqlToSucceed(
         `SELECT table_name FROM information_schema.tables
          WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -212,13 +212,27 @@ describe('Prisma のスキーマとマイグレーション', () => {
       const tables = output.split('\n').filter((line) => line.length > 0);
       expect(tables).toEqual(
         expect.arrayContaining([
+          'Attachment',
+          'AvatarUpload',
           'Channel',
           'ChannelMember',
+          'ChannelRead',
+          'Dm',
+          'DmMessage',
+          'DmNotification',
+          'DmRead',
+          'HereMentionRecipient',
           'Invitation',
           'Membership',
           'Message',
+          'MessageMention',
+          'MessageReaction',
+          'MessageReactionCount',
+          'MessagePin',
+          'Notification',
           'RecoveryCode',
           'RefreshToken',
+          'ThreadRead',
           'User',
           'Workspace',
         ]),
@@ -236,7 +250,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
       // **この検査は検査制約・部分一意索引・式に対する索引（`lower(...)`）を見ない。**
       // Prisma がそれらをスキーマとして扱わないためである
       // （検査制約を消して確かめた。`User_userId_lower_key` を足しても差分は出ない）。
-      // **手書きした制約は5つあり、その5つは下の各テストが個別に見ている。**
+      // **手書きした制約は9つあり、その9つは下の各テストが個別に見ている。**
       // ここが通ったからといって、マイグレーションの手書き部分まで
       // 守られているわけではない。列挙は `schema.prisma` の冒頭と揃えてある。
       expect(() =>
@@ -263,7 +277,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
          ORDER BY c.table_name;`,
       );
       const types = output.split('\n').filter((line) => line.length > 0);
-      expect(types).toHaveLength(9);
+      expect(types).toHaveLength(23);
       for (const type of types) {
         expect(type).toMatch(/:uuid$/);
       }
@@ -617,7 +631,9 @@ describe('Prisma のスキーマとマイグレーション', () => {
     });
   });
 
-  // 機能一覧 4.1: 本文は 1〜4000 文字で、空白だけではない。仕様の検証（openapi）を通らない経路でも DB が止める。
+  // 機能一覧 4.1: 本文は 4000 文字まで。仕様の検証（openapi）を通らない経路でも DB が止める。
+  // **空・空白だけは DB では止めない**——添付が1件以上ある投稿は本文が空でもよく（画像だけの投稿。#614）、添付の有無は
+  // 同じ行の検査制約では見られない。空・空白だけを断るのは仕様（CreateMessageRequest の if/else）の役目である。
   describe('メッセージの本文', () => {
     async function insertMessage(body: string): Promise<{ exitCode: number; output: string }> {
       const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
@@ -627,21 +643,146 @@ describe('Prisma のスキーマとマイグレーション', () => {
       );
     }
 
+    it.each([['4001 文字', `repeat('あ', 4001)`]])(
+      '%s の本文は入れられない',
+      async (_name, body) => {
+        const { exitCode, output } = await insertMessage(body);
+        expect(exitCode).not.toBe(0);
+        expect(output).toContain('Message_body_check');
+      },
+    );
+
+    it('空・空白だけ・1 文字・4000 文字の本文は入れられる（空・空白だけは添付だけの投稿のため。#614）', async () => {
+      for (const body of [`''`, `E' \\n\\t'`, `'あ'`, `repeat('あ', 4000)`]) {
+        const { exitCode, output } = await insertMessage(body);
+        expect(exitCode, output).toBe(0);
+      }
+    });
+  });
+
+  // 機能一覧 8（F-19）: 同じ相手との DM は1つに集約される。当事者は User.id の小さい方と大きい方の順で持ち、
+  // 一意索引と検査制約 `Dm_participants_check` の2つで「同じ2人の DM が2行できない」を DB が止める。
+  describe('ダイレクトメッセージ', () => {
+    /** 同じワークスペースのメンバー2人を作り、User.id の小さい方と大きい方の順で返す。 */
+    async function twoMembers(): Promise<{ workspaceId: string; low: string; high: string }> {
+      const { workspaceId, userId } = await createWorkspaceWithMember();
+      const other = randomUUID();
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${other}', 'u-${other.slice(0, 8)}', '検査用', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${workspaceId}', '${other}', 'MEMBER');
+      `);
+      const [low, high] = [userId, other].sort();
+      return { workspaceId, low: low ?? '', high: high ?? '' };
+    }
+
+    function insertDm(workspaceId: string, low: string, high: string, id = randomUUID()) {
+      return `INSERT INTO "Dm" ("id", "workspaceId", "lowUserId", "highUserId")
+              VALUES ('${id}', '${workspaceId}', '${low}', '${high}');`;
+    }
+
+    it('同じワークスペースの同じ2人の DM は2つ作れない', async () => {
+      const { workspaceId, low, high } = await twoMembers();
+      await expectSqlToSucceed(insertDm(workspaceId, low, high));
+      const output = await expectSqlToFail(insertDm(workspaceId, low, high));
+      expect(output).toContain('Dm_workspaceId_lowUserId_highUserId_key');
+    });
+
+    it('当事者を逆の順で入れた行（同じ2人の2つ目になりうる）と、自分自身との行は入れられない', async () => {
+      const { workspaceId, low, high } = await twoMembers();
+      expect(await expectSqlToFail(insertDm(workspaceId, high, low))).toContain(
+        'Dm_participants_check',
+      );
+      expect(await expectSqlToFail(insertDm(workspaceId, low, low))).toContain(
+        'Dm_participants_check',
+      );
+    });
+
     it.each([
       ['空', `''`],
       ['空白だけ', `E' \\n\\t'`],
       ['4001 文字', `repeat('あ', 4001)`],
-    ])('%s の本文は入れられない', async (_name, body) => {
-      const { exitCode, output } = await insertMessage(body);
-      expect(exitCode).not.toBe(0);
-      expect(output).toContain('Message_body_check');
+    ])('%s の本文の DM のメッセージは入れられない', async (_name, body) => {
+      const { workspaceId, low, high } = await twoMembers();
+      const dmId = randomUUID();
+      const output = await expectSqlToFail(`
+        ${insertDm(workspaceId, low, high, dmId)}
+        INSERT INTO "DmMessage" ("id", "dmId", "authorId", "body")
+          VALUES ('${randomUUID()}', '${dmId}', '${low}', ${body});
+      `);
+      expect(output).toContain('DmMessage_body_check');
     });
 
-    it('1 文字と 4000 文字の本文は入れられる', async () => {
-      for (const body of [`'あ'`, `repeat('あ', 4000)`]) {
-        const { exitCode, output } = await insertMessage(body);
-        expect(exitCode, output).toBe(0);
-      }
+    // DM のメッセージは、キック・退出・退会の後も残す（機能一覧 1.5・2.2「過去のメッセージは残る」）。
+    // 既読位置は ChannelRead と同じく Membership を参照し、抜けたら連鎖して消える（戻ったときに抜けていた間を既読にしない。10.1）。
+    it('ワークスペースから抜けると、その人の DM の既読位置は消えるが、DM とメッセージは残る', async () => {
+      const { workspaceId, low, high } = await twoMembers();
+      const dmId = randomUUID();
+      const messageId = randomUUID();
+      await expectSqlToSucceed(`
+        ${insertDm(workspaceId, low, high, dmId)}
+        INSERT INTO "DmMessage" ("id", "dmId", "authorId", "body")
+          VALUES ('${messageId}', '${dmId}', '${low}', 'あ');
+        INSERT INTO "DmRead" ("id", "dmId", "workspaceId", "userId", "lastReadMessageId")
+          VALUES ('${randomUUID()}', '${dmId}', '${workspaceId}', '${high}', '${messageId}');
+        DELETE FROM "Membership" WHERE "workspaceId" = '${workspaceId}' AND "userId" = '${high}';
+      `);
+      const output = await expectSqlToSucceed(`
+        SELECT (SELECT count(*) FROM "DmRead" WHERE "dmId" = '${dmId}') || ':' ||
+               (SELECT count(*) FROM "Dm" WHERE "id" = '${dmId}') || ':' ||
+               (SELECT count(*) FROM "DmMessage" WHERE "dmId" = '${dmId}');
+      `);
+      expect(output).toBe('0:1:1');
+    });
+  });
+
+  // 機能一覧 6: 返信件数はカウンタ列で、負にならない。アプリの増減を誤っても DB が止める。
+  describe('メッセージの返信件数', () => {
+    async function insertMessage(
+      replyCount: number,
+    ): Promise<{ exitCode: number; output: string }> {
+      const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
+      return psql(
+        `INSERT INTO "Message" ("id", "channelId", "workspaceId", "authorId", "body", "replyCount")
+         VALUES ('${randomUUID()}', '${channelId}', '${workspaceId}', '${userId}', 'あ', ${replyCount});`,
+      );
+    }
+
+    it('返信件数を負にできない', async () => {
+      const { exitCode, output } = await insertMessage(-1);
+      expect(exitCode).not.toBe(0);
+      expect(output).toContain('Message_replyCount_check');
+    });
+
+    it('返信件数 0 は入れられる', async () => {
+      const { exitCode, output } = await insertMessage(0);
+      expect(exitCode, output).toBe(0);
+    });
+  });
+
+  // 機能一覧 7: リアクションの件数はカウンタ列で、1 以上（0 になった絵文字の行は消す）。アプリの増減を誤っても DB が止める。
+  describe('リアクションの件数', () => {
+    async function insertCount(count: number): Promise<{ exitCode: number; output: string }> {
+      const { workspaceId, userId, channelId } = await createWorkspaceWithMember();
+      const messageId = randomUUID();
+      return psql(
+        `INSERT INTO "Message" ("id", "channelId", "workspaceId", "authorId", "body")
+           VALUES ('${messageId}', '${channelId}', '${workspaceId}', '${userId}', 'あ');
+         INSERT INTO "MessageReactionCount" ("id", "messageId", "emoji", "count")
+           VALUES ('${randomUUID()}', '${messageId}', '👍', ${count});`,
+      );
+    }
+
+    it.each([0, -1])('件数 %i は入れられない', async (count) => {
+      const { exitCode, output } = await insertCount(count);
+      expect(exitCode).not.toBe(0);
+      expect(output).toContain('MessageReactionCount_count_check');
+    });
+
+    it('件数 1 は入れられる', async () => {
+      const { exitCode, output } = await insertCount(1);
+      expect(exitCode, output).toBe(0);
     });
   });
 
@@ -1815,6 +1956,117 @@ describe('Prisma のスキーマとマイグレーション', () => {
         }),
       );
       expect(output).toBe('');
+    });
+
+    /**
+     * メンションの**補完候補**（機能一覧 9.1。#90）を返す問い合わせ。
+     *
+     * **条件は経路1（`mentionTargetByLoginId`）と同じ**——対象も要求する側も、そのチャンネルの参加者で、退会していない。
+     * **違うのは照合が前方一致であることだけである。** 候補に出たのに投稿で解決されない利用者を作らない。
+     * 候補の提示は解決ではないため、「メンションの解決には2つの経路があり」の2つには数えない。
+     *
+     * **`LIKE` を使わない。** `_` はユーザーID に使える文字であり、`LIKE` のワイルドカードでもある——
+     * エスケープを書き漏らすと `a_` が `ab` に当たる。`starts_with` は文字をそのまま比べる。
+     *
+     * **この形をそのまま写さないこと。** 値はプレースホルダとして渡す（REVIEW.md 3 / CWE-89）。
+     * `prefix` は入力欄の自由入力であり、`viewerId` はトークンから導く値である（`mentionTargetByLoginId` と同じ）。
+     */
+    function mentionCandidatesByPrefix({
+      viewerId,
+      channelId,
+      prefix,
+    }: {
+      viewerId: string;
+      channelId: string;
+      prefix: string;
+    }): string {
+      return `
+        SELECT u."id"
+        FROM "User" u
+        JOIN "ChannelMember" cm
+          ON cm."userId" = u."id" AND cm."channelId" = '${channelId}'
+        JOIN "ChannelMember" vcm
+          ON vcm."channelId" = '${channelId}' AND vcm."userId" = '${viewerId}'
+        JOIN "User" viewer
+          ON viewer."id" = vcm."userId" AND viewer."deletedAt" IS NULL
+        WHERE starts_with(lower(u."userId"), lower('${prefix}'))
+          AND u."deletedAt" IS NULL
+        ORDER BY lower(u."userId");
+      `;
+    }
+
+    it('補完候補は、経路1 で解決される利用者をユーザーID の前方で返し、消し込みを取りこぼした退会者は返さない', async () => {
+      const viewerId = '00000000-0000-7000-8000-000000000002';
+      const channelId = '00000000-0000-7000-8000-0000000000c2';
+      const { userId, loginId } = await createDeletedUserKeepingMembership();
+      // 大文字にして、照合の両側の lower() を要る形にする
+      const query = mentionCandidatesByPrefix({
+        viewerId,
+        channelId,
+        prefix: loginId.toUpperCase(),
+      });
+
+      // **同じ利用者で、退会前は候補に出ることを先に見る**（否定側だけだと、常に空を返す問い合わせでも緑になる）
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = NULL WHERE "id" = '${userId}';`);
+      expect(await expectSqlToSucceed(query)).toBe(userId);
+
+      await expectSqlToSucceed(`UPDATE "User" SET "deletedAt" = now() WHERE "id" = '${userId}';`);
+      expect(await expectSqlToSucceed(query)).toBe('');
+    });
+
+    it('補完候補の前方一致は `_` を文字として比べ、ワイルドカードにしない', async () => {
+      const tag = randomUUID().slice(0, 8);
+      const underscoreId = randomUUID();
+      const letterId = randomUUID();
+      const channelId = '00000000-0000-7000-8000-0000000000c2';
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${underscoreId}', 'c${tag}_a', '下線の人', 'argon2id-placeholder'),
+                 ('${letterId}', 'c${tag}xa', '文字の人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${underscoreId}', 'MEMBER'),
+                 ('${randomUUID()}', '${ws}', '${letterId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '${channelId}', '${ws}', '${underscoreId}'),
+                 ('${randomUUID()}', '${channelId}', '${ws}', '${letterId}');
+      `);
+
+      const output = await expectSqlToSucceed(
+        mentionCandidatesByPrefix({
+          viewerId: '00000000-0000-7000-8000-000000000002',
+          channelId,
+          prefix: `c${tag}_`,
+        }),
+      );
+
+      expect(output).toBe(underscoreId);
+    });
+
+    it('参加していない要求する側・退会した要求する側には、補完候補を返さない', async () => {
+      // 経路1 と同じく、非参加者が前方一致を1文字ずつ試してプライベートチャンネルの参加者を探れないようにする
+      const viewerId = randomUUID();
+      const ws = '00000000-0000-7000-8000-0000000000a1';
+      await expectSqlToSucceed(`
+        INSERT INTO "User" ("id", "userId", "displayName", "passwordHash")
+          VALUES ('${viewerId}', 'cand_elsewhere_${randomUUID().slice(0, 8)}', '要求側・別チャンネルの人', 'argon2id-placeholder');
+        INSERT INTO "Membership" ("id", "workspaceId", "userId", "role")
+          VALUES ('${randomUUID()}', '${ws}', '${viewerId}', 'MEMBER');
+        INSERT INTO "ChannelMember" ("id", "channelId", "workspaceId", "userId")
+          VALUES ('${randomUUID()}', '00000000-0000-7000-8000-0000000000c1', '${ws}', '${viewerId}');
+      `);
+      const { userId: ghostViewerId } = await createDeletedUserKeepingMembership();
+
+      for (const requester of [viewerId, ghostViewerId]) {
+        const output = await expectSqlToSucceed(
+          mentionCandidatesByPrefix({
+            viewerId: requester,
+            channelId: '00000000-0000-7000-8000-0000000000c2',
+            prefix: 'insider',
+          }),
+        );
+        expect(output).toBe('');
+      }
     });
 
     /**

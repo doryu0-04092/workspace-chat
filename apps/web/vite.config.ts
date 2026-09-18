@@ -2,6 +2,27 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { resolvePort } from '../api/src/port';
+import { resolveS3Bucket, resolveS3Endpoint } from '../api/src/storage/s3-config';
+import { storageProxies } from './src/dev/storage-proxy';
+
+/**
+ * 手元の配信の中継（src/dev/storage-proxy.ts）。**api を起動した端末と同じ `S3_ENDPOINT`・`S3_BUCKET` を、この dev サーバーの端末にも渡す**
+ * （`PORT` と同じく `.env` からは来ない）。**値の規則は api の s3-config.ts の1つだけを使う**（渡したのに不正なら起動時に落とす）。
+ * どちらかが無ければ中継せず、そのことを出す（アバターの画像が出ない理由を黙らせない）。
+ */
+function localStorageProxies() {
+  const { S3_ENDPOINT, S3_BUCKET } = process.env;
+  if (S3_ENDPOINT === undefined || S3_BUCKET === undefined) {
+    console.warn(
+      'S3_ENDPOINT と S3_BUCKET が無いため、/avatars と /files を MinIO へ中継しない（アバターと添付の画像は表示されない）',
+    );
+    return {};
+  }
+  return storageProxies({
+    endpoint: resolveS3Endpoint(S3_ENDPOINT),
+    bucket: resolveS3Bucket(S3_BUCKET),
+  });
+}
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -30,6 +51,8 @@ export default defineConfig({
         // WebSocket のハンドシェイクも同じ前置きに載るため、ws を有効にする。
         ws: true,
       },
+      // 配信 URL のパス（本番は CloudFront の `/avatars/*` と `/files/*`）。手元では MinIO へ中継する。
+      ...localStorageProxies(),
     },
   },
   // @workspace-chat/shared は CommonJS で出す（NestJS 11 が CommonJS のため）。

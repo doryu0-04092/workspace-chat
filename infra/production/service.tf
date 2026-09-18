@@ -1,5 +1,6 @@
 # ECS のタスク定義・サービス・ロググループ（#452）。技術スタックのコンテナの行・「ECS のタスクの置き場」と、
 # 「リソースのサイジング」の ECS Fargate の行。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 #
 # マイグレーションはサービスの外で、マイグレーション用のタスク定義を aws ecs run-task で1回動かし、新しいタスク定義に
 # 切り替える前に流す（技術スタックのコンテナの行。#274）。運用者が ECS Exec で入る先も、そのタスク定義を run-task で動かしたタスクである。
@@ -9,6 +10,12 @@
 locals {
   # 0.25 vCPU / 0.5 GB × 2 タスク（技術スタックの「リソースのサイジング」の ECS Fargate の行）。
   # api_task_count は API_TASK_COUNT にも渡す（apps/api/src/rate-limit/rate-limit-config.ts。Valkey が止まっている間、上限をこの数で割る）。
+  #
+  # 踏むと壊れる: **秘密の値の入れ替えで api を止めるときに、この値を 0 にしない**
+  # （要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の、**api を止める箇条（DATABASE_URL と JWT_SECRET）**。
+  # 止めるのは Terraform の外である）。ここを 0 にして apply すると、対象を絞る段の理由が消え、
+  # **サービスを戻す段の対象を絞らない apply でも構成が 0 のままで戻らない**（どちらの箇条でも全断が続く）。
+  # API_TASK_COUNT も 0 になり、レート制限の数え方まで巻き込む。
   api_task_cpu    = 256
   api_task_memory = 512
   api_task_count  = 2
@@ -60,6 +67,8 @@ resource "aws_ecs_task_definition" "api" {
   cpu                      = local.api_task_cpu
   memory                   = local.api_task_memory
   execution_role_arn       = aws_iam_role.task_execution.arn
+  # 確定の主体と、署名者のロールの引き受け（compute.tf の api_task。#427）。
+  task_role_arn = aws_iam_role.api_task.arn
 
   runtime_platform {
     cpu_architecture        = local.task_cpu_architecture
@@ -68,8 +77,20 @@ resource "aws_ecs_task_definition" "api" {
 
   # secret: true の設定（apps/api/src/config/api-config.ts の API_SETTINGS）は secrets で渡し、environment に書かない
   # （技術スタックの秘密情報の行）。踏むと壊れる: secret: true の設定を足したら、ここと compute.tf の ssm:GetParameters の両方に足す。
+  # 踏むと壊れる: apps/api/src/config/api-config-infra.test.ts がこのファイルを読んで秘密の渡し方を確かめる。タスク定義は api と migrate の2つだけにし、
+  # container_definitions は jsonencode([ … ]) の1つだけで、その要素はその場に書いたオブジェクトにする（local・merge・for で作ると、中身を読めずに検査が落ちる）。
+  # コンテナの属性は name・image・essential・portMappings・environment・secrets・logConfiguration だけ（logConfiguration の中は logDriver・options だけ）。
+  # 属性を足すときは、秘密を渡す別の経路（environmentFiles・secretOptions など）でないことを確かめてから、検査の許可リストにも足す。
+  # environment・secrets はその場に書いたリスト（[ … ]）にし、要素の name は文字列、secrets の valueFrom は aws_ssm_parameter.<名前>.arn
+  # （Terraform が値を作る）か local.<名前>_arn（Terraform の外で値を置く。検査の externalParameters にあるものだけ）の形で書く。
+  # api のコンテナの environment を空にしない（検査の「数え上げる対象がある」の下限で落ちる。空にするなら、その下限も直す）。
   container_definitions = jsonencode([
     {
+      # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の前置きが、
+      # このコンテナを containerDefinitions[0] という位置で、image を <URL>:<タグ> という形で読み、
+      # 末尾のタグを TF_VAR_image_tag に採る。** 並びを変える・image の形を変えると、
+      # **採るタグが別のものになるか採れなくなり、対象を絞らない apply が別のイメージを本番へ出す。**
+      # validate も plan も CI も落ちない。
       name         = "api"
       image        = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
       essential    = true
@@ -77,12 +98,21 @@ resource "aws_ecs_task_definition" "api" {
       environment = [
         { name = "TRUST_PROXY_HOPS", value = tostring(local.trust_proxy_hops) },
         { name = "API_TASK_COUNT", value = tostring(local.api_task_count) },
-        { name = "WEB_ORIGIN", value = "https://${aws_cloudfront_distribution.main.domain_name}" },
+        { name = "WEB_ORIGIN", value = local.web_origin },
+        # 添付とアバターのバケット（attachments.tf）。S3_ENDPOINT・S3_FORCE_PATH_STYLE は渡さない（AWS の既定の宛先と仮想ホスト形式）。
+        { name = "S3_BUCKET", value = aws_s3_bucket.attachments.bucket },
+        { name = "S3_REGION", value = data.aws_region.current.region },
+        # アップロード用の署名付き URL の署名者のロール（compute.tf の upload_signer。#427）。
+        { name = "S3_UPLOAD_ROLE_ARN", value = aws_iam_role.upload_signer.arn },
+        # 署名付き Cookie の公開鍵の ID（秘密ではない。delivery.tf）。対の秘密鍵は secrets の CLOUDFRONT_PRIVATE_KEY。
+        { name = "CLOUDFRONT_KEY_PAIR_ID", value = aws_cloudfront_public_key.signing[local.cloudfront_signing_key_name].id },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.database_url.arn },
         { name = "REDIS_URL", valueFrom = aws_ssm_parameter.redis_url.arn },
         { name = "JWT_SECRET", valueFrom = aws_ssm_parameter.jwt_secret.arn },
+        # Terraform の外で置くパラメータ（compute.tf の locals。値は state とプランに出ない）。
+        { name = "CLOUDFRONT_PRIVATE_KEY", valueFrom = local.cloudfront_private_key_parameter_arn },
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -133,9 +163,14 @@ resource "aws_ecs_task_definition" "migrate" {
 }
 
 resource "aws_ecs_service" "api" {
-  name                              = "workspace-chat-api"
-  cluster                           = aws_ecs_cluster.main.id
-  task_definition                   = aws_ecs_task_definition.api.arn
+  name            = "workspace-chat-api"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.api.arn
+  # 踏むと壊れる: **この desired_count に lifecycle { ignore_changes } を置かない。**
+  # 要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の **api を止める箇条（DATABASE_URL と JWT_SECRET）の
+  # サービスを戻す段**は、**止めるときに Terraform の外から 0 にした drift を、対象を絞らない apply が
+  # 構成の値に戻すこと**に依存している。置くと Terraform がその drift を無視し、
+  # **どちらの箇条でも api を止めたまま全断が続く。** validate も plan も CI も落ちない。
   desired_count                     = local.api_task_count
   launch_type                       = "FARGATE"
   health_check_grace_period_seconds = local.api_health_check_grace_seconds

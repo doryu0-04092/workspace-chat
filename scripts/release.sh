@@ -22,6 +22,13 @@
 #   アラートのメールの購読は、届く確認のメールのリンクを開くまで有効にならない。
 #
 # 前提: aws（資格情報と ap-northeast-1）・terraform・docker（buildx で linux/arm64 を作れること——x86 の端末では QEMU の登録が要る）・node と npm。
+#
+# **秘密の値を入れ替えるときは、この手順ではない。** 要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順による
+# （前置きの形——init -backend-config と TF_VAR_* の渡し方——は同じだが、**api を止める段と、入れ替わったことを確かめる段がある**）。
+#
+#   **レジストリ（Docker Hub）へ届くこと。** 手順 2 は土台を --pull で取り直すため、手元にイメージがあっても届かなければ落ちる
+#   （同じ代償は scripts/api-image.test.sh と apps/api/src/testing/postgres.ts にもある）。
+#   **落ちるのは手順 1 の apply が済んだ後である**（ECR のリポジトリは作られた状態で止まる）。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -54,9 +61,12 @@ aws ecr get-login-password | docker login --username AWS --password-stdin "$regi
 echo "== 2. イメージ（linux/arm64）を作り、ARM64 で動くことを確かめてから push する"
 # ARM64 で動くことは CI では確かめていない（CI の code は amd64 のイメージで scripts/api-image.test.sh を回す）。
 # push の前にここで、ネイティブモジュール（argon2）・Prisma の CLI・psql が ARM64 のイメージの中で動くことを見る。
-docker buildx build --platform linux/arm64 --file apps/api/Dockerfile --target runtime \
+# --pull: 土台（apps/api/Dockerfile の NODE_IMAGE。タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で本番のイメージを作り、
+# CI（scripts/api-image.test.sh も --pull）が確かめた土台とずれる。
+# **土台は Dependabot で追わず、同じタグの中の更新をこの --pull で取り込むと決めている**（理由は .github/dependabot.yml の末尾）。
+docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target runtime \
   --tag "$api_repository:$IMAGE_TAG" --load .
-docker buildx build --platform linux/arm64 --file apps/api/Dockerfile --target migrate \
+docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target migrate \
   --tag "$migrate_repository:$IMAGE_TAG" --load .
 docker run --rm --platform linux/arm64 --entrypoint node "$api_repository:$IMAGE_TAG" \
   -e 'require(require("node:module").createRequire("/app/apps/api/dist/main.js").resolve("argon2"))' ||
@@ -107,7 +117,14 @@ echo "== 6. web を置く"
 npm ci --no-audit --no-fund
 npm run build -w @workspace-chat/shared
 npm run build -w @workspace-chat/web
-aws s3 sync apps/web/dist "s3://$(tf output -raw web_bucket)" --delete
-aws cloudfront create-invalidation --distribution-id "$(tf output -raw cloudfront_distribution_id)" --paths '/*' >/dev/null
+# 踏むと壊れる: 置く順番を変えない（#604）。古い資産を消すのは、index.html を no-cache で置き直し、無効化が終わった後にする。
+# 先に消すと、ブラウザや CloudFront に残った古い index.html が消えた /assets/index-<hash>.js を読みに行き、画面が出ない。
+# index.html に Cache-Control を付けないと、ブラウザが Last-Modified から推定した間だけ古いものを使い回す（RFC 9111 4.2.2）。
+web_bucket=$(tf output -raw web_bucket)
+aws s3 sync apps/web/dist "s3://$web_bucket" --exclude index.html
+aws s3 cp apps/web/dist/index.html "s3://$web_bucket/index.html" --cache-control no-cache --content-type text/html
+invalidation=$(aws cloudfront create-invalidation --distribution-id "$(tf output -raw cloudfront_distribution_id)" --paths '/*'   --query 'Invalidation.Id' --output text)
+aws cloudfront wait invalidation-completed --distribution-id "$(tf output -raw cloudfront_distribution_id)" --id "$invalidation"
+aws s3 sync apps/web/dist "s3://$web_bucket" --delete --exclude index.html
 
 echo "公開した: $(tf output -raw web_url)"

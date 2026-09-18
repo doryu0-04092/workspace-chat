@@ -1,24 +1,20 @@
 import { type FormEvent, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { failureMessage } from './failure-message';
+import { LOSS_WARNING, RecoveryCodeNotice } from './RecoveryCodeNotice';
 import { register } from './register';
-
-const LOSS_WARNING =
-  'リカバリーコードを失うと、アカウントを復旧できません。パスワードを忘れたときの唯一の手段です（メールでの再設定はありません）。';
 
 /**
  * 新規登録（F-01・F-37）。登録するとリカバリーコードを1度だけ見せ、控えたことを選ぶまで先へ進めない（機能一覧 1.1）。
- * **コードはこの部品の状態にだけ持ち、保存しない。** 画面を離れれば消え、再表示はできない。
+ * **コードはこの部品の状態にだけ持ち、保存しない。** 画面を離れれば消え、再表示はできない（`RecoveryCodeNotice`）。
  */
 export function RegisterPage() {
-  const navigate = useNavigate();
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -32,32 +28,10 @@ export function RegisterPage() {
 
   if (recoveryCode !== null) {
     return (
-      <main className="mx-auto max-w-sm p-8">
-        <h1 className="text-2xl font-bold">リカバリーコード</h1>
-        <p className="mt-4">
-          登録しました。次のコードを控えてください。この画面を離れると、二度と表示できません。
-        </p>
-        <p className="mt-4 rounded bg-slate-100 p-3 text-center font-mono text-lg">
-          {recoveryCode}
-        </p>
-        <p className="mt-4 text-red-700">{LOSS_WARNING}</p>
-        <label className="mt-6 flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={saved}
-            onChange={(event) => setSaved(event.target.checked)}
-          />
-          リカバリーコードを控えました
-        </label>
-        <button
-          type="button"
-          className="mt-4 w-full rounded bg-slate-800 px-3 py-2 text-white disabled:opacity-50"
-          disabled={!saved}
-          onClick={() => navigate('/login', { replace: true })}
-        >
-          ログインの画面へ進む
-        </button>
-      </main>
+      <RecoveryCodeNotice
+        lead="登録しました。次のコードを控えてください。この画面を離れると、二度と表示できません。"
+        recoveryCode={recoveryCode}
+      />
     );
   }
 

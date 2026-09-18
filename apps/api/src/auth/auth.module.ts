@@ -67,6 +67,6 @@ import { ACCESS_TOKEN_TTL_SECONDS } from './session-tokens';
         ),
     },
   ],
-  exports: [AccessTokenResolver],
+  exports: [AccessTokenResolver, LOGIN_BACKOFF_STORE],
 })
 export class AuthModule {}

@@ -32,6 +32,13 @@ describe('AppModule', () => {
           registrationEnabled: true,
           jwtSecret: randomBytes(32).toString('base64url'),
           webOrigin: 'http://web.test',
+          s3Bucket: 'workspace-chat-test',
+          s3Region: 'ap-northeast-1',
+          s3Endpoint: 'http://127.0.0.1:9',
+          s3ForcePathStyle: true,
+          s3UploadRoleArn: undefined,
+          cloudfrontKeyPairId: undefined,
+          cloudfrontPrivateKey: undefined,
         }),
       ],
     }).compile();

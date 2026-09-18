@@ -1,5 +1,16 @@
 # アラート（#452・#477）。要件定義書 4.2「アラート」と 4.6 の監視項目。
 # 通知先は SNS のメール購読（決定・2026-09-12・依頼側。送れるところまで作り、購読の確認は依頼側が行う）。夜間・休日の対応はしない。
+# 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
+#
+# 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順が、このファイルの3つの値を前提にしている。**
+# どれも locals の外にあり、**変えても validate も plan も CI も落ちない。**
+#  1. aws_sns_topic.alerts の name（workspace-chat-alerts）——**手順の共通の前置きが、この名前をリテラルで打って
+#     TF_VAR_alarm_email を引く**。変えると引きが空になり、**空でも変数は「設定済み」になるため apply は聞き返さず、
+#     endpoint = "" で落ちる**（前置きは空を弾く段を持つが、名前を変えたことに気づく経路はそこだけである）
+#  2. 5xx 率の treat_missing_data = "notBreaching"——手順は「**要求の来ない時間帯なら、全断でも鳴らない**」と書いている。
+#     breaching に変えると、その記述が逆になる
+#  3. Valkey のメトリクス欠損の treat_missing_data = "breaching"——手順は「**鳴るのは作り直しの区間だけ**」
+#     「アラートが収まったことを終わった合図と読まないこと」と書いている。この値でしか成り立たない
 
 # 閾値は Terraform に置き、文書に数値を書かない（要件定義書 4.2「アラート」）。
 # 踏むと壊れる: どの値も、変えても validate も plan も CI も落ちない。変えるときは要件定義書 4.2「アラート」の意図に照らす。
@@ -30,6 +41,7 @@ locals {
   log_metric_namespace = "WorkspaceChat"
 }
 
+# トピックに発行を許すポリシー（aws_sns_topic_policy など）は IAM の面に入る——足すときは、main.tf の冒頭の条件に従い、検査の iamSurface の表も直す。
 resource "aws_sns_topic" "alerts" {
   name = "workspace-chat-alerts"
 }
