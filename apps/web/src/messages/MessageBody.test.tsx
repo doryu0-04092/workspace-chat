@@ -454,3 +454,36 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
     });
   });
 });
+
+// 機能一覧 4.3。記法の解釈を固定する検査の不足（#383・#387・#391・#429）。
+describe('メッセージの本文の描画（解釈を固定する検査）', () => {
+  it.each([
+    ['mailto', '[メール](mailto:a@example.com)', 'mailto:a@example.com'],
+    ['相対 URL', '[画面](/workspaces/x)', '/workspaces/x'],
+    ['山括弧で囲んだ URL', '<https://example.com/a>', 'https://example.com/a'],
+  ])('%s のリンクは href を残す（#387）', (_name, body, href) => {
+    const links = [...renderBody(body).querySelectorAll('a')].map((link) =>
+      link.getAttribute('href'),
+    );
+    expect(links).toEqual([href]);
+  });
+
+  it('生の HTML の中の URL もリンクになる（#429）', () => {
+    const links = [
+      ...renderBody('<iframe src="https://example.com/x"></iframe>').querySelectorAll('a'),
+    ];
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute('href')).toMatch(/^https:\/\/example\.com\/x/);
+  });
+
+  it('書いた文字に戻す節（画像）の中の改行も、改行の要素にする（remarkPlugins の並び。#383）', () => {
+    const container = renderBody('![あ\nい](https://example.com/x.png)');
+    expect(container.querySelectorAll('br')).toHaveLength(1);
+    expect(container.textContent).toContain('![あ');
+  });
+
+  it('箇条書きの中の複数行の生の HTML は、字下げを本文の文字に足さない（#391）', () => {
+    const item = renderBody('- <div>\n  あ\n  </div>').querySelector('li');
+    expect(item?.textContent).toBe('<div>\nあ\n</div>');
+  });
+});
