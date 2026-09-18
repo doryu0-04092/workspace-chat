@@ -298,6 +298,33 @@ describe('起動時の復元', () => {
     expect(order).toEqual(['lock:workspace-chat:refresh', 'refresh', 'unlock']);
   });
 
+  // #425: 製品の経路（引数なしの createSessionStore()）は navigator.locks を自分で見に行く。jsdom には locks が無いため、差し替えて通す。
+  it('ロックを渡さなければ navigator.locks を使い、リフレッシュを同じ名前のロックの中で送る', async () => {
+    const order: string[] = [];
+    fakeFetch({
+      'POST /api/auth/refresh': () => {
+        order.push('refresh');
+        return token('t1');
+      },
+      'GET /api/users/me': () => json(200, PROFILE),
+    });
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      locks: {
+        request: async (name: string, callback: () => Promise<unknown>) => {
+          order.push(`lock:${name}`);
+          const result = await callback();
+          order.push('unlock');
+          return result;
+        },
+      },
+    });
+
+    await createSessionStore().restore();
+
+    expect(order).toEqual(['lock:workspace-chat:refresh', 'refresh', 'unlock']);
+  });
+
   it('ロックが取れず断られても（InvalidStateError など）、ロックの外でリフレッシュし、確かめる途中のまま止まらない', async () => {
     const { count } = fakeFetch({
       'POST /api/auth/refresh': () => token('t1'),
