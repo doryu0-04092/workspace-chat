@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router';
 import { useSession } from '../auth/session-context';
 import { MessageActionButtons } from '../messages/MessageActions';
 import { MessageShell, PagedMessages } from '../messages/MessageList';
-import { useDmFileCookies } from '../delivery/signed-cookies';
+import { FileCookiesReady, useDmFileCookies } from '../delivery/signed-cookies';
 import { useDmAttachmentDrafts } from '../messages/attachment-drafts';
 import { MessageAttachments } from '../messages/MessageAttachments';
 import { AttachmentField, MessageForm } from '../messages/PostMessageForm';
@@ -75,11 +75,11 @@ function DmMessages({ workspaceId, dm }: { workspaceId: string; dm: Dm }) {
   const post = usePostDmMessage(workspaceId, dm.id);
   // 添付（#239）: 選んだらすぐに上げ、確定したものを本文と一緒に送る。配信の Cookie は DM を開いている間だけ取り直す
   const attachments = useDmAttachmentDrafts(workspaceId, dm.id);
-  useDmFileCookies(workspaceId, dm.id);
+  const filesReady = useDmFileCookies(workspaceId, dm.id);
   useAdvanceDmRead(workspaceId, dm.id, messages.data?.pages[0]?.messages);
 
   return (
-    <>
+    <FileCookiesReady value={filesReady}>
       {/* 入力欄は一覧の上に置く（最新も上に来るため、下までスクロールしない。#608） */}
       {dm.writable ? (
         <MessageForm
@@ -125,7 +125,7 @@ function DmMessages({ workspaceId, dm }: { workspaceId: string; dm: Dm }) {
           joinedAt={dm.joinedAt}
         />
       </section>
-    </>
+    </FileCookiesReady>
   );
 }
 

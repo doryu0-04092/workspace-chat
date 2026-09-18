@@ -1,6 +1,6 @@
 import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { components } from '@workspace-chat/shared';
-import { useEffect } from 'react';
+import { createContext, useEffect } from 'react';
 import { requestJson, segment } from '../api/client';
 import { useSessionStore } from '../auth/session-context';
 
@@ -56,7 +56,13 @@ export function useAvatarCookies(): void {
   });
 }
 
-/** いま添付の Cookie を取り直しているチャンネル（読み込みの記憶ごと。テストは記憶をテストごとに作る）。 */
+/**
+ * 開いている会話の添付の Cookie の最初の発行が終わったか（#661）。会話の画面が値を渡し、添付の表示が読む。
+ * **終わる前に `<img>` を出すと、前の会話の Cookie で取りに行って 403 になり、Cookie が届いても取り直さない。**
+ * 会話の画面の外の既定は true（待つものが無い）。
+ */
+export const FileCookiesReady = createContext(true);
+
 /** いま開いている会話（チャンネル・DM）の Cookie の発行の経路。 */
 const openConversations = new WeakMap<QueryClient, { path: string }>();
 
@@ -68,21 +74,23 @@ const filesKey = (cookiesPath: string) => ['delivery', 'files', cookiesPath] as 
  * **添付の Cookie は名前と Path（`/files`）が同じで、別のチャンネル・DM で発行すると上書きされる。** そのため:
  * - 閉じたら記憶を残さない（`gcTime: 0`）——開き直したときに、まだ新しいとみなして発行し直さない、を起こさない
  * - 前の会話の発行が、移った先の発行より後に返ったら、いま開いている会話の分を発行し直す（前の Cookie が残るため）
+ *
+ * 返すのは、最初の発行が終わったか（通っても断られても true。`FileCookiesReady` に渡す）。
  */
-export function useChannelFileCookies(workspaceId: string, channelId: string): void {
-  useConversationFileCookies(
+export function useChannelFileCookies(workspaceId: string, channelId: string): boolean {
+  return useConversationFileCookies(
     `/api/workspaces/${segment(workspaceId)}/channels/${segment(channelId)}/files/cookies`,
   );
 }
 
 /** DM を開いている間、その DM の `/files/workspace/{ws}/dm/{dmId}/*` の Cookie を取り直す（#239。扱いはチャンネルと同じ）。 */
-export function useDmFileCookies(workspaceId: string, dmId: string): void {
-  useConversationFileCookies(
+export function useDmFileCookies(workspaceId: string, dmId: string): boolean {
+  return useConversationFileCookies(
     `/api/workspaces/${segment(workspaceId)}/dms/${segment(dmId)}/files/cookies`,
   );
 }
 
-function useConversationFileCookies(cookiesPath: string): void {
+function useConversationFileCookies(cookiesPath: string): boolean {
   const store = useSessionStore();
   const queryClient = useQueryClient();
 
@@ -95,7 +103,7 @@ function useConversationFileCookies(cookiesPath: string): void {
     };
   }, [queryClient, cookiesPath]);
 
-  useQuery({
+  const cookies = useQuery({
     queryKey: filesKey(cookiesPath),
     queryFn: async () => {
       const result = await issue(store, cookiesPath);
@@ -108,4 +116,6 @@ function useConversationFileCookies(cookiesPath: string): void {
     gcTime: 0,
     ...refreshOptions,
   });
+  // 取り直し（期限の前・移った先の発行し直し）の間は false に戻さない——戻すと、表示中の画像を外して付け直すことになる
+  return !cookies.isPending;
 }

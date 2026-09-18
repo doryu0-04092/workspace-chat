@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ApiError, errorMessage } from '../api/client';
 import { failureMessage } from '../auth/failure-message';
-import { useChannelFileCookies } from '../delivery/signed-cookies';
+import { FileCookiesReady, useChannelFileCookies } from '../delivery/signed-cookies';
 import { MessageChannelProvider } from '../messages/message-channel';
 import { MessageList } from '../messages/MessageList';
 import { PinnedMessages } from '../messages/PinnedMessages';
@@ -172,7 +172,7 @@ function ChannelMessages({
 }) {
   const rejected = useChannelRealtime(workspaceId, channelId);
   // 添付の配信の Cookie は、参加しているチャンネルを開いている間だけ取り直す（機能一覧 11.2）
-  useChannelFileCookies(workspaceId, channelId);
+  const filesReady = useChannelFileCookies(workspaceId, channelId);
   // 開いているチャンネルの @here にだけ受け取りを返す（F-21）
   useHereReceipt(channelId);
   const [unreadFrom] = useState(lastReadMessageId);
@@ -190,42 +190,44 @@ function ChannelMessages({
   return (
     // 一覧とスレッドの自分のメッセージに、編集・削除を出すため（F-13）
     <MessageChannelProvider workspaceId={workspaceId} channelId={channelId} readOnly={readOnly}>
-      {rejected && (
-        <p role="alert" className="mt-4 text-red-700">
-          リアルタイムの反映を始められませんでした。{failureMessage(rejected)}
-        </p>
-      )}
-      {/* チャンネルのピン留めの一覧（F-33）。付け外しの操作は、アーカイブ済みでないときだけ出す */}
-      <PinnedMessages />
-      <div className={threadId ? 'md:grid md:grid-cols-2 md:gap-4' : undefined}>
-        <div>
-          {/* 入力欄は一覧の上に置く（最新も上に来るため、下までスクロールしない。#608） */}
-          {!readOnly && (
-            <>
-              <PostMessageForm workspaceId={workspaceId} channelId={channelId} />
-              <TypingIndicator channelId={channelId} />
-            </>
-          )}
-          <section aria-label="メッセージの一覧" className="mt-4">
-            <MessageList
+      <FileCookiesReady value={filesReady}>
+        {rejected && (
+          <p role="alert" className="mt-4 text-red-700">
+            リアルタイムの反映を始められませんでした。{failureMessage(rejected)}
+          </p>
+        )}
+        {/* チャンネルのピン留めの一覧（F-33）。付け外しの操作は、アーカイブ済みでないときだけ出す */}
+        <PinnedMessages />
+        <div className={threadId ? 'md:grid md:grid-cols-2 md:gap-4' : undefined}>
+          <div>
+            {/* 入力欄は一覧の上に置く（最新も上に来るため、下までスクロールしない。#608） */}
+            {!readOnly && (
+              <>
+                <PostMessageForm workspaceId={workspaceId} channelId={channelId} />
+                <TypingIndicator channelId={channelId} />
+              </>
+            )}
+            <section aria-label="メッセージの一覧" className="mt-4">
+              <MessageList
+                workspaceId={workspaceId}
+                channelId={channelId}
+                onOpenThread={(message) => setThread(message.id)}
+                lastReadMessageId={unreadFrom}
+                joinedAt={joinedAt}
+              />
+            </section>
+          </div>
+          {threadId && (
+            <ThreadPanel
+              key={threadId}
               workspaceId={workspaceId}
               channelId={channelId}
-              onOpenThread={(message) => setThread(message.id)}
-              lastReadMessageId={unreadFrom}
-              joinedAt={joinedAt}
+              parentId={threadId}
+              onClose={() => setThread(null)}
             />
-          </section>
+          )}
         </div>
-        {threadId && (
-          <ThreadPanel
-            key={threadId}
-            workspaceId={workspaceId}
-            channelId={channelId}
-            parentId={threadId}
-            onClose={() => setThread(null)}
-          />
-        )}
-      </div>
+      </FileCookiesReady>
     </MessageChannelProvider>
   );
 }

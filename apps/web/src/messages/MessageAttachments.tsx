@@ -1,18 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
+import { FileCookiesReady } from '../delivery/signed-cookies';
 import type { Attachment } from './attachment-drafts';
 
 /**
  * メッセージの添付（F-27。機能一覧 11.1）。**画像は表示し、動画は 30 秒の位置を表示し、それ以外はファイル名のリンクにする**
  * （テキスト系・pdf・Office・zip はアプリ内で描画しない。配信の Content-Disposition は attachment）。
  * 配信 URL（`/files/...`）の取得の認可は CloudFront の署名付き Cookie である（11.2）。
+ * **開いた会話の Cookie の最初の発行が終わるまでは、ファイル名だけを出す**（`FileCookiesReady`。#661）。
  */
 export function MessageAttachments({ attachments }: { attachments: readonly Attachment[] }) {
+  const ready = use(FileCookiesReady);
   if (attachments.length === 0) return null;
   return (
     <ul className="mt-1 flex flex-wrap gap-2">
       {attachments.map((attachment) => (
         <li key={attachment.id}>
-          {attachment.kind === 'image' ? (
+          {!ready ? (
+            <span className="text-sm text-slate-500">{attachment.fileName}</span>
+          ) : attachment.kind === 'image' ? (
             <img
               src={attachment.url}
               alt={attachment.fileName}
