@@ -350,6 +350,39 @@ describe('在席（F-22）', () => {
       expect(received.filter((p) => p.userId === alice.id && p.present)).toEqual([]);
       await untilBothSee(channelId, alice.id, false);
     });
+
+    // #378: 2回目の参加の確認の問い合わせの往復の間に、同じタスクでキックが処理された場合も、在席に足し直さない。
+    it('初めての入室で2回目の参加の確認の往復の間にキックされたら、在席に足さず、present: true を配らない', async () => {
+      const { owner, alice, bob, workspace, channelId } = await channelOfThree();
+      const aliceSocket = await t.open(t.firstBase, alice);
+      const bobSocket = await t.open(t.firstBase, bob);
+      await enter(bobSocket, channelId);
+      const received = await collectAfterEntries(bobSocket);
+      const rooms = t.first.get(ChannelRoomsService);
+      const check = rooms.assertCanEnter.bind(rooms);
+      // 1回目の確認は通す。2回目は、確認の結果を得た後・返す前にキックを確定させる。
+      const paused = vi
+        .spyOn(rooms, 'assertCanEnter')
+        .mockImplementationOnce(check)
+        .mockImplementationOnce(async (userId, id) => {
+          const result = await check(userId, id);
+          const kicked = await t.send(
+            'DELETE',
+            `/workspaces/${workspace.id}/channels/${channelId}/members/${alice.id}`,
+            owner,
+          );
+          expect(kicked.status).toBe(204);
+          return result;
+        });
+      try {
+        expect(await enter(aliceSocket, channelId)).toMatchObject({ ok: false, status: 404 });
+      } finally {
+        paused.mockRestore();
+      }
+      await quiet();
+      expect(received.filter((p) => p.userId === alice.id && p.present)).toEqual([]);
+      expect(t.first.get(PresenceRegistry).usersIn(channelId)).not.toContain(alice.id);
+    });
   });
 
   describe('参加資格を失ったとき（機能一覧 2.2）', () => {
