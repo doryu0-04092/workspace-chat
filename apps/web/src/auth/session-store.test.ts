@@ -258,6 +258,36 @@ describe('起動時の復元', () => {
         expect(store.getState()).toEqual({ status: 'unavailable' });
         expect(count('GET /api/users/me')).toBe(0);
       });
+
+      // #564: 自分の情報の読み込みの側も、打ち切った後に届いた結果を状態に当てない。
+      it('打ち切った自分の情報の読み込みの応答が後から届いても、ログインした状態にしない', async () => {
+        let deliverLate: ((response: Response) => void) | undefined;
+        const late = () =>
+          new Promise<Response>((resolve) => {
+            deliverLate = resolve;
+          });
+        fakeFetch({
+          'POST /api/auth/refresh': () => token('t1'),
+          'GET /api/users/me': [late, hang],
+        });
+        const timeouts = manualTimeouts();
+        const store = createSessionStore({
+          wait: recordingWait().wait,
+          timeoutSignal: timeouts.timeoutSignal,
+        });
+
+        const restoring = store.restore();
+        // 0 番目はリフレッシュの時限（応答が返ったので切らない）
+        await vi.waitFor(() => expect(deliverLate).toBeDefined());
+        timeouts.fire(1);
+        deliverLate!(json(200, PROFILE));
+        await vi.waitFor(() => expect(timeouts.requested).toHaveLength(3));
+        timeouts.fire(2);
+        await restoring;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+
+        expect(store.getState()).toEqual({ status: 'unavailable' });
+      });
     });
   });
 
