@@ -1,5 +1,5 @@
 import type { InfiniteData, UseInfiniteQueryResult } from '@tanstack/react-query';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { errorMessage } from '../api/client';
 import { useSession } from '../auth/session-context';
@@ -119,6 +119,7 @@ export function PagedMessages<M extends ListedMessage>({
       items={items}
       renderMessage={renderMessage}
       oldestUnreadId={oldestUnreadId}
+      me={me}
       context={{
         labels,
         hasOlder: query.hasNextPage,
@@ -134,20 +135,37 @@ export function PagedMessages<M extends ListedMessage>({
  * 読み込めた一覧。開いたときは最新（いちばん上）を見せる。
  * **`firstItemIndex` は使わない**——古いものは下に足すため、既に出ている行の番号は変わらない。新しいものは上に足し、
  * いちばん上を見ている間はそのまま見える（上を見ていない間は、足した分だけ下にずれる）。
+ * **先頭に加わったのが自分の投稿なら、いちばん上へ戻す**（送ったのに見えない、を起こさない。#663）。他人の投稿では動かさない——読んでいる位置を奪わない。
  */
 function LoadedList<M extends ListedMessage>({
   items,
   renderMessage,
   oldestUnreadId,
+  me,
   context,
 }: {
   items: M[];
   renderMessage: (message: M) => ReactNode;
   oldestUnreadId: string | null;
+  me: string | null;
   context: ListContext;
 }) {
+  const scroller = useRef<HTMLElement | Window | null>(null);
+  const first = items[0];
+  const shownFirstId = useRef(first?.id);
+  useEffect(() => {
+    if (first === undefined || first.id === shownFirstId.current) return;
+    shownFirstId.current = first.id;
+    if (me !== null && first.author?.id === me && scroller.current instanceof HTMLElement) {
+      scroller.current.scrollTop = 0;
+    }
+  }, [first, me]);
+
   return (
     <Virtuoso<M, ListContext>
+      scrollerRef={(element) => {
+        scroller.current = element;
+      }}
       // 踏むと壊れる: 高さは className ではなく style で渡す。react-virtuoso は枠に height: 100% をインラインで付け、クラスの高さに勝つ
       // （親の高さは自動のため 0 になり、一覧が見えない。#606）
       style={{ height: '60vh' }}
