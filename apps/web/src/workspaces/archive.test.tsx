@@ -137,6 +137,36 @@ describe('アーカイブ（F-35・3.2）', () => {
     expect(headerOf(archive.init, 'Authorization')).toBe('Bearer t1');
   });
 
+  // #561: 参加しているチャンネルをアーカイブしたら、開いてあるアーカイブ済みの一覧を取り直し、そこに載せる（機能一覧 3.2）。
+  it('アーカイブしたら、開いてあるアーカイブ済みの一覧を取り直し、そのチャンネルを載せる', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const ARCHIVED = `/api/workspaces/${WORKSPACE_ID}/archived-channels`;
+    fakeFetch(
+      routes({
+        ...AS_OWNER,
+        [`GET ${CHANNELS}`]: [() => json(200, [GENERAL]), () => json(200, [])],
+        [`GET ${ARCHIVED}`]: [
+          () => json(200, []),
+          () => json(200, [{ ...GENERAL, name: 'general-1', archived: true }]),
+        ],
+        [`GET ${MANAGED}`]: () => json(200, [MANAGED_GENERAL]),
+        [`POST ${CHANNELS}/${GENERAL.id}/archive`]: () =>
+          json(200, { ...MANAGED_GENERAL, name: 'general-1', archived: true }),
+      }),
+    );
+    renderApp(WORKSPACE_PATH);
+    fireEvent.click(await screen.findByRole('button', { name: 'アーカイブ済みのチャンネル' }));
+    expect(await screen.findByText('アーカイブ済みのチャンネルはありません。')).toBeDefined();
+    const list = await openManaged();
+
+    fireEvent.click(
+      within(rowOf(list, /general/)).getByRole('button', { name: 'general をアーカイブする' }),
+    );
+
+    const archived = await screen.findByRole('list', { name: 'アーカイブ済みのチャンネル' });
+    expect(within(archived).getByRole('link', { name: /general-1/ })).toBeDefined();
+  });
+
   it('アーカイブの確かめを取り消したら送らない', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     const { count } = fakeFetch(
