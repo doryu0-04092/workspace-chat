@@ -7,6 +7,7 @@ import { useAvatarCookies } from '../delivery/signed-cookies';
 import { useRealtime } from '../realtime/realtime-context';
 import { useInvitationRealtime } from '../realtime/use-invitation-realtime';
 import { useMyProfile } from '../users/queries';
+import { UserAvatar } from '../users/UserAvatar';
 import { useMyInvitations } from '../workspaces/queries';
 
 /**
@@ -93,11 +94,9 @@ export function SignedInLayout() {
 
 /**
  * 画面の枠のアバター画像（F-04。機能一覧 1.3）。プロフィールの画面と同じ読み込みを使い、上げ直したら読み直さずに変わる。
- * **表示名の横の飾りであり、代わりの文を持たない**（同じ内容を表示名が読み上げる）。無い・読めないときは何も出さない。
+ * 表示は利用者の一覧と同じ UserAvatar（無い・読めないときは頭文字）。プロフィールを読み込むまでは何も出さない。
  */
 function HeaderAvatar() {
   const profile = useMyProfile();
-  const url = profile.data?.avatarUrl;
-  if (!url) return null;
-  return <img src={url} alt="" className="h-7 w-7 rounded-full border object-cover" />;
+  return profile.data ? <UserAvatar user={profile.data} size="h-7 w-7" /> : null;
 }
