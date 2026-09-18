@@ -2,6 +2,7 @@ import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
 import { type ErrorResponse, RetryAfterException } from '../error-response';
 import { PrismaService } from '../prisma.service';
+import { toUserSummary, type UserSummaryRow, userSummaryColumns } from '../users/user-summary';
 import { accountBackoffKey, type LoginBackoffStore } from './login-backoff';
 import { dummySecretHash, verifySecret } from './secret-hash';
 import { SessionService } from './session.service';
@@ -18,13 +19,7 @@ const INVALID_CREDENTIALS: ErrorResponse = {
   message: 'ユーザーID またはパスワードが違います',
 };
 
-type UserRow = {
-  id: string;
-  userId: string;
-  displayName: string;
-  avatarUrl: string | null;
-  passwordHash: string;
-};
+type UserRow = UserSummaryRow & { passwordHash: string };
 
 @Injectable()
 export class LoginService {
@@ -50,7 +45,7 @@ export class LoginService {
     }
 
     const rows = await this.prisma.$queryRaw<UserRow[]>`
-      SELECT "id", "userId", "displayName", "avatarUrl", "passwordHash"
+      SELECT ${userSummaryColumns('"User"')}, "passwordHash"
       FROM "User"
       WHERE lower("userId") = lower(${input.userId}) AND "deletedAt" IS NULL
     `;
@@ -71,12 +66,7 @@ export class LoginService {
         accessToken: tokens.accessToken,
         tokenType: 'Bearer',
         expiresIn: tokens.expiresIn,
-        user: {
-          id: user.id,
-          userId: user.userId,
-          displayName: user.displayName,
-          avatarUrl: user.avatarUrl,
-        },
+        user: toUserSummary(user),
       },
       refreshToken: tokens.refreshToken,
     };
