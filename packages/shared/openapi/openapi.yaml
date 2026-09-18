@@ -3454,7 +3454,9 @@ components:
           items:
             $ref: '#/components/schemas/PinnedMessage'
     Channel:
-      description: 一般の一覧（参加者向け）のチャンネル
+      description: >-
+        一般の一覧（参加者向け）のチャンネル。作成（201）と、自分が参加しているアーカイブ済みの一覧
+        （GET /workspaces/{id}/archived-channels）の応答にも使う
       type: object
       additionalProperties: false
       required:
