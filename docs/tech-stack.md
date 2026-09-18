@@ -551,9 +551,10 @@ NestJS のコンストラクタインジェクションは、この指定が出�
   設定が無い状態で試して落ちても、それは pg_bigm が使えない証拠にはならない
 - **テストの実行環境にも同じ前提が要る。** 本書は「テストは Testcontainers で
   実 PostgreSQL に対して検証する」としているが、**`postgres:17` をそのまま渡すと
-  pg_bigm が無い。** Testcontainers に渡すのは
-  [開発環境と同じイメージ](../docker/postgres/Dockerfile)（または同等の pg_bigm 入りイメージ）とし、
-  `shared_preload_libraries=pg_bigm` も渡す必要がある。
+  pg_bigm が無い。** **実装済み**（`apps/api/src/testing/postgres.ts`）: Testcontainers に渡すのは
+  [開発環境と同じ Dockerfile](../docker/postgres/Dockerfile) から起動のたびに `docker build --pull` で作るイメージ
+  （`workspace-chat-db:test`。開発環境の db とは別名にし、`--pull` が開発環境のイメージを差し替えないようにする）で、
+  `shared_preload_libraries=pg_bigm` も渡す。
   **環境は「ローカル・RDS」の2つではなく、テストを含めて3つある**
 - **ElastiCache の AUTH トークンと転送時暗号化（`rediss://`。上の「本番の HTTPS・秘密情報・state の置き場」）のもとで、
   `@socket.io/redis-adapter` と、レート制限の接続（`apps/api/src/rate-limit/rate-limit.module.ts` の `ioredis`。`REDIS_URL`）の
@@ -567,11 +568,11 @@ NestJS のコンストラクタインジェクションは、この指定が出�
   **ローカルの Valkey は無認証の `redis://` であり、この経路を一度も通らない**
   （下記「ローカルの Valkey に認証を掛けない」）
 
-> **代償を明記する。** **テストの実行環境の項目**は**まだ決めていない**。Testcontainers に
-> ビルド済みのイメージをどう渡すか（毎回ビルドするか、名前で参照するか）を
-> 決めないまま検索の実装に入ると、**検索のテストだけが動かない**か、
-> **2-gram 索引が効いていることを検証しないテスト**になる。
-> どちらもこの構成で最も避けたい「遅い段階で露見する」形である。
+> **代償を明記する。** **テストの実行環境の項目は決めた**（`apps/api/src/testing/postgres.ts`）——
+> Testcontainers に渡すイメージは、名前で参照するのではなく、**起動のたびに `docker build --pull` で作り直す**。
+> **代償: 土台を起動するたびにレジストリへ問い合わせるため `npm test` が遅くなり、手元に作った層が無い最初の1回は
+> pg_bigm のビルドを待つ。レジストリと pg_bigm の取得元に届かない環境では、手元にイメージがあっても起動できない**
+> （`scripts/api-image.test.sh` と同じ代償）。
 
 #### ローカルでの確認結果（2026-09-04）
 
