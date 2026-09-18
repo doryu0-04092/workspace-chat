@@ -4,6 +4,8 @@ import { RateLimitModule } from '../rate-limit/rate-limit.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { AttachmentsController } from './attachments.controller';
 import { AttachmentsService } from './attachments.service';
+import { DmAttachmentsController } from './dm-attachments.controller';
+import { DmAttachmentsService } from './dm-attachments.service';
 import { ChannelArchiveController } from './channel-archive.controller';
 import { ChannelArchiveService } from './channel-archive.service';
 import { ChannelMembershipController } from './channel-membership.controller';
@@ -49,6 +51,7 @@ import { WorkspacesService } from './workspaces.service';
     SearchController,
     ReactionsController,
     AttachmentsController,
+    DmAttachmentsController,
   ],
   providers: [
     WorkspacesService,
@@ -64,6 +67,7 @@ import { WorkspacesService } from './workspaces.service';
     SearchService,
     ReactionsService,
     AttachmentsService,
+    DmAttachmentsService,
     HereMentions,
   ],
   // 添付の配信の Cookie の発行（delivery/）が、所属の判定に使う

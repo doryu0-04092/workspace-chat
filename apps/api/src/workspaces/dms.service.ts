@@ -17,6 +17,8 @@ import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { USER_SUMMARY_SELECT, toUserSummary, type UserSummaryRow } from '../users/user-summary';
+import { DM_ATTACHMENT_SELECT, toDmAttachment } from './attachment-view';
+import { ATTACHMENT_UNAVAILABLE } from '../file-uploads/upload-errors';
 import { NOT_MESSAGE_AUTHOR } from './channel-errors';
 import { DM_COUNTERPART_NOT_FOUND, DM_COUNTERPART_UNAVAILABLE, DM_WITH_SELF } from './dm-errors';
 import { advanceReadPosition } from './unread';
@@ -46,6 +48,8 @@ export const DM_MESSAGE_SELECT = {
   editedAt: true,
   deletedAt: true,
   author: { select: USER_SUMMARY_SELECT },
+  // 投稿に付けた添付（#239）。確定に成功したものだけが付くため、上げた順（id の順）に並べる
+  attachments: { select: DM_ATTACHMENT_SELECT, orderBy: { id: 'asc' } },
 } as const;
 
 type DmMessageRow = {
@@ -56,6 +60,7 @@ type DmMessageRow = {
   editedAt: Date | null;
   deletedAt: Date | null;
   author: UserSummaryRow;
+  attachments: Parameters<typeof toDmAttachment>[0][];
 };
 
 /**
@@ -72,6 +77,8 @@ export function toDmMessage(row: DmMessageRow): DmMessage {
     createdAt: row.createdAt.toISOString(),
     editedAt: row.editedAt?.toISOString() ?? null,
     deleted,
+    // 削除済みのメッセージは添付も返さない（本文を返さないのと同じ。機能一覧 4.2）
+    attachments: deleted ? [] : row.attachments.map(toDmAttachment),
   };
 }
 
@@ -82,7 +89,7 @@ type Parties = { id: string; lowUserId: string; highUserId: string };
  * 要求する側が当事者の DM を読む。**当事者でない・無い・別のワークスペースの DM は、区別せず 404**（機能一覧 8「自分が当事者でない DM は取得できない（404）」）。
  * 所属の確認（`WorkspacesService.membershipOf`）の後に呼ぶ——所属していなければ、DM の有無を問う前に 404 になる。
  */
-async function partiesFor(
+export async function partiesFor(
   db: Pick<PrismaService, 'dm'>,
   userId: string,
   workspaceId: string,
@@ -94,6 +101,34 @@ async function partiesFor(
   });
   if (!dm) throw new NotFoundException();
   return dm;
+}
+
+/**
+ * DM の投稿に添付を結び付ける（#239。チャンネルの attachTo と同じ規則）。**本人が上げ、その DM で確定に成功し、まだどの投稿にも付いていないものだけ**を
+ * 条件付きで結び付け、**1つでも当たらなければ 422 `attachment_unavailable` で投稿ごと取り消す**（同じトランザクションで投げる）。
+ */
+async function attachToDmMessage(
+  tx: Pick<PrismaService, 'dmAttachment'>,
+  {
+    messageId,
+    attachmentIds,
+    ...owner
+  }: {
+    messageId: string;
+    uploaderId: string;
+    workspaceId: string;
+    dmId: string;
+    attachmentIds: string[];
+  },
+): Promise<void> {
+  if (attachmentIds.length === 0) return;
+  const { count } = await tx.dmAttachment.updateMany({
+    where: { id: { in: attachmentIds }, ...owner, state: 'SUCCEEDED', messageId: null },
+    data: { messageId },
+  });
+  if (count !== attachmentIds.length) {
+    throw new UnprocessableEntityException(ATTACHMENT_UNAVAILABLE);
+  }
 }
 
 function counterpartOf(parties: Parties, userId: string): string {
@@ -196,8 +231,19 @@ export class DmsService {
       if (!members.has(counterpartOf(dm, userId))) {
         throw new ConflictException(DM_COUNTERPART_UNAVAILABLE);
       }
-      const row = await tx.dmMessage.create({
+      const created = await tx.dmMessage.create({
         data: { dmId: dm.id, authorId: userId, body: input.body },
+        select: { id: true },
+      });
+      await attachToDmMessage(tx, {
+        messageId: created.id,
+        uploaderId: userId,
+        workspaceId,
+        dmId: dm.id,
+        attachmentIds: input.attachmentIds ?? [],
+      });
+      const row = await tx.dmMessage.findUniqueOrThrow({
+        where: { id: created.id },
         select: DM_MESSAGE_SELECT,
       });
       // 相手の DM の通知（F-26。機能一覧 10.3。#623）。書いたのと同じトランザクションで作り、確定しなかった投稿の通知を残さない

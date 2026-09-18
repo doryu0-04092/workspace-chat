@@ -52,8 +52,8 @@ export function PostMessageForm({
   );
 }
 
-/** 添付するファイルを選ぶ欄と、上げている・上げたファイルの一覧。 */
-function AttachmentField({
+/** 添付するファイルを選ぶ欄と、上げている・上げたファイルの一覧（チャンネルと DM で共通。#239）。 */
+export function AttachmentField({
   drafts,
   full,
   onChoose,

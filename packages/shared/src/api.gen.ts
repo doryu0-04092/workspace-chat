@@ -1115,6 +1115,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspaces/{id}/dms/{dmId}/attachments/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * DM の添付ファイルのアップロード用の署名付き URL の発行（F-27・F-28・F-19）
+         * @description DM の添付を上げる署名付き URL を発行する（#239。決定・2026-09-11・依頼側）。その DM の当事者だけが発行できる—— 所属していない・当事者でない・DM が無いは、どれも 404（DM の他の経路と同じ）。 URL の宛先は隔離用のキー quarantine/workspace/{id}/dm/{dmId}/{uploadId}/{保存名} であり、キーはすべてサーバーが組み立てる。 形式・上限・有効期限・保存名の扱いと、利用者単位で 10 分に 30 回までの上限は、チャンネルの添付（createAttachmentUpload）と同じ
+         */
+        post: operations["createDmAttachmentUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/dms/{dmId}/attachments/uploads/{uploadId}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * DM の添付ファイルのアップロードの確定（F-27・F-28・F-19）
+         * @description 本人に払い出され、このワークスペースと DM で発行した識別子だけを確定できる（そうでなければ 404）。 確定の時点で当事者の判定をやり直し、落ちたら 404 を返して隔離用のキーを削除する。 通れば配信用のキー workspace/{id}/dm/{dmId}/{uploadId}/{保存名} へコピーする。検証・1回だけの確定・409 upload_in_progress の扱いは、 チャンネルの添付（completeAttachmentUpload）と同じ。確定した添付は、DM の投稿（postDmMessage）の attachmentIds で投稿に付ける。 利用者単位で 10 分に 30 回まで
+         */
+        post: operations["completeDmAttachmentUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/{id}/dms/{dmId}/files/cookies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * DM の添付の配信の署名付き Cookie の発行（F-29・F-19）
+         * @description その DM の当事者に、CloudFront の /files/workspace/{ws}/dm/{dmId}/* に限って有効な署名付き Cookie を発行する（#239）。 Cookie の名前・属性と、同じ名前・Path の Cookie が上書きされることはチャンネルの分（issueChannelFileCookies）と同じ （有効なのは最後に発行したチャンネルか DM の分だけ）。所属していない・当事者でない・DM が無いは、どれも 404。 CloudFront の署名鍵を設定していない環境（手元）では、判定を通ったときに Cookie を発行せず 204 を返す。本体は送らない
+         */
+        post: operations["issueDmFileCookies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/avatars/cookies": {
         parameters: {
             query?: never;
@@ -1425,6 +1502,13 @@ export interface components {
             /** @description 付ける添付の識別子（確定の応答の id）。自分が上げ、このチャンネルで確定に成功し、まだどの投稿にも付いていないものだけを付けられる （1つでも当たらなければ 422 attachment_unavailable で、投稿しない）。並びは上げた順になる */
             attachmentIds?: string[];
         };
+        /** @description DM への投稿の本体（機能一覧 8。#239）。確定した DM の添付を最大 10 件付けられる。 本文の扱いはチャンネルの投稿（CreateMessageRequest）と同じ——添付が無ければ 1 文字以上で空白だけは不可、 添付が 1 件以上あれば空・空白だけでもよい */
+        CreateDmMessageRequest: {
+            /** @description 4000 文字まで（文字数はコードポイントで数える）。添付が無ければ 1 文字以上で空白だけは不可 */
+            body: string;
+            /** @description 付ける添付の識別子（DM の確定の応答の id）。自分が上げ、この DM で確定に成功し、まだどの投稿にも付いていないものだけを付けられる （1つでも当たらなければ 422 attachment_unavailable で、投稿しない）。並びは上げた順になる */
+            attachmentIds?: string[];
+        };
         /** @description 添付ファイル（機能一覧 11.1・11.2） */
         Attachment: {
             /**
@@ -1699,6 +1783,8 @@ export interface components {
             editedAt: string | null;
             /** @description 削除済みか（機能一覧 4.2） */
             deleted: boolean;
+            /** @description 投稿に付けた添付（上げた順。#239）。削除済みのメッセージは空（本文を返さないのと同じく返さない。機能一覧 4.2） */
+            attachments: components["schemas"]["Attachment"][];
         };
         DmMessagePage: {
             /** @description 新しい順 */
@@ -3889,7 +3975,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PostMessageRequest"];
+                "application/json": components["schemas"]["CreateDmMessageRequest"];
             };
         };
         responses: {
@@ -4261,6 +4347,143 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createDmAttachmentUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UploadRequest"];
+            };
+        };
+        responses: {
+            /** @description 発行したアップロード */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadTicket"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            /** @description 受け付けない形式（unsupported_file_type）か、上限を超える大きさ（file_too_large） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    completeDmAttachmentUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+                /** @description アップロードの識別子（発行の応答の uploadId）。形が uuid でなければ 400 */
+                uploadId: components["parameters"]["UploadId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 確定した添付 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attachment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
+            /** @description 同じ識別子の確定が進行中（upload_in_progress） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 検証に通らなかった（unsupported_file_type・file_too_large・upload_not_received） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    issueDmFileCookies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ワークスペースの id。形が uuid でなければ 400 */
+                id: components["parameters"]["WorkspaceId"];
+                /** @description DM の id。形が uuid でなければ 400 */
+                dmId: components["parameters"]["DmId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 発行した */
+            200: {
+                headers: {
+                    /** @description CloudFront-Policy・CloudFront-Signature・CloudFront-Key-Pair-Id（Path=/files） */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignedCookiesResponse"];
+                };
+            };
+            /** @description CloudFront の署名鍵を設定していない環境であり、Cookie を発行しない */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            405: components["responses"]["MethodNotAllowed"];
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalServerError"];
         };

@@ -412,6 +412,7 @@ describe('ダイレクトメッセージ（F-19）', () => {
         createdAt: expect.any(String),
         editedAt: null,
         deleted: false,
+        attachments: [],
       });
       const newest = await page(bob, workspace.id, dm.id, '?limit=2');
       expect(newest).toEqual({ messages: [third, second], nextBefore: second.id });

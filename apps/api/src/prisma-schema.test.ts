@@ -277,7 +277,7 @@ describe('Prisma のスキーマとマイグレーション', () => {
          ORDER BY c.table_name;`,
       );
       const types = output.split('\n').filter((line) => line.length > 0);
-      expect(types).toHaveLength(23);
+      expect(types).toHaveLength(24);
       for (const type of types) {
         expect(type).toMatch(/:uuid$/);
       }
@@ -699,20 +699,20 @@ describe('Prisma のスキーマとマイグレーション', () => {
       );
     });
 
-    it.each([
-      ['空', `''`],
-      ['空白だけ', `E' \\n\\t'`],
-      ['4001 文字', `repeat('あ', 4001)`],
-    ])('%s の本文の DM のメッセージは入れられない', async (_name, body) => {
-      const { workspaceId, low, high } = await twoMembers();
-      const dmId = randomUUID();
-      const output = await expectSqlToFail(`
+    // 空・空白だけを断るのは REST の仕様（CreateDmMessageRequest。添付が無いときだけ）であり、DB は 4000 文字の上限だけを持つ（#239）
+    it.each([['4001 文字', `repeat('あ', 4001)`]])(
+      '%s の本文の DM のメッセージは入れられない',
+      async (_name, body) => {
+        const { workspaceId, low, high } = await twoMembers();
+        const dmId = randomUUID();
+        const output = await expectSqlToFail(`
         ${insertDm(workspaceId, low, high, dmId)}
         INSERT INTO "DmMessage" ("id", "dmId", "authorId", "body")
           VALUES ('${randomUUID()}', '${dmId}', '${low}', ${body});
       `);
-      expect(output).toContain('DmMessage_body_check');
-    });
+        expect(output).toContain('DmMessage_body_check');
+      },
+    );
 
     // DM のメッセージは、キック・退出・退会の後も残す（機能一覧 1.5・2.2「過去のメッセージは残る」）。
     // 既読位置は ChannelRead と同じく Membership を参照し、抜けたら連鎖して消える（戻ったときに抜けていた間を既読にしない。10.1）。

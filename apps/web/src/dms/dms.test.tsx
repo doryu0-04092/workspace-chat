@@ -38,6 +38,7 @@ function dmMessage(n: number, overrides: Record<string, unknown> = {}) {
     createdAt: new Date(Date.UTC(2026, 8, 14, 0, n)).toISOString(),
     editedAt: null as string | null,
     deleted: false,
+    attachments: [] as unknown[],
     ...overrides,
   };
 }
@@ -51,6 +52,8 @@ function dmRoutes(extra: Parameters<typeof fakeFetch>[0] = {}) {
     [`GET ${DMS}`]: () => json(200, [DM]),
     [`GET ${DM_MESSAGES}`]: () => dmPage([dmMessage(1)]),
     [`PUT ${DM_READ}`]: () => new Response(null, { status: 204 }),
+    // DM を開いている間は、添付の配信の Cookie を取り直す（#239。手元と同じく署名鍵の無い 204）
+    [`POST ${DMS}/${DM.id}/files/cookies`]: () => new Response(null, { status: 204 }),
     ...extra,
   });
 }
@@ -469,5 +472,58 @@ describe('DM の未読のリアルタイムの反映（F-23）', () => {
     expect(await within(channels).findByText('未読 5 件')).toBeDefined();
     const dms = screen.getByRole('list', { name: 'DM' });
     expect(within(dms).queryByText(/未読/)).toBeNull();
+  });
+});
+
+// #239（決定・2026-09-11・依頼側）: DM でもファイルを添付できる。上げる先と配信の Cookie は DM の経路。
+describe('DM の添付ファイル（#239）', () => {
+  const UPLOADS = `${DMS}/${DM.id}/attachments/uploads`;
+  const UPLOAD_ID = '01920000-0000-7000-8000-0000000000f2';
+  const UPLOAD_URL = `http://127.0.0.1:9000/bucket/quarantine/workspace/${WORKSPACE_ID}/dm/${DM.id}/${UPLOAD_ID}/a.png?X-Amz-Signature=x`;
+  const PNG = {
+    id: UPLOAD_ID,
+    fileName: '会議の写真.png',
+    contentType: 'image/png',
+    kind: 'image',
+    size: 2,
+    url: `/files/workspace/${WORKSPACE_ID}/dm/${DM.id}/${UPLOAD_ID}/_____.png`,
+  };
+
+  it('ファイルを選ぶと DM の経路で上げ、本文が空でも添付の識別子を付けて送り、画像を出す。開いている間は DM の Cookie を取り直す', async () => {
+    const posted = dmMessage(2, { author: USER, body: '', attachments: [PNG] });
+    const { calls } = await openDm({
+      [`GET ${DM_MESSAGES}`]: () => dmPage([]),
+      [`POST ${UPLOADS}`]: () =>
+        json(201, {
+          uploadId: UPLOAD_ID,
+          uploadUrl: UPLOAD_URL,
+          uploadHeaders: { 'Content-Type': 'image/png', 'If-None-Match': '*' },
+          expiresAt: '2026-09-18T10:05:00.000Z',
+        }),
+      [`PUT ${UPLOAD_URL}`]: () => new Response(null, { status: 200 }),
+      [`POST ${UPLOADS}/${UPLOAD_ID}/complete`]: () => json(200, PNG),
+      [`POST ${DM_MESSAGES}`]: () => json(201, posted),
+    });
+    const send = () => screen.getByRole('button', { name: '送信する' }) as HTMLButtonElement;
+    expect(send().disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText('ファイルを添付'), {
+      target: {
+        files: [new File([new Uint8Array([0x89, 0x50])], '会議の写真.png', { type: 'image/png' })],
+      },
+    });
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+
+    await waitFor(() => expect(calls.some((c) => c.key === `POST ${DM_MESSAGES}`)).toBe(true));
+    const post = calls.find((c) => c.key === `POST ${DM_MESSAGES}`)!;
+    expect(JSON.parse(String(post.init.body))).toEqual({ body: '', attachmentIds: [UPLOAD_ID] });
+    expect((await screen.findByRole('img', { name: '会議の写真.png' })).getAttribute('src')).toBe(
+      PNG.url,
+    );
+    expect(calls.some((c) => c.key === `POST ${DMS}/${DM.id}/files/cookies`)).toBe(true);
+    expect(calls.some((c) => c.key.includes('/channels/') && c.key.includes('files/cookies'))).toBe(
+      false,
+    );
   });
 });

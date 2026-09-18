@@ -47,3 +47,24 @@ export function attachmentQuarantineDirectory(
 export function attachmentUrlPath(deliveryKey: string): string {
   return `/files/${deliveryKey}`;
 }
+
+/**
+ * DM の添付の配信用のキーの `{ファイル名}` の前まで（`workspace/{ws}/dm/{dmId}/{UUID}/`。#239）。
+ * **この構造が配信の認可の一部である**——署名付き Cookie の対象は `/files/workspace/{ws}/dm/{dmId}/*`（チャンネルの分と重ならない）。
+ */
+export function dmAttachmentKeyDirectory(
+  workspaceId: string,
+  dmId: string,
+  uploadId: string,
+): string {
+  return `workspace/${workspaceId}/dm/${dmId}/${uploadId}/`;
+}
+
+/** DM の添付の隔離用のキーの `{ファイル名}` の前まで（`quarantine/workspace/{ws}/dm/{dmId}/{UUID}/`）。 */
+export function dmAttachmentQuarantineDirectory(
+  workspaceId: string,
+  dmId: string,
+  uploadId: string,
+): string {
+  return `${QUARANTINE_PREFIX}${dmAttachmentKeyDirectory(workspaceId, dmId, uploadId)}`;
+}
