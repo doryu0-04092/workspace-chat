@@ -1,7 +1,15 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { error, fakeFetch, headerOf, json, USER } from '../testing/fake-api';
-import { CHANNEL_PATH, GENERAL, MESSAGES, message, page, routes } from '../testing/fake-messages';
+import {
+  CHANNEL_PATH,
+  GENERAL,
+  MESSAGES,
+  message,
+  page,
+  routes,
+  SENT_AT,
+} from '../testing/fake-messages';
 import { renderApp } from '../testing/render-app';
 
 function articles(): HTMLElement[] {
@@ -15,6 +23,13 @@ function type(value: string) {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** 画面の更新（react-virtuoso の位置の計算を含む）を数フレーム進める。 */
+async function pauseFrames() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+}
 
 describe('チャンネルのメッセージの表示', () => {
   it('メッセージをトークンを付けて読み、上が新しく下が古い順に並べる（#608）', async () => {
@@ -242,6 +257,33 @@ describe('チャンネルへの投稿', () => {
       expect((screen.getByLabelText('メッセージ') as HTMLTextAreaElement).value).toBe(''),
     );
     expect(count(`GET ${MESSAGES}`)).toBe(1);
+  });
+
+  it('自分の投稿が先頭に加わったら一覧をいちばん上（最新）へ戻し、他人の新しいメッセージでは戻さない（#663）', async () => {
+    const mine = message(3, { author: USER, body: '自分の投稿' });
+    fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () => page([message(1)]),
+        [`POST ${MESSAGES}`]: () => json(201, mine),
+      }),
+    );
+    const view = renderApp(CHANNEL_PATH);
+    await screen.findByText('メッセージ 1');
+    const socket = view.sockets.at(-1)!;
+    // 読み進めて下へスクロールしている（先頭の新しい投稿は枠の外）
+    const scroller = screen.getByTestId('virtuoso-scroller');
+    scroller.scrollTop = 400;
+    fireEvent.scroll(scroller);
+    await pauseFrames();
+
+    act(() => socket.deliver('message:new', { message: message(2), sentAt: SENT_AT }));
+    await pauseFrames();
+    expect(scroller.scrollTop).toBe(400);
+
+    type('自分の投稿');
+    fireEvent.click(screen.getByRole('button', { name: '送信する' }));
+    // 一覧の先頭に足すことは「投稿すると本文を送り…」が確かめる。ここでは先頭へ戻すことだけを見る
+    await waitFor(() => expect(scroller.scrollTop).toBe(0));
   });
 
   it('投稿に失敗したら理由を出し、入力を残す', async () => {
