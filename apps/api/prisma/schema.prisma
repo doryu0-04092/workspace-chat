@@ -18,7 +18,7 @@
 //   5. `Message_body_check`                    … 本文は 4000 文字まで（空・空白だけは添付だけの投稿のため許す。#614）
 //   6. `Message_replyCount_check`              … 返信件数は負にならない
 //   7. `Dm_participants_check`                 … DM の当事者は小さい User.id が先で、自分自身ではない
-//   8. `DmMessage_body_check`                  … DM の本文も 1〜4000 文字で、空白だけではない
+//   8. `DmMessage_body_check`                  … DM の本文も 4000 文字まで（空・空白だけは添付だけの投稿のため許す。#239）
 //   9. `MessageReactionCount_count_check`      … リアクションの件数は 1 以上（0 になった絵文字の行は消す）
 //
 // **このファイルだけを見ても、この9つは見えない。** モデルを増減させるときは
@@ -285,17 +285,18 @@ model User {
   /// ピン留めした（F-33）。
   pinnedMessages      MessagePin[]
   /// 自分宛ての未承諾の招待（F-38）と、自分が出した招待（F-08）。
-  invitationsReceived Invitation[]     @relation("InvitationInvitee")
-  invitationsSent     Invitation[]     @relation("InvitationInviter")
+  invitationsReceived Invitation[]           @relation("InvitationInvitee")
+  invitationsSent     Invitation[]           @relation("InvitationInviter")
   messages            Message[]
   mentionedIn         MessageMention[]
   /// DM の当事者（F-19。`Dm` は User.id の小さい方と大きい方の2本で持つ）と、DM に書いたメッセージ。
-  dmsAsLow            Dm[]             @relation("DmLowUser")
-  dmsAsHigh           Dm[]             @relation("DmHighUser")
+  dmsAsLow            Dm[]                   @relation("DmLowUser")
+  dmsAsHigh           Dm[]                   @relation("DmHighUser")
   dmMessages          DmMessage[]
   reactions           MessageReaction[]
   avatarUploads       AvatarUpload[]
   attachments         Attachment[]
+  dmAttachments       DmAttachment[]
   hereMentionedIn     HereMentionRecipient[]
 
   /// **`ChannelMember` への直接の関連は持たない。** チャンネル参加は
@@ -443,9 +444,9 @@ model Membership {
 
   /// **既読位置（F-23）も、この行が消えると消える。** 参照先を `User` ではなくここにしているのは、
   /// **抜けた利用者の既読位置が残ると、復帰したときに抜けていた間の投稿が既読になる**ためである（機能一覧 10.1）。
-  channelReads ChannelRead[]
-  threadReads  ThreadRead[]
-  dmReads      DmRead[]
+  channelReads    ChannelRead[]
+  threadReads     ThreadRead[]
+  dmReads         DmRead[]
   /// DM の通知（F-26。#623）。抜けたら連鎖して消える（`Notification` と同じ）。
   dmNotifications DmNotification[]
 
@@ -641,13 +642,13 @@ model Channel {
   /// **生 SQL で行を更新する経路を足すと、その経路では据え置かれる。**
   updatedAt DateTime @default(now()) @updatedAt @db.Timestamptz(3)
 
-  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  members   ChannelMember[]
-  messages  Message[]
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  members     ChannelMember[]
+  messages    Message[]
   /// 添付ファイルのアップロード（F-27）。チャンネルを消せば行も消える（S3 のオブジェクトは残る）。
   attachments Attachment[]
   /// 既読位置（F-23）。チャンネルを消せば既読位置も消える。
-  reads     ChannelRead[]
+  reads       ChannelRead[]
 
   /// 通知（F-26）。チャンネルを消せば通知も消える。
   notifications Notification[]
@@ -776,23 +777,23 @@ model Message {
   /// 編集で本文から消えたら数えない（受け取りの記録は残す）。
   mentionsHere Boolean @default(false)
 
-  channel  Channel          @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  author   User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  channel        Channel                @relation(fields: [channelId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  author         User                   @relation(fields: [authorId], references: [id], onDelete: Cascade)
   /// 親は論理削除だけで消える（返信は残す。機能一覧 4.2）。チャンネルごと消えるときは、同じ文の中で返信も消えるため NoAction にする。
-  parent   Message?         @relation("Thread", fields: [parentId, channelId], references: [id, channelId], onDelete: NoAction)
-  replies  Message[]        @relation("Thread")
-  mentions MessageMention[]
+  parent         Message?               @relation("Thread", fields: [parentId, channelId], references: [id, channelId], onDelete: NoAction)
+  replies        Message[]              @relation("Thread")
+  mentions       MessageMention[]
   reactions      MessageReaction[]
   reactionCounts MessageReactionCount[]
   /// 投稿に結び付けた添付（F-27）。
-  attachments Attachment[]
+  attachments    Attachment[]
   hereRecipients HereMentionRecipient[]
 
   /// 既読位置（F-23）から指される向き。**参照するだけで、このメッセージの側からは読まない。**
   /// Prisma が双方向の関連を要求するために置いている（3本とも `ChannelRead` / `ThreadRead` の側が持ち主である）。
-  readAsChannelLast ChannelRead[]
-  readAsThreadParent ThreadRead[] @relation("ThreadReadParent")
-  readAsThreadLast   ThreadRead[] @relation("ThreadReadLast")
+  readAsChannelLast  ChannelRead[]
+  readAsThreadParent ThreadRead[]  @relation("ThreadReadParent")
+  readAsThreadLast   ThreadRead[]  @relation("ThreadReadLast")
   /// ピン留め（F-33）。**1件のメッセージに1つまで**（`MessagePin.messageId` の一意制約）。リストにしているのは、参照先が複合キー（id, channelId）で
   /// Prisma が1対1の関連に同じ組の一意制約を求めるためである（`messageId` だけで一意なので、組の一意索引は足さない）。
   pins               MessagePin[]
@@ -1017,11 +1018,12 @@ model Dm {
 
   createdAt DateTime @default(now()) @db.Timestamptz(3)
 
-  workspace Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  lowUser   User        @relation("DmLowUser", fields: [lowUserId], references: [id], onDelete: Cascade)
-  highUser  User        @relation("DmHighUser", fields: [highUserId], references: [id], onDelete: Cascade)
-  messages  DmMessage[]
-  reads     DmRead[]
+  workspace     Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  lowUser       User             @relation("DmLowUser", fields: [lowUserId], references: [id], onDelete: Cascade)
+  highUser      User             @relation("DmHighUser", fields: [highUserId], references: [id], onDelete: Cascade)
+  messages      DmMessage[]
+  reads         DmRead[]
+  attachments   DmAttachment[]
   notifications DmNotification[]
 
   /// 同じ2人の DM は1つ。**「この利用者の DM の一覧」を小さい方の側から引く向き**にも効く（先頭2列）。
@@ -1042,7 +1044,7 @@ model DmMessage {
   /// 書き手。**退会しても行は残る**（機能一覧 1.5）。
   authorId String @db.Uuid
 
-  /// 1〜4000 文字で、空白だけではない（検査制約 `DmMessage_body_check`。マイグレーションに置く）。
+  /// 4000 文字まで。空・空白だけは添付があるときだけ許す（REST の仕様が断る。#239）（検査制約 `DmMessage_body_check`。マイグレーションに置く）。
   body String
 
   createdAt DateTime  @default(now()) @db.Timestamptz(3)
@@ -1053,8 +1055,9 @@ model DmMessage {
   author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   /// 既読位置から指される向き（`Message.readAsChannelLast` と同じく、参照するだけ）。
-  readAsLast DmRead[]
+  readAsLast    DmRead[]
   /// このメッセージの DM の通知（F-26）。
+  attachments   DmAttachment[]
   notifications DmNotification[]
 
   /// `DmRead` の既読位置を、同じ DM のメッセージに限る複合外部キーの参照先。
@@ -1292,5 +1295,46 @@ model Attachment {
   @@index([uploaderId])
   @@index([channelId])
   /// 一覧のメッセージに載せる添付を、メッセージの id でまとめて引く。
+  @@index([messageId])
+}
+
+/// DM の添付ファイルのアップロード（F-27・F-28・F-19。#239。決定・2026-09-11・依頼側）。発行した署名付き URL 1つに1行。
+/// **チャンネルの `Attachment` と表を分ける**——チャンネルの参加者判定と DM の当事者判定を1つの経路に混ぜない（#239）。
+/// 状態の遷移・検証・保存名の扱いは `Attachment` と同じ。キーは `workspace/{ws}/dm/{dmId}/{UUID}/` の下（upload-keys.ts）。
+model DmAttachment {
+  /// アップロードの識別子であり、キーの `{UUID}` でもある（推測できない値。UUIDv7）。
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// 当事者の判定を通した DM とそのワークスペース（複合外部キーで、別のワークスペースの DM を指せない）。
+  workspaceId String @db.Uuid
+  dmId        String @db.Uuid
+
+  uploaderId String @db.Uuid
+
+  originalName String
+  fileName     String
+  contentType  String
+
+  state UploadState @default(ISSUED)
+
+  formatId          String?
+  deliveredFileName String?
+  size              Int?
+
+  rejectedStatus Int?
+  rejectedCode   String?
+
+  /// 結び付けた投稿。**確定に成功した、まだどの投稿にも付いていない、本人が上げたものだけを、同じ DM の投稿に付ける**（書く側が確かめる）。
+  messageId String? @db.Uuid
+
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  completedAt DateTime? @db.Timestamptz(3)
+
+  dm       Dm         @relation(fields: [dmId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  uploader User       @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  message  DmMessage? @relation(fields: [messageId, dmId], references: [id, dmId], onDelete: NoAction)
+
+  @@index([uploaderId])
+  @@index([dmId])
   @@index([messageId])
 }

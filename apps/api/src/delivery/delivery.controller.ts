@@ -5,6 +5,7 @@ import { type AuthenticatedUser, CurrentUser } from '../auth/access-token.guard'
 import { API_CONFIG, type ApiConfig } from '../config/api-config';
 import { PrismaService } from '../prisma.service';
 import { assertChannelParticipant, channelFor } from '../workspaces/channel-access';
+import { partiesFor } from '../workspaces/dms.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { SIGNED_COOKIE_TTL_SECONDS, type SignedCookieScope, signedCookies } from './signed-cookies';
 
@@ -50,6 +51,22 @@ export class DeliveryController {
     await this.workspaces.membershipOf(user.id, workspaceId);
     assertChannelParticipant(await channelFor(this.prisma, user.id, workspaceId, channelId));
     this.issue(res, { path: '/files', workspaceId, channelId });
+  }
+
+  /**
+   * その DM の当事者だけに `/files/workspace/{ws}/dm/{dmId}/*` の Cookie（#239）。
+   * 所属していない・当事者でない・DM が無いは、区別せず 404（DM の他の経路と同じ）。
+   */
+  @Post('workspaces/:id/dms/:dmId/files/cookies')
+  async dmFiles(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') workspaceId: string,
+    @Param('dmId') dmId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.workspaces.membershipOf(user.id, workspaceId);
+    await partiesFor(this.prisma, user.id, workspaceId, dmId);
+    this.issue(res, { path: '/files', workspaceId, dmId });
   }
 
   private issue(res: Response, scope: SignedCookieScope): void {

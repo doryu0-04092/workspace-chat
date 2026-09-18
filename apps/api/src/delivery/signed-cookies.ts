@@ -11,7 +11,8 @@ export const SIGNED_COOKIE_TTL_SECONDS = 15 * 60;
 /** 署名付き Cookie を発行する配信の経路。`path` は Cookie の Path 属性（要件定義書 4.3 の表）。 */
 export type SignedCookieScope =
   | { readonly path: '/avatars' }
-  | { readonly path: '/files'; readonly workspaceId: string; readonly channelId: string };
+  | { readonly path: '/files'; readonly workspaceId: string; readonly channelId: string }
+  | { readonly path: '/files'; readonly workspaceId: string; readonly dmId: string };
 
 /**
  * Cookie の対象（署名する方針の Resource）。**配信 URL のパスであり、S3 のキーではない**（要件定義書 4.3 の表）。
@@ -19,9 +20,12 @@ export type SignedCookieScope =
  * `{ws}`・`{ch}` は、判定を通したワークスペースとチャンネルの id を、S3 のキーと同じ小文字で入れる。
  */
 export function signedCookieResource(webOrigin: string, scope: SignedCookieScope): string {
-  return scope.path === '/avatars'
-    ? `${webOrigin}/avatars/*`
-    : `${webOrigin}/files/workspace/${scope.workspaceId.toLowerCase()}/channel/${scope.channelId.toLowerCase()}/*`;
+  if (scope.path === '/avatars') return `${webOrigin}/avatars/*`;
+  const workspace = `${webOrigin}/files/workspace/${scope.workspaceId.toLowerCase()}`;
+  // DM の分（#239）はチャンネルの分と重ならない `dm/{dmId}/*` に限る
+  return 'dmId' in scope
+    ? `${workspace}/dm/${scope.dmId.toLowerCase()}/*`
+    : `${workspace}/channel/${scope.channelId.toLowerCase()}/*`;
 }
 
 /**

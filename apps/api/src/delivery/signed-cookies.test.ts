@@ -473,4 +473,58 @@ describe('アバターと添付の配信の署名付き Cookie（F-04・F-29）'
       expectNoCookies(outsider);
     });
   });
+
+  // #239: DM の添付の配信。当事者だけに、その DM のパスだけを対象に発行する（必ずテストを書く箇所の2。当事者でなければ拒否する）。
+  describe('DM の添付（/files/workspace/{ws}/dm/{dmId}/*）', () => {
+    const dmFilesPath = (workspaceId: string, dmId: string) =>
+      `/workspaces/${workspaceId}/dms/${dmId}/files/cookies`;
+
+    /** オーナー・alice・bob のワークスペースで、alice と bob の DM を作る。 */
+    async function dmOfTwo() {
+      const owner = await login();
+      const alice = await login();
+      const bob = await login();
+      const workspace = await workspaceWith(owner, alice, bob);
+      const res = await send('POST', `/workspaces/${workspace.id}/dms`, alice, {
+        body: { userId: bob.id },
+      });
+      expect(res.status).toBe(200);
+      const dm = (await res.json()) as { id: string };
+      return { owner, alice, bob, workspace, dmId: dm.id };
+    }
+
+    it('当事者のそれぞれに、その DM のパスだけを対象に Path=/files の Cookie を発行する', async () => {
+      const { alice, bob, workspace, dmId } = await dmOfTwo();
+
+      for (const party of [alice, bob]) {
+        const policy = await issuedPolicy(
+          await send('POST', dmFilesPath(workspace.id, dmId), party),
+          '/files',
+        );
+        expect(policy.Statement.map(({ Resource }) => Resource)).toEqual([
+          `${TEST_WEB_ORIGIN}/files/workspace/${workspace.id}/dm/${dmId}/*`,
+        ]);
+      }
+    });
+
+    it('当事者でない利用者（オーナーを含む）・所属していない利用者には 404 で、Cookie を発行しない', async () => {
+      const { owner, workspace, dmId } = await dmOfTwo();
+      const outsider = await login();
+
+      for (const who of [owner, outsider]) {
+        const res = await send('POST', dmFilesPath(workspace.id, dmId), who);
+        expect(res.status).toBe(404);
+        expectNoCookies(res);
+      }
+    });
+
+    it('別のワークスペースの id で当事者が求めても 404 で、Cookie を発行しない', async () => {
+      const { alice, dmId } = await dmOfTwo();
+      const other = await workspaceWith(alice);
+
+      const res = await send('POST', dmFilesPath(other.id, dmId), alice);
+      expect(res.status).toBe(404);
+      expectNoCookies(res);
+    });
+  });
 });
