@@ -421,6 +421,7 @@
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
 | **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
 | **`infra/bootstrap` の state** | **取り込み直す**——state のバケットは `prevent_destroy` で残るため、`terraform import` でバケット・バージョニング・パブリックアクセスの遮断（`infra/bootstrap/main.tf` の3つのリソース）を state に戻す |
+| **CloudFront の署名鍵（`CLOUDFRONT_PRIVATE_KEY`）** | **作り直して入れ直す**——`scripts/cloudfront-signing-key.sh` は新規作成だけを行い、既にパラメータ・公開鍵があれば止まる。**入れ替えは、新しい公開鍵をキーグループに足してから秘密鍵とキーペア ID（`CLOUDFRONT_KEY_PAIR_ID`）を切り替える別の手順による**（決定・#427。その手順自体はまだ実装していない） |
 | **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで入れ替えるときは、`secret: true` のすべて、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが残る——`DATABASE_URL` なら DB に繋がらず、`JWT_SECRET` なら**漏れた鍵で偽造したトークンを受理し続ける**）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
 | **ElastiCache Valkey** | **データを戻す手順は持たない**（持つのは配信の共有と期限つきの回数だけで、蓄積しない。この節の「代償」）。**作り直したら、接続先が変わらなくても AUTH トークンは作成時に新しい乱数になるため、版を上げてから ECS のタスクを入れ替える一手が要る**（手順は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の「踏むと壊れる」） |
 | **ECR のイメージ** | **作り直して push し直す**——ソースからイメージを作り（`scripts/api-image.test.sh` と同じ `apps/api/Dockerfile` の段）、ECR に push して、ECS のタスクを入れ替える（push の手順は、イメージを出す PR で書く） |
@@ -510,7 +511,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 **ただし上限が無いのは `terraform destroy` までである。** `terraform destroy` の時点では、
 添付のバケットは `force_destroy` を指定するため（上記「バックアップ」）、旧バージョンごと消える。
 
-**秘密の値が漏れた疑いがあるとき**、**api が `secret: true` と宣言した設定のすべて**（`apps/api/src/config/api-config.ts` が正本。いまは `DATABASE_URL`・`REDIS_URL`・`JWT_SECRET`）は次のとおり入れ替える（決定・2026-09-16・作業側。依頼側の委任による。#423）。定期の入れ替えはしない（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。
+**秘密の値が漏れた疑いがあるとき**、**api が `secret: true` と宣言した設定のすべて**（`apps/api/src/config/api-config.ts` が正本。いまは `DATABASE_URL`・`REDIS_URL`・`JWT_SECRET`・`CLOUDFRONT_PRIVATE_KEY`）は次のとおり入れ替える（決定・2026-09-16・作業側。依頼側の委任による。#423）。定期の入れ替えはしない（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。
 
 **どの箇条にも共通する前置き**（書き写さず、ここを見る）。
 
@@ -691,6 +692,7 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
   **鳴るのは評価期間（300 秒 × 2 期間＝10 分）続いたときである**（`infra/production/alarms.tf` の `locals`。
   入れ替えがそれより短ければ鳴らない）。**要求の来ない時間帯なら鳴らない**——同じ理由）。
   **発行済みのアクセストークンはすべて無効になるが、利用者はログインし直さずに済む**——リフレッシュトークンは DB に置く乱数で、署名の鍵に依らないためである
+- **CloudFront の署名鍵（`CLOUDFRONT_PRIVATE_KEY`）は、既存の秘密鍵を上書きしない**（`scripts/cloudfront-signing-key.sh` は既にパラメータ・公開鍵があれば止まる）。**入れ替えは、新しい公開鍵をキーグループに足してから秘密鍵とキーペア ID（`CLOUDFRONT_KEY_PAIR_ID`）を切り替える別の手順で行う**（決定・#427。手順そのものはまだ実装していない）
 
 **ここからは、個々の入れ替え手順ではなく、この節の復旧手順全体に掛かる注記である。**
 
