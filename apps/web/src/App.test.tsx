@@ -143,6 +143,33 @@ describe('ログインの画面', () => {
     expect(sessionStorage.length).toBe(0);
   });
 
+  // 機能一覧 1.2: ログインしていない利用者が保護された画面を開くとログインの画面へ移し、ログインしたら元の行き先へ戻す（#414）。
+  it('ワークスペースの一覧以外の保護された画面から入ってログインすると、その画面へ戻る', async () => {
+    const workspace = {
+      id: '01920000-0000-7000-8000-0000000000a1',
+      name: '開発チーム',
+      createdAt: '2026-09-13T00:00:00.000Z',
+      role: 'OWNER',
+    };
+    fakeFetch({
+      ...signedOut,
+      'POST /api/auth/login': () => loggedIn('t1'),
+      'GET /api/users/me': () => json(200, PROFILE),
+      'GET /api/invitations': () => json(200, []),
+      [`GET /api/workspaces/${workspace.id}`]: () => json(200, workspace),
+      [`GET /api/workspaces/${workspace.id}/channels`]: () => json(200, []),
+      [`GET /api/workspaces/${workspace.id}/dms`]: () => json(200, []),
+    });
+    renderAt(`/workspaces/${workspace.id}`);
+    await screen.findByRole('heading', { name: 'ログイン' });
+
+    type('ユーザーID', 'alice');
+    type('パスワード', 'password-1');
+    fireEvent.click(screen.getByRole('button', { name: 'ログイン' }));
+
+    expect(await screen.findByRole('heading', { name: '開発チーム' })).toBeDefined();
+  });
+
   it('ユーザーID かパスワードが違えば理由を出し、ログインの画面に留まる', async () => {
     await openLogin({ 'POST /api/auth/login': () => error(401, 'invalid_credentials') });
 
