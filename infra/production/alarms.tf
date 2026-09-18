@@ -147,7 +147,7 @@ resource "aws_cloudwatch_metric_alarm" "valkey_metrics_missing" {
 # --- 構造化ログを数える（rate_limit_exceeded・refresh_token_reuse） --------------------------
 #
 # api のログは1行1件の JSON で、logger.warn({ event: ... }) の中身は message に入る（apps/api/src/logging/json-logger.ts）。
-# 踏むと壊れる: api のログのイベント名（apps/api/src/error-response.ts・channel-rooms.gateway.ts の rate_limit_exceeded、
+# 踏むと壊れる: api のログのイベント名（apps/api/src/error-response.ts・apps/api/src/workspaces/channel-rooms.gateway.ts の rate_limit_exceeded、
 # auth/session.service.ts の refresh_token_reuse）を変えると、数えられなくなってもどの検査も落ちない。
 
 resource "aws_cloudwatch_log_metric_filter" "rate_limit_exceeded" {
