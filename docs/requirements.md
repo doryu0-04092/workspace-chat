@@ -386,7 +386,7 @@
 | S3（添付ファイル・アバター画像） | バージョニングで誤削除に備える。**ライフサイクルは置かない。例外は `quarantine/`（検証前の隔離用のキー）だけ**である（同じバケットの `avatars/` にアバター画像も置く。`infra/production/attachments.tf`。[機能一覧](features.md) 11.1） |
 | Terraform の state のバケット | バージョニングで誤削除と誤った書き込みに備える（HashiCorp の S3 バックエンドの文書「enable Bucket Versioning on the S3 bucket to allow for state recovery in the case of accidental deletions and human error」。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。**state を失うと、本体の構成を Terraform から操作できなくなる** |
 | `infra/bootstrap` の state（手元のファイル） | **対象外。写しを持たない**（state のバケットを作る前には置き場が無いため、手元のファイルに置く。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の state の行）。失ったら取り込み直す（下の「復旧手順」） |
-| Systems Manager Parameter Store（`secret: true` の設定の値） | **対象外。値の写しを持たない**（state にもプランにも残さない。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。失ったら作り直して入れ直す（下の「復旧手順」） |
+| Systems Manager Parameter Store（`secret: true` の設定の値） | **Terraform 側（state・プラン）には写しを持たない**（[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。**Parameter Store 自身は、値を書き換えるたびに新しい版を作り、直近 100 件を保持する**（AWS 公式文書「Working with parameter versions in Parameter Store」）。誤って上書きしたときはこの版から戻せる（下の「復旧手順」）。**パラメータを削除した場合に版の履歴も消えるか、`value_wo` で入れた値がこの版の管理に含まれるかは未確認** |
 | ElastiCache Valkey | **対象外**（この節の「代償」） |
 | ECR のイメージ（api・マイグレーション用） | **対象外。写しを持たない**（ソースから作り直せるビルドの成果物である）。失ったら作り直して push し直す（下の「復旧手順」） |
 
@@ -419,10 +419,10 @@
 |---|---|
 | **RDS** | 下記の手順 1〜5 |
 | **S3（添付ファイル）** | 下記「**S3 の誤削除からの復元**」 |
-| **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」） |
+| **Terraform の state のバケット** | 下記「**S3 の誤削除からの復元**」の手順 1〜3（対象のキーは state のファイル）。**手順 3 の注意（配信では確かめられない）は添付ファイルに固有で、ここには当たらない。認可の外に出る代償（#160）は、秘密の値が state に残らないことを確かめるまで、このバケットにも当たるものとして扱う**（`password_wo` の値が state に残らないことは未確認。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）。**露出しうるものは、未確認の `password_wo` が state に残っている場合の RDS のマスターパスワードであり、読めた者はアプリの認可を経ずに DB へ直接到達して全チャンネルのメッセージを読める**（上記「RDS の障害から復旧するとき」手順 5 の代償と同じ経路） |
 | **`infra/bootstrap` の state** | **取り込み直す**——state のバケットは `prevent_destroy` で残るため、`terraform import` でバケット・バージョニング・パブリックアクセスの遮断（`infra/bootstrap/main.tf` の3つのリソース）を state に戻す |
 | **CloudFront の署名鍵（`CLOUDFRONT_PRIVATE_KEY`）** | **作り直して入れ直す**——`scripts/cloudfront-signing-key.sh` は新規作成だけを行い、既にパラメータ・公開鍵があれば止まる。**入れ替えは、新しい公開鍵をキーグループに足してから秘密鍵とキーペア ID（`CLOUDFRONT_KEY_PAIR_ID`）を切り替える別の手順による**（決定・#427。その手順自体はまだ実装していない） |
-| **Parameter Store の値** | **作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで入れ替えるときは、`secret: true` のすべて、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが残る——`DATABASE_URL` なら DB に繋がらず、`JWT_SECRET` なら**漏れた鍵で偽造したトークンを受理し続ける**）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
+| **Parameter Store の値** | **値を誤って上書きしただけなら、Parameter Store 自身が保持する版（直近 100 件。上の「バックアップ」の行）から前の値に戻す手もある。削除した場合に版も残るかは未確認のため、削除にはこの行の手順による: 作り直して入れ直す**——その設定の `value_wo_version`（`DATABASE_URL` は RDS の `password_wo_version`、`REDIS_URL` は ElastiCache の `auth_token_wo_version` と一緒に）を上げて `apply` し、ECS のタスクを入れ替える（AWS の ECS の文書「If the secret is subsequently updated or rotated, the container will not receive the updated value automatically.」）。**漏えいの疑いで入れ替えるときは、`secret: true` のすべて、下記「秘密の値が漏れた疑いがあるとき」の手順による**（この行の手順のままでは、タスクを入れ替えるまで古い値を持つタスクが残る——`DATABASE_URL` なら DB に繋がらず、`JWT_SECRET` なら**漏れた鍵で偽造したトークンを受理し続ける**）。**`JWT_SECRET` を作り直すと、発行済みのアクセストークンがすべて無効になる**（リフレッシュトークンは DB に置く乱数で署名の鍵に依らず、リフレッシュで取り直せる。`apps/api/src/auth/session-tokens.ts`） |
 | **ElastiCache Valkey** | **データを戻す手順は持たない**（持つのは配信の共有と期限つきの回数だけで、蓄積しない。この節の「代償」）。**作り直したら、接続先が変わらなくても AUTH トークンは作成時に新しい乱数になるため、版を上げてから ECS のタスクを入れ替える一手が要る**（手順は [技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」の「踏むと壊れる」） |
 | **ECR のイメージ** | **作り直して push し直す**——ソースからイメージを作り（`scripts/api-image.test.sh` と同じ `apps/api/Dockerfile` の段）、ECR に push して、ECS のタスクを入れ替える（push の手順は、イメージを出す PR で書く） |
 
@@ -825,6 +825,7 @@ OWASP は、ステートレスな構成に対して**署名付き Double-Submit 
 - **SameSite に対応しない古いブラウザでは1層目が効かない**（残る2層は効く）
 - **将来 Cookie を使うエンドポイントが増えた場合、この判断は見直しが必要である。**
   「2つだけだから」が前提であり、前提が変われば結論も変わる
+- **サイト境界は配信ドメインに依存する**（既定のドメインでは `cloudfront.net` が Public Suffix List に載っていることに依存し、独自ドメインへ切り替えるとその境界はそのドメインに移る。[技術スタック](tech-stack.md) の「本番の HTTPS・秘密情報・state の置き場」）
 
 #### 配信で、署名付き URL ではなく署名付き Cookie を採る理由
 

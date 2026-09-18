@@ -1,7 +1,7 @@
 import Redis from 'ioredis';
 import type { StartedTestContainer } from 'testcontainers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { startValkey } from '../testing/valkey';
+import { VALKEY_STARTUP_TIMEOUT_MS, startValkey } from '../testing/valkey';
 import {
   LOGIN_BACKOFF_MAX_MS,
   LOGIN_BACKOFF_RESET_MS,
@@ -155,7 +155,7 @@ describe('Valkey の保存先', () => {
     const started = await startValkey();
     container = started.container;
     valkeyUrl = started.url;
-  }, 120_000);
+  }, VALKEY_STARTUP_TIMEOUT_MS);
 
   afterAll(async () => {
     for (const client of clients) client.disconnect();

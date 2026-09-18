@@ -917,8 +917,13 @@ echo "0d. .claude/ 配下の Markdown が、DOC_PRUNE_DIRS の .claude を消す
 claude_probe='.claude/worktrees/probe-claude-scope/README.md'
 mkdir -p "$work/$(doc_parent "$claude_probe")"
 printf '%s\n' '[壊れたリンク](./does-not-exist.md)' > "$work/$claude_probe"
-
-if ! run_check; then
+# probe を置けたことを先に確かめる。mkdir -p や printf > が失敗しても
+# （set -e は無いので継続する）以下の run_check はそのまま通り、「除外が効いている」と
+# 「そもそも置けていない」を区別できないまま緑になる（expect_ok と同じ理由）。
+if [ ! -f "$work/$claude_probe" ]; then
+  echo "  NG: probe を置けていない（$claude_probe）。ケースが成立していない"
+  fail=1
+elif ! run_check; then
   echo "  NG: 前提が崩れている（.claude/ 配下にリンク切れを置いただけで検査が落ちた。除外が効いていない）"
   (cd "$work" && bash scripts/check-docs.sh 2>&1 | sed 's/^/        実際: /')
   fail=1
