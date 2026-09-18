@@ -1,4 +1,5 @@
-import { Logger } from '@nestjs/common';
+import { Inject, Logger } from '@nestjs/common';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import {
   type OnGatewayConnection,
   type OnGatewayInit,
@@ -9,6 +10,13 @@ import type { ErrorResponse } from '../error-response';
 import type { Server, Socket } from 'socket.io';
 import { AccessTokenResolver, type AuthenticatedUser } from '../auth/access-token.guard';
 import { MetricsWriter } from '../logging/metrics';
+
+/**
+ * ハンドシェイクの上限（利用者単位。#366）。入室要求の上限（channel-rooms.gateway.ts の CHANNEL_ENTER_LIMIT。決定・2026-09-13・依頼側）と同じ形にそろえる。
+ * 発信元で数えないのは、同じ発信元の利用者（学校などの共有の回線）とデプロイでの再接続が、正当な利用者を締め出すため。
+ */
+export const HANDSHAKE_LIMIT = { limit: 60, ttlMs: 60 * 1000 } as const;
+const HANDSHAKE_THROTTLER = 'handshake';
 
 /** 利用者の部屋の名前（機能一覧 9.2「利用者の部屋」）。 */
 export function userRoom(userId: string): string {
@@ -31,7 +39,7 @@ export type RealtimeSocket = Socket & { data: { user?: AuthenticatedUser } };
 /** 断ったときにクライアントの `connect_error` の `data` に載る値。HTTP の 401 の `code` と同じ綴り（仕様の列挙から取る）。 */
 type RejectCode = Extract<
   ErrorResponse['code'],
-  'authentication_required' | 'invalid_token' | 'internal_error'
+  'authentication_required' | 'invalid_token' | 'too_many_requests' | 'internal_error'
 >;
 
 function reject(code: RejectCode): Error & { data: { code: RejectCode } } {
@@ -43,6 +51,8 @@ function reject(code: RejectCode): Error & { data: { code: RejectCode } } {
  *
  * - **トークンはハンドシェイクの `auth.token` だけから読む**（Cookie で渡さない。5.2）。無い → `authentication_required`
  * - **HTTP の入口と同じ AccessTokenResolver で解決し、使えないトークンも退会済みも `invalid_token` で断る**（1.4。#90）
+ * - **署名を確かめた後・利用者を DB から引く前に、利用者ごとに `HANDSHAKE_LIMIT` まで数え、超えたら `too_many_requests` で断る**（#366）。
+ *   超えた接続では DB を引かず、`rate_limit_exceeded`（`limit: 'user'`）を warn で残す（Nest の例外フィルタを通らないため、ここで残す）
  * - **解決の想定外の失敗（DB に繋がらないなど）は、例外のメッセージを渡さず `internal_error` で断り、ログに error で残す**
  *   （Socket.IO は `next(err)` の `message` をクライアントへ送る。`server.use` は Nest の例外フィルタを通らないため、error-response.ts と同じ決めをここで当てる）
  * - 認証を通った接続を、その利用者の部屋に入れる（9.2）
@@ -62,6 +72,7 @@ export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnecti
   constructor(
     private readonly tokens: AccessTokenResolver,
     private readonly metrics: MetricsWriter,
+    @Inject(ThrottlerStorage) private readonly limits: ThrottlerStorage,
   ) {}
 
   afterInit(server: Server): void {
@@ -71,13 +82,13 @@ export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnecti
         next(reject('authentication_required'));
         return;
       }
-      this.tokens.resolve(token).then(
-        (user) => {
-          if (!user) {
-            next(reject('invalid_token'));
+      this.authenticate(token).then(
+        (outcome) => {
+          if (typeof outcome === 'string') {
+            next(reject(outcome));
             return;
           }
-          socket.data.user = user;
+          socket.data.user = outcome;
           next();
         },
         (error: unknown) => {
@@ -87,6 +98,30 @@ export class RealtimeGateway implements OnGatewayInit<Server>, OnGatewayConnecti
         },
       );
     });
+  }
+
+  /** 署名を確かめ、利用者ごとに数えてから、利用者を DB から引く。断るときは断りの code を返す。 */
+  private async authenticate(token: string): Promise<AuthenticatedUser | RejectCode> {
+    const userId = await this.tokens.subjectOf(token);
+    if (userId === undefined) return 'invalid_token';
+    const { limit, ttlMs } = HANDSHAKE_LIMIT;
+    const { isBlocked } = await this.limits.increment(
+      `${HANDSHAKE_THROTTLER}:${userId}`,
+      ttlMs,
+      limit,
+      ttlMs,
+      HANDSHAKE_THROTTLER,
+    );
+    if (isBlocked) {
+      this.logger.warn({
+        event: 'rate_limit_exceeded',
+        limit: 'user',
+        userId,
+        request: 'handshake',
+      });
+      return 'too_many_requests';
+    }
+    return (await this.tokens.userOf(userId)) ?? 'invalid_token';
   }
 
   handleConnection(socket: RealtimeSocket): void {
