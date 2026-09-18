@@ -107,4 +107,34 @@ describe('在席の一覧（PresenceRegistry）', () => {
     expect(message).toContain('ECONNREFUSED');
     expect(message).not.toContain('10.0.0.5');
   });
+
+  // 入り直しの入室要求ごとに取り直すため、失敗している間に要求ごとに warn を出すとあふれる（#400。レート制限の迂回・ログインの待ち時間と同じ形）。
+  it('取り直しの失敗が続いても warn は切り替わったときに1回だけ出し、取り直せたら log を1回出し、また失敗したら warn を出す', async () => {
+    const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const logged = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    let failing = true;
+    const registry = new PresenceRegistry(
+      fakeGateway(async () => {
+        if (failing) throw new Error('timeout reached while waiting for fetchSockets response');
+        return [socketOf('s9', 'u2')];
+      }).gateway,
+    );
+    registry.add('c1', 'u1', 's1');
+
+    await registry.refresh();
+    await registry.refreshOne('c1');
+    await registry.refreshOne('c1');
+    expect(warned).toHaveBeenCalledTimes(1);
+    expect(logged).not.toHaveBeenCalled();
+
+    failing = false;
+    await registry.refreshOne('c1');
+    await registry.refresh();
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(warned).toHaveBeenCalledTimes(1);
+
+    failing = true;
+    await registry.refreshOne('c1');
+    expect(warned).toHaveBeenCalledTimes(2);
+  });
 });
