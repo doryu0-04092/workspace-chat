@@ -130,11 +130,13 @@ describe('在席（F-22）', () => {
     // 画面の側の取り直しは入室要求の送り直しで行う（9.2「クライアントの要求で行う場合…入室要求として扱う」）。
     it('同じ接続が入室し直すと、一覧を取り直してから返す（ずれた一覧をそのまま返さない）', async () => {
       const { alice, bob, channelId } = await channelOfThree();
-      await enter(await t.open(t.secondBase, alice), channelId);
+      const aliceSocket = await t.open(t.secondBase, alice);
+      await enter(aliceSocket, channelId);
       const bobSocket = await t.open(t.firstBase, bob);
       await enter(bobSocket, channelId);
       await untilBothSee(channelId, alice.id, true);
-      const received = collect(await t.open(t.secondBase, alice));
+      // 観測は部屋に入っている接続で行う（presence:changed はチャンネルの部屋にだけ届く。#375）
+      const received = await collectAfterEntries(aliceSocket);
       t.first
         .get(PresenceRegistry)
         .replace(channelId, [{ id: 'stale-socket', userId: 'stale-user' }]);
@@ -349,6 +351,39 @@ describe('在席（F-22）', () => {
       await quiet();
       expect(received.filter((p) => p.userId === alice.id && p.present)).toEqual([]);
       await untilBothSee(channelId, alice.id, false);
+    });
+
+    // #378: 2回目の参加の確認の問い合わせの往復の間に、同じタスクでキックが処理された場合も、在席に足し直さない。
+    it('初めての入室で2回目の参加の確認の往復の間にキックされたら、在席に足さず、present: true を配らない', async () => {
+      const { owner, alice, bob, workspace, channelId } = await channelOfThree();
+      const aliceSocket = await t.open(t.firstBase, alice);
+      const bobSocket = await t.open(t.firstBase, bob);
+      await enter(bobSocket, channelId);
+      const received = await collectAfterEntries(bobSocket);
+      const rooms = t.first.get(ChannelRoomsService);
+      const check = rooms.assertCanEnter.bind(rooms);
+      // 1回目の確認は通す。2回目は、確認の結果を得た後・返す前にキックを確定させる。
+      const paused = vi
+        .spyOn(rooms, 'assertCanEnter')
+        .mockImplementationOnce(check)
+        .mockImplementationOnce(async (userId, id) => {
+          const result = await check(userId, id);
+          const kicked = await t.send(
+            'DELETE',
+            `/workspaces/${workspace.id}/channels/${channelId}/members/${alice.id}`,
+            owner,
+          );
+          expect(kicked.status).toBe(204);
+          return result;
+        });
+      try {
+        expect(await enter(aliceSocket, channelId)).toMatchObject({ ok: false, status: 404 });
+      } finally {
+        paused.mockRestore();
+      }
+      await quiet();
+      expect(received.filter((p) => p.userId === alice.id && p.present)).toEqual([]);
+      expect(t.first.get(PresenceRegistry).usersIn(channelId)).not.toContain(alice.id);
     });
   });
 

@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Inject, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import {
   ConnectedSocket,
@@ -100,12 +100,21 @@ export class ChannelRoomsGateway implements OnGatewayConnection<RealtimeSocket> 
       const reentering = socket.rooms.has(channelRoom(channelId));
       if (reentering) await this.presence.refresh(channelId);
       await socket.join(channelRoom(channelId));
+      const removals = this.presence.removalsOf(channelId, userId);
       try {
         await this.rooms.assertCanEnter(userId, channelId);
       } catch (error) {
         await socket.leave(channelRoom(channelId));
         if (reentering) this.presence.left(channelId, userId, socket.id);
         throw error;
+      }
+      // 2回目の確認の往復の間に参加資格を失った（在席から外された）なら、在席に足し直さずに断る（#378）。
+      // 部屋から外す通知（socketsLeave）はアダプタを通って後から届くため、部屋に残っているかでは見分けられない。
+      if (this.presence.removalsOf(channelId, userId) !== removals) {
+        await socket.leave(channelRoom(channelId));
+        if (reentering) this.presence.left(channelId, userId, socket.id);
+        await this.rooms.assertCanEnter(userId, channelId);
+        throw new NotFoundException();
       }
       const present = this.presence.entered(channelId, userId, socket.id);
       return { ok: true, present } as const;
