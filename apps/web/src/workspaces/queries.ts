@@ -400,7 +400,7 @@ export function useChannelMembers(workspaceId: string, channelId: string, enable
   });
 }
 
-/** チャンネルから外す（F-09。オーナーだけ。そのチャンネルだけから外す。判定は api）。通ったら、読み込んである参加者の一覧から外す。 */
+/** チャンネルから外す（F-09。オーナーだけ。そのチャンネルだけから外す。判定は api）。通ったら、読み込んである参加者の一覧から外し、管理用の一覧（F-35）の人数も減らす。 */
 export function useKickChannelMember(workspaceId: string, channelId: string) {
   const store = useSessionStore();
   const queryClient = useQueryClient();
