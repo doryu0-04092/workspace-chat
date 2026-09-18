@@ -15,10 +15,10 @@ import { startMigratedPostgres } from './postgres';
 import { connectRealtime } from './realtime-client';
 import { startValkey } from './valkey';
 
-/** タスク間の経路が繋がるのを待つ上限（#618。手元でも CI でも数ミリ秒で繋がる。繋がらなければ検査を始めない）。 */
+/** タスク間の経路が繋がるのを待つ上限（#618。繋がらなければ検査を始めない）。 */
 const CROSS_TASK_LINK_TIMEOUT_MS = 20_000;
-/** 1回の試しで答えを待つ時間（#618）。 */
-const CROSS_TASK_LINK_ATTEMPT_MS = 1_000;
+/** 答えが返らなかった試しの後、次を送るまでの間（#618。1回の試しはアダプタの期限まで待つ）。 */
+const CROSS_TASK_LINK_RETRY_DELAY_MS = 200;
 
 /**
  * タスクを2つに見立てた api（同じ PostgreSQL と Valkey を使う）と、利用者・ワークスペース・チャンネルを用意する部品。
@@ -202,17 +202,24 @@ async function waitForCrossTaskLink(
     ack('second');
   }) as never);
   const deadline = Date.now() + CROSS_TASK_LINK_TIMEOUT_MS;
+  let attempts = 0;
+  let lastFailure = '答えが空';
   for (;;) {
+    attempts += 1;
+    // **答えはアダプタの期限（requestsTimeout）まで待つ。** 手元の時限で先に打ち切ると、往復が遅い環境では
+    // 答えが毎回打ち切りの後に届いて捨てられ、繋がっていても「答えが無い」ことになる。
     const answered = await new Promise<string[]>((resolve) => {
-      const timer = setTimeout(() => resolve([]), CROSS_TASK_LINK_ATTEMPT_MS);
       firstServer.serverSideEmit(event, ((error: unknown, responses: string[]) => {
-        clearTimeout(timer);
+        if (error) lastFailure = error instanceof Error ? error.message : String(error);
         resolve(error ? [] : responses);
       }) as never);
     });
     if (answered.length > 0) return;
     if (Date.now() > deadline) {
-      throw new Error('タスク間の経路が繋がらないまま、検査を始めようとした（#618）');
+      throw new Error(
+        `タスク間の経路が繋がらないまま、検査を始めようとした（#618。${attempts} 回試した。最後の失敗: ${lastFailure}）`,
+      );
     }
+    await new Promise((resolve) => setTimeout(resolve, CROSS_TASK_LINK_RETRY_DELAY_MS));
   }
 }
