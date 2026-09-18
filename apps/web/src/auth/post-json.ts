@@ -1,7 +1,7 @@
 import { type Failure, readFailure } from './failure';
 
 /**
- * 認証の前の api（新規登録・ログイン）へ JSON を POST し、成功の応答の本体を返す。**失敗は投げずに戻り値で表す**（`status` の意味は `Failure`）。
+ * 認証の前の api（新規登録・ログイン・リカバリーコードによる再設定）へ JSON を POST し、成功の応答の本体を返す。**失敗は投げずに戻り値で表す**（`status` の意味は `Failure`）。
  * - 本体を JSON にできない（実装の誤り）: 要求を送らずに status -1（通信の失敗〔status 0〕にしない）
  * - `fetch` が `TypeError` で断った（通信の失敗）: status 0。`TypeError` でない例外で断った: status -1
  * - 断られた応答: `readFailure`

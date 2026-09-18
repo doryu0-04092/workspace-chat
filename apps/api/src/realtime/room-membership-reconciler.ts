@@ -24,7 +24,7 @@ export const ROOM_RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
  *   参加者でなくなった利用者は、他のタスクに接続が残っていても（そちらの照合がまだ走っていなくても）在席ではない
  * - **契機は5分ごとと、Valkey への publish が戻ったとき**。見るのは自タスクの接続だけ（`local`）——Valkey が止まっていても照合できる
  * - 照合に失敗しても例外にせず、warn を残す（次の契機でやり直す）。**warn には code か、code が無ければ種類の名前だけを残す**——
- *   照合は DB と Valkey に問い合わせ、接続の失敗のメッセージには接続先が入りうる（logging/error-kind.ts）
+ *   照合は DB に問い合わせ、接続の失敗のメッセージには接続先が入りうる（`server.local.fetchSockets()` は Valkey を通らない自タスクの接続だけを見る。logging/error-kind.ts）
  */
 @Injectable()
 export class RoomMembershipReconciler implements OnApplicationBootstrap, OnModuleDestroy {

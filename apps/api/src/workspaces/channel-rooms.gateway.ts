@@ -21,7 +21,13 @@ import { RealtimeEmitter } from '../realtime/realtime.emitter';
 import { type RealtimeSocket, channelIdOfRoom, channelRoom } from '../realtime/realtime.gateway';
 import { ChannelRoomsService, channelIdOf } from './channel-rooms.service';
 
-/** 入室要求の上限（利用者単位。決定・2026-09-13・依頼側。機能一覧 9.2）。 */
+/**
+ * 入室要求の上限（利用者単位。決定・2026-09-13・依頼側。機能一覧 9.2）。
+ *
+ * **踏むと壊れる**: web の送り直しの間隔（`ENTER_RETRY_DELAY_MS`。
+ * `apps/web/src/realtime/use-channel-realtime.ts`）はこの `ttlMs` に依存する。
+ * ここだけ値を変えると、送り直しても窓が明けておらず再び断られ続ける。
+ */
 export const CHANNEL_ENTER_LIMIT = { limit: 60, ttlMs: 60 * 1000 } as const;
 const CHANNEL_ENTER_THROTTLER = 'channel-enter';
 
