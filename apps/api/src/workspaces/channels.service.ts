@@ -3,7 +3,12 @@ import type { paths } from '@workspace-chat/shared';
 import { isUniqueViolation } from '../prisma-errors';
 import { PrismaService } from '../prisma.service';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
-import { USER_SUMMARY_SELECT, toUserSummary } from '../users/user-summary';
+import {
+  USER_SUMMARY_SELECT,
+  toUserSummary,
+  type UserSummaryRow,
+  userSummaryColumns,
+} from '../users/user-summary';
 import { assertChannelParticipant, channelFor } from './channel-access';
 import { advanceReadPosition, announceUnreadTo, unreadOfChannels } from './unread';
 import { CHANNEL_NAME_TAKEN } from './channel-errors';
@@ -219,10 +224,8 @@ export class ChannelsService {
   ): Promise<ChannelMember[]> {
     await this.workspaces.membershipOf(userId, workspaceId);
     assertChannelParticipant(await channelFor(this.prisma, userId, workspaceId, channelId));
-    const rows = await this.prisma.$queryRaw<
-      { id: string; loginId: string; displayName: string }[]
-    >`
-      SELECT u."id", u."userId" AS "loginId", u."displayName"
+    const rows = await this.prisma.$queryRaw<UserSummaryRow[]>`
+      SELECT ${userSummaryColumns('u')}
       FROM "User" u
       JOIN "ChannelMember" cm ON cm."userId" = u."id" AND cm."channelId" = ${channelId}::uuid
       JOIN "ChannelMember" vcm ON vcm."channelId" = ${channelId}::uuid AND vcm."userId" = ${userId}::uuid

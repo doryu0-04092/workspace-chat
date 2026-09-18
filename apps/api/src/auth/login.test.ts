@@ -74,7 +74,7 @@ describe('POST /api/auth/login（F-02）', () => {
   async function createUser(
     password: string,
     options: { deleted?: boolean } = {},
-  ): Promise<{ id: string; userId: string; displayName: string }> {
+  ): Promise<{ id: string; userId: string; displayName: string; avatarUrl: null }> {
     const userId = uniqueUserId();
     const user = await prisma.user.create({
       data: {
@@ -84,7 +84,7 @@ describe('POST /api/auth/login（F-02）', () => {
         deletedAt: options.deleted ? new Date() : null,
       },
     });
-    return { id: user.id, userId, displayName: user.displayName };
+    return { id: user.id, userId, displayName: user.displayName, avatarUrl: null };
   }
 
   beforeAll(async () => {

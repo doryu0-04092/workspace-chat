@@ -173,7 +173,7 @@ describe('ピン留め（F-33）', () => {
   }
 
   function summaryOf(user: LoggedIn) {
-    return { id: user.id, userId: user.loginId, displayName: expect.any(String) };
+    return { id: user.id, userId: user.loginId, displayName: expect.any(String), avatarUrl: null };
   }
 
   /** オーナーのワークスペースに alice と bob が参加するチャンネルを作り、alice が1件投稿する。carol は所属していて参加していない。 */

@@ -22,6 +22,7 @@ const CAROL = {
   id: '01920000-0000-7000-8000-000000000003',
   userId: 'carol',
   displayName: 'キャロル',
+  avatarUrl: null,
 };
 
 async function openChannel(extra: Parameters<typeof fakeFetch>[0] = {}) {

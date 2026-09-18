@@ -111,7 +111,7 @@ describe('本文の @here / @channel の表示（F-21）', () => {
   });
 
   it('同じ綴りのユーザーID のメンションが応答に載っていれば、その利用者の表示名で出す（#497）', () => {
-    const here = { id: BOB.id, userId: 'here', displayName: 'ヒア' };
+    const here = { id: BOB.id, userId: 'here', displayName: 'ヒア', avatarUrl: null };
     const { container } = render(
       <MessageBody body="@here" mentions={[{ userId: 'here', user: here }]} />,
     );

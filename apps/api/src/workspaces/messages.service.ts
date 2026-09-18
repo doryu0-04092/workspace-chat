@@ -17,7 +17,13 @@ import { addMentionNotifications } from '../notifications/mention-notifications'
 import { PrismaService } from '../prisma.service';
 import { ATTACHMENT_UNAVAILABLE } from '../file-uploads/upload-errors';
 import { RealtimeEmitter } from '../realtime/realtime.emitter';
-import { USER_SUMMARY_SELECT, type UserSummary, toUserSummary } from '../users/user-summary';
+import {
+  USER_SUMMARY_SELECT,
+  type UserSummary,
+  type UserSummaryRow,
+  toUserSummary,
+  userSummaryColumns,
+} from '../users/user-summary';
 import { ATTACHMENT_SELECT, type Attachment, toAttachment } from './attachment-view';
 import { assertChannelParticipant, channelFor, lockedChannelFor } from './channel-access';
 import { CHANNEL_ARCHIVED, NOT_MESSAGE_AUTHOR } from './channel-errors';
@@ -238,7 +244,7 @@ export const MESSAGE_SELECT = {
   createdAt: true,
   editedAt: true,
   deletedAt: true,
-  author: { select: { ...USER_SUMMARY_SELECT, deletedAt: true } },
+  author: { select: USER_SUMMARY_SELECT },
 } as const;
 
 type MessageRow = {
@@ -250,7 +256,7 @@ type MessageRow = {
   createdAt: Date;
   editedAt: Date | null;
   deletedAt: Date | null;
-  author: { id: string; loginId: string; displayName: string; deletedAt: Date | null };
+  author: UserSummaryRow;
 };
 
 /**
@@ -297,9 +303,7 @@ async function participantsOf(
   if (parents.length === 0) return participants;
   const parentIds = parents.map(({ id }) => id);
   const channelIds = [...new Set(parents.map(({ channelId }) => channelId))];
-  const rows = await db.$queryRaw<
-    { parentId: string; id: string; loginId: string; displayName: string }[]
-  >`
+  const rows = await db.$queryRaw<(UserSummaryRow & { parentId: string })[]>`
     WITH "latest" AS (
       SELECT m."parentId", m."authorId", m."id",
         ROW_NUMBER() OVER (PARTITION BY m."parentId", m."authorId" ORDER BY m."id" DESC) AS "perAuthor"
@@ -313,7 +317,7 @@ async function participantsOf(
       FROM "latest"
       WHERE "perAuthor" = 1
     )
-    SELECT r."parentId", u."id", u."userId" AS "loginId", u."displayName"
+    SELECT r."parentId", ${userSummaryColumns('u')}
     FROM "ranked" r
     JOIN "User" u ON u."id" = r."authorId"
     WHERE r."rank" <= ${REPLY_PARTICIPANT_LIMIT}
@@ -363,7 +367,7 @@ async function mentionsOf(
   if (rows.length === 0) return mentions;
   const saved = await db.messageMention.findMany({
     where: { messageId: { in: rows.map(({ id }) => id) } },
-    select: { messageId: true, user: { select: { ...USER_SUMMARY_SELECT, deletedAt: true } } },
+    select: { messageId: true, user: { select: USER_SUMMARY_SELECT } },
   });
   for (const row of rows) {
     const order = mentionedLoginIds(row.body);

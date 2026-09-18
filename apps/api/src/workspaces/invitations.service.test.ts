@@ -8,7 +8,7 @@ import { InvitationsService } from './invitations.service';
 const OWNER = {
   role: 'OWNER' as const,
   workspace: { id: 'workspace-1', name: 'ワークスペース', createdAt: new Date() },
-  user: { id: 'owner-1', userId: 'owner', displayName: 'オーナー' },
+  user: { id: 'owner-1', userId: 'owner', displayName: 'オーナー', avatarUrl: null },
 };
 const INVITEE_ROW = { id: 'invitee-1' };
 

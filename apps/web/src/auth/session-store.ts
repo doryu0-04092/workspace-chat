@@ -198,8 +198,8 @@ export function createSessionStore(
           if (!response.ok) return await readFailure(response);
           const profile = (await response.json().catch(() => null)) as Schemas['Profile'] | null;
           if (profile === null) return { ok: false, status: response.status };
-          const { id, userId, displayName } = profile;
-          return { ok: true, value: { id, userId, displayName } };
+          const { id, userId, displayName, avatarUrl } = profile;
+          return { ok: true, value: { id, userId, displayName, avatarUrl } };
         } catch (error) {
           return signal.aborted ? TIMED_OUT : thrownFailure(error);
         }

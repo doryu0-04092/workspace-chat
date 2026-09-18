@@ -43,6 +43,25 @@ describe('チャンネルのメッセージの表示', () => {
     expect(within(article).getByText('ボブ')).toBeDefined();
   });
 
+  it('投稿者のアバターを表示名の横に出し、無ければ画像を出さない（F-04。機能一覧 1.3）', async () => {
+    const avatarUrl = '/avatars/01920000-0000-7000-8000-000000000002/u/b.png';
+    fakeFetch(
+      routes({
+        [`GET ${MESSAGES}`]: () =>
+          page([
+            message(2, { author: { ...message(2).author!, avatarUrl } }),
+            message(1, { author: { ...message(1).author!, avatarUrl: null } }),
+          ]),
+      }),
+    );
+    renderApp(CHANNEL_PATH);
+
+    const withAvatar = (await screen.findByText('メッセージ 2')).closest('article')!;
+    expect(withAvatar.querySelector('img')?.getAttribute('src')).toBe(avatarUrl);
+    const without = screen.getByText('メッセージ 1').closest('article')!;
+    expect(without.querySelector('img')).toBeNull();
+  });
+
   it('退会した投稿者（author が null）は「削除済みの利用者」と出す', async () => {
     fakeFetch(routes({ [`GET ${MESSAGES}`]: () => page([message(1, { author: null })]) }));
     renderApp(CHANNEL_PATH);
