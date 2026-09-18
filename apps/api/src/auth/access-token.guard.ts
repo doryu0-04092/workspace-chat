@@ -63,15 +63,24 @@ export class AccessTokenResolver {
 
   /** 署名（HS256 だけ。AuthModule の verifyOptions）・期限・`sub` の形を確かめ、退会していない利用者を返す。使えなければ null。 */
   async resolve(token: string | undefined): Promise<AuthenticatedUser | null> {
-    const userId = await this.subject(token);
+    const userId = await this.subjectOf(token);
     if (userId === undefined) return null;
+    return this.userOf(userId);
+  }
+
+  /** 退会していない利用者を DB から引く（`resolve` の2段目）。 */
+  userOf(userId: string): Promise<AuthenticatedUser | null> {
     return this.prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
       select: { id: true },
     });
   }
 
-  private async subject(token: string | undefined): Promise<string | undefined> {
+  /**
+   * 署名・期限・`sub` の形を確かめ、トークンの利用者の ID を返す（`resolve` の1段目。**DB を引かない**）。使えなければ undefined。
+   * WebSocket のハンドシェイクは、この後・`userOf` の前に利用者ごとに数える（realtime.gateway.ts）。
+   */
+  async subjectOf(token: string | undefined): Promise<string | undefined> {
     if (token === undefined) return undefined;
     try {
       const { sub } = await this.jwt.verifyAsync<{ sub?: unknown }>(token);
