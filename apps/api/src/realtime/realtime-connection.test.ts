@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import type { Socket } from 'socket.io-client';
@@ -14,6 +15,7 @@ import {
 } from '../testing/realtime-client';
 import { type TwoTasks, startTwoTasks } from '../testing/two-tasks';
 import { RealtimeEmitter } from './realtime.emitter';
+import { HANDSHAKE_LIMIT } from './realtime.gateway';
 
 // 機能一覧 5.2・9.2、要件定義書 4.2・4.3・4.8 の4（許可外の Origin からのハンドシェイクを拒否する）。
 // タスクを2つに見立てる。Valkey のアダプタを通さないと、別のタスクに繋いだ利用者へ届かない。
@@ -99,6 +101,40 @@ describe('Socket.IO の接続の入口（F-16）', () => {
         expect(socket.connected).toBe(false);
       }
     });
+
+    // #366: ハンドシェイクも、入室要求（channel-rooms.gateway.ts の CHANNEL_ENTER_LIMIT）と同じく利用者ごとに数える。
+    // 数えるのは署名を確かめた後・利用者を DB から引く前であり、超えた接続では DB を引かない。トークンを替えても同じ枠である。
+    it('同じ利用者のハンドシェイクは上限までで、超えたら too_many_requests で断り、利用者を DB から引かない。別の利用者は断らない', async () => {
+      const alice = await t.login();
+      const bob = await t.login();
+      const signer = new JwtService({ secret: process.env.JWT_SECRET });
+      const freshToken = () => signer.sign({ sub: alice.id, jti: randomUUID() });
+      for (let i = 0; i < HANDSHAKE_LIMIT.limit; i += 1) {
+        const { error, socket } = await open(t.firstBase, { token: freshToken() });
+        expect(error, `${i + 1} 回目`).toBeUndefined();
+        socket.close();
+      }
+      const lookups = vi.spyOn(t.first.get(AccessTokenResolver), 'userOf');
+      const warned = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        const limited = await open(t.firstBase, { token: freshToken() });
+        expect(limited.error?.data).toEqual({ code: 'too_many_requests' });
+        expect(limited.socket.connected).toBe(false);
+        expect(lookups).not.toHaveBeenCalled();
+        expect(warned).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: 'rate_limit_exceeded',
+            limit: 'user',
+            userId: alice.id,
+          }),
+        );
+
+        expect((await open(t.secondBase, { token: bob.token })).error).toBeUndefined();
+      } finally {
+        lookups.mockRestore();
+        warned.mockRestore();
+      }
+    }, 30_000);
   });
 
   describe('利用者の部屋（機能一覧 9.2）', () => {
@@ -151,7 +187,7 @@ describe('Socket.IO の接続の入口（F-16）', () => {
     const { token } = await t.login();
     const resolver = t.first.get(AccessTokenResolver);
     const failing = vi
-      .spyOn(resolver, 'resolve')
+      .spyOn(resolver, 'userOf')
       .mockRejectedValueOnce(new Error('secret-looking detail from prisma'));
     const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     try {
