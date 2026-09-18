@@ -309,6 +309,7 @@ describe('検索（F-30・F-31）', () => {
             id: owner.id,
             userId: owner.loginId,
             displayName: expect.any(String) as string,
+            avatarUrl: null,
           },
           body: '全文検索は索引で速くなる',
           createdAt: expect.any(String) as string,
@@ -451,10 +452,10 @@ describe('検索（F-30・F-31）', () => {
       await prisma.user.update({ where: { id: retired.id }, data: { deletedAt: new Date() } });
 
       expect((await found(owner, workspace.id, '山田')).users).toEqual([
-        { id: member.id, userId: member.loginId, displayName: '山田 花子' },
+        { id: member.id, userId: member.loginId, displayName: '山田 花子', avatarUrl: null },
       ]);
       expect((await found(owner, workspace.id, member.loginId.toLowerCase())).users).toEqual([
-        { id: member.id, userId: member.loginId, displayName: '山田 花子' },
+        { id: member.id, userId: member.loginId, displayName: '山田 花子', avatarUrl: null },
       ]);
     });
   });

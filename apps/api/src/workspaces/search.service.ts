@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { paths } from '@workspace-chat/shared';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma.service';
-import { toUserSummary } from '../users/user-summary';
+import { toUserSummary, type UserSummaryRow, userSummaryColumns } from '../users/user-summary';
 import { assertChannelParticipant, channelFor } from './channel-access';
 import { parseSearchQuery } from './search-query';
 import { WorkspacesService } from './workspaces.service';
@@ -42,6 +42,7 @@ type MessageRow = {
   authorId: string;
   authorLoginId: string;
   authorDisplayName: string;
+  authorAvatarUrl: string | null;
   authorDeleted: boolean;
 };
 
@@ -108,7 +109,7 @@ export class SearchService {
         c."id" AS "channelId", c."name" AS "channelName", c."visibility"::text AS "channelVisibility",
         c."archivedAt" IS NOT NULL AS "channelArchived",
         a."id" AS "authorId", a."userId" AS "authorLoginId", a."displayName" AS "authorDisplayName",
-        a."deletedAt" IS NOT NULL AS "authorDeleted"
+        a."avatarUrl" AS "authorAvatarUrl", a."deletedAt" IS NOT NULL AS "authorDeleted"
       FROM "Message" m
       -- **検索の認可（F-31）: 要求する側が参加しているチャンネルだけ。** 役割も種別も見ない（オーナーの例外は及ばない）
       JOIN "ChannelMember" cm ON cm."channelId" = m."channelId" AND cm."userId" = ${userId}::uuid
@@ -140,6 +141,8 @@ export class SearchService {
             id: row.authorId,
             loginId: row.authorLoginId,
             displayName: row.authorDisplayName,
+            avatarUrl: row.authorAvatarUrl,
+            deletedAt: null,
           }),
       body: row.body,
       createdAt: row.createdAt.toISOString(),
@@ -173,10 +176,8 @@ export class SearchService {
    */
   private async users(workspaceId: string, terms: string[]): Promise<SearchResult['users']> {
     if (terms.length === 0) return [];
-    const rows = await this.prisma.$queryRaw<
-      { id: string; loginId: string; displayName: string }[]
-    >`
-      SELECT u."id", u."userId" AS "loginId", u."displayName"
+    const rows = await this.prisma.$queryRaw<UserSummaryRow[]>`
+      SELECT ${userSummaryColumns('u')}
       FROM "Membership" mb
       JOIN "User" u ON u."id" = mb."userId" AND u."deletedAt" IS NULL
       WHERE mb."workspaceId" = ${workspaceId}::uuid

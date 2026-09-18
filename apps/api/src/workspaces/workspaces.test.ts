@@ -225,12 +225,14 @@ describe('/api/workspaces（F-06）', () => {
         id: alice.id,
         userId: alice.loginId,
         displayName: expect.any(String) as string,
+        avatarUrl: null,
         role: 'OWNER',
       },
       {
         id: bob.id,
         userId: bob.loginId,
         displayName: expect.any(String) as string,
+        avatarUrl: null,
         role: 'MEMBER',
       },
     ]);

@@ -175,7 +175,7 @@ describe('絵文字リアクション（F-18）', () => {
   }
 
   function summaryOf(user: LoggedIn) {
-    return { id: user.id, userId: user.loginId, displayName: expect.any(String) };
+    return { id: user.id, userId: user.loginId, displayName: expect.any(String), avatarUrl: null };
   }
 
   /** 行とカウンタ列が食い違っていないか（カウンタ列の件数は、その絵文字の行の数と一致する）。 */

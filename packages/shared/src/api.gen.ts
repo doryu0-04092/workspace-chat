@@ -1301,6 +1301,8 @@ export interface components {
             id: string;
             userId: string;
             displayName: string;
+            /** @description アバター画像の配信 URL のパス。無ければ null。**退会した利用者は null**（機能一覧 1.3・1.5） */
+            avatarUrl: string | null;
         };
         /** @description 利用者ごとの設定（F-23。機能一覧 10.1）。**プロフィール（Profile）とは分ける**—— プロフィールが持つのは他人に見える情報であり、設定は本人にしか返さない。 通知の設定（F-24・F-25）が増えたら、ここに足す */
         UserSettings: {
@@ -1395,6 +1397,8 @@ export interface components {
             id: string;
             userId: string;
             displayName: string;
+            /** @description UserSummary の avatarUrl と同じ */
+            avatarUrl: string | null;
             role: components["schemas"]["WorkspaceRole"];
         };
         /**

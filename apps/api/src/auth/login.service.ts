@@ -18,7 +18,13 @@ const INVALID_CREDENTIALS: ErrorResponse = {
   message: 'ユーザーID またはパスワードが違います',
 };
 
-type UserRow = { id: string; userId: string; displayName: string; passwordHash: string };
+type UserRow = {
+  id: string;
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  passwordHash: string;
+};
 
 @Injectable()
 export class LoginService {
@@ -44,7 +50,7 @@ export class LoginService {
     }
 
     const rows = await this.prisma.$queryRaw<UserRow[]>`
-      SELECT "id", "userId", "displayName", "passwordHash"
+      SELECT "id", "userId", "displayName", "avatarUrl", "passwordHash"
       FROM "User"
       WHERE lower("userId") = lower(${input.userId}) AND "deletedAt" IS NULL
     `;
@@ -65,7 +71,12 @@ export class LoginService {
         accessToken: tokens.accessToken,
         tokenType: 'Bearer',
         expiresIn: tokens.expiresIn,
-        user: { id: user.id, userId: user.userId, displayName: user.displayName },
+        user: {
+          id: user.id,
+          userId: user.userId,
+          displayName: user.displayName,
+          avatarUrl: user.avatarUrl,
+        },
       },
       refreshToken: tokens.refreshToken,
     };
