@@ -124,7 +124,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 検証 | **Zod** | 3.x/4.x | リクエストと WebSocket イベントを同じスキーマで検証する |
 | パスワード | **Argon2id** | — | 現在の推奨 |
 | 認証 | JWT（アクセス・短命）+ opaque リフレッシュトークン | — | |
-| テスト | Vitest + Testcontainers | — | 実 PostgreSQL に対して検証する |
+| テスト | Vitest + Testcontainers | — | 実 PostgreSQL と実 Valkey に対して検証する |
 
 #### Socket.IO を選んだ理由
 
@@ -219,6 +219,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 - **既定のドメインは、他の利用者のディストリビューションと同じ `cloudfront.net` の下のホストである。** リフレッシュトークンの Cookie の `SameSite=Strict` と、`Origin` / `Sec-Fetch-Site` の検証（[要件定義書](requirements.md) 4.3 の CSRF の対処）が別のディストリビューションを別のサイトとして扱うことは、**`cloudfront.net` が Public Suffix List に載っていること**に依存する（載っている: Public Suffix List の「// Amazon CloudFront」の項に `cloudfront.net`。2026-09-13 に確かめた）。独自ドメインへ切り替えると、この依存はそのドメインの境界に移る
 - **state のバケットは `terraform destroy` の対象外として残る**（[要件定義書](requirements.md) 4.2 の「バックアップ」）
 - **write-only 引数の値は state に保存されないため、`plan` は値の変更を差分として出さない。** 値を替える手順は、上の秘密情報の行の「踏むと壊れる」による（Terraform の文書「Terraform does not store write-only arguments in state files, so Terraform has no way of knowing if a write-only argument value has changed.」）
+- **Secrets Manager の自動ローテーションを採らないため、秘密の入れ替えは版を手で上げる `apply` と、手で行う ECS のタスクの入れ替えの2手に固定される**（上の秘密情報の行の「踏むと壊れる」）。**入れ替え忘れ・片方だけの版上げが起こりうる**
 - **タスクへの受信を止めるのは、セキュリティグループの1層だけである**（AWS 公式「When you first create a security group, it has no inbound rules. Therefore, no inbound traffic is allowed until you add inbound rules to the security group.」）。規則を広げる誤りをすると、CloudFront を経ずに api へ直接届き、平文の HTTP でトークンが流れ、X-Forwarded-For を偽ってレート制限を迂回できる（上の ALB の行の `TRUST_PROXY_HOPS=2` の前提が崩れる）。**規則は Terraform だけで書き（送信元を ALB のセキュリティグループに限る）、`apply` の後に実際の規則を確かめる**。プライベートサブネットと NAT ゲートウェイの形なら、同じ誤りでも外から届かない
 - **公開 IPv4 アドレスの料金がかかる**（AWS 公式「Effective February 1, 2024 there will be a charge of $0.005 per IP per hour for all public IPv4 addresses」。タスク 2 つで月におよそ 7 ドル）
 
