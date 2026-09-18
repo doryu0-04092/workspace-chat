@@ -7,3 +7,33 @@
 .mention {
   @apply rounded bg-sky-100 px-0.5 font-semibold text-sky-800;
 }
+
+/* 本文の Markdown（F-14。機能一覧 4.3。#664）。Tailwind の初期化（preflight）が消す箇条書きの印とコードの見た目を、
+   本文の範囲（MessageBody の .markdown）にだけ戻す。画面のほかの ul / ol（一覧の部品）には当てない */
+.markdown ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+}
+.markdown ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+}
+.markdown pre {
+  background-color: var(--color-slate-100);
+  border-radius: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  overflow-x: auto;
+}
+/* 色付けのテーマ（github.css）は .hljs に白の背景と余白を付けるため、コードブロックの中では外す */
+.markdown pre .hljs {
+  background: transparent;
+  padding: 0;
+}
+.markdown :not(pre) > code {
+  background-color: var(--color-slate-100);
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+}
+.markdown code {
+  font-family: var(--font-mono);
+}

@@ -241,7 +241,8 @@ export function MessageBody({
   mentions?: readonly Mention[];
 }) {
   return (
-    <div className="break-words">
+    // .markdown: 箇条書きの印とコードの見た目は index.css がこの中にだけ当てる（#664）
+    <div className="markdown break-words">
       <Markdown
         remarkPlugins={[f14Syntax, asWrittenText, remarkBreaks, mentionSpans(mentions)]}
         rehypePlugins={[

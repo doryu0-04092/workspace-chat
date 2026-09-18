@@ -1,8 +1,17 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { render } from '@testing-library/react';
 import rehypeSanitize from 'rehype-sanitize';
 import { describe, expect, it } from 'vitest';
 import { MessageBody, SANITIZE_SCHEMA } from './MessageBody';
 import type { Message } from './queries';
+
+// 画面全体の CSS（本文の見た目の規則を見る。#664）。テストの環境は CSS の読み込みを処理しない（?raw は空になる）ため、ファイルを直接読む
+const STYLES = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'index.css'),
+  'utf8',
+);
 
 function renderBody(body: string): HTMLElement {
   return render(<MessageBody body={body} />).container;
@@ -80,6 +89,18 @@ describe('メッセージの本文の描画（F-14・F-15）', () => {
       const element = renderBody(body).querySelector(selector);
       expect(element).not.toBeNull();
       expect(element?.textContent).toContain(text);
+    });
+
+    // #664: Tailwind の初期化が ul / ol の印とコードの見た目を消すため、本文の範囲（.markdown）にだけ戻す。
+    // jsdom は CSS を当てないため、本文が印の class を持つことと、CSS がその下に規則を持つことを分けて見る
+    it('本文は .markdown の中に描き、CSS は箇条書きの印とコードの背景をその下に持つ（#664）', () => {
+      const list = renderBody('- 一つ目').querySelector('ul')!;
+      expect(list.closest('.markdown')).not.toBeNull();
+      const css = STYLES.replace(/\s+/g, ' ');
+      expect(css).toMatch(/\.markdown ul \{[^}]*list-style-type: disc/);
+      expect(css).toMatch(/\.markdown ol \{[^}]*list-style-type: decimal/);
+      expect(css).toMatch(/\.markdown pre \{[^}]*background/);
+      expect(css).toMatch(/\.markdown :not\(pre\) > code \{[^}]*background/);
     });
 
     it('段落の中の改行（入力欄の Enter の改行）は、改行の要素になる', () => {
