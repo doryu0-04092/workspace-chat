@@ -15,7 +15,7 @@ import {
 } from '../testing/realtime-client';
 import { type TwoTasks, startTwoTasks } from '../testing/two-tasks';
 import { RealtimeEmitter } from './realtime.emitter';
-import { HANDSHAKE_LIMIT } from './realtime.gateway';
+import { HANDSHAKE_LIMIT, RealtimeGateway, channelRoom, userRoom } from './realtime.gateway';
 
 // 機能一覧 5.2・9.2、要件定義書 4.2・4.3・4.8 の4（許可外の Origin からのハンドシェイクを拒否する）。
 // タスクを2つに見立てる。Valkey のアダプタを通さないと、別のタスクに繋いだ利用者へ届かない。
@@ -170,6 +170,26 @@ describe('Socket.IO の接続の入口（F-16）', () => {
       expect(count).toEqual({ alice: 1, bob: 1 });
     });
 
+    // 機能一覧 5.2: チャンネルの部屋と利用者の部屋の両方に入っている接続にも、1回の配信で1回だけ届く（#289）。
+    // 個人メンションの message:new がこの経路を通る。部屋ごとに分けて送ると、この接続には2回届く。
+    it('チャンネルの部屋と利用者の部屋の両方に入っている接続へ、両方を宛先に1回で送ると1回だけ届く', async () => {
+      const alice = await t.login();
+      const aliceSocket = (await open(t.firstBase, { token: alice.token })).socket;
+      const channelId = randomUUID();
+      const server = t.first.get(RealtimeGateway).server;
+      server.in(userRoom(alice.id)).socketsJoin(channelRoom(channelId));
+      await vi.waitFor(async () =>
+        expect(await server.in(channelRoom(channelId)).fetchSockets()).toHaveLength(1),
+      );
+      let count = 0;
+      aliceSocket.on('message:new', () => (count += 1));
+
+      t.first.get(RealtimeEmitter).toChannelAndUsers(channelId, [alice.id], 'message:new', {});
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+
+      expect(count).toBe(1);
+    });
+
     // Socket.IO は宛先の部屋が空だと、部屋で絞らずに名前空間の全接続へ送る。宛先を確かめた結果が 0 人になる呼び出しはありうる。
     it('宛先が空なら、どの接続にも届かない', async () => {
       const alice = await t.login();
@@ -268,6 +288,10 @@ describe('Socket.IO の接続の入口（F-16）', () => {
         );
         expect(disconnected).toContain(id);
         expect(disconnected).not.toContain(token);
+        // 切断の理由を載せる（機能一覧 5.2。#353）。Socket.IO が与える文字列は決め打ちしない
+        const [entry] = JSON.parse(disconnected ?? '[]') as [{ reason?: unknown }];
+        expect(typeof entry.reason).toBe('string');
+        expect(entry.reason).not.toBe('');
       } finally {
         logged.mockRestore();
       }
