@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# 本番へのリリース（#452）。AWS の資格情報が入った端末で流す。**費用が発生し、AWS にリソースを作る。**
+# 本番へのリリース（#452。ビルド・push を CD へ移した分割は #673）。AWS の資格情報が入った端末で流す。
+# **費用が発生し、AWS にリソースを作る。**
 #
-#   1. ECR のリポジトリを作る（イメージの置き場。初回はまだ無い）
-#   2. api とマイグレーション用のイメージを linux/arm64 で作り、同じタグで ECR に push する（ECS のタスクは ARM64。技術スタックのコンテナの行）
+#   1. ECR のリポジトリと、CD（.github/workflows/cd.yml）用の IAM ロール一式を作る（初回はまだ無い。#671）
+#   2. IMAGE_TAG のイメージが ECR に既に push されていることを確かめる
+#      （ビルド・push は CD が main への push をトリガーに自動で行う。#672。このスクリプトはもう行わない）
 #   3. マイグレーション用のタスク定義を新しいタグにする（apply -target。依存する RDS・パラメータなども、無ければここで作る）
 #   4. マイグレーションを run-task で1回動かし、終わるまで待って終了コードを確かめる
 #      ——新しいタスク定義に切り替える前に流す（技術スタックのコンテナの行。#274）
@@ -16,16 +18,17 @@
 #   terraform -chdir=infra/bootstrap init
 #   terraform -chdir=infra/bootstrap apply
 #
+# 前段（初回だけ）: 手順 1 で workspace-chat-cd ロールができたら、`terraform -chdir=infra/production output -raw cd_role_arn`
+# の値を、GitHub の Secrets に AWS_CD_ROLE_ARN という名前で設定する。設定するまで CD（cd.yml）は動かない。
+#
 # 使い方:
 #   TF_STATE_BUCKET=$(terraform -chdir=infra/bootstrap output -raw state_bucket) \
-#     IMAGE_TAG=$(git rev-parse --short HEAD) ALARM_EMAIL=<通知先> bash scripts/release.sh
+#     IMAGE_TAG=<release ブランチで CD が push した短い SHA> ALARM_EMAIL=<通知先> bash scripts/release.sh
+#   IMAGE_TAG は release ブランチの `git rev-parse --short HEAD`、または CD（cd.yml）の実行結果から読む。
 #   アラートのメールの購読は、届く確認のメールのリンクを開くまで有効にならない。
 #
-# 前提: aws（資格情報と ap-northeast-1）・terraform・docker（buildx で linux/arm64 を作れること——x86 の端末では QEMU の登録が要る）・node と npm。
-#
-#   **レジストリ（Docker Hub）へ届くこと。** 手順 2 は土台を --pull で取り直すため、手元にイメージがあっても届かなければ落ちる
-#   （同じ代償は scripts/api-image.test.sh と apps/api/src/testing/postgres.ts にもある）。
-#   **落ちるのは手順 1 の apply が済んだ後である**（ECR のリポジトリは作られた状態で止まる）。
+# 前提: aws（資格情報と ap-northeast-1）・terraform・node と npm。
+# **docker は要らない**——ビルド・push は CD（GitHub Actions）が行うため、この端末に arm64 のクロスビルド環境は不要になった（#673）。
 #
 # **秘密の値を入れ替えるときは、この手順ではない。** 要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順による
 # （前置きの形——init -backend-config と TF_VAR_* の渡し方——は同じだが、**api を止める段と、入れ替わったことを確かめる段がある**）。
@@ -39,7 +42,7 @@ fail() {
 }
 
 : "${TF_STATE_BUCKET:?state のバケット名を TF_STATE_BUCKET に渡す}"
-: "${IMAGE_TAG:?イメージのタグを IMAGE_TAG に渡す（例: git rev-parse --short HEAD）}"
+: "${IMAGE_TAG:?イメージのタグを IMAGE_TAG に渡す（release ブランチで CD が push したタグ）}"
 : "${ALARM_EMAIL:?アラートの通知先を ALARM_EMAIL に渡す}"
 
 export TF_VAR_image_tag="$IMAGE_TAG"
@@ -51,33 +54,24 @@ tf() {
 
 tf init -input=false -backend-config="bucket=$TF_STATE_BUCKET" >/dev/null
 
-echo "== 1. ECR のリポジトリ"
-tf apply -input=false -target=aws_ecr_repository.api -target=aws_ecr_repository.migrate
+echo "== 1. ECR のリポジトリと CD 用の IAM ロール一式"
+tf apply -input=false \
+  -target=aws_ecr_repository.api \
+  -target=aws_ecr_repository.migrate \
+  -target=aws_iam_openid_connect_provider.github_actions \
+  -target=aws_iam_role_policy.cd_ecr
 api_repository=$(tf output -raw ecr_api_repository_url)
 migrate_repository=$(tf output -raw ecr_migrate_repository_url)
-registry=${api_repository%%/*}
-aws ecr get-login-password | docker login --username AWS --password-stdin "$registry" >/dev/null
+api_repository_name=${api_repository##*/}
+migrate_repository_name=${migrate_repository##*/}
 
-echo "== 2. イメージ（linux/arm64）を作り、ARM64 で動くことを確かめてから push する"
-# ARM64 で動くことは CI では確かめていない（CI の code は amd64 のイメージで scripts/api-image.test.sh を回す）。
-# push の前にここで、ネイティブモジュール（argon2）・Prisma の CLI・psql が ARM64 のイメージの中で動くことを見る。
-# --pull: 土台（apps/api/Dockerfile の NODE_IMAGE。タグで指す）を毎回レジストリから取り直す。無いと手元に残った古い土台で本番のイメージを作り、
-# CI（scripts/api-image.test.sh も --pull）が確かめた土台とずれる。
-# **土台は Dependabot で追わず、同じタグの中の更新をこの --pull で取り込むと決めている**（理由は .github/dependabot.yml の末尾）。
-docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target runtime \
-  --tag "$api_repository:$IMAGE_TAG" --load .
-docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target migrate \
-  --tag "$migrate_repository:$IMAGE_TAG" --load .
-docker run --rm --platform linux/arm64 --entrypoint node "$api_repository:$IMAGE_TAG" \
-  -e 'require(require("node:module").createRequire("/app/apps/api/dist/main.js").resolve("argon2"))' ||
-  fail "ARM64 の api のイメージで argon2 を読めない"
-docker run --rm --platform linux/arm64 --entrypoint node "$migrate_repository:$IMAGE_TAG" \
-  node_modules/prisma/build/index.js --version >/dev/null ||
-  fail "ARM64 のマイグレーション用のイメージで Prisma の CLI が動かない"
-docker run --rm --platform linux/arm64 --entrypoint psql "$migrate_repository:$IMAGE_TAG" --version ||
-  fail "ARM64 のマイグレーション用のイメージで psql が動かない"
-docker push "$api_repository:$IMAGE_TAG"
-docker push "$migrate_repository:$IMAGE_TAG"
+echo "== 2. IMAGE_TAG のイメージが ECR に push 済みであることを確かめる"
+# ビルド・push は CD（main への push をトリガーに動く .github/workflows/cd.yml）が行う。#672。
+# ここで見つからないのは、CD がまだ動いていない・失敗した・IMAGE_TAG を取り違えたのいずれかである。
+aws ecr describe-images --repository-name "$api_repository_name" --image-ids "imageTag=$IMAGE_TAG" >/dev/null 2>&1 ||
+  fail "ECR に $api_repository_name:$IMAGE_TAG が無い（CD（cd.yml）がこのタグを push し終えているか確かめる）"
+aws ecr describe-images --repository-name "$migrate_repository_name" --image-ids "imageTag=$IMAGE_TAG" >/dev/null 2>&1 ||
+  fail "ECR に $migrate_repository_name:$IMAGE_TAG が無い（CD（cd.yml）がこのタグを push し終えているか確かめる）"
 
 echo "== 3. マイグレーション用のタスク定義を新しいタグにし、run-task に要るものを揃える"
 # -target はそのリソースと依存だけを作る。マイグレーション用のタスク定義の依存（ロール・ECR・ロググループ・DATABASE_URL →
