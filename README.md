@@ -22,6 +22,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis・S3） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17・Valkey・MinIO（S3 互換のストレージ。#427）。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
 | Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#40） |
+| **CD（ビルド・ECR への push・release ブランチの前進）** | **完了**（[cd.yml](.github/workflows/cd.yml)。#672。本番への反映は `release` ブランチから手動で行う。下記「CD（本番へのリリース）」） |
 | 実装 | 実装中 |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する
@@ -517,6 +518,33 @@ Claude GitHub App のトークンに交換する経路を通るため、App が�
 | **ブランチ名に日本語を含む PR ではレビューが動かない** | `claude-code-action` が `Invalid branch name` を出して実行を拒否する（実測で確認。#210）。エラーメッセージが許可として挙げるのは、英数字と `/` `-` `_` `.` `#` `+` `,` `@` `(` `)` である。**ブランチ名は英数字と `/` `-` `#` だけで書く**（[CLAUDE.md](CLAUDE.md) 開発フロー 2。この許可集合の内側に収まる）。**見分け方: `review` が `fail` のまま 12〜14 秒で終わり、コメントが投稿されない。**「このワークフロー自身を変える PR ではレビューが動かない」とは **`success` か `fail` かで分かれる** |
 | **トークン消費が大きい** | レビューはセッション履歴を持たないため、毎回 PR 差分・`CLAUDE.md`・`REVIEW.md` を読み直す |
 | **PR の版の `CLAUDE.md` は読まれない** | ルートの `CLAUDE.md` は既定ブランチの版に差し替えられ、PR の版は `.claude-pr/CLAUDE.md` へ退避される（実測で確認。#46）。**レビュアーに効かせたい規則は `REVIEW.md` に書く。** `REVIEW.md` は PR の版がそのまま読まれる |
+
+## CD（本番へのリリース）
+
+GitHub フローに `release` ブランチを1本足した環境ブランチ方式（#671〜#674）。
+
+1. `main` への push（PR のマージ）をトリガーに、[cd.yml](.github/workflows/cd.yml) が
+   api・migrate イメージを linux/arm64 でビルドして ECR へ push し、成功したら `release`
+   ブランチをそのコミットまで進める（#672）
+2. `terraform apply`・マイグレーションの実行・ECS サービスの更新はここでは行わない。
+   本番への反映は、`release` ブランチから人が手動で [scripts/release.sh](scripts/release.sh)
+   を実行する（#673）
+
+**別のステージング環境は用意しない。** マイグレーション実行の完了確認・`terraform apply` の
+プランレビュー（yes と打つ前）・web 配置後の動作確認という `scripts/release.sh` 自体の段階が、
+「検証してから本番へ統合する」の実体になる。
+
+### 動かすために必要な設定
+
+| # | 作業 | 場所 |
+|---|---|---|
+| 1 | `infra/production` を apply し、`aws_iam_role.cd`（GitHub Actions の OIDC で引き受けるロール）を作る | `terraform -chdir=infra/production apply`（#671） |
+| 2 | `terraform output -raw cd_role_arn` で取得した値を登録する | Settings → Secrets and variables → Actions → Secret `AWS_CD_ROLE_ARN` |
+
+**1 を行うまで cd.yml は動かない。** `configure-aws-credentials` のステップで認証に失敗する。
+
+**長期のアクセスキーは使わない。** OIDC でロールを引き受け、信頼ポリシーの `sub` 条件で
+このリポジトリの `main` ブランチへの push だけに限定している（`infra/production/compute.tf`）。
 
 ## ライセンス
 
