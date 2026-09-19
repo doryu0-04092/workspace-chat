@@ -27,6 +27,14 @@ locals {
   alarm_rds_cpu_threshold_percent  = 80
   alarm_rds_cpu_evaluation_periods = 3
 
+  # RDS の接続数（実数。% ではない）。db.t4g.micro の実際の max_connections は未確認——
+  # PostgreSQL の既定値は LEAST({DBInstanceClassMemory/9531392}, 5000) で決まる（AWS の文書
+  # 「Maximum number of database connections」）が、DBInstanceClassMemory は OS・RDS の管理プロセス分を
+  # 差し引いた値であり、db.t4g.micro（1 GiB）での実際のバイト数は公開されていない。
+  # この値は暫定であり、次の apply の後に実インスタンスで `SHOW max_connections;` を確認して見直す（#669）。
+  alarm_rds_connections_threshold          = 60
+  alarm_rds_connections_evaluation_periods = 3
+
   # Valkey のメトリクス欠損。CurrConnections の欠測を breaching として扱い、欠損そのものを発火条件にする。
   # 値の閾値は使わない（接続数は 0 未満にならないため、0 未満を条件にしておく）。
   alarm_valkey_evaluation_periods = 2
@@ -119,6 +127,28 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
   comparison_operator = "GreaterThanThreshold"
   threshold           = local.alarm_rds_cpu_threshold_percent
   evaluation_periods  = local.alarm_rds_cpu_evaluation_periods
+  treat_missing_data  = "missing"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+}
+
+# --- RDS の接続数（要件定義書 4.6「DB 接続プール使用率」。#669） ---------------------------------
+#
+# アプリ側の各タスクのプール使用率そのものではなく、枯渇の実体である RDS 側の実接続数
+# （AWS/RDS の DatabaseConnections）を見る。技術スタック文書が「この規模を超えた場合に
+# 最初に詰まるのは RDS の接続数である」と識別した資源に直接対応する。
+
+resource "aws_cloudwatch_metric_alarm" "rds_database_connections" {
+  alarm_name          = "workspace-chat-rds-database-connections"
+  alarm_description   = "Database connections of the RDS instance"
+  namespace           = "AWS/RDS"
+  metric_name         = "DatabaseConnections"
+  statistic           = "Average"
+  period              = local.alarm_period_seconds
+  dimensions          = { DBInstanceIdentifier = aws_db_instance.main.identifier }
+  comparison_operator = "GreaterThanThreshold"
+  threshold           = local.alarm_rds_connections_threshold
+  evaluation_periods  = local.alarm_rds_connections_evaluation_periods
   treat_missing_data  = "missing"
   alarm_actions       = [aws_sns_topic.alerts.arn]
   ok_actions          = [aws_sns_topic.alerts.arn]
