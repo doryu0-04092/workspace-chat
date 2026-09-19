@@ -40,9 +40,17 @@ locals {
   # CD（GitHub Actions）の OIDC 連携（#671）。このロールを引き受けられるのは、この repo の main ブランチへの
   # push で動くワークフローだけに絞る（GitHub の文書「configuring-openid-connect-in-amazon-web-services」が
   # sub 条件でリポジトリ・ブランチを絞ることを勧める）。
+  #
+  # 踏むと壊れる: sub の値は owner_id・repo_id を含む不変形式にする（#679）。GitHub は 2026-04-23 に
+  # 「Immutable subject claims for GitHub Actions OIDC tokens」を導入し、2026-07-15 以降に作成した
+  # リポジトリ（このリポジトリは 2026-09-03 作成）は既定でこの形になる
+  # （https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/）。
+  # owner_id=292095077・repo_id=1355868496 は `gh api repos/doryu0-04092/workspace-chat` の
+  # owner.id・id で確認済み。**ID を外した従来形式（repo:doryu0-04092/workspace-chat:...）には戻さない**
+  # ——不変 ID は、リポジトリ名の再利用によるなりすましを防ぐための仕組みであり、外すと導入の意図を打ち消す。
   github_actions_oidc_url  = "https://token.actions.githubusercontent.com"
   github_actions_audience  = "sts.amazonaws.com"
-  github_repo_main_subject = "repo:doryu0-04092/workspace-chat:ref:refs/heads/main"
+  github_repo_main_subject = "repo:doryu0-04092@292095077/workspace-chat@1355868496:ref:refs/heads/main"
 
   # OIDC プロバイダーの thumbprint_list は Terraform のリソーススキーマ上は必須だが、AWS はもう検証に使わない
   # （GitHub と AWS が 2024 年末に、証明書チェーンでの検証に切り替えたため）。広く知られている値を置く。
