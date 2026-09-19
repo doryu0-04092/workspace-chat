@@ -166,7 +166,7 @@ ESM で出すと `apps/api` から素直に `import` できない。
 | 項目 | 採用 | バージョン | 理由 |
 |---|---|---|---|
 | DB | **PostgreSQL** | **17** | 検索以外のクエリが重いため（下記） |
-| 全文検索 | **pg_bigm**（2-gram 索引） | — | **難-5 の解決**。Amazon RDS for PostgreSQL が[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html)に挙げている（PostgreSQL 17 を含む。確認日 2026-09-05）。**実インスタンスでの `CREATE EXTENSION` は未確認**（下記） |
+| 全文検索 | **pg_bigm**（2-gram 索引） | — | **難-5 の解決**。Amazon RDS for PostgreSQL が[拡張機能一覧](https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html)に挙げている（PostgreSQL 17 を含む。確認日 2026-09-05）。**実インスタンスでの `CREATE EXTENSION` も確認済み**（2026-09-19。下記） |
 | 主キー | **UUIDv7** | — | 連番は資源の存在を漏らすため用いない。**UUIDv7 は先頭が時刻順であるため、UUIDv4 と違って索引の局所性を損なわない。** カーソルページネーションのカーソルにも使える |
 
 > **UUIDv7 の生成は Prisma 側で行う。** `@default(uuid(7))` は **Prisma v5.18.0 以降**で
@@ -520,9 +520,9 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 
 ### 実装時に検証する項目
 
-- **`CREATE EXTENSION pg_bigm` が RDS PostgreSQL 17 で通ること。** pg_bigm は PostgreSQL の
-  バージョンごとにビルドが必要なため、最初のマイグレーションで実際に確認する。
-  通らない場合は RDS PostgreSQL 18.4、または MySQL 8.4 の ngram 索引に切り替える
+- **`CREATE EXTENSION pg_bigm` が RDS PostgreSQL 17 で通ること。** **確認済み**（2026-09-19。
+  最初の本番apply後、`scripts/release.sh` のマイグレーション実行〔`20260917192455_message_search`
+  の `CREATE EXTENSION IF NOT EXISTS pg_bigm;`〕が終了コード 0 で完了した）
 - **文字符号化と照合順序が、3つの環境で揃っていること。**
   **pg_bigm の 2-gram 分割は文字符号化に依存する。**
   下の「ローカルでの確認結果（2026-09-04）」で索引が使われることを確かめたのはローカルであり、
@@ -589,7 +589,7 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 | 環境 | `postgres:17-bookworm`（**確認した時点の server_version は 17.11**）＋ pg_bigm をソースからビルド |
 | `CREATE EXTENSION pg_bigm` | **通った**（`extversion` は Dockerfile が固定する版に対応する。ここには書き写さない） |
 | `gin_bigm_ops` の索引が `LIKE '%…%'` で使われること | **確認した**（`Bitmap Index Scan` になる） |
-| RDS PostgreSQL 17 | **未確認**。Terraform で環境を作る段で確かめる |
+| RDS PostgreSQL 17 | **`CREATE EXTENSION` が通ることは確認済み**（2026-09-19。下記）。**索引が使われるか（`Bitmap Index Scan`）は未確認のまま**——実データに対する検索クエリの実行計画は見ていない |
 
 **pg_bigm は PGDG の apt リポジトリに存在しない**（bookworm / trixie の `Packages` を
 取得して検索し 0 件）。ローカルは [Dockerfile](../docker/postgres/Dockerfile) でビルドしている。
@@ -616,11 +616,12 @@ NestJS のコンストラクタインジェクションは、この指定が出�
 > 版番号は上の方針どおり本書に書き写さない。確認した時点では
 > [Dockerfile](../docker/postgres/Dockerfile) が固定している版と一致していた）。
 >
-> **それでも上の「未確認」は消せない。** 残っているのは同梱の有無ではなく、
-> **RDS の実インスタンスで `CREATE EXTENSION pg_bigm` を叩いていない**ことと、
-> **`shared_preload_libraries` をパラメータグループで設定していない**ことである。
-> ローカルで通ったことは、そのどちらも裏付けない。
-> **消してよいのは、RDS の実インスタンスで実行したときだけである。**
+> **上の「未確認」は消えた（2026-09-19）。** `infra/production/database.tf` が
+> `shared_preload_libraries` に `pg_bigm` を含むパラメータグループを設定した状態で、
+> 最初の本番 apply 後に `scripts/release.sh` のマイグレーション（`CREATE EXTENSION IF NOT EXISTS pg_bigm;`）
+> が実インスタンスに対して終了コード 0 で完了した。**残っているのは「文字符号化と照合順序が
+> ローカルと揃っているか」「索引が実際に使われるか（`Bitmap Index Scan`）」であり、これらは
+> 上の「実装時に検証する項目」の別項目が持つ、引き続き未確認の事項である。**
 
 #### Valkey の版（ローカル）——#24: Redis OSS から Valkey への移行（2026-09-04 承認）
 
