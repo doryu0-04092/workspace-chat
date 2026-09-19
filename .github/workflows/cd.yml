@@ -1,0 +1,88 @@
+name: cd
+
+# main への push（PR のマージ）をトリガーに、api・migrate イメージを linux/arm64 でビルドして
+# ECR へ push し、成功したら release ブランチをそのコミットまで進める（#672）。
+#
+# terraform apply・マイグレーションの実行・ECS サービスの更新はここでは行わない。
+# 本番への反映は、release ブランチから人が手動で行う（scripts/release.sh。#673）。
+#
+# 長期のアクセスキーは使わない。GitHub Actions の OIDC で、ECR への push だけができる
+# IAM ロール（infra/production/compute.tf の aws_iam_role.cd。#671）を引き受ける。
+
+on:
+  push:
+    branches: [main]
+
+# 連続で main に push（マージ）されても、release への反映は順番を保つ。打ち切ると
+# 先に走っていた分のイメージが ECR に残らないまま release だけ進むことになるため、
+# 打ち切らずに並ばせる。
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC でロールを引き受けるために要る
+  contents: write # release ブランチへ push するために要る
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # scripts/release.sh と同じ規則（git rev-parse --short HEAD）。人が手動リリースの手順で
+      # 同じコミットから同じタグを求め直せるようにする。
+      - name: イメージのタグ
+        id: tag
+        run: echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CD_ROLE_ARN }}
+          aws-region: ap-northeast-1
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # --pull: apps/api/Dockerfile の土台をレジストリから取り直す（scripts/release.sh の手順2と同じ理由。
+      # 土台は Dependabot で追わず、同じタグの中の更新をここで取り込む）。
+      - name: api・migrate イメージを linux/arm64 でビルドする
+        env:
+          API_IMAGE: ${{ steps.ecr.outputs.registry }}/workspace-chat-api:${{ steps.tag.outputs.value }}
+          MIGRATE_IMAGE: ${{ steps.ecr.outputs.registry }}/workspace-chat-migrate:${{ steps.tag.outputs.value }}
+        run: |
+          docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target runtime \
+            --tag "$API_IMAGE" --load .
+          docker buildx build --pull --platform linux/arm64 --file apps/api/Dockerfile --target migrate \
+            --tag "$MIGRATE_IMAGE" --load .
+
+      # ARM64 で動くことは通常の CI（amd64 で scripts/api-image.test.sh を回す）では確かめていない。
+      # push の前に、ネイティブモジュール（argon2）・Prisma の CLI・psql が ARM64 のイメージの中で動くことを見る
+      # （scripts/release.sh の手順2と同じ確認）。
+      - name: ARM64 で動くことを確かめる
+        env:
+          API_IMAGE: ${{ steps.ecr.outputs.registry }}/workspace-chat-api:${{ steps.tag.outputs.value }}
+          MIGRATE_IMAGE: ${{ steps.ecr.outputs.registry }}/workspace-chat-migrate:${{ steps.tag.outputs.value }}
+        run: |
+          docker run --rm --platform linux/arm64 --entrypoint node "$API_IMAGE" \
+            -e 'require(require("node:module").createRequire("/app/apps/api/dist/main.js").resolve("argon2"))'
+          docker run --rm --platform linux/arm64 --entrypoint node "$MIGRATE_IMAGE" \
+            node_modules/prisma/build/index.js --version >/dev/null
+          docker run --rm --platform linux/arm64 --entrypoint psql "$MIGRATE_IMAGE" --version
+
+      - name: ECR へ push する
+        env:
+          API_IMAGE: ${{ steps.ecr.outputs.registry }}/workspace-chat-api:${{ steps.tag.outputs.value }}
+          MIGRATE_IMAGE: ${{ steps.ecr.outputs.registry }}/workspace-chat-migrate:${{ steps.tag.outputs.value }}
+        run: |
+          docker push "$API_IMAGE"
+          docker push "$MIGRATE_IMAGE"
+
+      # fast-forward のみ（--force を付けない）。release が this push 以外の理由で先に進んでいたら、
+      # ここで失敗して気づける。
+      - name: release ブランチを進める
+        run: git push origin ${{ github.sha }}:refs/heads/release

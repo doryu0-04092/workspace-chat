@@ -45,3 +45,8 @@ output "cloudfront_distribution_id" {
   description = "web を置き換えた後にキャッシュを消すディストリビューション"
   value       = aws_cloudfront_distribution.main.id
 }
+
+output "cd_role_arn" {
+  description = "GitHub Actions の CD（cd.yml）が OIDC で引き受けるロール。値を AWS_CD_ROLE_ARN という名前の GitHub の Secret に手動で設定する（#671・#672）"
+  value       = aws_iam_role.cd.arn
+}
