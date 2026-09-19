@@ -646,7 +646,10 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
           {
             actions: ['"sts:AssumeRoleWithWebIdentity"'],
             principals: [
-              { type: '"Federated"', identifiers: ['aws_iam_openid_connect_provider.github_actions.arn'] },
+              {
+                type: '"Federated"',
+                identifiers: ['aws_iam_openid_connect_provider.github_actions.arn'],
+              },
             ],
             condition: [
               {
