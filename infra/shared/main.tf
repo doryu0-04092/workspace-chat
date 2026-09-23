@@ -7,6 +7,13 @@
 # - CD のビルド用ロール: ECR への push だけ
 #
 # 踏むと壊れる: この構成は環境の destroy の対象にしない。消すと、両方の環境がイメージを取れなくなり、CD が認証に失敗する。
+#
+# 踏むと壊れる（検査の条件）: apps/api/src/config/api-config-infra.test.ts の「共有の層（infra/shared）の IAM の面」が、このファイルを読む。
+# - 構成はこの main.tf だけに書き、ほかの .tf・.tf.json を置かず、module を呼ばない（検査はこのファイルしか読まない）
+# - IAM の面（aws_iam_ で始まるブロックと、policy・assume_role_policy を持つブロック）は、検査の表とちょうど同じかで照合する。
+#   足す・変えるときは、引き受けられる相手と、できる操作が広がらないことを確かめてから、表も直す。ポリシーは aws_iam_policy_document で書き、
+#   policy・assume_role_policy には data.aws_iam_policy_document.<名前>.json だけを渡す
+# - 信頼条件の値（github_actions_*・github_repo_main_subject）は、検査が値そのものを照合する
 
 terraform {
   # 1.11 以上: S3 バックエンドの use_lockfile（技術スタック「インフラ（AWS）」の IaC の行）。

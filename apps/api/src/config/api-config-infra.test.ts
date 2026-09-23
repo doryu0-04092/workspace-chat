@@ -809,10 +809,11 @@ const sharedDir = join(infraDir, '..', 'shared');
 describe('共有の層（infra/shared）の IAM の面', () => {
   const shared = withoutComments(readFileSync(join(sharedDir, 'main.tf'), 'utf8'));
 
-  it('Terraform が読むのは main.tf だけである（ほかのファイルに置いた構成を、この検査が読み落とさない）', () => {
+  it('Terraform が読むのは main.tf だけで、module も呼ばない（ほかの場所に置いた構成を、この検査が読み落とさない）', () => {
     expect(
       readdirSync(sharedDir).filter((file) => file.endsWith('.tf') || file.endsWith('.tf.json')),
     ).toEqual(['main.tf']);
+    expect(countOf(shared, /\bmodule\s+"/g)).toBe(0);
   });
 
   it('IAM の面（OIDC・CD のロール・ポリシー）は、表とちょうど同じである', () => {
