@@ -57,12 +57,12 @@ locals {
   # destroy のときに、イメージが入ったままのリポジトリも消す
   # （プロバイダーの文書「If `true`, will delete the repository even if it contains images.」）。
   ecr_force_delete = true
-
-  # 残すイメージの数（リポジトリごと。決定・2026-09-23・作業側。#685）。ECR は環境の destroy で消えなくなったため、
-  # 置いたままにすると main へのマージのたびにイメージが積み上がり、保管の費用が増え続ける。
-  # 代償: これより古いイメージは、ステージング・本番へ出し直せない（出し直すには、そのコミットから作り直す）。
-  ecr_keep_image_count = 10
 }
+
+# 踏むと壊れる: 数や日数で古いイメージを消すライフサイクルポリシーを置かない（決定・2026-09-23・作業側。#685）。
+# 本番が動かしているイメージは release ブランチのコミットのもので、main へのマージが続くと「古い側」に入る。
+# 消えていると、タスクの入れ替え（再起動・秘密の値の入れ替え・サーキットブレーカーのロールバック）でイメージを取れず、本番が止まる。
+# 代償: main へのマージのたびにイメージが積み上がり、保管の費用が増え続ける。要らなくなったものは人が消す（要件定義書 4.2「バックアップ」）。
 
 # --- イメージ -----------------------------------------------------------------
 #
@@ -76,24 +76,6 @@ resource "aws_ecr_repository" "api" {
 resource "aws_ecr_repository" "migrate" {
   name         = local.ecr_migrate_repository_name
   force_delete = local.ecr_force_delete
-}
-
-resource "aws_ecr_lifecycle_policy" "keep_recent" {
-  for_each   = { api = aws_ecr_repository.api.name, migrate = aws_ecr_repository.migrate.name }
-  repository = each.value
-
-  policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "keep the most recent images"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = local.ecr_keep_image_count
-      }
-      action = { type = "expire" }
-    }]
-  })
 }
 
 # --- CD（GitHub Actions。#671） ---------------------------------------------------
