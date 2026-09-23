@@ -44,7 +44,7 @@ export const INVALID_TOKEN: BearerErrorResponse = {
  * - **end**: ログアウトで系列ごと失効させる
  *
  * **失効済みのトークンが出されたら、不正アクセスの疑いとして記録する**（`refresh_token_reuse`。系列と利用者の ID だけを載せ、
- * トークンは載せない。決定・2026-09-12・依頼側。#270）。アラートは要件定義書 4.2（ログを数える）。
+ * トークンは載せない。決定・2026-09-12・依頼側。#270）。アラートにはしない（要件定義書 4.2「アラート」）。
  */
 @Injectable()
 export class SessionService {
