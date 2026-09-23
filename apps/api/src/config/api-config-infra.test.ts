@@ -635,64 +635,6 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
         role: 'aws_iam_role.upload_signer.id',
         policy: 'data.aws_iam_policy_document.upload_signer.json',
       },
-      // CD（GitHub Actions。#671）: OIDC で引き受けるロール。ECR への push だけができ、秘密のパラメータには触れない。
-      'resource.aws_iam_openid_connect_provider.github_actions': {
-        url: 'local.github_actions_oidc_url',
-        client_id_list: ['local.github_actions_audience'],
-        thumbprint_list: ['local.github_actions_oidc_thumbprint'],
-      },
-      'data.aws_iam_policy_document.cd_assume': {
-        statement: [
-          {
-            actions: ['"sts:AssumeRoleWithWebIdentity"'],
-            principals: [
-              {
-                type: '"Federated"',
-                identifiers: ['aws_iam_openid_connect_provider.github_actions.arn'],
-              },
-            ],
-            condition: [
-              {
-                test: '"StringEquals"',
-                variable: '"token.actions.githubusercontent.com:aud"',
-                values: ['local.github_actions_audience'],
-              },
-              {
-                test: '"StringEquals"',
-                variable: '"token.actions.githubusercontent.com:sub"',
-                values: ['local.github_repo_main_subject'],
-              },
-            ],
-          },
-        ],
-      },
-      'resource.aws_iam_role.cd': {
-        name: '"workspace-chat-cd"',
-        assume_role_policy: 'data.aws_iam_policy_document.cd_assume.json',
-      },
-      'data.aws_iam_policy_document.cd_ecr': {
-        statement: [
-          {
-            actions: ['"ecr:GetAuthorizationToken"'],
-            resources: ['"*"'],
-          },
-          {
-            actions: [
-              '"ecr:BatchCheckLayerAvailability"',
-              '"ecr:PutImage"',
-              '"ecr:InitiateLayerUpload"',
-              '"ecr:UploadLayerPart"',
-              '"ecr:CompleteLayerUpload"',
-            ],
-            resources: ['aws_ecr_repository.api.arn', 'aws_ecr_repository.migrate.arn'],
-          },
-        ],
-      },
-      'resource.aws_iam_role_policy.cd_ecr': {
-        name: '"ecr-push"',
-        role: 'aws_iam_role.cd.id',
-        policy: 'data.aws_iam_policy_document.cd_ecr.json',
-      },
       // 添付のバケット: CloudFront（このディストリビューション）は配信用の接頭辞だけを読める。配信用の接頭辞へ書けるのは api のタスクロールだけ。
       // **「CloudFront の OAC からのみ」に閉じない**（閉じると、ブラウザから quarantine/ への署名付き PUT が通らない。#427）。
       'data.aws_iam_policy_document.attachments_bucket': {

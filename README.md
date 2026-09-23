@@ -538,13 +538,13 @@ GitHub フローに `release` ブランチを1本足した環境ブランチ方�
 
 | # | 作業 | 場所 |
 |---|---|---|
-| 1 | `infra/production` を apply し、`aws_iam_role.cd`（GitHub Actions の OIDC で引き受けるロール）を作る | `terraform -chdir=infra/production apply`（#671） |
-| 2 | `terraform output -raw cd_role_arn` で取得した値を登録する | Settings → Secrets and variables → Actions → Secret `AWS_CD_ROLE_ARN` |
+| 1 | 共有の層 `infra/shared` を apply し、`aws_iam_role.cd`（GitHub Actions の OIDC で引き受けるロール）と ECR を作る | `scripts/release.sh` の手順 1、または `terraform -chdir=infra/shared apply`（#671・#685） |
+| 2 | `terraform -chdir=infra/shared output -raw cd_role_arn` で取得した値を登録する | Settings → Secrets and variables → Actions → Secret `AWS_CD_ROLE_ARN` |
 
 **1 を行うまで cd.yml は動かない。** `configure-aws-credentials` のステップで認証に失敗する。
 
 **長期のアクセスキーは使わない。** OIDC でロールを引き受け、信頼ポリシーの `sub` 条件で
-このリポジトリの `main` ブランチへの push だけに限定している（`infra/production/compute.tf`）。
+このリポジトリの `main` ブランチへの push だけに限定している（`infra/shared/main.tf`）。
 
 ## ライセンス
 
