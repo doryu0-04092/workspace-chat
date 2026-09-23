@@ -35,7 +35,7 @@ locals {
   # Terraform は値を作らず読まず（state とプランに鍵を残さない）、名前から ARN を組み立てて secrets と ssm:GetParameters に渡すだけにする。
   # 踏むと壊れる: 名前を変えるときは、スクリプトの名前も同じに直す（apps/api/src/config/api-config-infra.test.ts の externalParameters が照合する）。
   # apply の前にパラメータが置かれていないと、api のタスクが起動しない（ECS が secrets を読めない）。
-  cloudfront_private_key_parameter_name = "/workspace-chat/CLOUDFRONT_PRIVATE_KEY"
+  cloudfront_private_key_parameter_name = "/${local.name}/CLOUDFRONT_PRIVATE_KEY"
   cloudfront_private_key_parameter_arn  = "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter${local.cloudfront_private_key_parameter_name}"
 }
 
@@ -54,7 +54,7 @@ data "aws_ecr_repository" "migrate" {
 # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順が、このクラスターを
 # outputs.tf の ecs_cluster_name 経由で指す**（aws ecs update-service / list-tasks / wait の --cluster）。
 resource "aws_ecs_cluster" "main" {
-  name = "workspace-chat"
+  name = local.name
 }
 
 # --- IAM のロール ---------------------------------------------------------------
@@ -81,7 +81,7 @@ data "aws_iam_policy_document" "ecs_tasks_assume" {
 # role はロールの参照（aws_iam_role.task_execution）で書き、ロール名の文字列で書かない。ロールのブロックに managed_policy_arns・inline_policy を書かない。
 # パラメータを読む操作（ssm:GetParameters）は task_execution_parameters の1箇所だけに書く。apps/api/src/config/api-config-infra.test.ts が確かめる。
 resource "aws_iam_role" "task_execution" {
-  name               = "workspace-chat-task-execution"
+  name               = "${local.name}-task-execution"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
@@ -119,7 +119,7 @@ resource "aws_iam_role_policy" "task_execution_parameters" {
 # 運用者がその権限を得る（要件定義書 4.2 手順 5 の「踏むと壊れる」）。この権限を api のタスクのタスクロールに付けない。api のタスクに入ると
 # JWT_SECRET に届き、認証の外に出る。
 resource "aws_iam_role" "migrate_task" {
-  name               = "workspace-chat-migrate-task"
+  name               = "${local.name}-migrate-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
@@ -147,7 +147,7 @@ resource "aws_iam_role_policy" "task_exec_command" {
 # 同じプリンシパルで署名すると、ブラウザからの PUT が配信用のキーへも通る（署名付き URL への PUT は署名したプリンシパルとして認証される）。
 # 踏むと壊れる: このロールに ssmmessages の権限を足さない・api のサービスで ECS Exec を有効にしない（service.tf の api_enable_execute_command）。
 resource "aws_iam_role" "api_task" {
-  name               = "workspace-chat-api-task"
+  name               = "${local.name}-api-task"
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
@@ -195,7 +195,7 @@ data "aws_iam_policy_document" "upload_signer_assume" {
 }
 
 resource "aws_iam_role" "upload_signer" {
-  name               = "workspace-chat-upload-signer"
+  name               = "${local.name}-upload-signer"
   assume_role_policy = data.aws_iam_policy_document.upload_signer_assume.json
 }
 
@@ -215,7 +215,7 @@ resource "aws_iam_role_policy" "upload_signer" {
 # --- ALB ----------------------------------------------------------------------
 
 resource "aws_lb" "api" {
-  name               = "workspace-chat-api"
+  name               = "${local.name}-api"
   internal           = local.alb_internal
   load_balancer_type = local.alb_type
   subnets            = aws_subnet.private[*].id
@@ -223,7 +223,7 @@ resource "aws_lb" "api" {
 }
 
 resource "aws_lb_target_group" "api" {
-  name        = "workspace-chat-api"
+  name        = "${local.name}-api"
   port        = local.api_port
   protocol    = local.api_target_protocol
   target_type = local.api_target_type

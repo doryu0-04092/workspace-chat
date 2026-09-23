@@ -51,17 +51,17 @@ locals {
 data "aws_region" "current" {}
 
 resource "aws_cloudwatch_log_group" "api" {
-  name              = "/ecs/workspace-chat-api"
+  name              = "/ecs/${local.name}-api"
   retention_in_days = local.log_retention_days
 }
 
 resource "aws_cloudwatch_log_group" "migrate" {
-  name              = "/ecs/workspace-chat-migrate"
+  name              = "/ecs/${local.name}-migrate"
   retention_in_days = local.log_retention_days
 }
 
 resource "aws_ecs_task_definition" "api" {
-  family                   = "workspace-chat-api"
+  family                   = "${local.name}-api"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = local.api_task_cpu
@@ -129,7 +129,7 @@ resource "aws_ecs_task_definition" "api" {
 # 踏むと壊れる: マイグレーション用のタスク定義の secrets には DATABASE_URL だけを置き、タスクロールは compute.tf の migrate_task にする
 # （運用者が ECS Exec で入る先であり、JWT_SECRET などを足すと認証の外に出る。要件定義書 4.2 手順 5 の「踏むと壊れる」）。
 resource "aws_ecs_task_definition" "migrate" {
-  family                   = "workspace-chat-migrate"
+  family                   = "${local.name}-migrate"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = local.migrate_task_cpu
@@ -163,7 +163,7 @@ resource "aws_ecs_task_definition" "migrate" {
 }
 
 resource "aws_ecs_service" "api" {
-  name            = "workspace-chat-api"
+  name            = "${local.name}-api"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.api.arn
   # 踏むと壊れる: **この desired_count に lifecycle { ignore_changes } を置かない。**

@@ -95,12 +95,12 @@ ephemeral "random_password" "db_password" {
 }
 
 resource "aws_db_subnet_group" "main" {
-  name       = "workspace-chat-db"
+  name       = "${local.name}-db"
   subnet_ids = aws_subnet.private[*].id
 }
 
 resource "aws_db_parameter_group" "main" {
-  name   = "workspace-chat-postgres"
+  name   = "${local.name}-postgres"
   family = local.db_parameter_group_family
 
   parameter {
@@ -121,7 +121,7 @@ resource "aws_db_parameter_group" "main" {
 resource "aws_db_instance" "main" {
   # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順 3 が、この識別子をリテラルで打っている**
   # （aws rds describe-db-instances --db-instance-identifier workspace-chat）。変えるとその段が対象を見つけられない。
-  identifier = "workspace-chat"
+  identifier = local.name
   db_name    = "workspace_chat"
   username   = "workspace_chat"
 
@@ -158,7 +158,7 @@ resource "aws_db_instance" "main" {
 # **4.2 の段だけが対象を見つけられなくなる**（落ちる位置は前置きの弾く段で、api を止める前ではある）。
 # 踏むと壊れる: **4.2 の RDS の箇条が、このアドレス（aws_ssm_parameter.database_url）を -target で打っている。**
 resource "aws_ssm_parameter" "database_url" {
-  name             = "/workspace-chat/DATABASE_URL"
+  name             = "/${local.name}/DATABASE_URL"
   type             = local.parameter_type
   tier             = local.parameter_tier
   value_wo         = "postgresql://${aws_db_instance.main.username}:${ephemeral.random_password.db_password.result}@${aws_db_instance.main.address}:${local.db_port}/${aws_db_instance.main.db_name}?${local.db_url_tls_parameters}"

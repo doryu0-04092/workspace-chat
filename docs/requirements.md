@@ -523,6 +523,9 @@ S3 側の3つの手順すべてが認可の外に出る（削除済みの旧バ�
 
   TF_STATE_BUCKET=$(terraform -chdir="$repo/infra/bootstrap" output -raw state_bucket)
   tf init -input=false -backend-config="bucket=$TF_STATE_BUCKET"
+  # **本番（default の workspace）に当たっていることを確かめる**——`terraform workspace select` の選択や
+  # TF_WORKSPACE が残っていると、この手順がステージングに当たる（infra/production/main.tf の locals。#686）
+  [ "$(tf workspace show)" = default ] && echo "本番に当たっている" || echo "本番（default）の workspace ではない。先へ進まない"
   cluster=$(tf output -raw ecs_cluster_name)
   service=$(tf output -raw ecs_service_name)
 
@@ -908,7 +911,7 @@ Range リクエストの再試行**をクライアントに実装することに
 - リクエストごとに ID を発行し、そのリクエスト中の全ログに付与する
 - **WebSocket の接続数・切断率・配信遅延をメトリクスとして記録する。** リアルタイム配信が
   中核機能である以上、これが見えないと障害の切り分けができない。
-  **出し方（決定・2026-09-12・依頼側。#287）: 構造化ログ（`websocket_connected` / `websocket_disconnected`）と、CloudWatch の埋め込みメトリクス形式（EMF）の行を、どちらも標準出力に出す**（`apps/api/src/logging/metrics.ts`。SDK も依存も足さない。ログの出力先が CloudWatch Logs でないとメトリクスにならない）。接続数はタスクごとの現在値、切断率は接続と切断の回数の比から取る。**配信遅延は、サーバーが自発的に配るイベントの payload に送信時刻を載せる形になるため、チャンネルの実装で足す**（応答〔acknowledgement〕は対象外。範囲は [機能一覧](features.md) 5.2）
+  **出し方（決定・2026-09-12・依頼側。#287）: 構造化ログ（`websocket_connected` / `websocket_disconnected`）と、CloudWatch の埋め込みメトリクス形式（EMF）の行を、どちらも標準出力に出す**（`apps/api/src/logging/metrics.ts`。SDK も依存も足さない。ログの出力先が CloudWatch Logs でないとメトリクスにならない）。**名前空間（`workspace-chat/api`）は環境をまたいで同じであり、ステージングを立てている間は本番の値と合算される**（代償。環境ごとに分けるにはアプリの設定を1つ足す必要があり、ステージングは検証のときだけ立てるため分けない。#686）。接続数はタスクごとの現在値、切断率は接続と切断の回数の比から取る。**配信遅延は、サーバーが自発的に配るイベントの payload に送信時刻を載せる形になるため、チャンネルの実装で足す**（応答〔acknowledgement〕は対象外。範囲は [機能一覧](features.md) 5.2）
 
 - 監視項目: リクエスト数 / エラー率 / p95 レイテンシ / WebSocket 接続数 / DB 接続プール使用率 / RDS CPU / 5xx 率（ALB のメトリクス） / Valkey の接続数（ElastiCache の `CurrConnections`） / レート制限の超過と失効済みのリフレッシュトークンの再利用（構造化ログ）。**いずれも運用者が CloudWatch で見に行くものであり、アラートにはしない**（4.2「アラート」）
 ### 4.7 保守性

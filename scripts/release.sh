@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# 本番へのリリース（#452。ビルド・push を CD へ移した分割は #673）。AWS の資格情報が入った端末で流す。
+# 本番・ステージングへのリリース（#452。ビルド・push を CD へ移した分割は #673。環境の指定は #686）。AWS の資格情報が入った端末で流す。
 # **費用が発生し、AWS にリソースを作る。**
+#
+# 環境は ENVIRONMENT（production か staging）で選ぶ。どちらも infra/production の同じ構成を当て、
+# Terraform の workspace（production は default、staging は staging）で state と資源の名前が分かれる（main.tf の locals）。
+# workspace は手元に残らない TF_WORKSPACE で選ぶ（`terraform workspace select` は .terraform/ に残り、
+# その後に流す本番の手順——要件定義書 4.2——をステージングに当ててしまうため）。
 #
 #   1. 共有の層（infra/shared。OIDC・ECR・CD（.github/workflows/cd.yml）のロール）を apply する（初回は作る。2回目以降は差分が無い。#685）
 #   2. IMAGE_TAG のイメージが ECR に既に push されていることを確かめる
@@ -22,10 +27,14 @@
 # の値を、GitHub の Secrets に AWS_CD_ROLE_ARN という名前で設定する。設定するまで CD（cd.yml）は動かない。
 # CD がイメージを push するのは、この設定の後に main へマージしたときである（手順 2 はそのイメージを探す）。
 #
+# 前段（環境ごとに初回だけ）: CloudFront の署名鍵の対を作る（`bash scripts/cloudfront-signing-key.sh <環境>`）。
+#
 # 使い方:
 #   TF_STATE_BUCKET=$(terraform -chdir=infra/bootstrap output -raw state_bucket) \
-#     IMAGE_TAG=<release ブランチで CD が push した短い SHA> bash scripts/release.sh
-#   IMAGE_TAG は release ブランチの `git rev-parse --short HEAD`、または CD（cd.yml）の実行結果から読む。
+#     ENVIRONMENT=production IMAGE_TAG=<release ブランチで CD が push した短い SHA> bash scripts/release.sh
+#   本番の IMAGE_TAG は release ブランチの `git rev-parse --short HEAD`、または CD（cd.yml）の実行結果から読む。
+#   ステージングの IMAGE_TAG は main の `git rev-parse --short HEAD` を渡す。
+#   **ステージングは検証が終わったら destroy する**（費用。README の CD の節）。
 #
 # 前提: aws（資格情報と ap-northeast-1）・terraform・node と npm。
 # **docker は要らない**——ビルド・push は CD（GitHub Actions）が行うため、この端末に arm64 のクロスビルド環境は不要になった（#673）。
@@ -42,20 +51,38 @@ fail() {
 }
 
 : "${TF_STATE_BUCKET:?state のバケット名を TF_STATE_BUCKET に渡す}"
-: "${IMAGE_TAG:?イメージのタグを IMAGE_TAG に渡す（release ブランチで CD が push したタグ）}"
+: "${ENVIRONMENT:?環境（production か staging）を ENVIRONMENT に渡す}"
+: "${IMAGE_TAG:?イメージのタグを IMAGE_TAG に渡す（CD が push したタグ）}"
+
+# 踏むと壊れる: workspace と環境の対応は infra/production/main.tf の locals（environment）と揃える。
+case "$ENVIRONMENT" in
+  production) workspace=default ;;
+  staging) workspace=staging ;;
+  *) fail "ENVIRONMENT は production か staging にする: $ENVIRONMENT" ;;
+esac
 
 export TF_VAR_image_tag="$IMAGE_TAG"
 
 tf() {
-  terraform -chdir=infra/production "$@"
+  TF_WORKSPACE="$workspace" terraform -chdir=infra/production "$@"
 }
 
 tf_shared() {
   terraform -chdir=infra/shared "$@"
 }
 
-tf init -input=false -backend-config="bucket=$TF_STATE_BUCKET" >/dev/null
+# init は workspace を指定せずに流す（まだ無い workspace を TF_WORKSPACE で指すと init が進めない）。
+terraform -chdir=infra/production init -input=false -backend-config="bucket=$TF_STATE_BUCKET" >/dev/null
 tf_shared init -input=false -backend-config="bucket=$TF_STATE_BUCKET" >/dev/null
+
+# ステージングの workspace は初回だけ作る。`workspace new` は作った workspace を選んだまま残すため、default に戻す。
+if [ "$workspace" != default ] &&
+  ! terraform -chdir=infra/production workspace list | sed 's/^[* ]*//' | grep -qx "$workspace"; then
+  terraform -chdir=infra/production workspace new "$workspace" >/dev/null
+  terraform -chdir=infra/production workspace select default >/dev/null
+fi
+[ "$(tf workspace show)" = "$workspace" ] || fail "workspace が $workspace にならない"
+echo "== 環境: $ENVIRONMENT（workspace: $workspace）"
 
 echo "== 1. 共有の層（OIDC・ECR・CD のロール）"
 tf_shared apply -input=false
@@ -103,7 +130,7 @@ fi
 aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
 exit_code=$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
   --query 'tasks[0].containers[0].exitCode' --output text)
-[ "$exit_code" = "0" ] || fail "マイグレーションが終了コード $exit_code で終わった（ロググループ /ecs/workspace-chat-migrate を見る）"
+[ "$exit_code" = "0" ] || fail "マイグレーションが終了コード $exit_code で終わった（ロググループ /ecs/<名前>-migrate を見る。本番は /ecs/workspace-chat-migrate）"
 
 echo "== 5. 残りを apply し、api のサービスが安定するまで待つ"
 tf apply -input=false
