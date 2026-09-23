@@ -30,8 +30,11 @@ migrate_family="${name}-migrate"
 
 mode="${1:-}"
 
-staging_exists() {
-  [ "$(aws ecs describe-clusters --clusters "$cluster" --query 'clusters[0].status' --output text)" = "ACTIVE" ]
+# クラスターの状態（無ければ None）。
+# 踏むと壊れる: この呼び出しを if の条件式や $(...) の中の比較に入れない。そこでは set -e が効かず、権限不足や通信の失敗が
+# 「立っていない」と同じに扱われ、デプロイ用のロールが壊れても CD が緑のまま飛ばし続ける。代入の形で呼び、失敗はその場で落とす。
+cluster_status() {
+  aws ecs describe-clusters --clusters "$cluster" --query 'clusters[0].status' --output text
 }
 
 # タスク定義（family か ARN）を、イメージのタグだけ替えて新しい版として登録し、その ARN を出す。
@@ -52,12 +55,14 @@ register_with_image() {
 
 case "$mode" in
   exists)
-    if staging_exists; then echo true; else echo false; fi
+    status=$(cluster_status)
+    if [ "$status" = "ACTIVE" ]; then echo true; else echo false; fi
     ;;
   deploy)
     : "${IMAGE_TAG:?イメージのタグを IMAGE_TAG に渡す（CD が push したタグ）}"
     : "${WEB_DIST:?ビルド済みの web のディレクトリを WEB_DIST に渡す}"
-    if ! staging_exists; then
+    status=$(cluster_status)
+    if [ "$status" != "ACTIVE" ]; then
       echo "ステージングが立っていない（クラスター $cluster が無い）。デプロイを飛ばす"
       exit 0
     fi

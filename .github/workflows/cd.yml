@@ -109,7 +109,10 @@ jobs:
       - name: ステージングが立っているか
         id: staging
         if: steps.configured.outputs.value == 'true'
-        run: echo "exists=$(bash scripts/deploy-staging.sh exists)" >> "$GITHUB_OUTPUT"
+        # 代入の行で呼ぶ（echo の引数の中の $(...) は、失敗しても step を落とさない）。確かめられなかったら赤にする。
+        run: |
+          exists=$(bash scripts/deploy-staging.sh exists)
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
 
       - name: 飛ばす
         if: steps.staging.outputs.exists != 'true'

@@ -23,6 +23,11 @@ cat >"$work/bin/aws" <<'FAKE'
 # 偽の aws。呼び出しを1行ずつ記録し、場面（FAKE_*）に応じた値を返す。
 echo "$*" >>"$FAKE_LOG"
 args="$*"
+# FAKE_FAIL に当たる呼び出しは、本物の aws が権限不足・通信の失敗で落ちたときと同じく、0 以外で終える。
+if [ -n "${FAKE_FAIL:-}" ] && [ "$1 $2" = "$FAKE_FAIL" ]; then
+  echo "An error occurred (AccessDeniedException)" >&2
+  exit 255
+fi
 case "$1 $2" in
   "sts get-caller-identity") echo 111122223333 ;;
   "ecs describe-clusters") echo "$FAKE_CLUSTER_STATUS" ;;
@@ -134,6 +139,18 @@ echo "== 5. IMAGE_TAG が無ければ何もしないで落とす"
 run no-tag deploy IMAGE_TAG=
 d="$work/no-tag"
 [ "$(cat "$d/exit")" != 0 ] && [ ! -s "$d/aws.log" ] && ok "aws を呼ばずに落ちる" || ng "IMAGE_TAG が無いのに進んだ" "$d"
+
+echo "== 6. AWS の呼び出しが落ちたら、立っていないと見なさずに落とす（権限の誤りを緑のまま隠さない）"
+run cluster-denied-exists exists FAKE_FAIL="ecs describe-clusters"
+d="$work/cluster-denied-exists"
+[ "$(cat "$d/exit")" != 0 ] && ok "exists は exit 0 以外" || ng "describe-clusters が落ちたのに exists が成功した" "$d"
+run cluster-denied-deploy deploy FAKE_FAIL="ecs describe-clusters"
+d="$work/cluster-denied-deploy"
+[ "$(cat "$d/exit")" != 0 ] && ok "deploy は exit 0 以外" || ng "describe-clusters が落ちたのに deploy が飛ばして成功した" "$d"
+run register-denied deploy FAKE_FAIL="ecs register-task-definition"
+d="$work/register-denied"
+[ "$(cat "$d/exit")" != 0 ] && ! grep -qE 'run-task|update-service|s3 ' "$d/aws.log" &&
+  ok "登録が落ちたら、マイグレーションもサービスの更新もしない" || ng "登録が落ちたのに進んだ" "$d"
 
 if [ "$fail" = 0 ]; then
   echo "ステージングへのデプロイの手順の検査を通過した"
