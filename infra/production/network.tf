@@ -26,7 +26,15 @@ resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
 
   tags = {
-    Name = "workspace-chat"
+    Name = local.name
+  }
+
+  # 決めた環境の外の workspace（打ち間違いなど）で plan を始めない。すべての資源はこの VPC の後に作られる。
+  lifecycle {
+    precondition {
+      condition     = contains(local.allowed_environments, local.environment)
+      error_message = "workspace は default（本番）か staging にする（main.tf の locals）。"
+    }
   }
 }
 
@@ -35,7 +43,7 @@ resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "workspace-chat"
+    Name = local.name
   }
 }
 
@@ -47,7 +55,7 @@ resource "aws_subnet" "public" {
   cidr_block        = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index)
 
   tags = {
-    Name = "workspace-chat-public-${local.azs[count.index]}"
+    Name = "${local.name}-public-${local.azs[count.index]}"
   }
 }
 
@@ -59,7 +67,7 @@ resource "aws_subnet" "private" {
   cidr_block        = cidrsubnet(aws_vpc.main.cidr_block, 8, 10 + count.index)
 
   tags = {
-    Name = "workspace-chat-private-${local.azs[count.index]}"
+    Name = "${local.name}-private-${local.azs[count.index]}"
   }
 }
 
@@ -72,7 +80,7 @@ resource "aws_route_table" "public" {
   }
 
   tags = {
-    Name = "workspace-chat-public"
+    Name = "${local.name}-public"
   }
 }
 
@@ -91,7 +99,7 @@ resource "aws_route_table" "private" {
   route  = []
 
   tags = {
-    Name = "workspace-chat-private"
+    Name = "${local.name}-private"
   }
 }
 
@@ -116,22 +124,22 @@ resource "aws_route_table_association" "private" {
 # 手順 3 の -target にも足す。足さないと、初回のリリースで手順 4 の run-task が規則の無いまま失敗する。
 
 resource "aws_security_group" "alb" {
-  name   = "workspace-chat-alb"
+  name   = "${local.name}-alb"
   vpc_id = aws_vpc.main.id
 }
 
 resource "aws_security_group" "task" {
-  name   = "workspace-chat-task"
+  name   = "${local.name}-task"
   vpc_id = aws_vpc.main.id
 }
 
 resource "aws_security_group" "db" {
-  name   = "workspace-chat-db"
+  name   = "${local.name}-db"
   vpc_id = aws_vpc.main.id
 }
 
 resource "aws_security_group" "valkey" {
-  name   = "workspace-chat-valkey"
+  name   = "${local.name}-valkey"
   vpc_id = aws_vpc.main.id
 }
 

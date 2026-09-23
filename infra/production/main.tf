@@ -53,4 +53,32 @@ terraform {
 
 provider "aws" {
   region = "ap-northeast-1"
+
+  # どちらの環境の資源かをコンソールで見分ける。CD のステージングへのデプロイ用ロールは、このタグで CloudFront を絞る（#686）。
+  default_tags {
+    tags = {
+      Project     = local.project_name
+      Environment = local.environment
+    }
+  }
+}
+
+# 同じ構成を本番とステージングに当てる（#686）。環境は Terraform の workspace で選ぶ:
+#   default → production（名前は今までどおり workspace-chat*）
+#   staging → staging（名前は workspace-chat-staging*。state は同じバケットの env:/staging/ の下に分かれる）
+# 環境名を変数で渡さないのは、state の置き場（workspace）と環境名が食い違わないようにするためである——食い違うと、
+# ステージングのつもりで本番の state に当て、本番の資源の名前をすべて変える plan ができる。
+#
+# 踏むと壊れる: 資源の名前は local.name から組み立てる。workspace-chat を直書きしない（例外は project_name と、
+# 環境をまたいで共有する ECR の名前だけ。apps/api/src/config/api-config-infra.test.ts が確かめる）。
+# 直書きした名前は2つの環境で同じになり、作成の API が同名の既存を返す資源では、もう一方の環境の資源を state に取り込む。
+#
+# 踏むと壊れる: workspace を `terraform workspace select` で選ぶと、手元の .terraform/ に残る。その後に本番の手順
+# （要件定義書 4.2）を流すとステージングに当たる。scripts/release.sh は、手元に残らない TF_WORKSPACE で選ぶ。
+locals {
+  project_name         = "workspace-chat"
+  allowed_environments = ["production", "staging"]
+
+  environment = terraform.workspace == "default" ? "production" : terraform.workspace
+  name        = local.environment == "production" ? local.project_name : "${local.project_name}-${local.environment}"
 }

@@ -17,10 +17,11 @@ locals {
   avatars_path_pattern               = "/avatars/*"
   attachments_viewer_protocol_policy = "redirect-to-https"
 
-  # 署名付き Cookie の公開鍵（#427）。鍵の対は Terraform の外で作り（scripts/cloudfront-signing-key.sh）、公開鍵を keys/<名前>.pem に置く。
-  # keys/ の PEM はすべてキーグループに入る（入れ替えの間は新旧の2つを置き、配信を止めない）。
-  cloudfront_public_key_names = toset([for file in fileset("${path.module}/keys", "*.pem") : trimsuffix(file, ".pem")])
-  # api が署名に使う鍵の名前（keys/<名前>.pem）。Parameter Store の秘密鍵（compute.tf の cloudfront_private_key_parameter_name）と対のもの。
+  # 署名付き Cookie の公開鍵（#427）。鍵の対は Terraform の外で作り（scripts/cloudfront-signing-key.sh）、公開鍵を keys/<環境>/<名前>.pem に置く。
+  # keys/<環境>/ の PEM はすべてその環境のキーグループに入る（入れ替えの間は新旧の2つを置き、配信を止めない）。
+  # 環境ごとに分ける（#686）: 秘密鍵のパラメータも環境ごとであり、もう一方の環境の公開鍵を入れると、対にならない鍵をキーグループが受け入れる。
+  cloudfront_public_key_names = toset([for file in fileset("${path.module}/keys/${local.environment}", "*.pem") : trimsuffix(file, ".pem")])
+  # api が署名に使う鍵の名前（keys/<環境>/<名前>.pem）。Parameter Store の秘密鍵（compute.tf の cloudfront_private_key_parameter_name）と対のもの。
   # 踏むと壊れる: スクリプトの既定の名前と揃える（検査が照合する）。この名前と Parameter Store の秘密鍵が対でないと、
   # api は起動するが、発行した Cookie がすべて署名の検査に落ちる（validate も plan も CI も落ちない）。
   cloudfront_signing_key_name = "signing-1"
@@ -74,7 +75,7 @@ locals {
 
 resource "aws_s3_bucket" "web" {
   # バケット名はすべての AWS アカウントで一意である。アカウント ID を含めて衝突を避ける。
-  bucket        = "workspace-chat-web-${data.aws_caller_identity.current.account_id}"
+  bucket        = "${local.name}-web-${data.aws_caller_identity.current.account_id}"
   force_destroy = local.web_force_destroy
 }
 
@@ -88,7 +89,7 @@ resource "aws_s3_bucket_public_access_block" "web" {
 }
 
 resource "aws_cloudfront_origin_access_control" "web" {
-  name                              = "workspace-chat-web"
+  name                              = "${local.name}-web"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
@@ -122,7 +123,7 @@ resource "aws_s3_bucket_policy" "web" {
 # 画面の URL（拡張子の無いパス）を web の入口（/index.html）に書き換える。コードと検査は functions/spa-rewrite.js と
 # scripts/cloudfront-functions.test.mjs。/api/* はこの関数を通らない（既定のビヘイビアにだけ付ける）。
 resource "aws_cloudfront_function" "spa_rewrite" {
-  name    = "workspace-chat-spa-rewrite"
+  name    = "${local.name}-spa-rewrite"
   runtime = "cloudfront-js-2.0"
   publish = true
   code    = file("${path.module}/functions/spa-rewrite.js")
@@ -133,7 +134,7 @@ resource "aws_cloudfront_function" "spa_rewrite" {
 # バケットとそのポリシーは attachments.tf にある。
 
 resource "aws_cloudfront_origin_access_control" "attachments" {
-  name                              = "workspace-chat-attachments"
+  name                              = "${local.name}-attachments"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
@@ -143,18 +144,18 @@ resource "aws_cloudfront_origin_access_control" "attachments" {
 resource "aws_cloudfront_public_key" "signing" {
   for_each = local.cloudfront_public_key_names
 
-  name        = "workspace-chat-${each.key}"
-  encoded_key = file("${path.module}/keys/${each.key}.pem")
+  name        = "${local.name}-${each.key}"
+  encoded_key = file("${path.module}/keys/${local.environment}/${each.key}.pem")
 }
 
 resource "aws_cloudfront_key_group" "signed_cookies" {
-  name  = "workspace-chat-signed-cookies"
+  name  = "${local.name}-signed-cookies"
   items = [for key in aws_cloudfront_public_key.signing : key.id]
 
   lifecycle {
     precondition {
       condition     = contains(local.cloudfront_public_key_names, local.cloudfront_signing_key_name)
-      error_message = "keys/ に api が署名に使う公開鍵（cloudfront_signing_key_name の PEM）が無い。scripts/cloudfront-signing-key.sh で鍵の対を作る"
+      error_message = "keys/<環境>/ に api が署名に使う公開鍵（cloudfront_signing_key_name の PEM）が無い。scripts/cloudfront-signing-key.sh <環境> で鍵の対を作る"
     }
   }
 }
@@ -162,7 +163,7 @@ resource "aws_cloudfront_key_group" "signed_cookies" {
 # /files/* の要求から /files を剥がし、S3 のキーと同じ形にする（要件定義書 4.3。剥がせるのは viewer-request で URI を書き換える手段だけ）。
 # コードと検査は functions/strip-files-prefix.js と scripts/cloudfront-functions.test.mjs。
 resource "aws_cloudfront_function" "strip_files_prefix" {
-  name    = "workspace-chat-strip-files-prefix"
+  name    = "${local.name}-strip-files-prefix"
   runtime = "cloudfront-js-2.0"
   publish = true
   code    = file("${path.module}/functions/strip-files-prefix.js")
@@ -175,7 +176,7 @@ data "aws_cloudfront_response_headers_policy" "security_headers" {
 
 # 画面（既定のビヘイビア）と api（/api/*）の応答に付けるセキュリティヘッダー（#609）。値は上の locals にある。
 resource "aws_cloudfront_response_headers_policy" "web" {
-  name = "workspace-chat-web-security-headers"
+  name = "${local.name}-web-security-headers"
 
   security_headers_config {
     content_security_policy {
@@ -215,7 +216,7 @@ resource "aws_cloudfront_response_headers_policy" "web" {
 
 resource "aws_cloudfront_vpc_origin" "api" {
   vpc_origin_endpoint_config {
-    name                   = "workspace-chat-api"
+    name                   = "${local.name}-api"
     arn                    = aws_lb.api.arn
     http_port              = local.alb_listener_port
     https_port             = local.api_origin_https_port

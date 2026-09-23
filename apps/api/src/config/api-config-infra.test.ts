@@ -494,7 +494,8 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
       stringAttribute(body, 'name'),
     );
     for (const { env, local } of externalParameters) {
-      const name = `/workspace-chat/${env}`;
+      // 環境ごとに分ける（#686）。名前の元は下の「環境ごとの名前」が確かめる。
+      const name = `/\${local.name}/${env}`;
       expect(localValue(`${local}_name`), env).toBe(`"${name}"`);
       expect(localValue(`${local}_arn`), env).toBe(
         `"arn:aws:ssm:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:parameter\${local.${local}_name}"`,
@@ -509,7 +510,10 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
     '外で置く %s は、手順のスクリプトが同じ名前の SecureString として既定の鍵で置く',
     (env, { script }) => {
       const text = readFileSync(join(__dirname, '..', '..', '..', '..', script), 'utf8');
-      expect(text).toContain(`"/workspace-chat/${env}"`);
+      // 名前の元は Terraform の local.name と同じ規則で作る（本番は workspace-chat、ほかは workspace-chat-<環境>）。
+      expect(text).toContain(`"/\${prefix}/${env}"`);
+      expect(text).toMatch(/^ {2}production\) prefix="workspace-chat" ;;$/m);
+      expect(text).toMatch(/^ {2}staging\) prefix="workspace-chat-\$environment" ;;$/m);
       expect(text).toMatch(/aws ssm put-parameter\b/);
       expect(text).toMatch(/--type SecureString\b/);
       expect(text).not.toMatch(/--key-id\b/);
@@ -522,7 +526,7 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
       join(__dirname, '..', '..', '..', '..', 'scripts', 'cloudfront-signing-key.sh'),
       'utf8',
     );
-    const defaultName = /^name="\$\{1:-([a-z0-9-]+)\}"$/m.exec(text)?.[1];
+    const defaultName = /^name="\$\{2:-([a-z0-9-]+)\}"$/m.exec(text)?.[1];
     expect(defaultName).toBeDefined();
     expect(localValue('cloudfront_signing_key_name')).toBe(`"${defaultName}"`);
   });
@@ -541,7 +545,7 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
         ],
       },
       'resource.aws_iam_role.task_execution': {
-        name: '"workspace-chat-task-execution"',
+        name: '"${local.name}-task-execution"',
         assume_role_policy: 'data.aws_iam_policy_document.ecs_tasks_assume.json',
       },
       'resource.aws_iam_role_policy_attachment.task_execution_managed': {
@@ -563,7 +567,7 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
         policy: 'data.aws_iam_policy_document.task_execution_parameters.json',
       },
       'resource.aws_iam_role.migrate_task': {
-        name: '"workspace-chat-migrate-task"',
+        name: '"${local.name}-migrate-task"',
         assume_role_policy: 'data.aws_iam_policy_document.ecs_tasks_assume.json',
       },
       'data.aws_iam_policy_document.task_exec_command': {
@@ -606,7 +610,7 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
       },
       // api のタスクロール: アップロードの確定の主体（機能一覧 11.1・1.3。技術スタックの添付ファイルの行）と、署名者のロールの引き受け（#427）。
       'resource.aws_iam_role.api_task': {
-        name: '"workspace-chat-api-task"',
+        name: '"${local.name}-api-task"',
         assume_role_policy: 'data.aws_iam_policy_document.ecs_tasks_assume.json',
       },
       'data.aws_iam_policy_document.api_task_storage': {
@@ -646,7 +650,7 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
         ],
       },
       'resource.aws_iam_role.upload_signer': {
-        name: '"workspace-chat-upload-signer"',
+        name: '"${local.name}-upload-signer"',
         assume_role_policy: 'data.aws_iam_policy_document.upload_signer_assume.json',
       },
       'data.aws_iam_policy_document.upload_signer': {
@@ -895,5 +899,33 @@ describe('共有の層（infra/shared）の IAM の面', () => {
       github_repo_main_subject:
         '"repo:doryu0-04092@292095077/workspace-chat@1355868496:ref:refs/heads/main"',
     });
+  });
+});
+
+// 同じ構成を本番とステージングに当てる（#686）。同じアカウントで名前がぶつかると、作成の API が同名の既存を返す資源
+// （ECS のクラスターなど）は、Terraform がもう一方の環境の資源を自分の state に取り込み、destroy で消しうる。
+// そのため名前はすべて local.name（workspace から決まる）から組み立て、直書きは名前の元と、環境をまたいで共有する ECR の名前だけにする。
+describe('環境ごとの名前', () => {
+  const allowed = [
+    /^\s*project_name\s*=\s*"workspace-chat"$/,
+    /^\s*ecr_(api|migrate)_repository_name\s*=\s*"workspace-chat-(api|migrate)"$/,
+  ];
+
+  it('workspace-chat の直書きは、名前の元（project_name）と共有の ECR の名前だけである', () => {
+    const literal = terraform
+      .split('\n')
+      .filter((line) => line.includes('workspace-chat'))
+      .filter((line) => !allowed.some((pattern) => pattern.test(line)))
+      .map((line) => line.trim());
+    expect(literal).toEqual([]);
+  });
+
+  it('名前の元は、本番（default の workspace）では workspace-chat、ほかの workspace では workspace-chat-<workspace> である', () => {
+    expect(terraform).toMatch(
+      /^\s*environment\s*=\s*terraform\.workspace == "default" \? "production" : terraform\.workspace$/m,
+    );
+    expect(terraform).toMatch(
+      /^\s*name\s*=\s*local\.environment == "production" \? local\.project_name : "\$\{local\.project_name\}-\$\{local\.environment\}"$/m,
+    );
   });
 });

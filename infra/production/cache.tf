@@ -74,7 +74,7 @@ ephemeral "random_password" "jwt_secret" {
 }
 
 resource "aws_elasticache_subnet_group" "valkey" {
-  name       = "workspace-chat-valkey"
+  name       = "${local.name}-valkey"
   subnet_ids = aws_subnet.private[*].id
 }
 
@@ -82,8 +82,8 @@ resource "aws_elasticache_subnet_group" "valkey" {
 # このアドレス（aws_elasticache_replication_group.valkey）を -replace でリテラルで打っている。**
 # 名前を変えると、**作り直しが起きないまま版だけが上がる**（漏れたトークンが古いクラスタに残る）。
 resource "aws_elasticache_replication_group" "valkey" {
-  replication_group_id = "workspace-chat"
-  description          = "workspace-chat realtime adapter and rate limit counters"
+  replication_group_id = local.name
+  description          = "${local.name} realtime adapter and rate limit counters"
 
   engine             = local.valkey_engine
   engine_version     = local.valkey_engine_version
@@ -105,7 +105,7 @@ resource "aws_elasticache_replication_group" "valkey" {
 # 確かめる段がリテラルで打っている。** 上の検査は**末尾しか見ない**ため、接頭辞を変えても CI は緑のまま、
 # **4.2 の段だけが対象を見つけられなくなる**。
 resource "aws_ssm_parameter" "redis_url" {
-  name             = "/workspace-chat/REDIS_URL"
+  name             = "/${local.name}/REDIS_URL"
   type             = local.parameter_type
   tier             = local.parameter_tier
   value_wo         = "rediss://:${ephemeral.random_password.valkey_auth_token.result}@${aws_elasticache_replication_group.valkey.primary_endpoint_address}:${local.valkey_port}"
@@ -115,7 +115,7 @@ resource "aws_ssm_parameter" "redis_url" {
 # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の JWT_SECRET の箇条が、
 # このアドレス（aws_ssm_parameter.jwt_secret）を -target でリテラルで打っている。** 名前を変えるとその段が対象を絞れない。
 resource "aws_ssm_parameter" "jwt_secret" {
-  name             = "/workspace-chat/JWT_SECRET"
+  name             = "/${local.name}/JWT_SECRET"
   type             = local.parameter_type
   tier             = local.parameter_tier
   value_wo         = ephemeral.random_password.jwt_secret.result
