@@ -29,7 +29,7 @@ resource "aws_vpc" "main" {
     Name = local.name
   }
 
-  # 決めた環境の外の workspace（打ち間違いなど）で plan を始めない。すべての資源はこの VPC の後に作られる。
+  # 決めた環境の外の workspace（打ち間違いなど）では plan を失敗させる（前提条件は plan の段階で評価され、失敗すると何も apply されない）。
   lifecycle {
     precondition {
       condition     = contains(local.allowed_environments, local.environment)

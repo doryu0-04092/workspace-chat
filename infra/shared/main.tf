@@ -5,6 +5,7 @@
 # - GitHub Actions の OIDC プロバイダー: URL ごとにアカウントに1つしか作れない。環境ごとの構成に置くと、2つ目の環境の apply でぶつかる
 # - ECR: CD（.github/workflows/cd.yml）がイメージを1回だけ作ってここへ push し、ステージングで検証したのと同じイメージを本番へ出す
 # - CD のビルド用ロール: ECR への push だけ
+# - CD のステージングへのデプロイ用ロール: ステージングの名前とタグに絞った、アプリの更新だけ（#688）
 #
 # 踏むと壊れる: この構成は環境の destroy の対象にしない。消すと、両方の環境がイメージを取れなくなり、CD が認証に失敗する。
 #
@@ -148,6 +149,136 @@ resource "aws_iam_role_policy" "cd_ecr" {
   name   = "ecr-push"
   role   = aws_iam_role.cd.id
   policy = data.aws_iam_policy_document.cd_ecr.json
+}
+
+# --- CD のステージングへのデプロイ（#688） ------------------------------------------------
+#
+# scripts/deploy-staging.sh が、main へのマージのたびに引き受ける。Terraform は流さず、ステージングのアプリだけを更新する
+# （タスク定義の新しい版の登録・マイグレーションの run-task・サービスの更新・web の配置・CloudFront の無効化）。
+#
+# 踏むと壊れる: 権限は、ステージングの名前（staging_name）とタグ（Environment=staging）に絞る。同じアカウントに本番があり、
+# 絞りを外すと、main へのマージが人の確認なしに本番を書き換えうる。名前は infra/production/main.tf の local.name の規則と、
+# scripts/deploy-staging.sh の name と揃える。
+# 資源を指定できない操作（DescribeTaskDefinition・ListDistributions）は読み取りだけである
+# （AWS の Service Reference の ecs.json・cloudfront.json で、この2つの Resources が空であることを確かめた。2026-09-23）。
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  staging_name = "workspace-chat-staging"
+  ecs_arn      = "arn:aws:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"
+}
+
+resource "aws_iam_role" "staging_deploy" {
+  name               = "${local.staging_name}-deploy"
+  assume_role_policy = data.aws_iam_policy_document.cd_assume.json
+}
+
+data "aws_iam_policy_document" "staging_deploy" {
+  statement {
+    sid       = "FindStaging"
+    actions   = ["ecs:DescribeClusters"]
+    resources = ["${local.ecs_arn}:cluster/${local.staging_name}"]
+  }
+
+  statement {
+    sid       = "ReadTaskDefinitions"
+    actions   = ["ecs:DescribeTaskDefinition", "cloudfront:ListDistributions"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "RegisterStagingTaskDefinitions"
+    # ListTagsForResource は、describe-task-definition --include TAGS でタグを読むため（要るかは未確認。読み取りだけに絞って付ける）。
+    actions   = ["ecs:RegisterTaskDefinition", "ecs:ListTagsForResource"]
+    resources = ["${local.ecs_arn}:task-definition/${local.staging_name}-*:*"]
+  }
+
+  statement {
+    # 登録のときにタグ（default_tags の Project・Environment）を付けるには TagResource も要る。登録と同時の付与だけに絞る。
+    sid       = "TagOnRegister"
+    actions   = ["ecs:TagResource"]
+    resources = ["${local.ecs_arn}:task-definition/${local.staging_name}-*:*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "ecs:CreateAction"
+      values   = ["RegisterTaskDefinition"]
+    }
+  }
+
+  statement {
+    sid       = "RunStagingMigration"
+    actions   = ["ecs:RunTask"]
+    resources = ["${local.ecs_arn}:task-definition/${local.staging_name}-migrate:*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = ["${local.ecs_arn}:cluster/${local.staging_name}"]
+    }
+  }
+
+  statement {
+    sid       = "WatchStagingTasks"
+    actions   = ["ecs:DescribeTasks"]
+    resources = ["${local.ecs_arn}:task/${local.staging_name}/*"]
+  }
+
+  statement {
+    sid       = "UpdateStagingService"
+    actions   = ["ecs:DescribeServices", "ecs:UpdateService"]
+    resources = ["${local.ecs_arn}:service/${local.staging_name}/${local.staging_name}-api"]
+  }
+
+  statement {
+    sid       = "PassStagingRoles"
+    actions   = ["iam:PassRole"]
+    resources = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.staging_name}-*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+
+  statement {
+    sid       = "ListStagingWeb"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.staging_name}-web-${data.aws_caller_identity.current.account_id}"]
+  }
+
+  statement {
+    sid       = "WriteStagingWeb"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["arn:aws:s3:::${local.staging_name}-web-${data.aws_caller_identity.current.account_id}/*"]
+  }
+
+  statement {
+    sid       = "InvalidateStagingCache"
+    actions   = ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"]
+    resources = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"]
+
+    # ディストリビューションの ARN は ID だけで名前を含まないため、タグで絞る（infra/production の default_tags）。
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Environment"
+      values   = ["staging"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "staging_deploy" {
+  name   = "staging-deploy"
+  role   = aws_iam_role.staging_deploy.id
+  policy = data.aws_iam_policy_document.staging_deploy.json
+}
+
+output "staging_deploy_role_arn" {
+  description = "CD のステージングへのデプロイ（cd.yml の deploy-staging）が引き受けるロール。値を AWS_STAGING_DEPLOY_ROLE_ARN という名前の GitHub の Secret に手動で設定する（#688）"
+  value       = aws_iam_role.staging_deploy.arn
 }
 
 output "ecr_api_repository_url" {

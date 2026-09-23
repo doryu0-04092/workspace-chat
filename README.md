@@ -22,7 +22,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis・S3） | **完了**（[compose.yaml](compose.yaml)。pg_bigm 入りの PostgreSQL 17・Valkey・MinIO（S3 互換のストレージ。#427）。**サービス名は `redis` のまま**（下記「開発環境のミドルウェア」）） |
 | Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#40） |
-| **CD（ビルド・ECR への push・release ブランチの前進）** | **完了**（[cd.yml](.github/workflows/cd.yml)。#672。本番への反映は `release` ブランチから手動で行う。下記「CD（本番へのリリース）」） |
+| **CD（ビルド・ECR への push・ステージングへの自動デプロイ）** | **完了**（[cd.yml](.github/workflows/cd.yml)。#672・#688。本番への反映は、ステージングで確かめてから `release` ブランチを進めて手動で行う。下記「CD（ステージングへの自動デプロイと、本番へのリリース）」） |
 | 実装 | 実装中 |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する
@@ -519,29 +519,58 @@ Claude GitHub App のトークンに交換する経路を通るため、App が�
 | **トークン消費が大きい** | レビューはセッション履歴を持たないため、毎回 PR 差分・`CLAUDE.md`・`REVIEW.md` を読み直す |
 | **PR の版の `CLAUDE.md` は読まれない** | ルートの `CLAUDE.md` は既定ブランチの版に差し替えられ、PR の版は `.claude-pr/CLAUDE.md` へ退避される（実測で確認。#46）。**レビュアーに効かせたい規則は `REVIEW.md` に書く。** `REVIEW.md` は PR の版がそのまま読まれる |
 
-## CD（本番へのリリース）
+## CD（ステージングへの自動デプロイと、本番へのリリース）
 
-GitHub フローに `release` ブランチを1本足した環境ブランチ方式（#671〜#674）。
+GitHub フローに `release` ブランチを1本足した環境ブランチ方式（#671〜#674・#688）。
+**main へのマージでステージングへ自動で出し、検証してから人が本番へ出す。**
 
 1. `main` への push（PR のマージ）をトリガーに、[cd.yml](.github/workflows/cd.yml) が
-   api・migrate イメージを linux/arm64 でビルドして ECR へ push し、成功したら `release`
-   ブランチをそのコミットまで進める（#672）
-2. `terraform apply`・マイグレーションの実行・ECS サービスの更新はここでは行わない。
-   本番への反映は、`release` ブランチから人が手動で [scripts/release.sh](scripts/release.sh)
-   を実行する（#673）
+   api・migrate イメージを linux/arm64 でビルドして ECR へ push する（#672）
+2. 続けて、**ステージングが立っていれば**、そのイメージでステージングへ出す（#688。[scripts/deploy-staging.sh](scripts/deploy-staging.sh)）。
+   マイグレーション → api のサービスの切り替え → web の配置の順。**立っていなければ飛ばして緑で終わる**
+3. 人がステージングの URL で動作を確かめる（2つの画面を並べて、リアルタイムの反映も見る）
+4. 確かめたコミットまで `release` ブランチを進め（`git push origin <SHA>:refs/heads/release`。fast-forward のみ）、
+   `release` のコミットのタグで [scripts/release.sh](scripts/release.sh) を `ENVIRONMENT=production` で流す。
+   **ステージングで確かめたのと同じイメージ**が本番に出る（ECR は環境をまたいで共有する。#685）
 
-**別のステージング環境は用意しない。** マイグレーション実行の完了確認・`terraform apply` の
-プランレビュー（yes と打つ前）・web 配置後の動作確認という `scripts/release.sh` 自体の段階が、
-「検証してから本番へ統合する」の実体になる。
+**CD は Terraform を apply しない。** apply は常に人が行う。ステージングでも CD が変えるのはアプリだけであり
+（タスク定義の新しい版・マイグレーション・サービス・web）、デプロイ用のロールの権限はステージングの名前とタグに絞っている
+（`infra/shared/main.tf` の `aws_iam_role.staging_deploy`）。
+
+### ステージング
+
+**本番と同じ構成を、同じアカウントに、名前を変えて立てる**（`infra/production` を Terraform の workspace `staging` で当てる。#686）。
+**検証のときだけ立て、終わったら destroy する**（決定・2026-09-23・依頼側）。
+
+| 操作 | コマンド |
+|---|---|
+| 署名鍵の対を作る（初回だけ） | `bash scripts/cloudfront-signing-key.sh staging` |
+| 立てる | `TF_STATE_BUCKET=… ENVIRONMENT=staging IMAGE_TAG=<main の短い SHA> bash scripts/release.sh` |
+| 消す | `TF_WORKSPACE=staging TF_VAR_image_tag=<直前のタグ> terraform -chdir=infra/production destroy` |
+
+- **代償（費用）**: 立てている間は、本番と同じ額（[技術スタック](docs/tech-stack.md)の「概算コスト」）がもう1つかかる。
+  アカウントは無料プランであり、クレジットを使い切るとアカウントが閉じる。**2つを立て続けない**
+- **代償（Terraform とのずれ）**: CD がステージングに登録したタスク定義の版は Terraform の外にある。
+  人がステージングに apply するときは、`IMAGE_TAG` に main の HEAD のタグを渡す（古いタグを渡すと、古いイメージに戻る）
+- **代償（メトリクス）**: アプリのメトリクスの名前空間は環境をまたいで同じで、立てている間は本番の値と合算される（[要件定義書](docs/requirements.md) 4.6）
+- **代償（読み取りの範囲）**: CD のデプロイ用ロールのうち、タスク定義の読み取り（`ecs:DescribeTaskDefinition`）とディストリビューションの一覧（`cloudfront:ListDistributions`）は、AWS の仕様で資源を指定できず、本番の分も読める。書き込みはすべてステージングの名前とタグに絞っており、本番に届かない。タスク定義から読めるのは設定と秘密の値の参照（ARN）だけで、秘密の値そのものは含まない
+- **本番の手順（要件定義書 4.2）は default の workspace で流す。** `terraform workspace select staging` の選択が手元に残っていると、
+  その手順がステージングに当たる（手順の前置きが確かめる）
+
+**以前の決定を改めた。** 以前は「別のステージング環境は用意しない」とし、`release.sh` のプランの確認と配置後の動作確認を
+「検証してから本番へ統合する」の実体としていた。講義46の課題（マージ後に、デプロイ先の環境が自動で更新される）を満たすため、
+本番と同じ構成のステージングへ自動で出す形に改めた（講義46の課題による要求と、2026-09-23 に承認を得た提案。#688）。
 
 ### 動かすために必要な設定
 
 | # | 作業 | 場所 |
 |---|---|---|
-| 1 | 共有の層 `infra/shared` を apply し、`aws_iam_role.cd`（GitHub Actions の OIDC で引き受けるロール）と ECR を作る | `scripts/release.sh` の手順 1、または `terraform -chdir=infra/shared apply`（#671・#685） |
+| 1 | 共有の層 `infra/shared` を apply し、ECR と CD の2つのロール（`aws_iam_role.cd`・`aws_iam_role.staging_deploy`）を作る | `scripts/release.sh` の手順 1、または `terraform -chdir=infra/shared apply`（#671・#685・#688） |
 | 2 | `terraform -chdir=infra/shared output -raw cd_role_arn` で取得した値を登録する | Settings → Secrets and variables → Actions → Secret `AWS_CD_ROLE_ARN` |
+| 3 | `terraform -chdir=infra/shared output -raw staging_deploy_role_arn` で取得した値を登録する | 同じ場所の Secret `AWS_STAGING_DEPLOY_ROLE_ARN` |
 
-**1 を行うまで cd.yml は動かない。** `configure-aws-credentials` のステップで認証に失敗する。
+**1・2 を行うまで cd.yml は動かない。** `configure-aws-credentials` のステップで認証に失敗する。
+**3 を行うまでは、ステージングへのデプロイを飛ばす**（赤にしない。イメージの push までは行う）。
 
 **長期のアクセスキーは使わない。** OIDC でロールを引き受け、信頼ポリシーの `sub` 条件で
 このリポジトリの `main` ブランチへの push だけに限定している（`infra/shared/main.tf`）。

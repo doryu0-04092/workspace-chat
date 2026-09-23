@@ -44,6 +44,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/deploy-lib.sh
+source scripts/deploy-lib.sh
 
 fail() {
   echo "NG: $*" >&2
@@ -120,17 +122,7 @@ tf apply -input=false \
 
 echo "== 4. マイグレーションを流す"
 cluster=$(tf output -raw ecs_cluster_name)
-migrate_task_definition=$(tf output -raw migrate_task_definition_arn)
-network_configuration=$(tf output -raw migrate_network_configuration)
-task=$(aws ecs run-task --cluster "$cluster" --task-definition "$migrate_task_definition" --launch-type FARGATE \
-  --network-configuration "$network_configuration" --query 'tasks[0].taskArn' --output text)
-if [ -z "$task" ] || [ "$task" = "None" ]; then
-  fail "マイグレーションのタスクを起動できない"
-fi
-aws ecs wait tasks-stopped --cluster "$cluster" --tasks "$task"
-exit_code=$(aws ecs describe-tasks --cluster "$cluster" --tasks "$task" \
-  --query 'tasks[0].containers[0].exitCode' --output text)
-[ "$exit_code" = "0" ] || fail "マイグレーションが終了コード $exit_code で終わった（ロググループ /ecs/<名前>-migrate を見る。本番は /ecs/workspace-chat-migrate）"
+run_migration "$cluster" "$(tf output -raw migrate_task_definition_arn)" "$(tf output -raw migrate_network_configuration)"
 
 echo "== 5. 残りを apply し、api のサービスが安定するまで待つ"
 tf apply -input=false
@@ -140,14 +132,7 @@ echo "== 6. web を置く"
 npm ci --no-audit --no-fund
 npm run build -w @workspace-chat/shared
 npm run build -w @workspace-chat/web
-# 踏むと壊れる: 置く順番を変えない（#604）。古い資産を消すのは、index.html を no-cache で置き直し、無効化が終わった後にする。
-# 先に消すと、ブラウザや CloudFront に残った古い index.html が消えた /assets/index-<hash>.js を読みに行き、画面が出ない。
-# index.html に Cache-Control を付けないと、ブラウザが Last-Modified から推定した間だけ古いものを使い回す（RFC 9111 4.2.2）。
-web_bucket=$(tf output -raw web_bucket)
-aws s3 sync apps/web/dist "s3://$web_bucket" --exclude index.html
-aws s3 cp apps/web/dist/index.html "s3://$web_bucket/index.html" --cache-control no-cache --content-type text/html
-invalidation=$(aws cloudfront create-invalidation --distribution-id "$(tf output -raw cloudfront_distribution_id)" --paths '/*'   --query 'Invalidation.Id' --output text)
-aws cloudfront wait invalidation-completed --distribution-id "$(tf output -raw cloudfront_distribution_id)" --id "$invalidation"
-aws s3 sync apps/web/dist "s3://$web_bucket" --delete --exclude index.html
+# 置く順番の決まり（#604）は scripts/deploy-lib.sh の deploy_web にある。
+deploy_web "$(tf output -raw web_bucket)" "$(tf output -raw cloudfront_distribution_id)" apps/web/dist
 
 echo "公開した: $(tf output -raw web_url)"
