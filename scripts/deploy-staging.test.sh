@@ -86,17 +86,27 @@ line_of() { grep -nE "$2" "$1/aws.log" | head -1 | cut -d: -f1 | grep . || echo 
 echo "== 1. ステージングが立っていなければ、飛ばして成功で終わる"
 run absent-exists exists FAKE_CLUSTER_STATUS=None
 d="$work/absent-exists"
-[ "$(cat "$d/exit")" = 0 ] && [ "$(tail -1 "$d/out.txt")" = false ] &&
-  ok "exists は false を出して exit 0" || ng "exists は false を出して exit 0 のはず" "$d"
+if [ "$(cat "$d/exit")" = 0 ] && [ "$(tail -1 "$d/out.txt")" = false ]; then
+  ok "exists は false を出して exit 0"
+else
+  ng "exists は false を出して exit 0 のはず" "$d"
+fi
 run absent-deploy deploy FAKE_CLUSTER_STATUS=None
 d="$work/absent-deploy"
-[ "$(cat "$d/exit")" = 0 ] && ! grep -qE 'register-task-definition|update-service|run-task|s3 ' "$d/aws.log" &&
-  ok "deploy も何も変えずに exit 0" || ng "立っていないのに何かを変えた、または落ちた" "$d"
+if [ "$(cat "$d/exit")" = 0 ] && ! grep -qE 'register-task-definition|update-service|run-task|s3 ' "$d/aws.log"; then
+  ok "deploy も何も変えずに exit 0"
+else
+  ng "立っていないのに何かを変えた、または落ちた" "$d"
+fi
 
 echo "== 2. 立っていれば、新しいイメージでマイグレーション → サービスの更新 → web の順に出す"
 run normal deploy
 d="$work/normal"
-[ "$(cat "$d/exit")" = 0 ] && ok "exit 0" || ng "exit 0 のはず" "$d"
+if [ "$(cat "$d/exit")" = 0 ]; then
+  ok "exit 0"
+else
+  ng "exit 0 のはず" "$d"
+fi
 for f in "$d"/registered-*.json; do
   image=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).containerDefinitions[0].image)' "$f")
   case "$image" in
@@ -110,47 +120,82 @@ for f in "$d"/registered-*.json; do
     ng "登録の入力に結果の項目が残っている（$(basename "$f")）" "$d"
   fi
 done
-[ "$(ls "$d"/registered-*.json | wc -l)" = 2 ] && ok "api と migrate の2つを登録" || ng "登録は2つのはず" "$d"
+registered=("$d"/registered-*.json)
+if [ "${#registered[@]}" = 2 ]; then
+  ok "api と migrate の2つを登録"
+else
+  ng "登録は2つのはず" "$d"
+fi
 migrate=$(line_of "$d" 'ecs run-task .*workspace-chat-staging-migrate:8')
 update=$(line_of "$d" 'ecs update-service .*workspace-chat-staging-api:8')
 web=$(line_of "$d" 's3 cp .*index.html')
 cleanup=$(line_of "$d" 's3 sync .*--delete')
 invalidate=$(line_of "$d" 'cloudfront create-invalidation .*EDIST123')
-[ "$migrate" -gt 0 ] && [ "$update" -gt "$migrate" ] && ok "マイグレーション（新しい版）の後にサービスを新しい版へ更新" ||
+if [ "$migrate" -gt 0 ] && [ "$update" -gt "$migrate" ]; then
+  ok "マイグレーション（新しい版）の後にサービスを新しい版へ更新"
+else
   ng "マイグレーション（$migrate 行目）の後にサービスの更新（$update 行目）が来るはず" "$d"
-[ "$web" -gt "$update" ] && [ "$invalidate" -gt "$web" ] && [ "$cleanup" -gt "$invalidate" ] &&
-  ok "サービスの後に web を置き、無効化の後で古い資産を消す" || ng "web の置き方の順番が違う（$web / $invalidate / $cleanup）" "$d"
-grep -qE 'run-task .*--network-configuration .*subnet-1' "$d/aws.log" &&
-  ok "マイグレーションはサービスと同じネットワークで動かす" || ng "run-task にサービスのネットワークの設定が渡っていない" "$d"
+fi
+if [ "$web" -gt "$update" ] && [ "$invalidate" -gt "$web" ] && [ "$cleanup" -gt "$invalidate" ]; then
+  ok "サービスの後に web を置き、無効化の後で古い資産を消す"
+else
+  ng "web の置き方の順番が違う（$web / $invalidate / $cleanup）" "$d"
+fi
+if grep -qE 'run-task .*--network-configuration .*subnet-1' "$d/aws.log"; then
+  ok "マイグレーションはサービスと同じネットワークで動かす"
+else
+  ng "run-task にサービスのネットワークの設定が渡っていない" "$d"
+fi
 
 echo "== 3. マイグレーションが落ちたら、サービスも web も更新しない"
 run migration-fails deploy FAKE_MIGRATION_EXIT=1
 d="$work/migration-fails"
-[ "$(cat "$d/exit")" != 0 ] && ! grep -qE 'update-service|s3 ' "$d/aws.log" &&
-  ok "exit 0 以外で、更新は何も出ていない" || ng "マイグレーションが落ちたのに進んだ" "$d"
+if [ "$(cat "$d/exit")" != 0 ] && ! grep -qE 'update-service|s3 ' "$d/aws.log"; then
+  ok "exit 0 以外で、更新は何も出ていない"
+else
+  ng "マイグレーションが落ちたのに進んだ" "$d"
+fi
 
 echo "== 4. タグの無いイメージ（digest 指定など）は差し替えずに落とす"
 run digest deploy FAKE_IMAGE_SUFFIX="@sha256:abc"
 d="$work/digest"
-[ "$(cat "$d/exit")" != 0 ] && ! grep -qE 'register-task-definition|update-service' "$d/aws.log" &&
-  ok "登録せずに落ちる" || ng "タグの無いイメージを差し替えようとした" "$d"
+if [ "$(cat "$d/exit")" != 0 ] && ! grep -qE 'register-task-definition|update-service' "$d/aws.log"; then
+  ok "登録せずに落ちる"
+else
+  ng "タグの無いイメージを差し替えようとした" "$d"
+fi
 
 echo "== 5. IMAGE_TAG が無ければ何もしないで落とす"
 run no-tag deploy IMAGE_TAG=
 d="$work/no-tag"
-[ "$(cat "$d/exit")" != 0 ] && [ ! -s "$d/aws.log" ] && ok "aws を呼ばずに落ちる" || ng "IMAGE_TAG が無いのに進んだ" "$d"
+if [ "$(cat "$d/exit")" != 0 ] && [ ! -s "$d/aws.log" ]; then
+  ok "aws を呼ばずに落ちる"
+else
+  ng "IMAGE_TAG が無いのに進んだ" "$d"
+fi
 
 echo "== 6. AWS の呼び出しが落ちたら、立っていないと見なさずに落とす（権限の誤りを緑のまま隠さない）"
 run cluster-denied-exists exists FAKE_FAIL="ecs describe-clusters"
 d="$work/cluster-denied-exists"
-[ "$(cat "$d/exit")" != 0 ] && ok "exists は exit 0 以外" || ng "describe-clusters が落ちたのに exists が成功した" "$d"
+if [ "$(cat "$d/exit")" != 0 ]; then
+  ok "exists は exit 0 以外"
+else
+  ng "describe-clusters が落ちたのに exists が成功した" "$d"
+fi
 run cluster-denied-deploy deploy FAKE_FAIL="ecs describe-clusters"
 d="$work/cluster-denied-deploy"
-[ "$(cat "$d/exit")" != 0 ] && ok "deploy は exit 0 以外" || ng "describe-clusters が落ちたのに deploy が飛ばして成功した" "$d"
+if [ "$(cat "$d/exit")" != 0 ]; then
+  ok "deploy は exit 0 以外"
+else
+  ng "describe-clusters が落ちたのに deploy が飛ばして成功した" "$d"
+fi
 run register-denied deploy FAKE_FAIL="ecs register-task-definition"
 d="$work/register-denied"
-[ "$(cat "$d/exit")" != 0 ] && ! grep -qE 'run-task|update-service|s3 ' "$d/aws.log" &&
-  ok "登録が落ちたら、マイグレーションもサービスの更新もしない" || ng "登録が落ちたのに進んだ" "$d"
+if [ "$(cat "$d/exit")" != 0 ] && ! grep -qE 'run-task|update-service|s3 ' "$d/aws.log"; then
+  ok "登録が落ちたら、マイグレーションもサービスの更新もしない"
+else
+  ng "登録が落ちたのに進んだ" "$d"
+fi
 
 if [ "$fail" = 0 ]; then
   echo "ステージングへのデプロイの手順の検査を通過した"

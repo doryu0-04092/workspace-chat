@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # 本番のリリース（scripts/release.sh）とステージングへのデプロイ（scripts/deploy-staging.sh）が共に使う手順（#688）。
 # source して使う。呼ぶ側が set -euo pipefail を掛けている前提で書く。
 

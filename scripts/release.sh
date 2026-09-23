@@ -44,8 +44,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-# shellcheck source=scripts/lib/deploy.sh
-source scripts/lib/deploy.sh
+# shellcheck source=scripts/deploy-lib.sh
+source scripts/deploy-lib.sh
 
 fail() {
   echo "NG: $*" >&2
@@ -132,7 +132,7 @@ echo "== 6. web を置く"
 npm ci --no-audit --no-fund
 npm run build -w @workspace-chat/shared
 npm run build -w @workspace-chat/web
-# 置く順番の決まり（#604）は scripts/lib/deploy.sh の deploy_web にある。
+# 置く順番の決まり（#604）は scripts/deploy-lib.sh の deploy_web にある。
 deploy_web "$(tf output -raw web_bucket)" "$(tf output -raw cloudfront_distribution_id)" apps/web/dist
 
 echo "公開した: $(tf output -raw web_url)"

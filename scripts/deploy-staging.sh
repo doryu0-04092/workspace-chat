@@ -20,8 +20,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-# shellcheck source=scripts/lib/deploy.sh
-source scripts/lib/deploy.sh
+# shellcheck source=scripts/deploy-lib.sh
+source scripts/deploy-lib.sh
 
 name="workspace-chat-staging"
 cluster="$name"
@@ -43,7 +43,7 @@ register_with_image() {
   work=$(mktemp -d)
   input="$work/input.json"
   aws ecs describe-task-definition --task-definition "$source" --include TAGS --output json |
-    node scripts/lib/task-definition-with-image.mjs "$IMAGE_TAG" >"$input" ||
+    node scripts/task-definition-with-image.mjs "$IMAGE_TAG" >"$input" ||
     deploy_fail "$source のイメージを差し替えられない"
   # AWS CLI（Windows 版）は Git Bash の /tmp の形のパスを読めない。手元で流すときのために Windows の形に直す。
   if command -v cygpath >/dev/null 2>&1; then
