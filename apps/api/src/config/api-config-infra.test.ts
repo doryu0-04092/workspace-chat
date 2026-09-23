@@ -66,14 +66,15 @@ const terraform = withoutComments(
 function blocksOf(
   kind: 'resource' | 'data',
   type: string,
+  source: string = terraform,
 ): { type: string; name: string; body: string }[] {
-  return [...terraform.matchAll(new RegExp(`^${kind} "(${type})" "(\\w+)" \\{(\\})?$`, 'gm'))].map(
+  return [...source.matchAll(new RegExp(`^${kind} "(${type})" "(\\w+)" \\{(\\})?$`, 'gm'))].map(
     (match) => ({
       type: match[1] ?? '',
       name: match[2] ?? '',
       body:
         match[3] === undefined
-          ? terraform.slice(match.index, terraform.indexOf('\n}\n', match.index))
+          ? source.slice(match.index, source.indexOf('\n}\n', match.index))
           : match[0].slice(0, -1),
     }),
   );
@@ -301,6 +302,32 @@ function localValue(name: string): string {
   const found = [...terraform.matchAll(new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'gm'))];
   if (found.length !== 1) throw new Error(`locals の ${name} が ${found.length} 個ある`);
   return found[0]?.[1] ?? '';
+}
+
+/**
+ * 構成（コメントを除いた .tf の本文）の IAM の面（aws_iam_ で始まるブロックと、policy・assume_role_policy を持つブロック）が、
+ * 表とちょうど同じであることを確かめる。
+ */
+function expectIamSurface(source: string, table: Record<string, Hcl>): void {
+  const blocks = (['resource', 'data'] as const).flatMap((kind) =>
+    blocksOf(kind, '\\w+', source).map(({ type, name, body }) => ({
+      key: `${kind}.${type}.${name}`,
+      type,
+      hcl: hclOfBlock(body),
+    })),
+  );
+  // 書き方を問わずに数えたブロックと、読めたブロックが一致する（読めないブロックの中の IAM を黙って外さない）。
+  expect(countOf(source, /\b(?:resource|data)\s+"/g)).toBe(blocks.length);
+  const policyKey = /^(?:assume_role_)?policy$/;
+  const surface = blocks.filter(
+    ({ type, hcl }) =>
+      type.startsWith('aws_iam_') || Object.keys(hcl).some((key) => policyKey.test(key)),
+  );
+  expect(Object.fromEntries(surface.map(({ key, hcl }) => [key, hcl]))).toEqual(table);
+  // ポリシーを受ける属性は、面のブロックの最も外側にしか無い（入れ子のブロックの中に書いたものを黙って外さない）。
+  expect(countOf(source, new RegExp(attribute('(?:assume_role_)?policy'), 'g'))).toBe(
+    surface.flatMap(({ hcl }) => Object.keys(hcl)).filter((key) => policyKey.test(key)).length,
+  );
 }
 
 const envsOf = (task: string) =>
@@ -635,64 +662,6 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
         role: 'aws_iam_role.upload_signer.id',
         policy: 'data.aws_iam_policy_document.upload_signer.json',
       },
-      // CD（GitHub Actions。#671）: OIDC で引き受けるロール。ECR への push だけができ、秘密のパラメータには触れない。
-      'resource.aws_iam_openid_connect_provider.github_actions': {
-        url: 'local.github_actions_oidc_url',
-        client_id_list: ['local.github_actions_audience'],
-        thumbprint_list: ['local.github_actions_oidc_thumbprint'],
-      },
-      'data.aws_iam_policy_document.cd_assume': {
-        statement: [
-          {
-            actions: ['"sts:AssumeRoleWithWebIdentity"'],
-            principals: [
-              {
-                type: '"Federated"',
-                identifiers: ['aws_iam_openid_connect_provider.github_actions.arn'],
-              },
-            ],
-            condition: [
-              {
-                test: '"StringEquals"',
-                variable: '"token.actions.githubusercontent.com:aud"',
-                values: ['local.github_actions_audience'],
-              },
-              {
-                test: '"StringEquals"',
-                variable: '"token.actions.githubusercontent.com:sub"',
-                values: ['local.github_repo_main_subject'],
-              },
-            ],
-          },
-        ],
-      },
-      'resource.aws_iam_role.cd': {
-        name: '"workspace-chat-cd"',
-        assume_role_policy: 'data.aws_iam_policy_document.cd_assume.json',
-      },
-      'data.aws_iam_policy_document.cd_ecr': {
-        statement: [
-          {
-            actions: ['"ecr:GetAuthorizationToken"'],
-            resources: ['"*"'],
-          },
-          {
-            actions: [
-              '"ecr:BatchCheckLayerAvailability"',
-              '"ecr:PutImage"',
-              '"ecr:InitiateLayerUpload"',
-              '"ecr:UploadLayerPart"',
-              '"ecr:CompleteLayerUpload"',
-            ],
-            resources: ['aws_ecr_repository.api.arn', 'aws_ecr_repository.migrate.arn'],
-          },
-        ],
-      },
-      'resource.aws_iam_role_policy.cd_ecr': {
-        name: '"ecr-push"',
-        role: 'aws_iam_role.cd.id',
-        policy: 'data.aws_iam_policy_document.cd_ecr.json',
-      },
       // 添付のバケット: CloudFront（このディストリビューション）は配信用の接頭辞だけを読める。配信用の接頭辞へ書けるのは api のタスクロールだけ。
       // **「CloudFront の OAC からのみ」に閉じない**（閉じると、ブラウザから quarantine/ への署名付き PUT が通らない。#427）。
       'data.aws_iam_policy_document.attachments_bucket': {
@@ -735,25 +704,7 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
         policy: 'data.aws_iam_policy_document.attachments_bucket.json',
       },
     };
-    const blocks = (['resource', 'data'] as const).flatMap((kind) =>
-      blocksOf(kind, '\\w+').map(({ type, name, body }) => ({
-        key: `${kind}.${type}.${name}`,
-        type,
-        hcl: hclOfBlock(body),
-      })),
-    );
-    // 書き方を問わずに数えたブロックと、読めたブロックが一致する（読めないブロックの中の IAM を黙って外さない）。
-    expect(countOf(terraform, /\b(?:resource|data)\s+"/g)).toBe(blocks.length);
-    const policyKey = /^(?:assume_role_)?policy$/;
-    const surface = blocks.filter(
-      ({ type, hcl }) =>
-        type.startsWith('aws_iam_') || Object.keys(hcl).some((key) => policyKey.test(key)),
-    );
-    expect(Object.fromEntries(surface.map(({ key, hcl }) => [key, hcl]))).toEqual(iamSurface);
-    // ポリシーを受ける属性は、面のブロックの最も外側にしか無い（入れ子のブロックの中に書いたものを黙って外さない）。
-    expect(countOf(terraform, new RegExp(attribute('(?:assume_role_)?policy'), 'g'))).toBe(
-      surface.flatMap(({ hcl }) => Object.keys(hcl)).filter((key) => policyKey.test(key)).length,
-    );
+    expectIamSurface(terraform, iamSurface);
   });
 
   // タスクロールの資格情報はコンテナに渡る。api のタスクに運用者の入口（ECS Exec）の権限を、マイグレーションのタスク（運用者が入る先）に
@@ -849,4 +800,100 @@ describe('secret: true の設定と、Terraform での秘密の渡し方', () =>
       expect(resolved).toBe('SecureString');
     },
   );
+});
+
+// 共有の層（infra/shared。#685）の IAM の面。GitHub Actions が OIDC で引き受けるロールの信頼条件と権限を、表とちょうど同じかで固定する。
+// 信頼条件を広げる・権限を足すと、main 以外のブランチや別のリポジトリのワークフローが、ECR への push やそれ以上のことをできる。
+const sharedDir = join(infraDir, '..', 'shared');
+
+describe('共有の層（infra/shared）の IAM の面', () => {
+  const shared = withoutComments(readFileSync(join(sharedDir, 'main.tf'), 'utf8'));
+
+  it('Terraform が読むのは main.tf だけで、module も呼ばない（ほかの場所に置いた構成を、この検査が読み落とさない）', () => {
+    expect(
+      readdirSync(sharedDir).filter((file) => file.endsWith('.tf') || file.endsWith('.tf.json')),
+    ).toEqual(['main.tf']);
+    expect(countOf(shared, /\bmodule\s+"/g)).toBe(0);
+  });
+
+  it('IAM の面（OIDC・CD のロール・ポリシー）は、表とちょうど同じである', () => {
+    expectIamSurface(shared, {
+      'resource.aws_iam_openid_connect_provider.github_actions': {
+        url: 'local.github_actions_oidc_url',
+        client_id_list: ['local.github_actions_audience'],
+        thumbprint_list: ['local.github_actions_oidc_thumbprint'],
+      },
+      'data.aws_iam_policy_document.cd_assume': {
+        statement: [
+          {
+            actions: ['"sts:AssumeRoleWithWebIdentity"'],
+            principals: [
+              {
+                type: '"Federated"',
+                identifiers: ['aws_iam_openid_connect_provider.github_actions.arn'],
+              },
+            ],
+            condition: [
+              {
+                test: '"StringEquals"',
+                variable: '"token.actions.githubusercontent.com:aud"',
+                values: ['local.github_actions_audience'],
+              },
+              {
+                test: '"StringEquals"',
+                variable: '"token.actions.githubusercontent.com:sub"',
+                values: ['local.github_repo_main_subject'],
+              },
+            ],
+          },
+        ],
+      },
+      'resource.aws_iam_role.cd': {
+        name: '"workspace-chat-cd"',
+        assume_role_policy: 'data.aws_iam_policy_document.cd_assume.json',
+      },
+      'data.aws_iam_policy_document.cd_ecr': {
+        statement: [
+          {
+            actions: ['"ecr:GetAuthorizationToken"'],
+            resources: ['"*"'],
+          },
+          {
+            actions: [
+              '"ecr:BatchCheckLayerAvailability"',
+              '"ecr:PutImage"',
+              '"ecr:InitiateLayerUpload"',
+              '"ecr:UploadLayerPart"',
+              '"ecr:CompleteLayerUpload"',
+            ],
+            resources: ['aws_ecr_repository.api.arn', 'aws_ecr_repository.migrate.arn'],
+          },
+        ],
+      },
+      'resource.aws_iam_role_policy.cd_ecr': {
+        name: '"ecr-push"',
+        role: 'aws_iam_role.cd.id',
+        policy: 'data.aws_iam_policy_document.cd_ecr.json',
+      },
+    });
+  });
+
+  // 引き受けられる相手は、このリポジトリ（不変 ID を含む形。#679）の main ブランチへの push で動くワークフローだけである。
+  it('信頼条件の audience と sub は、このリポジトリの main ブランチだけを指す', () => {
+    const values = Object.fromEntries(
+      ['github_actions_oidc_url', 'github_actions_audience', 'github_repo_main_subject'].map(
+        (name) => {
+          const found = [...shared.matchAll(new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'gm'))];
+          expect(found, name).toHaveLength(1);
+          return [name, found[0]?.[1]];
+        },
+      ),
+    );
+    expect(values).toEqual({
+      github_actions_oidc_url: '"https://token.actions.githubusercontent.com"',
+      github_actions_audience: '"sts.amazonaws.com"',
+      github_repo_main_subject:
+        '"repo:doryu0-04092@292095077/workspace-chat@1355868496:ref:refs/heads/main"',
+    });
+  });
 });

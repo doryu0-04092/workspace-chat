@@ -7,7 +7,7 @@ name: cd
 # 本番への反映は、release ブランチから人が手動で行う（scripts/release.sh。#673）。
 #
 # 長期のアクセスキーは使わない。GitHub Actions の OIDC で、ECR への push だけができる
-# IAM ロール（infra/production/compute.tf の aws_iam_role.cd。#671）を引き受ける。
+# IAM ロール（infra/shared/main.tf の aws_iam_role.cd。#671・#685）を引き受ける。
 
 on:
   push:

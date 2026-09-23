@@ -4,16 +4,6 @@
 # **空でも変数は「設定済み」になるため apply は聞き返さない**——前置きは空を弾く段を持つが、気づく経路はそこだけである。
 # 踏むと壊れる: このファイルにも main.tf の冒頭の検査の条件が掛かる（apps/api/src/config/api-config-infra.test.ts）。
 
-output "ecr_api_repository_url" {
-  description = "api のイメージ（apps/api/Dockerfile の runtime 段）を push する先"
-  value       = aws_ecr_repository.api.repository_url
-}
-
-output "ecr_migrate_repository_url" {
-  description = "マイグレーション用のイメージ（apps/api/Dockerfile の migrate 段）を push する先"
-  value       = aws_ecr_repository.migrate.repository_url
-}
-
 output "ecs_cluster_name" {
   description = "ECS のクラスター"
   value       = aws_ecs_cluster.main.name
@@ -44,9 +34,4 @@ output "migrate_network_configuration" {
 output "cloudfront_distribution_id" {
   description = "web を置き換えた後にキャッシュを消すディストリビューション"
   value       = aws_cloudfront_distribution.main.id
-}
-
-output "cd_role_arn" {
-  description = "GitHub Actions の CD（cd.yml）が OIDC で引き受けるロール。値を AWS_CD_ROLE_ARN という名前の GitHub の Secret に手動で設定する（#671・#672）"
-  value       = aws_iam_role.cd.arn
 }

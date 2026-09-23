@@ -92,7 +92,7 @@ resource "aws_ecs_task_definition" "api" {
       # **採るタグが別のものになるか採れなくなり、対象を絞らない apply が別のイメージを本番へ出す。**
       # validate も plan も CI も落ちない。
       name         = "api"
-      image        = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
+      image        = "${data.aws_ecr_repository.api.repository_url}:${var.image_tag}"
       essential    = true
       portMappings = [{ containerPort = local.api_port, protocol = "tcp" }]
       environment = [
@@ -145,7 +145,7 @@ resource "aws_ecs_task_definition" "migrate" {
   container_definitions = jsonencode([
     {
       name      = "migrate"
-      image     = "${aws_ecr_repository.migrate.repository_url}:${var.image_tag}"
+      image     = "${data.aws_ecr_repository.migrate.repository_url}:${var.image_tag}"
       essential = true
       secrets = [
         { name = "DATABASE_URL", valueFrom = aws_ssm_parameter.database_url.arn },

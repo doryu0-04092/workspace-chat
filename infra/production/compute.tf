@@ -1,4 +1,4 @@
-# 計算の土台（#452）。ECR・ECS クラスター・IAM のロール・内部の ALB・ターゲットグループ。
+# 計算の土台（#452）。ECR の参照（作るのは infra/shared。#685）・ECS クラスター・IAM のロール・内部の ALB・ターゲットグループ。
 # 技術スタック「インフラ（AWS）」のコンテナ・ロードバランサの行と、「リソースのサイジング」の ALB の行。
 #
 # タスク定義・サービス・ロググループは service.tf にある。
@@ -26,9 +26,10 @@ locals {
   alb_listener_port     = 80
   alb_listener_protocol = "HTTP"
 
-  # destroy のときに、イメージが入ったままのリポジトリも消す（決定と代償は要件定義書 4.2「バックアップ」の ECR の段落。
-  # プロバイダーの文書「If `true`, will delete the repository even if it contains images.」）。
-  ecr_force_delete = true
+  # イメージの置き場は共有の層（infra/shared）が作る。環境の destroy では消えない（#685）。
+  # 踏むと壊れる: 名前を変えるときは、infra/shared の locals と cd.yml も同じに直す。
+  ecr_api_repository_name     = "workspace-chat-api"
+  ecr_migrate_repository_name = "workspace-chat-migrate"
 
   # Terraform の外（scripts/cloudfront-signing-key.sh）で値を置くパラメータ（#427）。CloudFront の署名付き Cookie の秘密鍵。
   # Terraform は値を作らず読まず（state とプランに鍵を残さない）、名前から ARN を組み立てて secrets と ssm:GetParameters に渡すだけにする。
@@ -36,39 +37,18 @@ locals {
   # apply の前にパラメータが置かれていないと、api のタスクが起動しない（ECS が secrets を読めない）。
   cloudfront_private_key_parameter_name = "/workspace-chat/CLOUDFRONT_PRIVATE_KEY"
   cloudfront_private_key_parameter_arn  = "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter${local.cloudfront_private_key_parameter_name}"
-
-  # CD（GitHub Actions）の OIDC 連携（#671）。このロールを引き受けられるのは、この repo の main ブランチへの
-  # push で動くワークフローだけに絞る（GitHub の文書「configuring-openid-connect-in-amazon-web-services」が
-  # sub 条件でリポジトリ・ブランチを絞ることを勧める）。
-  #
-  # 踏むと壊れる: sub の値は owner_id・repo_id を含む不変形式にする（#679）。GitHub は 2026-04-23 に
-  # 「Immutable subject claims for GitHub Actions OIDC tokens」を導入し、2026-07-15 以降に作成した
-  # リポジトリ（このリポジトリは 2026-09-03 作成）は既定でこの形になる
-  # （https://github.blog/changelog/2026-04-23-immutable-subject-claims-for-github-actions-oidc-tokens/）。
-  # owner_id=292095077・repo_id=1355868496 は `gh api repos/doryu0-04092/workspace-chat` の
-  # owner.id・id で確認済み。**ID を外した従来形式（repo:doryu0-04092/workspace-chat:...）には戻さない**
-  # ——不変 ID は、リポジトリ名の再利用によるなりすましを防ぐための仕組みであり、外すと導入の意図を打ち消す。
-  github_actions_oidc_url  = "https://token.actions.githubusercontent.com"
-  github_actions_audience  = "sts.amazonaws.com"
-  github_repo_main_subject = "repo:doryu0-04092@292095077/workspace-chat@1355868496:ref:refs/heads/main"
-
-  # OIDC プロバイダーの thumbprint_list は Terraform のリソーススキーマ上は必須だが、AWS はもう検証に使わない
-  # （GitHub と AWS が 2024 年末に、証明書チェーンでの検証に切り替えたため）。広く知られている値を置く。
-  github_actions_oidc_thumbprint = "6938fd4d98bab03faadb97b34396831e3780aea1"
 }
 
 # --- イメージ -----------------------------------------------------------------
 #
 # apps/api/Dockerfile の段ごとに置き場を分ける（runtime は api のサービス、migrate は run-task の一回きりのタスク）。
 
-resource "aws_ecr_repository" "api" {
-  name         = "workspace-chat-api"
-  force_delete = local.ecr_force_delete
+data "aws_ecr_repository" "api" {
+  name = local.ecr_api_repository_name
 }
 
-resource "aws_ecr_repository" "migrate" {
-  name         = "workspace-chat-migrate"
-  force_delete = local.ecr_force_delete
+data "aws_ecr_repository" "migrate" {
+  name = local.ecr_migrate_repository_name
 }
 
 # 踏むと壊れる: **要件定義書 4.2「秘密の値が漏れた疑いがあるとき」の手順が、このクラスターを
@@ -230,72 +210,6 @@ resource "aws_iam_role_policy" "upload_signer" {
   name   = "quarantine-put"
   role   = aws_iam_role.upload_signer.id
   policy = data.aws_iam_policy_document.upload_signer.json
-}
-
-# --- CD（GitHub Actions。#671） ---------------------------------------------------
-#
-# 長期のアクセスキーを GitHub Secrets に置かない。OIDC でこのロールを引き受け、ECR への push だけを行う。
-# 踏むと壊れる: このロールに ECR の push 以外の権限を足さない。秘密のパラメータ（DATABASE_URL 等）には触れさせない
-# （terraform apply・マイグレーション実行・ECS サービスの更新は、人が手動で行うリリース手順に残す。#672 の対象外）。
-
-resource "aws_iam_openid_connect_provider" "github_actions" {
-  url             = local.github_actions_oidc_url
-  client_id_list  = [local.github_actions_audience]
-  thumbprint_list = [local.github_actions_oidc_thumbprint]
-}
-
-data "aws_iam_policy_document" "cd_assume" {
-  statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:aud"
-      values   = [local.github_actions_audience]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:sub"
-      values   = [local.github_repo_main_subject]
-    }
-  }
-}
-
-resource "aws_iam_role" "cd" {
-  name               = "workspace-chat-cd"
-  assume_role_policy = data.aws_iam_policy_document.cd_assume.json
-}
-
-data "aws_iam_policy_document" "cd_ecr" {
-  statement {
-    # ecr:GetAuthorizationToken はリソースレベルの権限指定に対応しない操作であり、"*" にする
-    # （AWS の文書「Amazon ECR EBS direct APIs」の Actions 一覧、GetAuthorizationToken の Resource types は "All resources"）。
-    actions   = ["ecr:GetAuthorizationToken"]
-    resources = ["*"]
-  }
-
-  statement {
-    actions = [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:PutImage",
-      "ecr:InitiateLayerUpload",
-      "ecr:UploadLayerPart",
-      "ecr:CompleteLayerUpload",
-    ]
-    resources = [aws_ecr_repository.api.arn, aws_ecr_repository.migrate.arn]
-  }
-}
-
-resource "aws_iam_role_policy" "cd_ecr" {
-  name   = "ecr-push"
-  role   = aws_iam_role.cd.id
-  policy = data.aws_iam_policy_document.cd_ecr.json
 }
 
 # --- ALB ----------------------------------------------------------------------

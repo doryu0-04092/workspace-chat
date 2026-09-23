@@ -2,7 +2,7 @@
 # 本番へのリリース（#452。ビルド・push を CD へ移した分割は #673）。AWS の資格情報が入った端末で流す。
 # **費用が発生し、AWS にリソースを作る。**
 #
-#   1. ECR のリポジトリと、CD（.github/workflows/cd.yml）用の IAM ロール一式を作る（初回はまだ無い。#671）
+#   1. 共有の層（infra/shared。OIDC・ECR・CD（.github/workflows/cd.yml）のロール）を apply する（初回は作る。2回目以降は差分が無い。#685）
 #   2. IMAGE_TAG のイメージが ECR に既に push されていることを確かめる
 #      （ビルド・push は CD が main への push をトリガーに自動で行う。#672。このスクリプトはもう行わない）
 #   3. マイグレーション用のタスク定義を新しいタグにする（apply -target。依存する RDS・パラメータなども、無ければここで作る）
@@ -18,8 +18,9 @@
 #   terraform -chdir=infra/bootstrap init
 #   terraform -chdir=infra/bootstrap apply
 #
-# 前段（初回だけ）: 手順 1 で workspace-chat-cd ロールができたら、`terraform -chdir=infra/production output -raw cd_role_arn`
+# 前段（初回だけ）: 手順 1 で workspace-chat-cd ロールができたら、`terraform -chdir=infra/shared output -raw cd_role_arn`
 # の値を、GitHub の Secrets に AWS_CD_ROLE_ARN という名前で設定する。設定するまで CD（cd.yml）は動かない。
+# CD がイメージを push するのは、この設定の後に main へマージしたときである（手順 2 はそのイメージを探す）。
 #
 # 使い方:
 #   TF_STATE_BUCKET=$(terraform -chdir=infra/bootstrap output -raw state_bucket) \
@@ -49,16 +50,17 @@ tf() {
   terraform -chdir=infra/production "$@"
 }
 
-tf init -input=false -backend-config="bucket=$TF_STATE_BUCKET" >/dev/null
+tf_shared() {
+  terraform -chdir=infra/shared "$@"
+}
 
-echo "== 1. ECR のリポジトリと CD 用の IAM ロール一式"
-tf apply -input=false \
-  -target=aws_ecr_repository.api \
-  -target=aws_ecr_repository.migrate \
-  -target=aws_iam_openid_connect_provider.github_actions \
-  -target=aws_iam_role_policy.cd_ecr
-api_repository=$(tf output -raw ecr_api_repository_url)
-migrate_repository=$(tf output -raw ecr_migrate_repository_url)
+tf init -input=false -backend-config="bucket=$TF_STATE_BUCKET" >/dev/null
+tf_shared init -input=false -backend-config="bucket=$TF_STATE_BUCKET" >/dev/null
+
+echo "== 1. 共有の層（OIDC・ECR・CD のロール）"
+tf_shared apply -input=false
+api_repository=$(tf_shared output -raw ecr_api_repository_url)
+migrate_repository=$(tf_shared output -raw ecr_migrate_repository_url)
 api_repository_name=${api_repository##*/}
 migrate_repository_name=${migrate_repository##*/}
 
