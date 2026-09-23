@@ -111,6 +111,10 @@ jobs:
       - name: Terraform の整形・プロバイダーのロック・構文の確認
         run: bash scripts/terraform.test.sh
 
+      # CD がステージングへ出す手順（#688）の順番と止まり方を、偽の aws で確かめる。本物の AWS には何も送らない。
+      - name: ステージングへのデプロイの手順の確認
+        run: bash scripts/deploy-staging.test.sh
+
       # テストが失敗したときこそ残す。CI を実行した事実と結果を成果物として残すのが目的。
       # ただしレポートが実際に出ている場合に限る。前段で落ちたときや、テストの
       # ステップ自体が junit を書く前に落ちたときは reports/ が存在せず、

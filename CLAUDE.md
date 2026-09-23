@@ -463,5 +463,5 @@ npm の版更新は止めた（[README](README.md) の「依存の版を上げ�
 | 依存の更新方針 | **完了**（[dependabot.yml](.github/dependabot.yml)。**npm の版は固定し、GitHub Actions の更新のみ受け取る**。脆弱性検査ではない）。**固定するのは「新しい版が出たから上げる」だけであり、脆弱性を塞ぐ更新は取り込む**（[README](README.md)「依存の版を上げない方針」） |
 | プロジェクトの雛形 | **完了**（apps/api / apps/web / packages/shared） |
 | 開発環境の Docker（DB・Redis） | **完了**（[compose.yaml](compose.yaml)。**Docker に入れるのはミドルウェアだけ**。api / web はホストの Node で動かす） |
-| **CD（ビルド・ECR への push・release ブランチの前進）** | **完了**（[cd.yml](.github/workflows/cd.yml)。#672。本番への反映は `release` ブランチから手動で行う。[README](README.md)「CD（本番へのリリース）」） |
+| **CD（ビルド・ECR への push・ステージングへの自動デプロイ）** | **完了**（[cd.yml](.github/workflows/cd.yml)。#672・#688。本番への反映は、ステージングで確かめてから `release` ブランチを進めて手動で行う。[README](README.md)「CD（ステージングへの自動デプロイと、本番へのリリース）」） |
 | 実装 | 実装中 |

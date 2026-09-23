@@ -270,6 +270,8 @@ data "aws_cloudfront_origin_request_policy" "all_viewer" {
 }
 
 resource "aws_cloudfront_distribution" "main" {
+  # CD のステージングへのデプロイ（scripts/deploy-staging.sh）が、この説明でディストリビューションを探す（ID は作り直すと変わる）。
+  comment             = local.name
   enabled             = true
   default_root_object = local.web_default_root_object
 

@@ -1,33 +1,35 @@
 name: cd
 
-# main への push（PR のマージ）をトリガーに、api・migrate イメージを linux/arm64 でビルドして
-# ECR へ push し、成功したら release ブランチをそのコミットまで進める（#672）。
+# main への push（PR のマージ）をトリガーに、
+#   1. api・migrate イメージを linux/arm64 でビルドして ECR へ push する（#672）
+#   2. ステージングが立っていれば、そのイメージでステージングへ出す（#688。scripts/deploy-staging.sh）
 #
-# terraform apply・マイグレーションの実行・ECS サービスの更新はここでは行わない。
-# 本番への反映は、release ブランチから人が手動で行う（scripts/release.sh。#673）。
+# terraform apply はここでは行わない（apply は常に人が行う）。ステージングはアプリだけを更新する。
+# 本番への反映は、ステージングで検証した後に、人が release ブランチを進めて手動で行う（scripts/release.sh。README の CD の節）。
 #
-# 長期のアクセスキーは使わない。GitHub Actions の OIDC で、ECR への push だけができる
-# IAM ロール（infra/shared/main.tf の aws_iam_role.cd。#671・#685）を引き受ける。
+# 長期のアクセスキーは使わない。GitHub Actions の OIDC で、ジョブごとに権限を絞ったロールを引き受ける
+# （infra/shared/main.tf の aws_iam_role.cd は ECR への push だけ、aws_iam_role.staging_deploy はステージングの更新だけ。#671・#685・#688）。
 
 on:
   push:
     branches: [main]
 
-# 連続で main に push（マージ）されても、release への反映は順番を保つ。打ち切ると
-# 先に走っていた分のイメージが ECR に残らないまま release だけ進むことになるため、
-# 打ち切らずに並ばせる。
+# 連続で main に push（マージ）されても、ステージングへの反映は順番を保つ。打ち切ると
+# 途中の版のマイグレーションだけが流れて、サービスが古い版のまま残りうるため、打ち切らずに並ばせる。
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
 permissions:
   id-token: write # OIDC でロールを引き受けるために要る
-  contents: write # release ブランチへ push するために要る
+  contents: read
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
     steps:
       - uses: actions/checkout@v4
 
@@ -82,7 +84,53 @@ jobs:
           docker push "$API_IMAGE"
           docker push "$MIGRATE_IMAGE"
 
-      # fast-forward のみ（--force を付けない）。release が this push 以外の理由で先に進んでいたら、
-      # ここで失敗して気づける。
-      - name: release ブランチを進める
-        run: git push origin ${{ github.sha }}:refs/heads/release
+  deploy-staging:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # デプロイ用のロールを Secret に設定するまでは飛ばす（README の CD の節の「動かすために必要な設定」）。
+      # 設定の前に main へマージしても CD を赤にしない（ビルド用のロールで起きた「Could not load credentials」を繰り返さない）。
+      - name: デプロイ用のロールが設定されているか
+        id: configured
+        env:
+          ROLE: ${{ secrets.AWS_STAGING_DEPLOY_ROLE_ARN }}
+        run: if [ -n "$ROLE" ]; then echo "value=true" >> "$GITHUB_OUTPUT"; else echo "value=false" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.configured.outputs.value == 'true'
+        with:
+          role-to-assume: ${{ secrets.AWS_STAGING_DEPLOY_ROLE_ARN }}
+          aws-region: ap-northeast-1
+
+      # ステージングは検証のときだけ立てる（README の CD の節）。立っていなければ、ここで飛ばして緑で終える。
+      - name: ステージングが立っているか
+        id: staging
+        if: steps.configured.outputs.value == 'true'
+        run: echo "exists=$(bash scripts/deploy-staging.sh exists)" >> "$GITHUB_OUTPUT"
+
+      - name: 飛ばす
+        if: steps.staging.outputs.exists != 'true'
+        run: echo "ステージングへのデプロイを飛ばした（デプロイ用のロール：${{ steps.configured.outputs.value }}・ステージング：${{ steps.staging.outputs.exists || '確かめていない' }}。イメージ ${{ needs.build-and-push.outputs.tag }} は ECR にある）"
+
+      - uses: actions/setup-node@v7
+        if: steps.staging.outputs.exists == 'true'
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: web をビルドする
+        if: steps.staging.outputs.exists == 'true'
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build -w @workspace-chat/shared
+          npm run build -w @workspace-chat/web
+
+      - name: ステージングへ出す
+        if: steps.staging.outputs.exists == 'true'
+        env:
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.tag }}
+          WEB_DIST: apps/web/dist
+        run: bash scripts/deploy-staging.sh deploy

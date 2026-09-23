@@ -879,25 +879,144 @@ describe('共有の層（infra/shared）の IAM の面', () => {
         role: 'aws_iam_role.cd.id',
         policy: 'data.aws_iam_policy_document.cd_ecr.json',
       },
+      // CD のステージングへのデプロイ（#688）。同じアカウントに本番があるため、ステージングの名前とタグの外に届かない。
+      'resource.aws_iam_role.staging_deploy': {
+        name: '"${local.staging_name}-deploy"',
+        assume_role_policy: 'data.aws_iam_policy_document.cd_assume.json',
+      },
+      'data.aws_iam_policy_document.staging_deploy': {
+        statement: [
+          {
+            sid: '"FindStaging"',
+            actions: ['"ecs:DescribeClusters"'],
+            resources: ['"${local.ecs_arn}:cluster/${local.staging_name}"'],
+          },
+          {
+            sid: '"ReadTaskDefinitions"',
+            actions: ['"ecs:DescribeTaskDefinition"', '"cloudfront:ListDistributions"'],
+            resources: ['"*"'],
+          },
+          {
+            sid: '"RegisterStagingTaskDefinitions"',
+            actions: ['"ecs:RegisterTaskDefinition"', '"ecs:ListTagsForResource"'],
+            resources: ['"${local.ecs_arn}:task-definition/${local.staging_name}-*:*"'],
+          },
+          {
+            sid: '"TagOnRegister"',
+            actions: ['"ecs:TagResource"'],
+            resources: ['"${local.ecs_arn}:task-definition/${local.staging_name}-*:*"'],
+            condition: [
+              {
+                test: '"StringEquals"',
+                variable: '"ecs:CreateAction"',
+                values: ['"RegisterTaskDefinition"'],
+              },
+            ],
+          },
+          {
+            sid: '"RunStagingMigration"',
+            actions: ['"ecs:RunTask"'],
+            resources: ['"${local.ecs_arn}:task-definition/${local.staging_name}-migrate:*"'],
+            condition: [
+              {
+                test: '"ArnEquals"',
+                variable: '"ecs:cluster"',
+                values: ['"${local.ecs_arn}:cluster/${local.staging_name}"'],
+              },
+            ],
+          },
+          {
+            sid: '"WatchStagingTasks"',
+            actions: ['"ecs:DescribeTasks"'],
+            resources: ['"${local.ecs_arn}:task/${local.staging_name}/*"'],
+          },
+          {
+            sid: '"UpdateStagingService"',
+            actions: ['"ecs:DescribeServices"', '"ecs:UpdateService"'],
+            resources: [
+              '"${local.ecs_arn}:service/${local.staging_name}/${local.staging_name}-api"',
+            ],
+          },
+          {
+            sid: '"PassStagingRoles"',
+            actions: ['"iam:PassRole"'],
+            resources: [
+              '"arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.staging_name}-*"',
+            ],
+            condition: [
+              {
+                test: '"StringEquals"',
+                variable: '"iam:PassedToService"',
+                values: ['"ecs-tasks.amazonaws.com"'],
+              },
+            ],
+          },
+          {
+            sid: '"ListStagingWeb"',
+            actions: ['"s3:ListBucket"'],
+            resources: [
+              '"arn:aws:s3:::${local.staging_name}-web-${data.aws_caller_identity.current.account_id}"',
+            ],
+          },
+          {
+            sid: '"WriteStagingWeb"',
+            actions: ['"s3:PutObject"', '"s3:DeleteObject"'],
+            resources: [
+              '"arn:aws:s3:::${local.staging_name}-web-${data.aws_caller_identity.current.account_id}/*"',
+            ],
+          },
+          {
+            sid: '"InvalidateStagingCache"',
+            actions: ['"cloudfront:CreateInvalidation"', '"cloudfront:GetInvalidation"'],
+            resources: [
+              '"arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/*"',
+            ],
+            condition: [
+              {
+                test: '"StringEquals"',
+                variable: '"aws:ResourceTag/Environment"',
+                values: ['"staging"'],
+              },
+            ],
+          },
+        ],
+      },
+      'resource.aws_iam_role_policy.staging_deploy': {
+        name: '"staging-deploy"',
+        role: 'aws_iam_role.staging_deploy.id',
+        policy: 'data.aws_iam_policy_document.staging_deploy.json',
+      },
     });
   });
 
+  const localsOf = (names: string[]) =>
+    Object.fromEntries(
+      names.map((name) => {
+        const found = [...shared.matchAll(new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'gm'))];
+        expect(found, name).toHaveLength(1);
+        return [name, found[0]?.[1]];
+      }),
+    );
+
   // 引き受けられる相手は、このリポジトリ（不変 ID を含む形。#679）の main ブランチへの push で動くワークフローだけである。
   it('信頼条件の audience と sub は、このリポジトリの main ブランチだけを指す', () => {
-    const values = Object.fromEntries(
-      ['github_actions_oidc_url', 'github_actions_audience', 'github_repo_main_subject'].map(
-        (name) => {
-          const found = [...shared.matchAll(new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'gm'))];
-          expect(found, name).toHaveLength(1);
-          return [name, found[0]?.[1]];
-        },
-      ),
-    );
-    expect(values).toEqual({
+    expect(
+      localsOf(['github_actions_oidc_url', 'github_actions_audience', 'github_repo_main_subject']),
+    ).toEqual({
       github_actions_oidc_url: '"https://token.actions.githubusercontent.com"',
       github_actions_audience: '"sts.amazonaws.com"',
       github_repo_main_subject:
         '"repo:doryu0-04092@292095077/workspace-chat@1355868496:ref:refs/heads/main"',
+    });
+  });
+
+  // 表はデプロイ用ロールの権限を local.staging_name で書く。その値が本番の名前（workspace-chat）に当たると、
+  // main へのマージが人の確認なしに本番を書き換えうる。値そのものを固定する（#688）。
+  it('ステージングへのデプロイ用ロールが指す名前は workspace-chat-staging で、本番の名前に当たらない', () => {
+    expect(localsOf(['staging_name', 'ecs_arn'])).toEqual({
+      staging_name: '"workspace-chat-staging"',
+      ecs_arn:
+        '"arn:aws:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"',
     });
   });
 });
