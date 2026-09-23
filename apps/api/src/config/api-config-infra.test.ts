@@ -1019,6 +1019,17 @@ describe('共有の層（infra/shared）の IAM の面', () => {
         '"arn:aws:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}"',
     });
   });
+
+  // CD が宛先にする名前（scripts/deploy-staging.sh）と、デプロイ用ロールが許す名前が食い違うと、CD が本番の資源を見に行く
+  // （書き込みは IAM で拒まれるが、読み取りと「立っているか」の判定が本番に当たる）。2つを同じ値に固定する（#688）。
+  it('CD が宛先にする名前（scripts/deploy-staging.sh の name）は、デプロイ用ロールが許す staging_name と同じである', () => {
+    const script = readFileSync(
+      join(__dirname, '..', '..', '..', '..', 'scripts', 'deploy-staging.sh'),
+      'utf8',
+    );
+    const names = [...script.matchAll(/^name="([^"]*)"$/gm)].map((match) => `"${match[1]}"`);
+    expect(names).toEqual([localsOf(['staging_name']).staging_name]);
+  });
 });
 
 // 同じ構成を本番とステージングに当てる（#686）。同じアカウントで名前がぶつかると、作成の API が同名の既存を返す資源
