@@ -32,7 +32,9 @@ run_migration() {
 deploy_web() {
   local bucket=$1 distribution=$2 dist=$3 invalidation
   [ -f "$dist/index.html" ] || deploy_fail "$dist に index.html が無い（web をビルドしてから置く）"
-  [ -n "$distribution" ] && [ "$distribution" != "None" ] || deploy_fail "CloudFront のディストリビューションが見つからない"
+  if [ -z "$distribution" ] || [ "$distribution" = "None" ]; then
+    deploy_fail "CloudFront のディストリビューションが見つからない"
+  fi
   aws s3 sync "$dist" "s3://$bucket" --exclude index.html
   aws s3 cp "$dist/index.html" "s3://$bucket/index.html" --cache-control no-cache --content-type text/html
   invalidation=$(aws cloudfront create-invalidation --distribution-id "$distribution" --paths '/*' \
