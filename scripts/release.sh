@@ -23,9 +23,8 @@
 #
 # 使い方:
 #   TF_STATE_BUCKET=$(terraform -chdir=infra/bootstrap output -raw state_bucket) \
-#     IMAGE_TAG=<release ブランチで CD が push した短い SHA> ALARM_EMAIL=<通知先> bash scripts/release.sh
+#     IMAGE_TAG=<release ブランチで CD が push した短い SHA> bash scripts/release.sh
 #   IMAGE_TAG は release ブランチの `git rev-parse --short HEAD`、または CD（cd.yml）の実行結果から読む。
-#   アラートのメールの購読は、届く確認のメールのリンクを開くまで有効にならない。
 #
 # 前提: aws（資格情報と ap-northeast-1）・terraform・node と npm。
 # **docker は要らない**——ビルド・push は CD（GitHub Actions）が行うため、この端末に arm64 のクロスビルド環境は不要になった（#673）。
@@ -43,10 +42,8 @@ fail() {
 
 : "${TF_STATE_BUCKET:?state のバケット名を TF_STATE_BUCKET に渡す}"
 : "${IMAGE_TAG:?イメージのタグを IMAGE_TAG に渡す（release ブランチで CD が push したタグ）}"
-: "${ALARM_EMAIL:?アラートの通知先を ALARM_EMAIL に渡す}"
 
 export TF_VAR_image_tag="$IMAGE_TAG"
-export TF_VAR_alarm_email="$ALARM_EMAIL"
 
 tf() {
   terraform -chdir=infra/production "$@"
