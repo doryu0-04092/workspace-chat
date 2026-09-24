@@ -226,10 +226,12 @@ ESM で出すと `apps/api` から素直に `import` できない。
 **未確認**
 
 - **暗号化パラメータに使う KMS の鍵の費用**
-- **`aws_db_instance` の `password_wo` の値が、実際に state に残らないこと**（Terraform の文書は write-only 引数を state に残さないとして `password_wo` を例に挙げるが、AWS プロバイダーの文書の `password_wo` の説明には `password` と同じ「it will be stored in the state file」が残っている。`apply` の後に state を開いて確かめる）
-- **`aws_ssm_parameter` の `value_wo` と `aws_elasticache_replication_group` の `auth_token_wo` の値が、実際に state に残らないこと**（上の `password_wo` と同じ形の write-only 引数。`apply` の後に state を開いて確かめる。`infra/production/cache.tf`）
-- **`aws_elasticache_replication_group` の `primary_endpoint_address` が `engine = "valkey"` で値を持つこと**（プロバイダーの文書は「(Redis only)」と書く。`REDIS_URL` の組み立てがこの属性に依る）
-- **VPC オリジンを経ても、api が受け取る X-Forwarded-For が「CloudFront → ALB」の2段の形になること**（`TRUST_PROXY_HOPS=2` の前提。上の ALB の行）
+
+**確認済み**（2026-09-24。ステージングの実環境で確かめた。[検証の記録](verification.md)）
+
+- **`aws_db_instance` の `password_wo`、`aws_ssm_parameter` の `value_wo`、`aws_elasticache_replication_group` の `auth_token_wo` の値は、state に残らない**（apply の後の state の版を開き、`password`・`password_wo`・`value`・`value_wo`・`insecure_value`・`auth_token`・`auth_token_wo` がすべて空で、接続文字列も含まないことを確かめた）
+- **`aws_elasticache_replication_group` の `primary_endpoint_address` は `engine = "valkey"` でも値を持つ**（state に値があり、それで組み立てた `REDIS_URL` で api が Valkey につながった）
+- **VPC オリジンを経ても、api が受け取る X-Forwarded-For は「CloudFront → ALB」の2段の形になる**（`TRUST_PROXY_HOPS=2` で、レート制限のログの発信元が、試した端末の公開 IP と一致した）
 
 **確認済み**（2026-09-16・作業側。AWS の読み取りの API で確かめた。`infra/production/database.tf`）
 
@@ -571,7 +573,10 @@ NestJS のコンストラクタインジェクションは、この指定が出�
   **レート制限の側は、繋がらなくても api が止まらずに各タスクのメモリへ迂回し、
   アラートにもしない**（[要件定義書](requirements.md) 4.2）**ため、この確認を飛ばすと取り違えに誰も気づけない**
   **ローカルの Valkey は無認証の `redis://` であり、この経路を一度も通らない**
-  （下記「ローカルの Valkey に認証を掛けない」）
+  （下記「ローカルの Valkey に認証を掛けない」）。
+  **確認済み（2026-09-24。ステージングと本番の実環境）**: 2 つのタスクが AUTH トークン・`rediss://` で Valkey につながり
+  （起動のログ「Valkey に接続した」と ElastiCache の接続数）、別のタスクにつながった利用者へ 20 回の投稿がすべて届き、
+  画面の通しでもリアルタイムの反映が出た（[検証の記録](verification.md)）。**自動の検査は、いまも無い**（実環境で人が流した記録である）
 
 > **代償を明記する。** **テストの実行環境の項目は決めた**（`apps/api/src/testing/postgres.ts`）——
 > Testcontainers に渡すイメージは、名前で参照するのではなく、**起動のたびに `docker build --pull` で作り直す**。
