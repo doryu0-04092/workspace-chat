@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ステージングへのデプロイ（#688）。CD（.github/workflows/cd.yml）が main へのマージのたびに流す。
 #
-#   bash scripts/deploy-staging.sh exists   # ステージングが立っていれば true、無ければ false を出す（どちらも exit 0）
+#   bash scripts/deploy-staging.sh exists   # ステージング（クラスターと api のサービス）が立っていれば true、無ければ false を出す（どちらも exit 0）
 #   IMAGE_TAG=<CD が push したタグ> WEB_DIST=<ビルド済みの web> bash scripts/deploy-staging.sh deploy
 #
 # deploy の流れ（本番の scripts/release.sh の手順 4〜6 と同じ順）:
@@ -37,6 +37,22 @@ cluster_status() {
   aws ecs describe-clusters --clusters "$cluster" --query 'clusters[0].status' --output text
 }
 
+# ステージングが立っているか（クラスターと api のサービスがどちらも ACTIVE か）を staging_up に入れる。
+# 踏むと壊れる: クラスターだけで判定しない。人が release.sh で立てている途中（クラスターはあるがサービスがまだ無い）に当たると、
+# マイグレーションが二重に流れ、サービスの取得で赤になる。サービスはクラスターが ACTIVE のときだけ問い合わせる
+# （クラスターが無いと describe-services がエラーを返し、「立っていない」を赤にしてしまう）。
+# この関数は $(...) の中で呼ばない（そこでは set -e が効かず、途中の失敗を見逃す）。
+read_staging_state() {
+  local cluster_state service_state=None
+  cluster_state=$(cluster_status)
+  if [ "$cluster_state" = "ACTIVE" ]; then
+    service_state=$(aws ecs describe-services --cluster "$cluster" --services "$service" \
+      --query 'services[0].status' --output text)
+  fi
+  staging_up=false
+  if [ "$service_state" = "ACTIVE" ]; then staging_up=true; fi
+}
+
 # タスク定義（family か ARN）を、イメージのタグだけ替えて新しい版として登録し、その ARN を出す。
 register_with_image() {
   local source=$1 work input
@@ -55,15 +71,15 @@ register_with_image() {
 
 case "$mode" in
   exists)
-    status=$(cluster_status)
-    if [ "$status" = "ACTIVE" ]; then echo true; else echo false; fi
+    read_staging_state
+    echo "$staging_up"
     ;;
   deploy)
     : "${IMAGE_TAG:?イメージのタグを IMAGE_TAG に渡す（CD が push したタグ）}"
     : "${WEB_DIST:?ビルド済みの web のディレクトリを WEB_DIST に渡す}"
-    status=$(cluster_status)
-    if [ "$status" != "ACTIVE" ]; then
-      echo "ステージングが立っていない（クラスター $cluster が無い）。デプロイを飛ばす"
+    read_staging_state
+    if [ "$staging_up" != true ]; then
+      echo "ステージングが立っていない（クラスター $cluster か api のサービスが無い）。デプロイを飛ばす"
       exit 0
     fi
 

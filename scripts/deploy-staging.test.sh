@@ -33,6 +33,7 @@ case "$1 $2" in
   "ecs describe-clusters") echo "$FAKE_CLUSTER_STATUS" ;;
   "ecs describe-services")
     case "$args" in
+      *"services[0].status"*) echo "${FAKE_SERVICE_STATUS:-ACTIVE}" ;;
       *taskDefinition*) echo "arn:aws:ecs:ap-northeast-1:111122223333:task-definition/workspace-chat-staging-api:7" ;;
       *networkConfiguration*) echo '{"awsvpcConfiguration":{"subnets":["subnet-1"],"securityGroups":["sg-1"],"assignPublicIp":"ENABLED"}}' ;;
     esac
@@ -97,6 +98,22 @@ if [ "$(cat "$d/exit")" = 0 ] && ! grep -qE 'register-task-definition|update-ser
   ok "deploy も何も変えずに exit 0"
 else
   ng "立っていないのに何かを変えた、または落ちた" "$d"
+fi
+
+echo "== 1b. 作りかけ（クラスターはあるが api のサービスが無い）なら、立っていないと見なして飛ばす"
+run half-exists exists FAKE_SERVICE_STATUS=None
+d="$work/half-exists"
+if [ "$(cat "$d/exit")" = 0 ] && [ "$(tail -1 "$d/out.txt")" = false ]; then
+  ok "exists は false を出して exit 0"
+else
+  ng "作りかけなのに exists が false を出さない" "$d"
+fi
+run half-deploy deploy FAKE_SERVICE_STATUS=None
+d="$work/half-deploy"
+if [ "$(cat "$d/exit")" = 0 ] && ! grep -qE 'register-task-definition|update-service|run-task|s3 ' "$d/aws.log"; then
+  ok "deploy は何も変えずに exit 0（マイグレーションを二重に流さない）"
+else
+  ng "作りかけのステージングに当たった" "$d"
 fi
 
 echo "== 2. 立っていれば、新しいイメージでマイグレーション → サービスの更新 → web の順に出す"
