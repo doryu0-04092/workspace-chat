@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { bodyReadErrorHandler } from './body-read-error';
+import { applyHttpTimeouts } from './http-timeouts';
 import { resolveApiConfig } from './config/api-config';
 import { JsonLogger } from './logging/json-logger';
 import { requestContext } from './logging/request-context';
@@ -47,6 +48,7 @@ export async function createApp(options?: NestApplicationOptions): Promise<INest
   });
   app.use(requestContext);
   app.enableShutdownHooks();
+  applyHttpTimeouts(app.getHttpServer());
   app.useBodyParser('json');
   app.use(bodyReadErrorHandler);
   app.setGlobalPrefix('api');

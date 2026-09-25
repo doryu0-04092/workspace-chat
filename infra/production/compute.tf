@@ -20,11 +20,13 @@ locals {
   api_target_protocol = "HTTP"
 
   # ALB はプライベートサブネットに置き、CloudFront の VPC オリジンから HTTP で受ける（TLS は終端しない。技術スタックの「HTTPS とドメイン」）。
-  # アイドルタイムアウトは既定の 60 秒のまま（Socket.IO の ping の間隔 25 秒に依存する。技術スタックの「ALB のアイドルタイムアウト」）。
-  alb_internal          = true
-  alb_type              = "application"
-  alb_listener_port     = 80
-  alb_listener_protocol = "HTTP"
+  # アイドルタイムアウトは既定と同じ 60 秒（Socket.IO の ping の間隔 25 秒に依存する。技術スタックの「ALB のアイドルタイムアウト」）。
+  # 踏むと壊れる: 延ばすなら api の HTTP_KEEP_ALIVE_TIMEOUT_MS（apps/api/src/http-timeouts.ts）をこれより長くする。短いと ALB が 502 を返す（#703）。
+  alb_internal             = true
+  alb_type                 = "application"
+  alb_listener_port        = 80
+  alb_listener_protocol    = "HTTP"
+  alb_idle_timeout_seconds = 60
 
   # イメージの置き場は共有の層（infra/shared）が作る。環境の destroy では消えない（#685）。
   # 踏むと壊れる: 名前を変えるときは、infra/shared の locals と cd.yml も同じに直す。
@@ -220,6 +222,7 @@ resource "aws_lb" "api" {
   load_balancer_type = local.alb_type
   subnets            = aws_subnet.private[*].id
   security_groups    = [aws_security_group.alb.id]
+  idle_timeout       = local.alb_idle_timeout_seconds
 }
 
 resource "aws_lb_target_group" "api" {
