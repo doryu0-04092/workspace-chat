@@ -100,12 +100,14 @@ updates:
 #     強さ: **npm test を流せば届く。** 手元でテストを回さない人には、compose pull だけが経路になる。
 #     **どちらも取り直すのは手元のイメージまでで、動いているコンテナに入るのは次に up -d で作り直したとき**
 #
-#   quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z（compose.yaml の minio と、apps/api/src/testing/minio.ts の MINIO_IMAGE。**同じタグ**）
+#   quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z（compose.yaml の minio）
 #     経路: docker compose pull minio
-#           minio.ts の PullPolicy.alwaysPull()
-#     強さ: **npm test を流せば届く。** 手元でテストを回さない人には、compose pull だけが経路になる。
-#     **ただし、このタグは版を名前に含むため、取り直しても同じ版のままである。** Docker Hub の minio/minio は取れず（2026-09-17 に 404）、
-#     quay.io にもこの後の `.hotfix.` の付かない版は無い（同日に確かめた）。手元とテストの代わりの S3 であり、本番には入らない
+#     **ただし、2026-09-25 から quay.io は認証なしでは取らせない（401。#698）。取り済みのイメージが無い機械では、手元の MinIO が起動しない。**
+#     Docker Hub の minio/minio も同日に 401。手元の代わりの S3 であり、本番には入らない
+#
+#   cgr.dev/chainguard/minio@sha256:…（apps/api/src/testing/minio.ts の MINIO_IMAGE。**compose.yaml とは別のイメージ**）
+#     経路: minio.ts の PullPolicy.alwaysPull()
+#     **ダイジェストで固定しているため、取り直しても同じ版のままである**（無料で取れるのは latest のタグだけ。#698）。テストの代わりの S3 であり、本番には入らない
 #
 # **代償**: テストの土台は起動のたびにレジストリへ問い合わせるため npm test が遅くなり、
 # レジストリが不調だとテストごと落ちる（#517 の CI で実際に起きた）。各 docblock にも書いてある。
