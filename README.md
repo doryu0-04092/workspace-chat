@@ -7,10 +7,11 @@ Slack 風のチャットアプリケーション。スクール課題として�
 
 ## 現在の状態
 
-**リポジトリは 2026-09-25 に終えた。** 実装は完了し、AWS の本番とステージングは検証の後に破棄した（2026-09-24）。
-共有の層（`infra/shared`）と state のバケット（`infra/bootstrap`）も、この更新の後に破棄する（2026-09-25）。
+**リポジトリは 2026-09-25 に終えた。** 実装は完了し、AWS の本番とステージングは検証の後に破棄した（2026-09-24。ステージングは 09-25 の追加の検証で作り直し、この更新の後に破棄する）。
+**料金がかかる資源はすべて消す。** 共有の層（`infra/shared`）のうち ECR の 2 つは、この更新の後に消す（2026-09-25）。
+OIDC・CD のロール 2 つ・SSM の署名鍵 2 つ・state のバケットは残す（無料で、それだけでは何もできない。依頼側の決定・2026-09-25）。
 **作り直すと URL は変わり、DB は空から始まる**（下記「空のアカウントから作り直す」）。
-検証の結果は [検証の記録](docs/verification.md)、未解決のまま終えたものは #695（デプロイの入れ替えの間のリアルタイム配信）である。
+検証の結果は [検証の記録](docs/verification.md) にある。
 
 | フェーズ | 状態 |
 |---|---|
@@ -27,7 +28,7 @@ Slack 風のチャットアプリケーション。スクール課題として�
 | Prisma のスキーマとマイグレーション | **完了**（[prisma.config.ts](prisma.config.ts) / `apps/api/prisma/`。#40） |
 | **CD（ビルド・ECR への push・ステージングへの自動デプロイ）** | **完了**（[cd.yml](.github/workflows/cd.yml)。#672・#688。本番への反映は、ステージングで確かめてから `release` ブランチを進めて手動で行う。下記「CD（ステージングへの自動デプロイと、本番へのリリース）」） |
 | 実装 | **完了**（2026-09-24。[検証の記録](docs/verification.md)） |
-| AWS の環境 | **破棄済み**（本番・ステージングは 2026-09-24。共有の層・state のバケットは 2026-09-25） |
+| AWS の環境 | **破棄済み**（本番は 2026-09-24、ステージングと ECR は 2026-09-25。OIDC・CD のロール・SSM の署名鍵・state のバケットは残す） |
 
 **開発方式はテスト駆動開発（TDD）。** 実装より先にテストを書き、失敗を確認してから実装する
 （[要件定義書](docs/requirements.md) 4.8）。
@@ -582,16 +583,17 @@ GitHub フローに `release` ブランチを1本足した環境ブランチ方�
 
 ### 空のアカウントから作り直す
 
-**AWS の資源をすべて消して終える**（2026-09-25）ため、作り直すときはこの順で行う。**順番を入れ替えると止まる**——
+**ECR を消して終える**（2026-09-25）ため、作り直すときはこの順で行う。**順番を入れ替えると止まる**——
 `release.sh` は手順 2 で ECR にイメージがあることを確かめるため、**CD を先に動かしてイメージを push しておく**必要がある。
+state のバケット・OIDC・CD のロール・SSM の署名鍵・GitHub の Secret は残してあるので、同じアカウントなら 1・3・5 は飛ばせる。
 
 | # | 作業 | コマンド・場所 |
 |---|---|---|
-| 1 | state のバケットを作る | `infra/bootstrap` を `init` → `apply`（state は手元のファイル。`scripts/release.sh` の冒頭の「前段」） |
-| 2 | 共有の層（OIDC・ECR・CD の2つのロール）を作る | `terraform -chdir=infra/shared init -backend-config="bucket=<1 のバケット>"` → `apply` |
-| 3 | 2つのロールの ARN を Secret に登録する | 上の「動かすために必要な設定」の 2・3 |
-| 4 | CD を動かしてイメージを push する | main へのマージ、または Actions の cd を再実行（cd を無効にしてあれば先に有効に戻す。ステージングが無いので deploy-staging は飛ばす） |
-| 5 | 署名鍵の対を作る | `bash scripts/cloudfront-signing-key.sh <環境>` |
+| 1 | state のバケットを作る（**残してあれば飛ばす**） | `infra/bootstrap` を `init` → `apply`（state は手元のファイル。`scripts/release.sh` の冒頭の「前段」） |
+| 2 | 共有の層を作り直す（ECR 2 つと、CD のロールの push の権限が戻る） | `terraform -chdir=infra/shared init -backend-config="bucket=<1 のバケット>"` → `apply` |
+| 3 | 2つのロールの ARN を Secret に登録する（**残してあれば飛ばす**） | 上の「動かすために必要な設定」の 2・3 |
+| 4 | CD を動かしてイメージを push する | main へのマージ、または Actions の cd を再実行（ステージングが無いので deploy-staging は飛ばす） |
+| 5 | 署名鍵の対を作る（**SSM に秘密鍵が残っていて、`infra/production/keys/<環境>/` の公開鍵と対なら飛ばす**） | `bash scripts/cloudfront-signing-key.sh <環境>` |
 | 6 | 環境を立てる | `TF_STATE_BUCKET=<1 のバケット> ENVIRONMENT=<環境> IMAGE_TAG=<4 で push したタグ> bash scripts/release.sh` |
 
 - **Windows の PowerShell から流すときは、`bash` ではなく Git Bash を名指しする**（`bash` は WSL を起動し、環境変数が渡らない。[検証の記録](docs/verification.md)「検証を進めるうえで当たったこと」）
