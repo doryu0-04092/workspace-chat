@@ -5,13 +5,16 @@ import { GenericContainer, PullPolicy, type StartedTestContainer, Wait } from 't
  * テストで S3 の代わりに S3 互換のストレージ（MinIO）を使うための部品。**製品コードから読み込まない**（tsconfig.build.json が外す）。
  * 手元とテストでは S3 を MinIO で代える（#427 の決定）。Docker が動いていることが前提（postgres.ts と同じ）。
  * **起動のたびにイメージを取り直す**（理由と代償は postgres.ts の POSTGRES_IMAGE と同じ）。
- * **このタグは compose.yaml の minio・minio-init と同じである。** 取り直す経路は、これと `docker compose pull minio` の2本
+ * **compose.yaml の minio とはイメージが違う**（下の理由）。取り直す経路は、これだけである
  * （タグごとの経路の一覧は .github/dependabot.yml の末尾）。
  *
- * **Docker Hub の minio/minio は取れない**（2026-09-17 に Docker Hub の API が 404 を返した）。quay.io から取る。
- * quay.io の `.hotfix.` の付いたタグは使わない（付いていない最後の版がこれである。2026-09-17 に quay.io の API で確かめた）。
+ * **quay.io の minio/minio も Docker Hub の minio/minio も、認証なしでは取れない**（2026-09-25 にどちらも 401。#698）。
+ * Chainguard が公開する MinIO を使う。無料で取れるのは latest のタグだけなので、**ダイジェストで固定する**
+ * （取り直しても同じ版のまま）。起動の命令は minio の本体なので、`server /data` をそのまま渡す。
+ * compose.yaml はシェルと mc でバケットを作るため、シェルを持たないこのイメージには替えられない。
  */
-export const MINIO_IMAGE = 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z';
+export const MINIO_IMAGE =
+  'cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1';
 
 export interface StartedMinio {
   readonly container: StartedTestContainer;

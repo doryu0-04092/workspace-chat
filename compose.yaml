@@ -141,9 +141,9 @@ services:
     # 添付とアバターの S3 の代わりの S3 互換のストレージ（#427 の決定。手元とテストでは S3 を MinIO で代える）。
     # **手元では署名者と確定の主体を分けない**（api は下の管理者の資格情報1つで読み書きする。分けることの確認は本番で行う）。
     #
-    # **このタグは apps/api/src/testing/minio.ts の MINIO_IMAGE と同じ**で、そちらは npm test のたびに取り直す。
-    # 手元でテストを回さない人には `docker compose pull minio` だけが取り込みの経路になる（タグごとの経路の一覧は .github/dependabot.yml の末尾）。
-    # Docker Hub の minio/minio は取れない（2026-09-17 に Docker Hub の API が 404 を返した）ため、quay.io から取る。
+    # 取り込みの経路は `docker compose pull minio` だけである（タグごとの経路の一覧は .github/dependabot.yml の末尾）。
+    # **2026-09-25 から quay.io も Docker Hub も、minio/minio を認証なしでは取らせない（401。#698）。取り済みのイメージが無い機械では起動しない。**
+    # テスト（apps/api/src/testing/minio.ts）は Chainguard の MinIO に替えたが、ここは下の minio-init がシェルと mc を使うため替えられない。
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:
       # 管理者の資格情報。**ローカル専用の使い捨ての値にする。** MinIO は利用者名 3 文字以上・パスワード 8 文字以上を求める。
