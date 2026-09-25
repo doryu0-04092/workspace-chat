@@ -31,7 +31,7 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.value }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # scripts/release.sh と同じ規則（git rev-parse --short HEAD）。人が手動リリースの手順で
       # 同じコミットから同じタグを求め直せるようにする。
@@ -39,10 +39,10 @@ jobs:
         id: tag
         run: echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_CD_ROLE_ARN }}
           aws-region: ap-northeast-1
@@ -89,7 +89,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # デプロイ用のロールを Secret に設定するまでは飛ばす（README の CD の節の「動かすために必要な設定」）。
       # 設定の前に main へマージしても CD を赤にしない（ビルド用のロールで起きた「Could not load credentials」を繰り返さない）。
@@ -99,7 +99,7 @@ jobs:
           ROLE: ${{ secrets.AWS_STAGING_DEPLOY_ROLE_ARN }}
         run: if [ -n "$ROLE" ]; then echo "value=true" >> "$GITHUB_OUTPUT"; else echo "value=false" >> "$GITHUB_OUTPUT"; fi
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         if: steps.configured.outputs.value == 'true'
         with:
           role-to-assume: ${{ secrets.AWS_STAGING_DEPLOY_ROLE_ARN }}
