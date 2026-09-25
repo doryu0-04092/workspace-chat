@@ -257,6 +257,11 @@ ElastiCache for Valkey の Pub/Sub を介して全タスクが配信を共有す
 ALB のアイドルタイムアウトは既定 60 秒である。Socket.IO は既定で 25 秒ごとに ping を送るため
 接続は維持されるが、**この前提に依存している**ことを記録しておく。
 
+**api の HTTP の keep-alive の待ち時間は、このアイドルタイムアウトより長くする**（65 秒。`apps/api/src/http-timeouts.ts`。#703）。
+Node の既定は 5 秒で、api が先に接続を閉じると、ALB がその接続に送った要求は 502 になる
+（AWS の ALB の文書の HTTP 502 の項。2026-09-25 のステージングで 324 回の投稿のうち 2 回が 502 になり、どちらも保存されていなかった）。
+アイドルタイムアウトは `infra/production/compute.tf` の `alb_idle_timeout_seconds` に明示し、2 つの値の大小を `api-config-infra.test.ts` が確かめる。
+
 #### リソースのサイジング（スケール）
 
 [要件定義書](requirements.md) 4.1 の想定規模（**利用者 200 / ワークスペース 20 /

@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { HTTP_KEEP_ALIVE_TIMEOUT_MS } from '../http-timeouts';
 import { API_SETTINGS } from './api-config';
 
 // secret: true の設定は、本番で Parameter Store の暗号化パラメータと ECS の secrets で渡す（api-config.ts の Setting の注記）。
@@ -1057,5 +1058,15 @@ describe('環境ごとの名前', () => {
     expect(terraform).toMatch(
       /^\s*name\s*=\s*local\.environment == "production" \? local\.project_name : "\$\{local\.project_name\}-\$\{local\.environment\}"$/m,
     );
+  });
+});
+
+describe('api の keep-alive と ALB のアイドル時間（#703）', () => {
+  it('ALB のアイドル時間は locals の1箇所で決め、api の keep-alive の待ち時間はそれより長い', () => {
+    const lb = blocksOf('resource', 'aws_lb').find((block) => block.name === 'api');
+    expect(lb?.body).toMatch(/^\s*idle_timeout\s*=\s*local\.alb_idle_timeout_seconds$/m);
+    const seconds = Number(/^\s*alb_idle_timeout_seconds\s*=\s*(\d+)$/m.exec(terraform)?.[1]);
+    expect(seconds).toBeGreaterThan(0);
+    expect(HTTP_KEEP_ALIVE_TIMEOUT_MS).toBeGreaterThan(seconds * 1000);
   });
 });
